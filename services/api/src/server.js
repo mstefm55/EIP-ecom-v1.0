@@ -1,3 +1,5 @@
+import dbPlugin from "./plugins/db.js";
+
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
@@ -16,6 +18,7 @@ async function buildServer() {
     schema: envSchema,
     dotenv: true
   });
+  await app.register(dbPlugin);
 
   // Basic hardening
   await app.register(helmet);
@@ -33,6 +36,8 @@ async function buildServer() {
 }
 
 const app = await buildServer();
+
+
 
 try {
   await app.listen({ port: app.config.PORT, host: app.config.HOST });
