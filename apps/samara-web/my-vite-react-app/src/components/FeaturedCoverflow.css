@@ -1,0 +1,268 @@
+.fcSection{
+  background: #f6f1e9;
+  padding: 48px 16px;
+}
+.fcContainer{
+  max-width: 1160px;
+  margin: 0 auto;
+  padding: 0 12px;
+}
+
+.fcHead{ margin-bottom: 18px; }
+.fcTitle{
+  font-family: ui-serif, Georgia, "Times New Roman", serif;
+  font-size: clamp(34px, 5vw, 64px);
+  letter-spacing: -0.02em;
+  line-height: 1;
+  color: #141414;
+}
+.fcSub{
+  margin-top: 10px;
+  max-width: 760px;
+  color: rgba(20,20,20,0.70);
+  line-height: 1.55;
+  font-size: 16px;
+}
+
+/* stage */
+.fcStage{
+  position: relative;
+  height: 520px;
+  border-radius: 36px;
+  overflow: hidden;
+  user-select: none;
+  touch-action: pan-y;
+}
+@media (max-width: 860px){
+  .fcStage{ height: 480px; }
+}
+
+/* “ground” shadow */
+.fcGround{
+  position: absolute;
+  left: 12%;
+  right: 12%;
+  bottom: 54px;
+  height: 120px;
+  background: rgba(0,0,0,0.60);
+  filter: blur(70px);
+  opacity: 0.18;
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+/* perspective wrapper */
+.fcPerspective{
+  position: absolute;
+  inset: 0;
+  perspective: 1400px;
+  transform-style: preserve-3d;
+  display: grid;
+  place-items: center;
+}
+
+/* card */
+.fcCard{
+  position: absolute;
+  width: 360px;
+  height: 460px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  transform-style: preserve-3d;
+  transition:
+    transform 900ms cubic-bezier(.16, 1, .3, 1),
+    filter 900ms cubic-bezier(.16, 1, .3, 1),
+    opacity 900ms cubic-bezier(.16, 1, .3, 1);
+}
+@media (max-width: 860px){
+  .fcCard{ width: 320px; height: 420px; }
+}
+.fcStage.isDragging .fcCard{
+  transition: none;
+}
+
+.fcCard.isHidden{
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* physical page look */
+.fcCardInner{
+  height: 100%;
+  border-radius: 28px;
+  background: #fbf8f2;
+  border: 1px solid rgba(0,0,0,0.10);
+  overflow: hidden;
+  box-shadow:
+    0 28px 70px rgba(0,0,0,0.18),
+    0 10px 26px rgba(0,0,0,0.10),
+    inset 0 1px 0 rgba(255,255,255,0.95);
+  position: relative;
+}
+
+/* paper edge thickness on right */
+.fcCardInner::after{
+  content:"";
+  position:absolute;
+  right:-16px;
+  top: 16px;
+  width: 30px;
+  height: calc(100% - 32px);
+  border-radius: 0 26px 26px 0;
+  background: #efe6d8;
+  border: 1px solid rgba(0,0,0,0.10);
+  box-shadow: 0 22px 52px rgba(0,0,0,0.14);
+  opacity: 0.70;
+}
+.fcCard:not(.isActive) .fcCardInner::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  background:
+    radial-gradient(circle at 22% 14%, rgba(255,255,255,0.45), transparent 62%),
+    linear-gradient(120deg, rgba(255,255,255,0.10) 0%, transparent 38%),
+    linear-gradient(to bottom, rgba(0,0,0,0.02), transparent 55%);
+  pointer-events:none;
+  opacity: 0.14;
+}
+
+
+
+
+/* header inside card */
+.fcCardTop{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  padding: 16px 18px 0 18px;
+}
+.fcEyebrow{
+  font-size: 11px;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: rgba(20,20,20,0.55);
+}
+.fcNum{
+  font-size: 11px;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: rgba(20,20,20,0.40);
+}
+
+.fcCover{
+  margin: 14px 18px 0 18px;
+  height: 260px;
+  border-radius: 22px;
+  border: 1px solid rgba(0,0,0,0.10);
+  background: #fff;
+  overflow: hidden;
+  box-shadow: 0 14px 34px rgba(0,0,0,0.10);
+}
+@media (max-width: 860px){
+  .fcCover{ height: 240px; }
+}
+.fcImg{
+  width:100%;
+  height:100%;
+  object-fit: cover;
+  display:block;
+}
+.fcCoverPh{
+  width:100%;
+  height:100%;
+  display:flex;
+  align-items:flex-end;
+  padding: 14px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: rgba(20,20,20,0.40);
+  font-size: 11px;
+  background:
+    radial-gradient(circle at 20% 10%, rgba(0,0,0,0.08), transparent 60%),
+    linear-gradient(to bottom, rgba(0,0,0,0.05), transparent 50%);
+}
+
+.fcText{
+  padding: 14px 18px 0 18px;
+}
+.fcH{
+  font-family: ui-serif, Georgia, "Times New Roman", serif;
+  font-size: 26px;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+  color: #141414;
+}
+.fcP{
+  margin-top: 8px;
+  color: rgba(20,20,20,0.70);
+  line-height: 1.55;
+  font-size: 14px;
+}
+
+/* footer chips */
+.fcFooter{
+  padding: 12px 18px 16px 18px;
+  display:flex;
+  flex-wrap:wrap;
+  gap: 10px;
+}
+.fcChip{
+  font-size: 11px;
+  letter-spacing: 0.20em;
+  text-transform: uppercase;
+  color: rgba(20,20,20,0.65);
+  background: rgba(0,0,0,0.06);
+  border-radius: 999px;
+  padding: 6px 10px;
+}
+
+/* nav */
+.fcNav{
+  position:absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 46px;
+  height: 46px;
+  border-radius: 999px;
+  border: 1px solid rgba(0,0,0,0.10);
+  background: rgba(255,255,255,0.82);
+  box-shadow: 0 18px 45px rgba(0,0,0,0.10);
+  cursor:pointer;
+  font-size: 28px;
+  line-height: 1;
+  color: rgba(20,20,20,0.85);
+  display:grid;
+  place-items:center;
+}
+.fcPrev{ left: 14px; }
+.fcNext{ right: 14px; }
+
+
+/*this area corrects transparency effect*/
+/* HARD RULE: active card is fully solid, no wash/overlay */
+.fcCard.isActive{
+  opacity: 1 !important;
+  filter: none !important;
+}
+
+.fcCard.isActive .fcCardInner::before{
+  content: none !important;   /* kills the overlay completely */
+  opacity: 0 !important;
+  background: none !important;
+}
+
+.fcCard.isActive .fcCover::after,
+.fcCard.isActive .fcCover::before{
+  content: none !important;   /* in case you later add overlays on cover */
+}
+
+
+/* TEST: if this fixes it, the "transparency" is NOT opacity, it's your cover placeholder */
+.fcCard.isActive .fcCoverPh{
+  background: #ffffff !important;
+}
+.fcCard.isActive .fcCardInner::after{
+  opacity: 0.95;
+}

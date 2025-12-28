@@ -1,0 +1,136 @@
+/* src/components/notebook-sprite.css */
+
+/* ===== Layout wrapper ===== */
+.nb-section{
+  width: 100%;
+  padding: 40px 16px;
+}
+
+/* Stage holds: base image + content overlay + sprite overlay */
+.nb-stage{
+  position: relative;
+  width: min(980px, 100%);
+  margin: 0 auto;
+  transform: perspective(1400px) rotateX(10deg) rotateZ(-3deg);
+  transform-origin: center;
+}
+
+/* ===== Base notebook image ===== */
+.nb-base{
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 18px;
+  user-select: none;
+  pointer-events: none;
+  box-shadow: 0 26px 60px rgba(0,0,0,.28);
+}
+
+/* ===== Content overlay (positioned via inline SPREAD) ===== */
+.nb-content{
+  position: absolute;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5%;
+  z-index: 10;
+}
+
+/* Left / Right pages */
+.nb-left,
+.nb-right{
+  overflow: hidden;
+  border-radius: 10px;
+}
+
+/* Placeholder blocks (for empty pages – keeps layout stable) */
+.nb-placeholder{
+  width: 100%;
+  height: 100%;
+  border-radius: 10px;
+  background: rgba(0,0,0,.03);
+}
+
+/* ===== Sketch (left page) ===== */
+.nb-sketch{
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  user-select: none;
+  pointer-events: none;
+}
+
+/* ===== Notes (right page) ===== */
+.nb-right{
+  padding: 6% 6%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  font-family: "Caveat", cursive;
+  color: rgba(20,20,20,.86);
+}
+
+.nb-title{
+  margin: 0 0 10px 0;
+  font-size: clamp(22px, 2.6vw, 36px);
+  font-weight: 600;
+}
+
+.nb-note{
+  margin: 0;
+  font-size: clamp(16px, 2.0vw, 26px);
+  line-height: 1.2;
+  opacity: 0.95;
+}
+
+/* ===== Sprite overlay (animated page flip) ===== */
+.nb-flip{
+  position: absolute;
+  z-index: 999;
+  pointer-events: none;
+  border-radius: 10px;
+  filter: contrast(1.05);
+}
+
+/* ===== Controls ===== */
+.nb-controls{
+  width: min(980px, 100%);
+  margin: 16px auto 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.nb-controls button{
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.14);
+  background: rgba(255,255,255,.06);
+  color: rgba(255,255,255,.9);
+  cursor: pointer;
+  font-family: "Caveat", cursive;
+  font-size: 22px;
+}
+
+.nb-controls button:disabled{
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+.nb-controls span{
+  font-family: "Caveat", cursive;
+  color: rgba(255,255,255,.75);
+  font-size: 18px;
+}
+
+/* ===== Responsive ===== */
+@media (max-width: 720px){
+  .nb-stage{
+    transform: perspective(1400px) rotateX(7deg) rotateZ(-2deg);
+  }
+
+  .nb-content{
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+}

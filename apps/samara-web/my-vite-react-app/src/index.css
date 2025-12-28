@@ -1,0 +1,113 @@
+
+@import "tailwindcss";
+
+/* =========================
+   GLOBAL BASE
+========================= */
+:root{
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  line-height: 1.2;
+  font-weight: 200;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  /* Landing-page tuning */
+             /* overall content scale (0.90–0.95) */
+  --rail: 1400px;             /* magazine content width (1280–1520) */
+  --page-bg: #f6f1e9;         /* your warm editorial base */
+}
+
+/* Reset */
+*{ box-sizing: border-box; }
+html, body{
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  overflow-x: hidden;
+  background: var(--page-bg);
+}
+
+/* Optional: slightly calmer global text size without breaking Tailwind */
+html{
+  font-size: 15px; /* default 16px; adjust to 14–15 if needed */
+}
+
+/* =========================
+   LAYOUT: FULL VIEWPORT + RAIL
+   (prevents "empty sides" feel)
+========================= */
+
+/* Center the app on wide screens */
+body{
+  display: flex;
+  justify-content: center;
+  
+}
+
+/* Root uses a magazine rail but still feels full-page */
+#root{
+  width: 100%;
+  max-width: var(--rail);
+  margin: 0 auto;
+
+  /* global landing-page scale */
+ /* transform: scale(var(--ui-scale));
+  transform-origin: top center;
+
+  /* breathing space 
+  padding-bottom: 10vh;*/
+}
+
+/* =========================
+   SAFETY OVERRIDES AGAINST "BOXED" CONTAINERS
+   (so your sections can still be wide if needed)
+========================= */
+.container,
+.site-container,
+.page-container,
+.main-container,
+main,
+.main,
+.site-main{
+  max-width: none !important;
+  width: 100% !important;
+}
+
+/* =========================
+   ACCESSIBILITY / INTERACTION
+========================= */
+button{
+  font: inherit;
+}
+/* =========================
+   EDITORIAL LAYOUT RAIL
+========================= */
+
+/* Main content rail */
+
+
+/* Slightly calmer landing-page typography */
+html{
+  font-size: 15px; /* try 14.5px if needed */
+}
+/* =========================
+   FULL-WIDTH NAV / HEADER
+========================= */
+
+.navbar,
+.header,
+.site-header,
+.topbar{
+  width: 100%;
+  max-width: none;
+  margin: 0;
+ /* padding-left: clamp(1px, 4vw, 56px);
+  padding-right: clamp(1px, 4vw, 56px);*/
+}
+body{
+  background: #f6f1e9;
+  margin: 0;
+}
