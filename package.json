@@ -1,0 +1,43 @@
+{
+  "private": true,
+  "workspaces": [
+    "services/api",
+    "apps/dashboard",
+    "apps/eip-landing",
+    "apps/samara-web/my-vite-react-app"
+  ],
+  "dependencies": {
+    "@fastify/cookie": "^11.0.2",
+    "@fastify/helmet": "^13.0.2",
+    "@fastify/rate-limit": "^10.3.0",
+    "argon2": "^0.44.0",
+    "fastify": "^5.6.2",
+    "keytar": "^7.9.0",
+    "nodemailer": "^7.0.12",
+    "otplib": "^12.0.1",
+    "pg": "^8.16.3"
+  },
+  "name": "eip-core",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "validate:process": "node tools/validate_process_alignment.mjs",
+    "smoke:ecom:ci": "powershell -ExecutionPolicy Bypass -File ./scripts/run_ecom_process_regression_ci.ps1",
+    "smoke:ecom:ci:auto-admin": "powershell -ExecutionPolicy Bypass -File ./scripts/run_ecom_process_regression_ci.ps1 -AutoAdminSession",
+    "lt:setup": "powershell -ExecutionPolicy Bypass -File ./scripts/libretranslate_local.ps1 -Action setup",
+    "lt:start": "powershell -ExecutionPolicy Bypass -File ./scripts/libretranslate_local.ps1 -Action start",
+    "lt:stop": "powershell -ExecutionPolicy Bypass -File ./scripts/libretranslate_local.ps1 -Action stop",
+    "lt:status": "powershell -ExecutionPolicy Bypass -File ./scripts/libretranslate_local.ps1 -Action status",
+    "lt:test": "powershell -ExecutionPolicy Bypass -File ./scripts/libretranslate_local.ps1 -Action test"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs"
+}

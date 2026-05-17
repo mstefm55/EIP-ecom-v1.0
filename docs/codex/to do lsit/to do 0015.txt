@@ -1,0 +1,130 @@
+Read these V2 governing files first and treat them as mandatory:
+
+- C:\Projects\EIP\eip-core-v2\AGENTS.md
+- C:\Projects\EIP\eip-core-v2\AGENT_TASKS.md
+- C:\Projects\EIP\eip-core-v2\SECURITY_TARGET.md
+- C:\Projects\EIP\eip-core-v2\SECURITY_CHECKLIST.md
+- C:\Projects\EIP\eip-core-v2\DB_V2_STRATEGY.md
+- C:\Projects\EIP\eip-core-v2\docs\codex\ARCHITECTURE_GUARDRAILS.md
+- C:\Projects\EIP\eip-core-v2\docs\codex\SERIAL_CONTEXT_001.md
+- C:\Projects\EIP\eip-core-v2\docs\codex\SERIAL_CONTEXT_003.md
+- C:\Projects\EIP\eip-core-v2\docs\architecture\TASK_EFFECT_MODEL.md
+- C:\Projects\EIP\eip-core-v2\docs\dev\DEVELOPER_MANUAL.md
+- C:\Projects\EIP\eip-core-v2\docs\dev\BANNED_PATTERNS.md
+- C:\Projects\EIP\eip-core-v2\docs\dev\NO_MERGE_GATES.md
+- C:\Projects\EIP\eip-core-v2\docs\db\NEW_TABLE_JUSTIFICATION_REGISTER.md
+- C:\Projects\EIP\eip-core-v2\docs\db\V2_MIGRATION_CHECKLIST.md
+
+Also inspect the current V2 auth/authz/runtime path, including at minimum:
+- C:\Projects\EIP\eip-core-v2\services\api\src\server.js
+- C:\Projects\EIP\eip-core-v2\services\api\src\plugins\authShell.js
+- C:\Projects\EIP\eip-core-v2\services\api\src\routes\auth.js
+- C:\Projects\EIP\eip-core-v2\services\api\src\routes\process\core_process.js
+- all V2 authz / permission / requirePerm-related files
+- current governance validators and CI gates
+
+MISSION:
+Execute the V2 permission-enforcement hardening wave.
+
+CRITICAL CONTEXT:
+The backend/process-builder workbench foundation is in place, but a remaining high-priority risk was identified:
+- requirePerm does not properly enforce passed permission codes
+We do not want to grow UI/workbench/operator surfaces on top of weak permission enforcement.
+
+PRIMARY GOAL:
+Make permission enforcement real, centralized, production-safe, and aligned with V2 kernel/security direction before the renderer/workbench UI wave.
+
+NON-NEGOTIABLE RULES:
+- No V1 modification
+- No storefront/public-commerce expansion
+- No broad feature migration
+- No route-local ad hoc permission patches as the main solution
+- Keep security centralized
+- Keep shared code tenant-agnostic
+- Preserve pooled tenancy with future bridge/silo portability
+- Preserve process-engine-only lifecycle authority
+- Do not introduce unjustified new tables
+- Any new table must go through the New Table Justification Register
+
+WHAT TO DO IN THIS WAVE:
+
+A. Audit the current permission-enforcement path
+1. Identify exactly how requirePerm currently behaves.
+2. Identify where permission-code enforcement is weak, missing, bypassed, or only nominal.
+3. Identify affected files/routes.
+4. State clearly whether the issue is:
+   - implementation bug
+   - incomplete authz shell
+   - missing permission data model
+   - route integration gap
+   - or a combination
+
+B. Implement centralized permission enforcement correctly
+1. Make requirePerm (or the replacement central mechanism) actually enforce passed permission codes.
+2. Keep the enforcement centralized.
+3. Avoid scattering custom checks route by route.
+4. Ensure tenant context and target-tenant semantics remain compatible with the current V2 direction.
+5. Preserve fail-closed behavior.
+
+C. Integrate with current process/workbench routes
+1. Ensure the current process/workbench endpoints are protected correctly.
+2. Do not weaken the current route contracts.
+3. Keep routes transport-only; authz should guard access, not own business semantics.
+
+D. Add validation/tests/checks
+At minimum add enough verification to prove:
+- permission codes are actually enforced
+- missing permission fails closed
+- wrong tenant/target context is rejected where applicable
+- allowed access still works
+- no regression to boot/auth/health/process routes
+
+E. Update governance/docs
+1. Update developer manual and security docs to reflect the actual enforced model.
+2. Strengthen drift-check/governance checks if needed so this class of security issue is less likely to be missed again.
+
+WORKER SPLIT:
+Worker 1 — permission/authz audit
+Worker 2 — centralized requirePerm/authz implementation
+Worker 3 — route integration review (process/workbench/auth paths)
+Worker 4 — tests/verification/gates
+Worker 5 — docs/drift-check sync
+
+PHASE A — AUDIT FIRST
+Before broad edits, produce a precise audit:
+1. what the current permission gap is
+2. where it lives
+3. why previous checks missed it
+4. what the minimum safe fix is
+
+PHASE B — FIX ONLY THIS FOUNDATIONAL SECURITY GAP
+Do not widen scope beyond what is needed to make permission enforcement real and safe.
+
+OUTPUT REQUIRED:
+1. full permission-gap audit summary
+2. files changed
+3. exact bug/gap found in requirePerm or equivalent path
+4. what was changed to enforce permissions centrally
+5. whether any new table was proposed or created
+6. what tests/checks were added or updated
+7. whether process/workbench routes are now properly protected
+8. what remains intentionally deferred
+9. final yes/no:
+   - Is V2 now ready for the rendered workbench frontend wave?
+
+MANDATORY END-OF-WAVE DRIFT CHECK:
+Include:
+1. drift risks checked
+2. any drift found
+3. what was corrected
+4. what remains deferred
+5. final yes/no:
+   - Is this wave aligned with V2 intent?
+
+STRICT END RULE:
+Do not say yes unless:
+- permission enforcement is real, not nominal
+- checks fail closed when permissions are missing
+- process/workbench routes are protected appropriately
+- no route-local permission drift was introduced
+- the result makes the upcoming UI/workbench wave safer

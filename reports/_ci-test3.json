@@ -1,0 +1,23 @@
+﻿{
+    "ok":  false,
+    "started_at":  "2026-03-13T11:05:28.6180783+04:00",
+    "ended_at":  "2026-03-13T11:05:33.8528195+04:00",
+    "duration_sec":  5.235,
+    "command":  {
+                    "script":  "C:\\Projects\\EIP\\eip-core\\scripts\\ecom_process_regression.ps1",
+                    "args":  [
+                                 "-ApiKey",
+                                 "***",
+                                 "-ApiBase",
+                                 "http://localhost:1"
+                             ]
+                },
+    "artifacts":  {
+                      "summary_path":  "C:\\Projects\\EIP\\eip-core\\reports\\_ci-test3.json",
+                      "log_path":  "C:\\Projects\\EIP\\eip-core\\reports\\_ci-test3.log",
+                      "status_path":  "C:\\Projects\\EIP\\eip-core\\reports\\_ci-test3.status.txt"
+                  },
+    "stats":  {
+                  "output_lines":  3
+              }
+}

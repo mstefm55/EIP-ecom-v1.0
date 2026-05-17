@@ -1,0 +1,170 @@
+Read these V2 governing files first and treat them as mandatory:
+
+- C:\Projects\EIP\eip-core-v2\AGENTS.md
+- C:\Projects\EIP\eip-core-v2\AGENT_TASKS.md
+- C:\Projects\EIP\eip-core-v2\SECURITY_TARGET.md
+- C:\Projects\EIP\eip-core-v2\SECURITY_CHECKLIST.md
+- C:\Projects\EIP\eip-core-v2\DB_V2_STRATEGY.md
+- C:\Projects\EIP\eip-core-v2\docs\codex\ARCHITECTURE_GUARDRAILS.md
+- C:\Projects\EIP\eip-core-v2\docs\codex\SERIAL_CONTEXT_001.md
+- C:\Projects\EIP\eip-core-v2\docs\codex\SERIAL_CONTEXT_003.md
+- C:\Projects\EIP\eip-core-v2\docs\architecture\TASK_EFFECT_MODEL.md
+- C:\Projects\EIP\eip-core-v2\docs\dev\DEVELOPER_MANUAL.md
+- C:\Projects\EIP\eip-core-v2\docs\dev\BANNED_PATTERNS.md
+- C:\Projects\EIP\eip-core-v2\docs\dev\NO_MERGE_GATES.md
+- C:\Projects\EIP\eip-core-v2\docs\db\NEW_TABLE_JUSTIFICATION_REGISTER.md
+- C:\Projects\EIP\eip-core-v2\docs\db\V2_MIGRATION_CHECKLIST.md
+
+Also inspect the entire V2 codebase recursively.
+
+MISSION:
+Do a full V2 repo hardening audit and fix the core governance gap that was missed in prior checks.
+
+CRITICAL CONTEXT:
+A manual review discovered a core architectural issue that prior wave checks did not flag.
+This means the previous checks were insufficient.
+Do not assume recent waves are correct merely because they passed smoke tests.
+
+CORE THINKING MODEL TO RESPECT:
+We are building a database-driven, process-driven, metadata-driven ERP kernel.
+In this model:
+- business structure should be governed as data
+- process behavior should be governed as data/metadata
+- UI surfaces should be governed as data/metadata
+- code should remain the generic runtime and helper layer
+- the system must avoid rigid hardcoded ERP structure
+
+IMPORTANT PRINCIPLE:
+Even “actions” like knitting 200 kilos of fabric are still part of governed business data and process semantics.
+The database should govern:
+- what the process is
+- what the task means
+- what macro is used
+- what effect is allowed
+- what service object/service object category applies
+- what headers/structure are valid
+Code should not silently become the real source of truth for these semantics.
+
+PRIMARY ARCHITECTURE MODEL:
+1. process
+2. task label
+3. macro
+4. effect library
+5. service object + service object category runtime parameters
+
+RULES:
+- process authority must remain DB-driven
+- macro authority must remain governed
+- effect library definition/governance should not remain hidden in hardcoded JS beyond what is unavoidable for runtime dispatch
+- handler implementations may remain in code
+- effect catalog, effect scope, allowed params, service object applicability, and governance should move toward explicit governed structures
+- document handling must not remain under-modeled or hidden behind accidental generic behavior
+- routes must remain transport-only
+- UI behavior must remain engine-/surface-driven
+- no route/module should become hidden business authority
+
+SPECIFIC ISSUE TO AUDIT FOR:
+Search the entire V2 repo for hidden hardcoded business/process/data authority, including but not limited to:
+- hardcoded effect catalogs
+- hardcoded effect alias maps
+- hardcoded service object/category handling that should be governed
+- hardcoded document logic or missing governed document model
+- hardcoded task or process semantics
+- route-level lifecycle ownership
+- UI surface ownership in code instead of governed metadata
+- weakly governed parameter schemas
+- missed opportunities where DB/governed metadata should be the authority
+
+EXPLICITLY CHECK:
+A. Effect library governance
+- Is the effect library still too JS-owned?
+- Which parts should stay in code?
+- Which parts should be DB/governed?
+- What is the minimum safe refactor to correct this?
+
+B. Document handling
+- Is document handling modeled clearly enough in V2?
+- Is Document / document category / document schema / document lifecycle aligned with the same kernel/process model?
+- What is missing?
+- What should be seeded/governed?
+
+C. Service object canon compliance
+- Are service object and service object category used consistently?
+- Is any old “object + category” thinking still leaking into implementation?
+
+D. Full repo consistency
+- Review all V2 files, not just recently touched ones.
+- Assume previous checks may have missed issues.
+- Find missed governance defects.
+
+WORKER SPLIT:
+Worker 1 — full repo audit for hidden hardcoded authority
+Worker 2 — effect library governance analysis and fix
+Worker 3 — document handling canon/governance analysis and fix
+Worker 4 — process/UI/route authority consistency review
+Worker 5 — docs/manual/drift-check synchronization
+
+PHASE A — AUDIT FIRST
+First produce an evidence-based audit of the entire V2 repo.
+Do not start broad fixes before the audit identifies the real foundational issues.
+
+Required audit output:
+1. every major governance gap found
+2. severity of each gap
+3. whether it is:
+   - acceptable code-runtime responsibility
+   - or architectural drift that should be moved into governed DB/metadata
+4. which files are involved
+5. what was missed by prior checks and why
+
+PHASE B — FIX ONLY FOUNDATIONAL ISSUES
+After the audit, fix the confirmed foundational issues that are necessary to keep V2 aligned.
+
+Priority order for fixes:
+1. effect library governance
+2. document handling governance/canon
+3. remaining hidden business/process authority
+4. docs/manual updates
+5. drift-check strengthening so this class of issue is not missed again
+
+STRICT FIX RULES:
+- do not widen into broad feature work
+- do not modify V1
+- do not do speculative expansion
+- do not create unjustified new tables
+- any new table must go through the New Table Justification Register
+- keep handler code generic and runtime-safe
+- move governance to DB/metadata only where appropriate
+- do not store executable JS code in the DB
+- do not break runtime while improving governance
+
+REQUIRED DELIVERABLES:
+1. full repo audit summary
+2. files changed
+3. exact governance gaps found
+4. exact missed issue(s) from prior checks
+5. what was changed in effect library governance
+6. what was changed in document handling governance
+7. whether any new table was proposed or created
+8. whether the effect catalog is now governed properly enough
+9. whether document handling is now aligned enough with the kernel model
+10. what still remains intentionally deferred
+11. final yes/no:
+   - Is V2 now optimized enough at the governance layer to continue safely?
+
+MANDATORY END-OF-WAVE DRIFT CHECK:
+Include:
+1. drift risks checked
+2. any drift found
+3. what was corrected
+4. what remains deferred
+5. final yes/no:
+   - Is this wave aligned with V2 intent?
+
+STRICT END RULE:
+Do not say yes unless:
+- the missed governance gap is explicitly addressed
+- the effect library is no longer overly JS-owned without justification
+- document handling is no longer under-modeled
+- the repo was checked broadly, not narrowly
+- the same class of issue is less likely to be missed in future waves

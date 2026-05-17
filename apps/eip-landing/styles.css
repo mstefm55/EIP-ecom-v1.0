@@ -1,0 +1,206 @@
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:wght@400;600;700&family=Space+Grotesk:wght@400;500;600&display=swap");
+
+:root {
+  --bg: #0f1317;
+  --bg-soft: #161c22;
+  --panel: #fdf7ef;
+  --ink: #111217;
+  --accent: #f8c46b;
+  --accent-2: #7fd1b9;
+  --stroke: rgba(0, 0, 0, 0.08);
+  --shadow: 0 30px 60px rgba(0, 0, 0, 0.18);
+  --radius: 22px;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: "Space Grotesk", sans-serif;
+  background: radial-gradient(circle at top, #1b2330, #0f1317 45%);
+  color: #f7f3ee;
+  min-height: 100vh;
+}
+
+.page {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 3.5rem 2rem 4rem;
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 2.5rem;
+  align-items: center;
+  margin-bottom: 3.5rem;
+}
+
+.hero__content {
+  display: grid;
+  gap: 1rem;
+}
+
+.hero__kicker {
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.hero__title {
+  font-family: "Fraunces", serif;
+  font-size: clamp(2.4rem, 4vw, 3.6rem);
+}
+
+.hero__sub {
+  color: rgba(255, 255, 255, 0.78);
+  line-height: 1.6;
+  max-width: 520px;
+}
+
+.hero__pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.hero__pill {
+  padding: 0.4rem 0.9rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 0.85rem;
+}
+
+.hero__art {
+  position: relative;
+  min-height: 260px;
+}
+
+.hero__ring {
+  position: absolute;
+  width: 220px;
+  height: 220px;
+  border-radius: 50%;
+  border: 2px dashed rgba(248, 196, 107, 0.6);
+  top: 30px;
+  right: 40px;
+}
+
+.hero__ring--alt {
+  width: 160px;
+  height: 160px;
+  border-color: rgba(127, 209, 185, 0.8);
+  top: 120px;
+  right: 140px;
+}
+
+.hero__card {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  background: #fdf7ef;
+  color: #111217;
+  padding: 1.4rem 1.6rem;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 0.4rem;
+  min-width: 200px;
+}
+
+.hero__card strong {
+  font-family: "Fraunces", serif;
+  font-size: 1.1rem;
+}
+
+.form-section {
+  background: var(--panel);
+  color: var(--ink);
+  border-radius: var(--radius);
+  padding: 2.5rem;
+  box-shadow: var(--shadow);
+}
+
+.form-section__intro {
+  margin-bottom: 1.5rem;
+}
+
+.form-section__intro h2 {
+  font-family: "Fraunces", serif;
+  font-size: 2rem;
+  margin-bottom: 0.5rem;
+}
+
+.form-section__intro p {
+  color: rgba(17, 18, 23, 0.65);
+  max-width: 600px;
+}
+
+.tenant-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.field {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+}
+
+.field input,
+.field select {
+  padding: 0.65rem 0.75rem;
+  border-radius: 12px;
+  border: 1px solid var(--stroke);
+  background: #fff;
+  font-family: "Space Grotesk", sans-serif;
+}
+
+.field--check {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.btn {
+  grid-column: 1 / -1;
+  border: none;
+  padding: 0.85rem 1rem;
+  border-radius: 999px;
+  background: #111217;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.form-message {
+  grid-column: 1 / -1;
+  font-size: 0.9rem;
+  margin-top: 0.3rem;
+}
+
+.form-message--error {
+  color: #b42318;
+}
+
+.form-message--success {
+  color: #166534;
+}
+
+.field--sole {
+  display: none;
+}
+
+.tenant-form.is-sole .field--business {
+  display: none;
+}
+
+.tenant-form.is-sole .field--sole {
+  display: grid;
+}

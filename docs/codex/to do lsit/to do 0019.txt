@@ -1,0 +1,373 @@
+Complete-block rule for this wave:
+
+This wave must close one full production block, not partially touch it.
+
+Before coding, inspect the target block and identify all dependent subcomponents required for the block to be truly complete.
+Then include those dependent subcomponents in this same wave if they are necessary for completion.
+
+Use V1 aggressively as reference and salvage source where it helps speed, but do not copy V1 drift.
+Extract useful intent and reusable patterns from V1, then adapt/restructure them into the V2 kernel-first, engine-first, DB-driven, UI-engine-driven model.
+
+Do not leave the block partially:
+- inspectable but not authorable
+- editable only through raw API/manual SQL
+- governed in docs but not enforced in runtime
+- renderer-backed only for viewing but not managed through the intended operator path
+- dependent on an immediate corrective follow-up wave for the same authoring block
+
+If the block cannot be completed in one wave because of a real blocker, do not claim completion.
+Instead report:
+1. exact blocker
+2. exact missing dependency
+3. exact files/modules involved
+4. exact next required block
+
+A block is only complete if it is closed in the intended production-safe form in default runtime and does not require an immediate corrective follow-up wave for the same block.
+
+MISSION:
+Close the governed process-builder authoring block fully in this wave.
+
+TARGET BLOCK:
+V2 process-builder authoring/editing block
+
+EXPECTED FINAL OUTCOME:
+In default runtime, an authenticated operator/admin can use the V2 workbench to:
+- inspect process definitions
+- create/edit/validate/publish process definitions
+- create/edit task templates
+- create/edit process bindings
+- manage macro/effect references through governed contracts
+- do this through the UI-engine/workbench path, not through hardcoded admin page logic
+
+The process builder must remain:
+- DB-driven
+- process-engine governed
+- macro/effect governed
+- service object + service object category aware
+- UI-surface/contract driven
+
+Read these V2 governing files first and treat them as mandatory:
+
+- C:\Projects\EIP\eip-core-v2\AGENTS.md
+- C:\Projects\EIP\eip-core-v2\AGENT_TASKS.md
+- C:\Projects\EIP\eip-core-v2\SECURITY_TARGET.md
+- C:\Projects\EIP\eip-core-v2\SECURITY_CHECKLIST.md
+- C:\Projects\EIP\eip-core-v2\DB_V2_STRATEGY.md
+- C:\Projects\EIP\eip-core-v2\docs\codex\ARCHITECTURE_GUARDRAILS.md
+- C:\Projects\EIP\eip-core-v2\docs\codex\SERIAL_CONTEXT_001.md
+- C:\Projects\EIP\eip-core-v2\docs\codex\SERIAL_CONTEXT_003.md
+- C:\Projects\EIP\eip-core-v2\docs\architecture\TASK_EFFECT_MODEL.md
+- C:\Projects\EIP\eip-core-v2\docs\dev\DEVELOPER_MANUAL.md
+- C:\Projects\EIP\eip-core-v2\docs\dev\BANNED_PATTERNS.md
+- C:\Projects\EIP\eip-core-v2\docs\dev\NO_MERGE_GATES.md
+- C:\Projects\EIP\eip-core-v2\docs\db\NEW_TABLE_JUSTIFICATION_REGISTER.md
+- C:\Projects\EIP\eip-core-v2\docs\db\V2_MIGRATION_CHECKLIST.md
+
+Also inspect the current V2 implementation fully, including at minimum:
+- C:\Projects\EIP\eip-core-v2\apps\workbench-ui\**
+- C:\Projects\EIP\eip-core-v2\services\api\src\routes\process\core_process.js
+- C:\Projects\EIP\eip-core-v2\services\api\src\routes\ui_surface.js
+- current process workbench endpoints
+- current seeded workbench surfaces
+- current process/macro/effect governance paths
+- current task template / process binding / process def storage and routes
+
+Also inspect these V1 files as reference only, not as authority:
+- any V1 AdminProcessBuilder or admin process editing UI
+- any V1 dashboard/admin process-definition routes
+- any V1 task-template/process-binding editing flows
+- any V1 process-related seed/config UI files
+
+CRITICAL CONTEXT:
+The rendered workbench exists.
+The staging deployment path exists.
+Now the next core value block is authoring, because future module growth should happen by defining:
+- process definitions
+- templates
+- bindings
+- surfaces
+not by hardcoding workflow pages.
+
+NON-NEGOTIABLE RULES:
+- No V1 modification
+- No broad module growth
+- No storefront/public-commerce buildout
+- No hardcoded business workflow ownership in frontend or route layer
+- No bypass of process-engine / DB-driven authority
+- No bypass of ui_surface / contract / renderer path
+- No unjustified new tables
+- Any new table must go through the New Table Justification Register
+- Preserve pooled tenancy with future bridge/silo portability
+- Preserve centralized security/authz boundaries
+- Preserve service object canon
+- Preserve explicit macro/effect governance
+- Preserve fail-closed validation for invalid process/macro/effect definitions
+
+WHAT TO DO IN THIS WAVE:
+
+A. Audit the full authoring block first
+Identify everything required to make the process-builder truly authorable in one wave:
+- missing workbench API write/update endpoints
+- missing validation/publish workflow
+- missing frontend authoring components
+- missing guarded mutation contracts
+- missing process/task/binding editing surfaces
+- missing save/validate/publish UX path
+- missing permission integration for authoring actions
+
+B. Implement the authoring path fully
+In the same wave, close the authoring block so an operator/admin can:
+- create/edit process definitions
+- edit graph, task labels, macro bindings, effect references through governed forms/contracts
+- create/edit task templates
+- create/edit process bindings
+- validate and publish safely
+
+C. Keep governance central
+- validation must remain server-side and fail closed
+- frontend should be editor/workbench only, not authority
+- process/macro/effect/service object governance must remain DB/runtime-enforced
+- no hardcoded ecom/business authoring shortcuts
+
+D. Use the current workbench surfaces properly
+- extend the governed workbench surfaces/contracts as needed
+- do not replace them with a one-off page outside the UI engine
+- if new node types/components are needed, add them through the renderer/registry path
+
+E. Include tight dependent work automatically
+If this authoring block requires closely related dependent fixes in:
+- auth/permissions for authoring
+- process validation endpoints
+- publish workflow
+- workbench UI components
+- surface contracts
+include them automatically in this same wave.
+
+WORKER SPLIT:
+Worker 1 — authoring block audit + dependency discovery
+Worker 2 — process/task/binding authoring API contracts and validation
+Worker 3 — workbench authoring UI/components
+Worker 4 — permission/auth integration for authoring actions
+Worker 5 — docs/drift-check/final closure review
+
+SUCCESS CONDITION:
+This block is complete only if:
+- the rendered workbench can author process defs/templates/bindings in default runtime
+- governed validation exists and is enforced server-side
+- publish/update flow works through the intended UI-engine/workbench path
+- no hidden hardcoded process authority was introduced
+- no immediate corrective follow-up wave is needed for this same authoring block
+
+OUTPUT REQUIRED:
+1. target block
+2. dependent subcomponents included automatically
+3. files changed
+4. what V1 ideas were reused/adapted and why
+5. what was restructured instead of copied
+6. whether process definitions can now be authored through the workbench
+7. whether task templates can now be authored through the workbench
+8. whether process bindings can now be authored through the workbench
+9. whether validation/publish flow is now real and fail-closed
+10. whether any hidden hardcoded process/UI authority was found and corrected
+11. whether any new table was proposed or created
+12. what remains intentionally deferred outside this block
+13. final yes/no:
+   - Is the process-builder authoring block fully closed in the intended production-safe form?
+
+MANDATORY END-OF-WAVE DRIFT CHECK:
+Include:
+1. drift risks checked
+2. any drift found
+3. what was corrected
+4. what remains deferred
+5. final yes/no:
+   - Is this wave aligned with V2 intent?
+
+STRICT END RULE:
+Do not say yes unless the process-builder is truly authorable through the governed workbench Complete-block rule for this wave:
+
+This wave must close one full production block, not partially touch it.
+
+Before coding, inspect the target block and identify all dependent subcomponents required for the block to be truly complete.
+Then include those dependent subcomponents in this same wave if they are necessary for completion.
+
+Use V1 aggressively as reference and salvage source where it helps speed, but do not copy V1 drift.
+Extract useful intent and reusable patterns from V1, then adapt/restructure them into the V2 kernel-first, engine-first, DB-driven, UI-engine-driven model.
+
+Do not leave the block partially:
+- inspectable but not authorable
+- editable only through raw API/manual SQL
+- governed in docs but not enforced in runtime
+- renderer-backed only for viewing but not managed through the intended operator path
+- dependent on an immediate corrective follow-up wave for the same authoring block
+
+If the block cannot be completed in one wave because of a real blocker, do not claim completion.
+Instead report:
+1. exact blocker
+2. exact missing dependency
+3. exact files/modules involved
+4. exact next required block
+
+A block is only complete if it is closed in the intended production-safe form in default runtime and does not require an immediate corrective follow-up wave for the same block.
+
+MISSION:
+Close the governed process-builder authoring block fully in this wave.
+
+TARGET BLOCK:
+V2 process-builder authoring/editing block
+
+EXPECTED FINAL OUTCOME:
+In default runtime, an authenticated operator/admin can use the V2 workbench to:
+- inspect process definitions
+- create/edit/validate/publish process definitions
+- create/edit task templates
+- create/edit process bindings
+- manage macro/effect references through governed contracts
+- do this through the UI-engine/workbench path, not through hardcoded admin page logic
+
+The process builder must remain:
+- DB-driven
+- process-engine governed
+- macro/effect governed
+- service object + service object category aware
+- UI-surface/contract driven
+
+Read these V2 governing files first and treat them as mandatory:
+
+- C:\Projects\EIP\eip-core-v2\AGENTS.md
+- C:\Projects\EIP\eip-core-v2\AGENT_TASKS.md
+- C:\Projects\EIP\eip-core-v2\SECURITY_TARGET.md
+- C:\Projects\EIP\eip-core-v2\SECURITY_CHECKLIST.md
+- C:\Projects\EIP\eip-core-v2\DB_V2_STRATEGY.md
+- C:\Projects\EIP\eip-core-v2\docs\codex\ARCHITECTURE_GUARDRAILS.md
+- C:\Projects\EIP\eip-core-v2\docs\codex\SERIAL_CONTEXT_001.md
+- C:\Projects\EIP\eip-core-v2\docs\codex\SERIAL_CONTEXT_003.md
+- C:\Projects\EIP\eip-core-v2\docs\architecture\TASK_EFFECT_MODEL.md
+- C:\Projects\EIP\eip-core-v2\docs\dev\DEVELOPER_MANUAL.md
+- C:\Projects\EIP\eip-core-v2\docs\dev\BANNED_PATTERNS.md
+- C:\Projects\EIP\eip-core-v2\docs\dev\NO_MERGE_GATES.md
+- C:\Projects\EIP\eip-core-v2\docs\db\NEW_TABLE_JUSTIFICATION_REGISTER.md
+- C:\Projects\EIP\eip-core-v2\docs\db\V2_MIGRATION_CHECKLIST.md
+
+Also inspect the current V2 implementation fully, including at minimum:
+- C:\Projects\EIP\eip-core-v2\apps\workbench-ui\**
+- C:\Projects\EIP\eip-core-v2\services\api\src\routes\process\core_process.js
+- C:\Projects\EIP\eip-core-v2\services\api\src\routes\ui_surface.js
+- current process workbench endpoints
+- current seeded workbench surfaces
+- current process/macro/effect governance paths
+- current task template / process binding / process def storage and routes
+
+Also inspect these V1 files as reference only, not as authority:
+- any V1 AdminProcessBuilder or admin process editing UI
+- any V1 dashboard/admin process-definition routes
+- any V1 task-template/process-binding editing flows
+- any V1 process-related seed/config UI files
+
+CRITICAL CONTEXT:
+The rendered workbench exists.
+The staging deployment path exists.
+Now the next core value block is authoring, because future module growth should happen by defining:
+- process definitions
+- templates
+- bindings
+- surfaces
+not by hardcoding workflow pages.
+
+NON-NEGOTIABLE RULES:
+- No V1 modification
+- No broad module growth
+- No storefront/public-commerce buildout
+- No hardcoded business workflow ownership in frontend or route layer
+- No bypass of process-engine / DB-driven authority
+- No bypass of ui_surface / contract / renderer path
+- No unjustified new tables
+- Any new table must go through the New Table Justification Register
+- Preserve pooled tenancy with future bridge/silo portability
+- Preserve centralized security/authz boundaries
+- Preserve service object canon
+- Preserve explicit macro/effect governance
+- Preserve fail-closed validation for invalid process/macro/effect definitions
+
+WHAT TO DO IN THIS WAVE:
+
+A. Audit the full authoring block first
+Identify everything required to make the process-builder truly authorable in one wave:
+- missing workbench API write/update endpoints
+- missing validation/publish workflow
+- missing frontend authoring components
+- missing guarded mutation contracts
+- missing process/task/binding editing surfaces
+- missing save/validate/publish UX path
+- missing permission integration for authoring actions
+
+B. Implement the authoring path fully
+In the same wave, close the authoring block so an operator/admin can:
+- create/edit process definitions
+- edit graph, task labels, macro bindings, effect references through governed forms/contracts
+- create/edit task templates
+- create/edit process bindings
+- validate and publish safely
+
+C. Keep governance central
+- validation must remain server-side and fail closed
+- frontend should be editor/workbench only, not authority
+- process/macro/effect/service object governance must remain DB/runtime-enforced
+- no hardcoded ecom/business authoring shortcuts
+
+D. Use the current workbench surfaces properly
+- extend the governed workbench surfaces/contracts as needed
+- do not replace them with a one-off page outside the UI engine
+- if new node types/components are needed, add them through the renderer/registry path
+
+E. Include tight dependent work automatically
+If this authoring block requires closely related dependent fixes in:
+- auth/permissions for authoring
+- process validation endpoints
+- publish workflow
+- workbench UI components
+- surface contracts
+include them automatically in this same wave.
+
+WORKER SPLIT:
+Worker 1 — authoring block audit + dependency discovery
+Worker 2 — process/task/binding authoring API contracts and validation
+Worker 3 — workbench authoring UI/components
+Worker 4 — permission/auth integration for authoring actions
+Worker 5 — docs/drift-check/final closure review
+
+SUCCESS CONDITION:
+This block is complete only if:
+- the rendered workbench can author process defs/templates/bindings in default runtime
+- governed validation exists and is enforced server-side
+- publish/update flow works through the intended UI-engine/workbench path
+- no hidden hardcoded process authority was introduced
+- no immediate corrective follow-up wave is needed for this same authoring block
+
+OUTPUT REQUIRED:
+1. target block
+2. dependent subcomponents included automatically
+3. files changed
+4. what V1 ideas were reused/adapted and why
+5. what was restructured instead of copied
+6. whether process definitions can now be authored through the workbench
+7. whether task templates can now be authored through the workbench
+8. whether process bindings can now be authored through the workbench
+9. whether validation/publish flow is now real and fail-closed
+10. whether any hidden hardcoded process/UI authority was found and corrected
+11. whether any new table was proposed or created
+12. what remains intentionally deferred outside this block
+13. final yes/no:
+   - Is the process-builder authoring block fully closed in the intended production-safe form?
+
+MANDATORY END-OF-WAVE DRIFT CHECK:
+Include:
+1. drift risks checked
+2. any drift found
+3. what was corrected
+4. what remains deferred
+5. final yes/no:
+   - Is this wave aligned with V2 intent?
+
+STRICT END RULE:
+Do not say yes unless the process-builder is truly authorable through the governed workbench path in default runtime and does not require an immediate corrective follow-up wave for this same block.

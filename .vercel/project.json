@@ -1,0 +1,16 @@
+{
+  "projectId": "prj_Ah5he8kElJW5FacFlXAmUx4roKAV",
+  "orgId": "team_E9bMyShzukTv2503LAbbyHkZ",
+  "projectName": "my-vite-react-app",
+  "settings": {
+    "createdAt": 1774892170286,
+    "framework": "vite",
+    "devCommand": null,
+    "installCommand": null,
+    "buildCommand": null,
+    "outputDirectory": null,
+    "rootDirectory": null,
+    "directoryListing": false,
+    "nodeVersion": "24.x"
+  }
+}

@@ -45,5 +45,5 @@ async function dbPlugin(app) {
 
 export default fp(dbPlugin, {
   name: "db",
-  fastify: "4.x"
+  fastify: "5.x"
 });

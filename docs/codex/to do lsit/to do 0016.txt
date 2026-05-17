@@ -1,0 +1,193 @@
+Complete-block rule for this wave:
+
+This wave must close one full production block, not partially touch it.
+
+Before coding, inspect the target block and identify all dependent subcomponents required for the block to be truly complete.
+Then include those dependent subcomponents in this same wave if they are necessary for completion.
+
+Use V1 aggressively as reference and salvage source where it helps speed, but do not copy V1 drift.
+Extract useful intent and reusable patterns from V1, then adapt/restructure them into the V2 kernel-first, engine-first, DB-driven, UI-engine-driven model.
+
+Do not leave the block partially:
+- scaffolded
+- mounted only in tests
+- governed only in docs but not runtime
+- secured only partially
+- renderer-backed only partially
+- usable only through raw API without the intended operator-facing surface
+
+If the block cannot be completed in one wave because of a real blocker, do not claim completion.
+Instead report:
+1. exact blocker
+2. exact missing dependency
+3. exact files/modules involved
+4. exact next required block
+
+A block is only complete if it is closed in the intended production-safe form in default runtime and does not require an immediate corrective follow-up wave for the same block.
+
+MISSION:
+Close the rendered workbench frontend block fully in this wave.
+
+TARGET BLOCK:
+V2 rendered process-builder / process-workbench frontend block
+
+EXPECTED FINAL OUTCOME:
+A real V2 operator-facing rendered workbench is available in default runtime and is driven by:
+- governed ui_surface definitions
+- workbench API contracts
+- process-engine-backed data
+- DB-driven process authority
+
+The workbench must allow a user/operator/admin to:
+- load the core process workbench surface
+- load the ecom process workbench surface
+- inspect process definitions through the rendered UI
+- inspect task labels, macro bindings, effect references, service object type/category applicability
+- use governed contracts/surfaces instead of hardcoded page-specific workflow logic
+
+The block is not complete if the backend/surfaces exist but there is still no rendered V2 operator-facing workbench in default runtime.
+
+Read these V2 governing files first and treat them as mandatory:
+
+- C:\Projects\EIP\eip-core-v2\AGENTS.md
+- C:\Projects\EIP\eip-core-v2\AGENT_TASKS.md
+- C:\Projects\EIP\eip-core-v2\SECURITY_TARGET.md
+- C:\Projects\EIP\eip-core-v2\SECURITY_CHECKLIST.md
+- C:\Projects\EIP\eip-core-v2\DB_V2_STRATEGY.md
+- C:\Projects\EIP\eip-core-v2\docs\codex\ARCHITECTURE_GUARDRAILS.md
+- C:\Projects\EIP\eip-core-v2\docs\codex\SERIAL_CONTEXT_001.md
+- C:\Projects\EIP\eip-core-v2\docs\codex\SERIAL_CONTEXT_003.md
+- C:\Projects\EIP\eip-core-v2\docs\architecture\TASK_EFFECT_MODEL.md
+- C:\Projects\EIP\eip-core-v2\docs\dev\DEVELOPER_MANUAL.md
+- C:\Projects\EIP\eip-core-v2\docs\dev\BANNED_PATTERNS.md
+- C:\Projects\EIP\eip-core-v2\docs\dev\NO_MERGE_GATES.md
+- C:\Projects\EIP\eip-core-v2\docs\db\NEW_TABLE_JUSTIFICATION_REGISTER.md
+- C:\Projects\EIP\eip-core-v2\docs\db\V2_MIGRATION_CHECKLIST.md
+
+Also inspect the current V2 runtime and frontend/backend surface path, including at minimum:
+- C:\Projects\EIP\eip-core-v2\services\api\src\routes\process\core_process.js
+- C:\Projects\EIP\eip-core-v2\services\api\src\routes\ui_surface.js
+- current V2 ui_surface seeds
+- current V2 workbench endpoints
+- current V2 frontend/app structure, if any
+- current V2 dashboard/workbench-related files, if any
+
+Also inspect these V1 files as reference only, not as authority:
+- C:\Projects\EIP\eip-core\apps\dashboard\src\engine\renderer.jsx
+- C:\Projects\EIP\eip-core\apps\dashboard\src\engine\registry.jsx
+- C:\Projects\EIP\eip-core\apps\dashboard\src\hooks\useSurfaceLoader.js
+- C:\Projects\EIP\eip-core\apps\dashboard\src\pages\AdminProcessBuilder.jsx
+- any V1 dashboard/admin surface metadata or workbench UI files you can find
+
+CRITICAL CONTEXT:
+The V2 base is now strong enough to continue.
+The next correct step is not broad module growth.
+The next correct step is the real rendered workbench frontend, because the workbench backend/surface-contract layer already exists.
+This frontend block must be completed properly, not partially scaffolded.
+
+NON-NEGOTIABLE RULES:
+- No V1 modification
+- No storefront/public-commerce buildout
+- No broad module migration
+- No hardcoded process/workflow ownership in frontend pages
+- No tenant-specific UI shortcuts as authority
+- No bypass of ui_surface / workbench contract model
+- No bypass of process-engine / DB-driven authority
+- No unjustified new tables
+- Any new table must go through the New Table Justification Register
+- Preserve pooled tenancy with future bridge/silo portability
+- Preserve centralized security/authz boundaries
+- Preserve service object canon
+- Preserve explicit macro/effect governance
+
+WHAT TO DO IN THIS WAVE:
+
+A. Audit the full block first
+Identify exactly what is missing to close the rendered workbench frontend block in one wave.
+This includes:
+- renderer/registry gaps
+- missing frontend app path if none exists
+- missing workbench-specific surface node support
+- missing client-side surface loader integration
+- missing auth/session integration for protected workbench use
+- missing route wiring for default runtime access
+
+B. Build the minimum full V2 rendered workbench path
+If the V2 frontend shell/app path does not exist or is insufficient, create the minimum necessary frontend/app shell as part of this same block.
+Do not leave “renderer later” as a follow-up for this same block.
+
+The rendered workbench must:
+- render from governed surface definitions
+- consume the workbench contracts/endpoints already created
+- render core_process_workbench
+- render ecom_process_workbench
+- remain generic enough to support future module growth
+- not hardcode ecom/business workflow semantics into the page
+
+C. Keep UI engine authority intact
+The frontend must remain:
+- registry/renderer/surface-loader driven
+- contract-driven
+- metadata/surface-driven
+
+Do not build a one-off page that merely mimics the workbench.
+Do not move business rules into React components.
+Do not duplicate process semantics in the frontend.
+
+D. Integrate security properly
+The rendered workbench must operate against the now-hardened permission/auth model.
+Do not bypass auth/permission checks.
+If protected workbench access needs session/auth integration in the frontend path, include it in this same block.
+
+E. V1 salvage rule
+Use V1 dashboard renderer/registry/surface-loader/process-builder ideas aggressively where useful.
+But do not copy:
+- hardcoded workflow ownership
+- tenant-specific shortcuts
+- drifted admin behavior
+- brittle page-specific logic
+
+Adapt/restructure if needed so the V2 result is clean.
+
+WORKER SPLIT:
+Worker 1 — full block audit + dependency discovery
+Worker 2 — renderer/registry/surface-loader implementation/adaptation
+Worker 3 — workbench frontend/app integration
+Worker 4 — auth/session/protected workbench access integration
+Worker 5 — drift-check/docs/manual sync
+
+SUCCESS CONDITION:
+This block is complete only if:
+- a real V2 rendered workbench exists in default runtime
+- it renders through the UI engine / surface system
+- it consumes the governed workbench contracts
+- it can load both core and ecom workbench surfaces
+- it does not introduce hidden hardcoded process/UI authority
+- it does not require an immediate corrective follow-up wave for this same frontend block
+
+OUTPUT REQUIRED:
+1. target block
+2. dependent subcomponents included automatically
+3. files changed
+4. what V1 pieces were reused/adapted and why
+5. what was restructured instead of copied
+6. whether a real V2 rendered workbench now exists in default runtime
+7. whether core_process_workbench renders
+8. whether ecom_process_workbench renders
+9. whether any hidden hardcoded UI/process authority was found and corrected
+10. whether any new table was proposed or created
+11. what remains intentionally deferred outside this block
+12. final yes/no:
+   - Is the rendered workbench frontend block fully closed in the intended production-safe form?
+
+MANDATORY END-OF-WAVE DRIFT CHECK:
+Include:
+1. drift risks checked
+2. any drift found
+3. what was corrected
+4. what remains deferred
+5. final yes/no:
+   - Is this wave aligned with V2 intent?
+
+STRICT END RULE:
+Do not say yes unless the rendered workbench frontend is truly usable in default runtime through the UI engine/surface path and does not require an immediate corrective follow-up wave for this same block.

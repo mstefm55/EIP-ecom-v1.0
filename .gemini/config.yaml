@@ -1,0 +1,5 @@
+code_review:
+  # Only report Medium or High severity issues
+  comment_severity_threshold: MEDIUM
+  # Limit the noise (max comments per file)
+  max_review_comments: 5

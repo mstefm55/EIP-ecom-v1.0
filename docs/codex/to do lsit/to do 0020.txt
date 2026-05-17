@@ -1,0 +1,251 @@
+Complete-block rule for this wave:
+
+This wave must close one full production block, not partially touch it.
+
+Before coding, inspect the target block and identify all dependent subcomponents required for the block to be truly complete.
+Then include those dependent subcomponents in this same wave if they are necessary for completion.
+
+Use V1/Samara aggressively as reference and salvage source where it helps speed, but do not copy V1 drift.
+Extract useful intent and reusable patterns from V1, then adapt/restructure them into the V2 kernel-first, engine-first, DB-driven, UI-engine-driven model.
+
+Do not leave the block partially:
+- workbench-specific composites still treated as primitives
+- metadata composition improved only slightly while JSX still owns structure
+- business/workbench concepts still encoded as component structure instead of metadata composition
+- current surfaces dependent on specialized JSX components when generic primitives should assemble them
+- immediate corrective follow-up still needed for this same UI correction block
+
+If the block cannot be completed in one wave because of a real blocker, do not claim completion.
+Instead report:
+1. exact blocker
+2. exact missing dependency
+3. exact files/modules involved
+4. exact next required block
+
+A block is only complete if it is closed in the intended production-safe form in default runtime and does not require an immediate corrective follow-up wave for the same block.
+
+MISSION:
+Close the full UI primitive-library correction block.
+
+TARGET BLOCK:
+Refactor the current V2 workbench UI so that workbench-specific components are no longer treated as primitives, and page/workbench structure is more fully metadata-composed from generic engine-owned primitives.
+
+EXPECTED FINAL OUTCOME:
+The V2 UI architecture must now clearly have these layers:
+
+1. app shell
+- App.jsx
+- auth/session shell
+- surface discovery/routing shell
+
+2. UI engine
+- renderer
+- registry
+- contract resolver
+- asset resolver
+- cache/surface loader
+- metadata sanitizer
+
+3. reusable generic primitives
+- generic layout/editor/view primitives only
+- no business/workbench-specific component should be treated as a primitive
+
+4. DB metadata
+- composes primitives into actual screens/surfaces
+- defines labels, layout, grouping, sizing, actions, contract bindings, visibility, asset keys, and tenant-specific variants
+
+IMPORTANT DEFINITIONS:
+A true primitive is generic and reusable across many domains, for example:
+- Panel
+- Toolbar
+- Tabs
+- SplitLayout
+- Section
+- FormRenderer
+- FieldRenderer
+- DataGrid
+- ListView
+- DetailView
+- ActionBar
+- Inspector
+- Timeline
+- EmptyState
+- NodeCanvas
+- GraphView
+
+A workbench-specific composite is NOT a primitive. Examples that must be demoted from primitive status:
+- ProcessDefinitionStudio
+- TaskTemplateWorkbench
+- ProcessBindingWorkbench
+- ProcessInstanceStream
+- ProcessWorkbenchCatalog
+
+These may remain as temporary assembly surfaces during refactor, but the end state of this wave should move their structure downward into metadata + generic primitives as far as safely possible.
+
+VERY IMPORTANT:
+All UI code is UI-engine-owned.
+Tenant variability belongs in metadata stored in DB and sent to the engine to render.
+Business/process authority remains server-side.
+Do not treat domain-specific JSX screens as primitives.
+
+Before doing anything else in this wave:
+1. reread AGENTS.md
+2. reread docs/architecture/UI_ENGINE_OWNERSHIP.md
+3. apply those rules as mandatory for this entire wave
+
+Read these V2 governing files first and treat them as mandatory:
+
+- C:\Projects\EIP\eip-core-v2\AGENTS.md
+- C:\Projects\EIP\eip-core-v2\AGENT_TASKS.md
+- C:\Projects\EIP\eip-core-v2\SECURITY_TARGET.md
+- C:\Projects\EIP\eip-core-v2\SECURITY_CHECKLIST.md
+- C:\Projects\EIP\eip-core-v2\DB_V2_STRATEGY.md
+- C:\Projects\EIP\eip-core-v2\docs\codex\ARCHITECTURE_GUARDRAILS.md
+- C:\Projects\EIP\eip-core-v2\docs\codex\SERIAL_CONTEXT_001.md
+- C:\Projects\EIP\eip-core-v2\docs\codex\SERIAL_CONTEXT_003.md
+- C:\Projects\EIP\eip-core-v2\docs\architecture\TASK_EFFECT_MODEL.md
+- C:\Projects\EIP\eip-core-v2\docs\architecture\UI_ENGINE_OWNERSHIP.md
+- C:\Projects\EIP\eip-core-v2\docs\dev\DEVELOPER_MANUAL.md
+- C:\Projects\EIP\eip-core-v2\docs\dev\BANNED_PATTERNS.md
+- C:\Projects\EIP\eip-core-v2\docs\dev\NO_MERGE_GATES.md
+
+Also inspect the current V2 UI path fully, including:
+- C:\Projects\EIP\eip-core-v2\apps\workbench-ui\src\App.jsx
+- C:\Projects\EIP\eip-core-v2\apps\workbench-ui\src\engine\renderer.jsx
+- C:\Projects\EIP\eip-core-v2\apps\workbench-ui\src\engine\registry.jsx
+- C:\Projects\EIP\eip-core-v2\apps\workbench-ui\src\engine\contracts.js
+- C:\Projects\EIP\eip-core-v2\apps\workbench-ui\src\engine\surfaceCache.js
+- C:\Projects\EIP\eip-core-v2\apps\workbench-ui\src\engine\surfacePayload.js
+- C:\Projects\EIP\eip-core-v2\apps\workbench-ui\src\hooks\useSurfaceLoader.js
+- C:\Projects\EIP\eip-core-v2\apps\workbench-ui\src\hooks\useSurfaceCatalog.js
+- all JSX components under C:\Projects\EIP\eip-core-v2\apps\workbench-ui\src\components\
+- current ui_surface metadata and seeded surfaces
+- current smoke tests
+
+Also inspect these V1/Samara examples as reference only:
+- config-driven navigation/footer/header metadata examples
+- any dynamic renderer/config files
+- any workbench/admin surface metadata examples
+
+NON-NEGOTIABLE RULES:
+- No V1 modification
+- No business workflow ownership in page JSX
+- No arbitrary executable code from DB metadata
+- No unsafe runtime logic injection
+- Keep renderer/registry/primitive library in code
+- Move composition, labels, ordering, sizing, grouping, visibility, actions, and tenant variability into metadata where appropriate
+- Preserve server-side business/process/permission authority
+- Preserve centralized auth/security boundaries
+- No unjustified new tables
+- Any new table must go through the New Table Justification Register
+
+WHAT TO DO IN THIS WAVE:
+
+A. Audit current components by category
+Classify every current JSX/component file into one of:
+1. true generic primitive
+2. engine shell/support
+3. domain/workbench-specific composite
+4. page/app shell
+
+Be explicit and strict.
+Do not call a workbench-specific composite a primitive.
+
+B. Define the target primitive library
+Create or refine the generic primitive library needed so current workbench screens can be assembled more from metadata and less from workbench-specific JSX.
+Examples may include:
+- SurfaceRoot
+- Layout primitives
+- Section/Panel primitives
+- Toolbar/ActionBar primitives
+- DataGrid/List/Detail primitives
+- Form/Field primitives
+- Inspector/Timeline primitives
+- Graph/Canvas primitives if needed
+Use your best judgment, but keep them generic.
+
+C. Refactor current workbench-specific JSX downward
+Refactor current components so:
+- less structure is owned by ProcessDefinitionStudio / TaskTemplateWorkbench / ProcessBindingWorkbench / ProcessInstanceStream / ProcessWorkbenchCatalog
+- more structure is owned by metadata + generic primitives
+- current surfaces still render correctly
+
+D. Improve metadata shape where needed
+Extend surface metadata shape to support the refactor, as needed, for:
+- primitive type selection
+- nested composition
+- layout/grouping
+- section labels
+- field/column/editor configuration
+- contract binding
+- action binding
+- assetKey
+- style/layout tokens
+without introducing unsafe arbitrary behavior
+
+E. Keep performance and caching sane
+Do not regress the current safe caching model.
+Keep:
+- tenant + realm + surface + version/etag identity
+- safe memory/session storage usage
+- no sensitive localStorage caching
+- efficient load path
+
+F. Demonstrate reduced hardcoding
+Show concretely that the current workbench path now depends less on workbench-specific JSX composition and more on metadata-composed generic primitives.
+
+WORKER SPLIT:
+Worker 1 — strict JSX/component audit and classification
+Worker 2 — primitive-library refactor
+Worker 3 — metadata shape and surface composition refactor
+Worker 4 — current workbench surface migration to the new structure
+Worker 5 — docs/UI-quality-check/final closure review
+
+SUCCESS CONDITION:
+This block is complete only if:
+- workbench-specific composites are no longer falsely treated as primitives
+- the primitive library is materially more generic than before
+- metadata composition materially increases
+- current workbench surfaces still render correctly
+- tenant variability clearly depends more on metadata than JSX edits
+- no hidden business/process authority is introduced
+- no immediate corrective follow-up wave is needed for this same correction block
+
+OUTPUT REQUIRED:
+1. target block
+2. dependent subcomponents included automatically
+3. files changed
+4. strict classification of current JSX/components:
+   - true primitives
+   - engine shell/support
+   - workbench-specific composites
+   - page/app shell
+5. what workbench-specific components were demoted from primitive status
+6. what new or refined generic primitives were introduced
+7. what composition was moved from JSX into metadata
+8. what intentionally remains in code and why
+9. whether hardcoded surface/page/workbench composition was materially reduced
+10. whether any hidden hardcoded UI/business authority was found and corrected
+11. whether any new table was proposed or created
+12. what remains intentionally deferred outside this block
+13. final yes/no:
+   - Is the full UI primitive-library correction block now closed in the intended production-safe form?
+
+MANDATORY UI QUALITY CHECK:
+Include:
+1. engine ownership check
+2. metadata ownership check
+3. server authority check
+4. tenant-scope check
+5. performance/caching check
+6. safety check
+7. final yes/no:
+   - Is this UI wave aligned with V2 intent?
+
+STRICT END RULE:
+Do not say yes unless the UI is materially closer to:
+- engine-owned runtime
+- metadata-composed structure
+- generic primitive library
+- tenant-scoped adaptability
+and no longer relies heavily on workbench-specific composites posing as primitives.
