@@ -22,3 +22,25 @@ session.json
 Thumbs.db
 .vscode/
 .idea/
+
+# Deployment/build output
+.vercel/
+.vercel/output/
+
+# Generated reports and runtime browser profiles
+reports/
+services/api/reports/
+
+# Runtime/generated app storage
+services/api/assets/
+services/api/public/sites/
+
+# Local crash/browser artifacts
+*.tmp
+*.dmp
+*.pma
+*.dat
+Crashpad/
+
+# Salvage patch artifacts
+backup_patch_*.patch

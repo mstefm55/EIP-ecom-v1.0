@@ -1,6 +1,0 @@
-﻿status=FAIL
-started_at=2026-03-13T11:40:46.8023429+04:00
-ended_at=2026-03-13T11:40:53.6848522+04:00
-duration_sec=6.883
-summary_path=C:\Projects\EIP\eip-core\reports\ecom-process-regression-20260313-114046.json
-log_path=C:\Projects\EIP\eip-core\reports\ecom-process-regression-20260313-114046.log

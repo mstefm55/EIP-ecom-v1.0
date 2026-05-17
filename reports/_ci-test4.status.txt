@@ -1,6 +1,0 @@
-﻿status=FAIL
-started_at=2026-03-13T11:06:43.5639501+04:00
-ended_at=2026-03-13T11:06:48.1913563+04:00
-duration_sec=4.627
-summary_path=C:\Projects\EIP\eip-core\reports\_ci-test4.json
-log_path=C:\Projects\EIP\eip-core\reports\_ci-test4.log

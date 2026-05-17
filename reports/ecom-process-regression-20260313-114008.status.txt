@@ -1,6 +1,0 @@
-﻿status=PASS
-started_at=2026-03-13T11:40:08.6043641+04:00
-ended_at=2026-03-13T11:40:11.4929028+04:00
-duration_sec=2.889
-summary_path=C:\Projects\EIP\eip-core\reports\ecom-process-regression-20260313-114008.json
-log_path=C:\Projects\EIP\eip-core\reports\ecom-process-regression-20260313-114008.log
