@@ -6,4 +6,9 @@ import tailwindcss from "@tailwindcss/vite";
 export default defineConfig({
   envDir: "../..",
   plugins: [tailwindcss(), react()],
+  preview: {
+    host: "0.0.0.0",
+    port: 4173,
+    allowedHosts: ["eip-dashboard.up.railway.app"],
+  },
 });
