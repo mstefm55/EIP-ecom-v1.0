@@ -67,6 +67,23 @@ async function listMigrationFiles() {
     .sort((a, b) => a.localeCompare(b));
 }
 
+function stripPsqlMetaCommands(sql, filename) {
+  let skipped = 0;
+  const filtered = String(sql)
+    .split(/\r?\n/)
+    .filter((line) => {
+      if (!line.trimStart().startsWith("\\")) return true;
+      skipped += 1;
+      return false;
+    });
+
+  if (skipped > 0) {
+    console.warn(`Skipped ${skipped} psql meta-command line(s) in ${filename}`);
+  }
+
+  return filtered.join("\n");
+}
+
 async function ensureMigrationLedger(client) {
   await client.query("CREATE SCHEMA IF NOT EXISTS eip_core");
   await client.query(`
@@ -110,7 +127,8 @@ async function run() {
       }
 
       console.log(`Applying ${filename}`);
-      const sql = await fs.readFile(path.join(migrationsDir, filename), "utf8");
+      const rawSql = await fs.readFile(path.join(migrationsDir, filename), "utf8");
+      const sql = stripPsqlMetaCommands(rawSql, filename);
       await client.query(sql);
       await client.query(
         "INSERT INTO eip_core.schema_migrations (filename) VALUES ($1)",
