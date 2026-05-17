@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>EIP Core — Tenant Application</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="page">
+      <header class="hero">
+        <div class="hero__content">
+          <p class="hero__kicker">EIP Core Platform</p>
+          <h1 class="hero__title">Apply for a tenant account</h1>
+          <p class="hero__sub">
+            Submit your business details. Our team reviews every request before
+            issuing a secure bootstrap link.
+          </p>
+          <div class="hero__pill-row">
+            <span class="hero__pill">Enterprise ERP</span>
+            <span class="hero__pill">Secure onboarding</span>
+            <span class="hero__pill">Human review</span>
+          </div>
+        </div>
+        <div class="hero__art">
+          <div class="hero__ring"></div>
+          <div class="hero__ring hero__ring--alt"></div>
+          <div class="hero__card">
+            <p>Fast approval</p>
+            <strong>Trusted access</strong>
+            <span>Step-up MFA</span>
+          </div>
+        </div>
+      </header>
+
+      <section class="form-section">
+        <div class="form-section__intro">
+          <h2>Tenant application</h2>
+          <p>
+            Provide the legal identity of the business. No documents are required
+            at this stage.
+          </p>
+        </div>
+        <form id="tenantForm" class="tenant-form">
+          <label class="field">
+            <span>Applicant type</span>
+            <select name="applicantType" required>
+              <option value="business">Business</option>
+              <option value="sole_trader">Sole trader</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>Legal name</span>
+            <input type="text" name="legalName" required />
+          </label>
+
+          <label class="field field--business">
+            <span>Business registration no</span>
+            <input type="text" name="businessRegNo" />
+          </label>
+
+          <label class="field field--sole">
+            <span>National ID / Passport no</span>
+            <input type="text" name="personalIdNo" />
+          </label>
+
+          <label class="field">
+            <span>Primary admin email</span>
+            <input type="email" name="email" required />
+          </label>
+
+          <label class="field">
+            <span>Phone (optional)</span>
+            <input type="text" name="phone" />
+          </label>
+
+          <label class="field">
+            <span>Country</span>
+            <input type="text" name="country" value="MU" required />
+          </label>
+
+          <label class="field">
+            <span>Timezone</span>
+            <input type="text" name="timezone" value="Indian/Mauritius" required />
+          </label>
+
+          <label class="field field--check">
+            <input type="checkbox" name="acceptTerms" required />
+            <span>I accept the Terms (v1)</span>
+          </label>
+
+          <label class="field field--check">
+            <input type="checkbox" name="acceptPrivacy" required />
+            <span>I accept the Privacy Policy (v1)</span>
+          </label>
+
+          <button class="btn" type="submit">Submit application</button>
+          <p id="formError" class="form-message form-message--error"></p>
+          <p id="formSuccess" class="form-message form-message--success"></p>
+        </form>
+      </section>
+    </main>
+    <script src="./app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,178 @@
+Complete-block rule for this wave:
+
+This wave must close one full production block, not partially touch it.
+
+Before coding, inspect the target block and identify all dependent subcomponents required for the block to be truly complete.
+Then include those dependent subcomponents in this same wave if they are necessary for completion.
+
+Use V1 as reference only where it helps speed, but do not copy V1 drift.
+Adapt/restructure anything needed so the V2 result is clean, repeatable, and deployment-safe.
+
+Do not leave the block partially:
+- documented but not runnable
+- runnable only on a developer machine but not deployment-shaped
+- missing environment templates
+- missing migration/app start order
+- missing reverse-proxy / origin strategy
+- missing cookie/session/CSRF deployment validation
+- missing repeatable smoke validation
+- missing operator deployment instructions
+
+If the block cannot be completed in one wave because of a real blocker, do not claim completion.
+Instead report:
+1. exact blocker
+2. exact missing dependency
+3. exact files/modules/infrastructure involved
+4. exact next required block
+
+A block is only complete if it is closed in the intended production-safe form in default deployment shape and does not require an immediate corrective follow-up wave for the same block.
+
+MISSION:
+Close the V2 staging deployment foundation block fully in this wave.
+
+TARGET BLOCK:
+V2 repeatable staging deployment block
+
+EXPECTED FINAL OUTCOME:
+A clean, repeatable staging deployment path exists for V2 such that:
+- API can be built and started
+- workbench UI can be built and started
+- DB migrations can be applied in the correct order
+- auth/session/cookie/CSRF behavior works in the intended deployed origin model
+- workbench routes and UI work in deployed staging shape
+- deployment startup, smoke validation, and rollback basics are documented
+- this becomes the stable base for later production deployment hardening
+
+DEFAULT DEPLOYMENT PRINCIPLE:
+If target hosting/provider is not fully fixed, choose the least-risk provider-agnostic staging topology:
+- single-origin deployment shape where possible
+- reverse proxy in front of API + workbench UI
+- avoid unnecessary cross-origin complexity
+- preserve current auth/session/cookie behavior safely
+- preserve pooled tenancy with future bridge/silo portability
+
+Read these V2 governing files first and treat them as mandatory:
+
+- C:\Projects\EIP\eip-core-v2\AGENTS.md
+- C:\Projects\EIP\eip-core-v2\AGENT_TASKS.md
+- C:\Projects\EIP\eip-core-v2\SECURITY_TARGET.md
+- C:\Projects\EIP\eip-core-v2\SECURITY_CHECKLIST.md
+- C:\Projects\EIP\eip-core-v2\DB_V2_STRATEGY.md
+- C:\Projects\EIP\eip-core-v2\docs\codex\ARCHITECTURE_GUARDRAILS.md
+- C:\Projects\EIP\eip-core-v2\docs\codex\SERIAL_CONTEXT_001.md
+- C:\Projects\EIP\eip-core-v2\docs\codex\SERIAL_CONTEXT_003.md
+- C:\Projects\EIP\eip-core-v2\docs\architecture\TASK_EFFECT_MODEL.md
+- C:\Projects\EIP\eip-core-v2\docs\dev\DEVELOPER_MANUAL.md
+- C:\Projects\EIP\eip-core-v2\docs\dev\BANNED_PATTERNS.md
+- C:\Projects\EIP\eip-core-v2\docs\dev\NO_MERGE_GATES.md
+- C:\Projects\EIP\eip-core-v2\docs\db\NEW_TABLE_JUSTIFICATION_REGISTER.md
+- C:\Projects\EIP\eip-core-v2\docs\db\V2_MIGRATION_CHECKLIST.md
+
+Also inspect the current V2 runnable pieces, including at minimum:
+- C:\Projects\EIP\eip-core-v2\services\api\**
+- C:\Projects\EIP\eip-core-v2\apps\workbench-ui\**
+- current scripts/
+- current package manifests
+- current environment/config handling
+- current tests/smoke suites
+- current migrations and DB bootstrap path
+
+NON-NEGOTIABLE RULES:
+- No V1 modification
+- No broad module growth
+- No new business-feature wave disguised as deployment work
+- No weakening of centralized security/authz
+- No unjustified new tables
+- Any new table must go through the New Table Justification Register
+- Preserve service object canon
+- Preserve explicit macro/effect governance
+- Preserve process-engine-first and UI-engine-first direction
+- Preserve pooled tenancy with future bridge/silo portability
+- Keep deployment shape aligned with secure cookies/session/CSRF expectations
+
+WHAT TO DO IN THIS WAVE:
+
+A. Audit deployment dependencies first
+Identify everything required to make V2 deployment repeatable in staging shape:
+- API build/start requirements
+- workbench-ui build/start requirements
+- environment variables and secrets expectations
+- DB migration/bootstrap sequence
+- origin/reverse-proxy/CORS/cookie/session/CSRF implications
+- smoke validation requirements
+- missing deployment files or scripts
+
+B. Choose and implement the least-risk staging deployment topology
+If no provider-specific topology is fixed, implement a provider-agnostic staging deployment foundation that is still concretely runnable.
+Prefer a single-origin reverse-proxy shape so the current auth/session model remains stable.
+
+C. Create the actual deployment foundation
+As needed for full block closure, include:
+- environment example files
+- deployment/start scripts
+- migration/apply scripts
+- reverse-proxy config
+- build orchestration
+- startup order documentation
+- smoke verification scripts
+- staging deployment README/runbook
+- rollback/recovery notes sufficient for staging
+
+D. Validate deployment behavior
+Demonstrate, in the staging deployment shape:
+- API health
+- DB health
+- workbench UI availability
+- authenticated workbench session path
+- cookie/session/CSRF behavior
+- workbench core/ecom paths still usable
+- fail-closed behavior when auth/session is wrong
+
+E. Keep the block closed
+Do not leave this as “files exist but unproven.”
+Do not leave the deployment as merely aspirational docs.
+Do not leave cookie/CORS/proxy assumptions unvalidated.
+
+WORKER SPLIT:
+Worker 1 — deployment dependency audit + topology decision
+Worker 2 — API/workbench build/start/deploy scripts
+Worker 3 — reverse-proxy/origin/cookie/CORS/session deployment closure
+Worker 4 — smoke validation / runtime deployment proof
+Worker 5 — docs/runbook/drift-check synchronization
+
+SUCCESS CONDITION:
+This block is complete only if:
+- a repeatable staging deployment path exists
+- deployment files/scripts/config are present and coherent
+- migrations/start order are documented and tested
+- API and workbench UI run in staging deployment shape
+- authenticated workbench flow works in deployment shape
+- cookie/session/CSRF/origin behavior is validated for that deployment path
+- no immediate corrective follow-up wave is required for this same deployment block
+
+OUTPUT REQUIRED:
+1. target block
+2. dependent subcomponents included automatically
+3. files changed
+4. chosen staging deployment topology and why
+5. what was added for deploy/build/start/migrate/reverse-proxy/runbook
+6. whether a real repeatable staging deployment path now exists
+7. whether authenticated workbench flow works in deployment shape
+8. whether cookie/CORS/session/CSRF behavior is validated in deployment shape
+9. whether any hidden deployment/security drift was found and corrected
+10. whether any new table was proposed or created
+11. what remains intentionally deferred outside this block
+12. final yes/no:
+   - Is the V2 staging deployment block fully closed in the intended production-safe form?
+
+MANDATORY END-OF-WAVE DRIFT CHECK:
+Include:
+1. drift risks checked
+2. any drift found
+3. what was corrected
+4. what remains deferred
+5. final yes/no:
+   - Is this wave aligned with V2 intent?
+
+STRICT END RULE:
+Do not say yes unless the staging deployment path is truly repeatable and validated, not just documented.

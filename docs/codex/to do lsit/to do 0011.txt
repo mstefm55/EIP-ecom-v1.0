@@ -1,0 +1,111 @@
+Read these V2 governing files first and treat them as mandatory:
+
+- C:\Projects\EIP\eip-core-v2\AGENTS.md
+- C:\Projects\EIP\eip-core-v2\AGENT_TASKS.md
+- C:\Projects\EIP\eip-core-v2\SECURITY_TARGET.md
+- C:\Projects\EIP\eip-core-v2\SECURITY_CHECKLIST.md
+- C:\Projects\EIP\eip-core-v2\DB_V2_STRATEGY.md
+- C:\Projects\EIP\eip-core-v2\docs\codex\ARCHITECTURE_GUARDRAILS.md
+- C:\Projects\EIP\eip-core-v2\docs\codex\SERIAL_CONTEXT_001.md
+- C:\Projects\EIP\eip-core-v2\docs\codex\SERIAL_CONTEXT_003.md
+- C:\Projects\EIP\eip-core-v2\docs\codex\DRIFT_CLOSURE_0010.md
+- C:\Projects\EIP\eip-core-v2\docs\codex\WAVE_4_CORE_CONSOLIDATION.md
+- C:\Projects\EIP\eip-core-v2\docs\db\NEW_TABLE_JUSTIFICATION_REGISTER.md
+- C:\Projects\EIP\eip-core-v2\docs\dev\DEVELOPER_MANUAL.md
+- C:\Projects\EIP\eip-core-v2\docs\architecture\TASK_EFFECT_MODEL.md
+
+Also inspect the current process engine/runtime implementation:
+- C:\Projects\EIP\eip-core-v2\services\api\src\core\core_process_engine.js
+- C:\Projects\EIP\eip-core-v2\services\api\src\routes\process\core_process.js
+- current V2 process schema and seeds
+
+MISSION:
+Execute one final base-hardening wave to eliminate the remaining process-model caveat.
+
+CURRENT CAVEAT:
+The 5-layer canon is explicit in docs, but the macro layer is still only metadata-explicit and runtime-implicit via transition effect bundles.
+We do not want this caveat to accumulate into future drift.
+
+GOAL:
+Make the macro layer explicit and governed enough at runtime that future waves cannot silently drift into hidden workflow bundles.
+
+NON-NEGOTIABLE MODEL:
+1. process = control-flow definition
+2. task label = human/business-facing wording
+3. macro = reusable execution bundle
+4. effect library = standardized engine capabilities
+5. service object + service object category = runtime parameters passed into execution
+
+RULES:
+- task label must remain human-facing only
+- effects must remain generic and reusable
+- routes must not become workflow authorities
+- process behavior must remain DB-driven
+- service object terminology must remain canonical
+- no “object + category” wording in canon
+- no business-specific workflow shortcuts
+- no unjustified new tables
+
+PRIMARY TASKS:
+
+A. Macro runtime clarification
+- inspect where macro currently lives in practice
+- explain precisely how it is currently resolved at runtime
+- identify the minimum change required to make it explicit and governed
+
+B. Promote macro to explicit governed runtime status
+Choose the least risky architecture-consistent option:
+- governed DB registry/table
+- or governed structured macro artifact inside process definitions/taxonomy with explicit engine resolution
+Do not leave it vague.
+
+C. Engine update
+- make macro resolution explicit in engine flow
+- make sure transition invokes macro explicitly, and macro invokes effects explicitly
+- do not collapse macro into ad hoc route or transition shortcuts
+
+D. Docs update
+- update canon docs and developer manual so macro is no longer described as only implicit
+- explicitly state the final chosen runtime model
+
+E. Drift check
+- verify no hidden workflow bundles remain where macro should be explicit
+- verify routes do not own workflow behavior
+- verify effect library remains generic
+- verify service object/runtime parameter model remains intact
+
+OUTPUT REQUIRED:
+1. files changed
+2. exact explanation of how macro worked before
+3. exact explanation of how macro works now
+4. whether macro is now first-class/governed at runtime
+5. whether any new table was proposed or created
+6. whether any hidden workflow drift was found and corrected
+7. final yes/no:
+   - Is the V2 base now fully consolidated with no remaining process-model caveat?
+
+MANDATORY END-OF-WAVE DRIFT CHECK:
+Include:
+1. drift risks checked
+2. any drift found
+3. what was corrected
+4. what remains deferred
+5. final yes/no:
+   - Is this wave aligned with V2 intent?
+   Mandatory end-of-wave drift check:
+Before closing the wave, perform an explicit drift check against:
+- kernel-first alignment
+- service object canon
+- DB-driven process authority
+- 5-layer process model
+- UI-engine / surface-driven direction
+- multi-tenant/security discipline
+- schema discipline
+
+Include in the output:
+1. drift risks checked
+2. any drift found
+3. what was corrected
+4. what remains deferred
+5. final yes/no:
+   - Is this wave aligned with V2 intent?

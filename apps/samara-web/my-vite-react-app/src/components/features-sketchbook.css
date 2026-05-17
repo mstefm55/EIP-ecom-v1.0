@@ -1,5 +1,4 @@
-/* Handwritten font (Google Fonts). Put this in your index.html OR keep here via @import. */
-@import url("https://fonts.googleapis.com/css2?family=Caveat:wght@400;600&display=swap");
+/* Use local cursive fallback to avoid runtime network dependency in storefront mode. */
 
 :root{
   --paper:#f6f0e6;

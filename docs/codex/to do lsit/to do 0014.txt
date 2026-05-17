@@ -1,0 +1,152 @@
+Read these V2 governing files first and treat them as mandatory:
+
+- C:\Projects\EIP\eip-core-v2\AGENTS.md
+- C:\Projects\EIP\eip-core-v2\AGENT_TASKS.md
+- C:\Projects\EIP\eip-core-v2\SECURITY_TARGET.md
+- C:\Projects\EIP\eip-core-v2\SECURITY_CHECKLIST.md
+- C:\Projects\EIP\eip-core-v2\DB_V2_STRATEGY.md
+- C:\Projects\EIP\eip-core-v2\docs\codex\ARCHITECTURE_GUARDRAILS.md
+- C:\Projects\EIP\eip-core-v2\docs\codex\SERIAL_CONTEXT_001.md
+- C:\Projects\EIP\eip-core-v2\docs\codex\SERIAL_CONTEXT_003.md
+- C:\Projects\EIP\eip-core-v2\docs\architecture\TASK_EFFECT_MODEL.md
+- C:\Projects\EIP\eip-core-v2\docs\dev\DEVELOPER_MANUAL.md
+- C:\Projects\EIP\eip-core-v2\docs\dev\BANNED_PATTERNS.md
+- C:\Projects\EIP\eip-core-v2\docs\dev\NO_MERGE_GATES.md
+- C:\Projects\EIP\eip-core-v2\docs\db\NEW_TABLE_JUSTIFICATION_REGISTER.md
+- C:\Projects\EIP\eip-core-v2\docs\db\V2_MIGRATION_CHECKLIST.md
+
+Also inspect the current V2 runtime and seeded base, including at minimum:
+- C:\Projects\EIP\eip-core-v2\services\api\src\core\core_process_engine.js
+- C:\Projects\EIP\eip-core-v2\services\api\src\routes\process\core_process.js
+- C:\Projects\EIP\eip-core-v2\services\api\src\routes\ui_surface.js
+- current V2 ecom process seeds
+- current V2 ui_surface seeds
+- dashboard UI engine / renderer / registry in V2 if present
+- any current process-builder-related UI files in V2
+
+Also read these V1 files only as reference material, not as authority:
+- C:\Projects\EIP\eip-core\apps\dashboard\src\engine\renderer.jsx
+- C:\Projects\EIP\eip-core\apps\dashboard\src\engine\registry.jsx
+- C:\Projects\EIP\eip-core\apps\dashboard\src\hooks\useSurfaceLoader.js
+- any V1 process-builder/workbench/admin UI files you can find
+- any V1 ecom workbench/surface definitions you can find
+
+MISSION:
+Execute the V2 UI engine / process builder workbench wave.
+
+CRITICAL CONTEXT:
+The V2 base is now process-model consolidated.
+We do NOT want module sprawl now.
+We want the next core capability:
+- a governed process-builder/workbench layer
+- UI-engine driven
+- process-engine driven
+- DB/surface-definition driven
+- suitable as the core operating surface for later modules
+
+PRIMARY GOAL:
+Make the process builder / process workbench usable through the UI engine, so later modules can be built mainly by defining:
+- process definitions
+- macros/effects usage
+- governed service object/service object category rules
+- UI surfaces
+
+and not by hardcoding module-specific workflow UIs.
+
+NON-NEGOTIABLE MODEL:
+1. process = control-flow definition
+2. task label = human/business-facing wording
+3. macro = reusable execution bundle
+4. effect library = governed standardized engine capabilities
+5. service object + service object category = runtime parameters passed into execution
+
+UI PRINCIPLE:
+- UI must be engine-/surface-driven
+- process builder/workbench must not become a one-off hardcoded page that bypasses the UI engine
+- routes must remain transport/API only
+- process semantics must remain DB-driven
+- workbench behavior should reflect governed process/macro/effect metadata, not duplicate it manually in frontend code
+
+WHAT TO BUILD IN THIS WAVE:
+Build the minimum production-grade V2 process-builder/workbench foundation.
+
+This should include, as appropriate and minimally:
+A. governed workbench surface definitions
+B. UI-engine-backed process builder/workbench rendering path
+C. process-definition inspection/editing workflow through governed contracts
+D. visibility of:
+   - process graph
+   - task labels
+   - macro bindings
+   - effect references
+   - service object type/category applicability
+E. enough usable workbench capability to support seeded ecom processes as the first demonstration case
+
+IMPORTANT:
+Do not try to build a giant perfect admin suite.
+Build the minimum core workbench that proves:
+- the UI engine can host the builder/workbench
+- the process engine remains the authority
+- process definitions can be viewed/managed through governed surfaces
+- ecom can be operated through this core rather than route-specific hardcoding
+
+ALSO DO:
+- identify any current hardcoded UI authority that must be reduced to make this work
+- make only the minimum justified fixes needed
+- keep later module expansion out of scope
+
+DO NOT:
+- modify V1
+- widen into storefront/public-commerce buildout
+- create broad tenant-specific UI shortcuts
+- introduce hardcoded business workflow ownership into the workbench
+- add unjustified new tables
+- redesign the whole frontend
+- bypass existing V2 process/effect governance
+
+WORKER SPLIT:
+Worker 1 — process builder/workbench requirements and current-gap audit
+Worker 2 — UI engine / surface-definition implementation
+Worker 3 — process builder/workbench API contract and runtime integration
+Worker 4 — ecom demonstration alignment using seeded process definitions
+Worker 5 — drift-check / docs / developer manual synchronization
+
+PHASE A — AUDIT FIRST
+First audit the current V2 state and identify:
+1. what already exists for UI engine/workbench
+2. what is missing for a usable process builder/workbench
+3. what should remain governed in DB/surfaces
+4. what must remain generic in code
+5. where hardcoded UI authority still exists
+
+PHASE B — IMPLEMENT MINIMUM CORE WORKBENCH
+Then implement only the foundational pieces needed to make the workbench real and aligned.
+
+REQUIRED DELIVERABLES:
+1. files changed
+2. exact workbench/process-builder surfaces created or updated
+3. exact API/runtime pieces created or updated
+4. what was kept engine-/surface-driven instead of hardcoded
+5. whether seeded ecom process definitions can now be inspected/operated through the workbench path
+6. whether any new table was proposed or created
+7. whether any hardcoded UI/process authority was found and corrected
+8. what remains intentionally deferred
+9. final yes/no:
+   - Is the V2 workbench/core UI layer now strong enough to support future module growth safely?
+
+MANDATORY END-OF-WAVE DRIFT CHECK:
+Include:
+1. drift risks checked
+2. any drift found
+3. what was corrected
+4. what remains deferred
+5. final yes/no:
+   - Is this wave aligned with V2 intent?
+
+STRICT END RULE:
+Do not say yes unless:
+- the process builder/workbench is meaningfully UI-engine-driven
+- process semantics remain DB-driven
+- no new hidden hardcoded workflow authority was introduced
+- the ecom demonstration case uses the core properly enough
+- the result makes future module growth safer rather than drift-prone

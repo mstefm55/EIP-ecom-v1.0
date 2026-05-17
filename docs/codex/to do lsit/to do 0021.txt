@@ -1,0 +1,184 @@
+Complete-block rule for this wave:
+
+This wave must close one full production block, not partially touch it.
+
+Before coding, inspect the target block and identify all dependent subcomponents required for the block to be truly complete.
+Then include those dependent subcomponents in this same wave if they are necessary for completion.
+
+Do not leave:
+- empty buttons
+- placeholder actions
+- shells without behavior
+- visual controls with no connected JS/runtime function
+- layout pieces without corresponding contracts/state handling
+- immediate corrective follow-up for the same block
+
+A block is only complete if:
+- all visible controls in scope have real final behavior
+- all corresponding JS/runtime handlers exist
+- all contracts/state transitions are wired
+- the runtime flow is validated end-to-end
+- no immediate same-block corrective wave is needed
+
+MISSION:
+Close the owner-admin shell + theming + behavior-complete UI foundation block.
+
+TARGET BLOCK:
+EIP owner-admin console shell, branded with EIP CORE artwork, using salvaged strong V1 layout/CSS, with governed tenant theme-token support and fully wired component behavior.
+
+IMPORTANT PLATFORM RULE:
+EIP V2 is the platform authority.
+Do not use any tenant as design authority.
+Do not mention or use Samara as architecture authority.
+Tenants are consumers of the platform.
+
+ROLE MODEL TO FOLLOW:
+- Owner admin: system-wide authority, admin tooling, template seeding, customization control
+- Partner / trained implementation team: controlled customization path
+- Tenant admin: operational usage, not unrestricted UI architecture control
+
+MANDATORY PLANNING / ANTICIPATION RULE:
+Before implementation, perform a block-completeness dependency sweep and anticipate all needed subparts.
+Do not build visuals first and leave behavior for later.
+Use a 3D/4D view:
+- layout
+- behavior
+- contracts
+- permissions
+- runtime flow
+- future maintainability
+must all be considered together.
+
+MANDATORY UI BEHAVIOR RULE:
+Every component/control introduced or restyled in this wave must have its corresponding final JS/runtime behavior completed in this same wave if it is visible/active in the delivered UI.
+No empty shell buttons.
+No dead menu items.
+No unbound actions.
+No “to be connected later” for in-scope controls.
+
+BRANDING REQUIREMENT:
+Use the attached EIP CORE artwork as the visual basis for the owner-admin shell:
+- deep navy / midnight blue base
+- metallic silver / white text emphasis
+- blue gradient accent system
+- curved wave motif where appropriate
+- polished premium admin look
+- logo / favicon / icon integration through safe asset registry
+
+V1 SALVAGE RULE:
+Aggressively salvage the strong parts of V1 layout/CSS:
+- shell layout
+- navigation layout
+- spacing rhythm
+- panel/card treatment
+- topbar/sidebar structure
+- CSS organization quality
+
+Do NOT copy:
+- hardcoded workflow authority
+- brittle page-specific hacks
+- tenant-specific drift
+- dead controls / empty behavior shells
+
+Read these first and treat them as mandatory:
+- AGENTS.md
+- docs/architecture/UI_ENGINE_OWNERSHIP.md
+- docs/dev/DEVELOPER_MANUAL.md
+- docs/dev/BANNED_PATTERNS.md
+- docs/dev/NO_MERGE_GATES.md
+- SECURITY_TARGET.md
+- SECURITY_CHECKLIST.md
+
+Also inspect:
+- current workbench-ui shell/layout/CSS
+- current primitives/composites/shell structure
+- current runtime smoke tests
+- current asset registry
+- relevant strong V1 admin layout/CSS files only as salvage source, not authority
+
+WHAT TO DO:
+
+A. Audit block completeness first
+Identify all subparts required to fully close this block:
+- shell layout
+- nav/topbar/sidebar
+- theme token system
+- owner-admin branding application
+- asset integration
+- tenant theme overrides
+- visible controls and their required behavior
+- permissions/visibility for owner-admin surfaces
+- runtime validation path
+
+B. Implement owner-admin shell
+Create/refine the owner-admin shell using EIP CORE artwork direction and strong V1 layout/CSS salvage.
+
+C. Implement governed theme-token system
+Allow:
+- default EIP owner-admin theme
+- tenant logo
+- tenant favicon/app icon
+- tenant color tokens
+- limited governed layout variants
+
+Do not allow arbitrary CSS injection.
+
+D. Ensure behavior completeness
+For every visible control introduced in this block:
+- confirm corresponding JS/runtime behavior exists
+- confirm contracts/state handlers are wired
+- confirm no dead UI elements remain
+
+E. Validate holistically
+Run build, smoke, and any needed UI/runtime checks.
+Do not claim closure if the UI looks complete but behavior is incomplete.
+
+OUTPUT REQUIRED:
+1. target block
+2. dependent subcomponents included automatically
+3. files changed
+4. what V1 layout/CSS was salvaged
+5. what was intentionally not copied from V1
+6. how the owner-admin shell now reflects EIP CORE branding
+7. what theme-token system was introduced
+8. which tenant overrides are allowed vs forbidden
+9. list of all visible controls touched in this wave and the corresponding behavior/JS path for each
+10. confirmation that no in-scope control is an empty shell
+11. whether runtime validation passed
+12. whether any hidden hardcoded UI/business authority was introduced
+13. whether any new table was proposed or created
+14. what remains intentionally deferred outside this block
+15. final yes/no:
+   - Is the owner-admin shell + theming + behavior-complete block fully closed in intended production-safe form?
+
+MANDATORY UI QUALITY CHECK:
+Include:
+1. engine ownership check
+2. metadata ownership check
+3. server authority check
+4. tenant-scope check
+5. performance/caching check
+6. safety check
+7. behavior-completeness check
+8. final yes/no:
+   - Is this UI wave aligned with V2 intent?
+
+STRICT END RULE:
+Do not say yes unless:
+- the owner-admin shell is visually coherent
+- strong V1 layout/CSS value was cleanly salvaged
+- tenant theming is governed
+- every visible in-scope control has final behavior
+- no dead/empty controls remain
+- no immediate same-block corrective wave is needed
+
+logo artworks for eip core admin console:
+"C:\Users\migue\Downloads\ChatGPT Image Feb 18, 2026, 01_35_53 PM.png"
+"C:\Users\migue\Downloads\ChatGPT Image Feb 18, 2026, 01_31_54 PM.png"
+"C:\Users\migue\Downloads\ChatGPT Image Feb 18, 2026, 01_31_16 PM.png"
+"C:\Users\migue\Downloads\ChatGPT Image Feb 18, 2026, 01_29_20 PM.png"
+"C:\Users\migue\Downloads\ChatGPT Image Feb 18, 2026, 02_05_33 PM.png"
+"C:\Users\migue\Downloads\ChatGPT Image Feb 18, 2026, 01_47_57 PM.png"
+"C:\Users\migue\Downloads\ChatGPT Image Feb 18, 2026, 01_36_27 PM.png"
+"C:\Users\migue\Downloads\ChatGPT Image Feb 18, 2026, 01_36_14 PM.png"
+"C:\Users\migue\Downloads\ChatGPT Image Feb 18, 2026, 01_36_02 PM.png"

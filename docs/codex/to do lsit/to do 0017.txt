@@ -1,0 +1,173 @@
+Complete-block rule for this wave:
+
+This wave must close the rendered workbench frontend block fully in the intended production-safe form.
+
+Before coding, inspect the current state of this same block and identify all remaining dependent subcomponents required for true closure.
+Then include those dependent subcomponents in this same wave if they are necessary for completion.
+
+Do not leave the block partially:
+- implemented but not authenticated end-to-end
+- rendered only in theory
+- protected only at API level without real UI-path proof
+- missing browser/runtime proof
+- missing minimal frontend smoke coverage
+- missing cookie/CORS/session validation in the real runtime path
+
+If the block cannot be completed in one wave because of a real blocker, do not claim completion.
+Instead report:
+1. exact blocker
+2. exact missing dependency
+3. exact files/modules involved
+4. exact next required block
+
+A block is only complete if it is closed in the intended production-safe form in default runtime and does not require an immediate corrective follow-up wave for the same block.
+
+MISSION:
+Close the rendered workbench frontend block fully.
+
+CURRENT FACTS:
+The current implementation exists, but strict closure is not yet achieved because:
+- authenticated E2E/browser proof is still missing
+- runtime-authenticated proof for both core and ecom workbench rendering is still pending
+- frontend automated smoke coverage is still missing or incomplete
+- deployment-level cookie/CORS/session behavior has not yet been validated end-to-end
+
+That means this block is not yet fully closed in the strict sense.
+
+TARGET BLOCK:
+Rendered V2 operator-facing process-builder/process-workbench frontend block
+
+EXPECTED FINAL OUTCOME:
+In default runtime, with real authenticated session flow:
+- a user can sign in
+- the V2 workbench UI loads
+- core_process_workbench renders
+- ecom_process_workbench renders
+- both render through the governed UI-engine / surface / contract path
+- permission enforcement works through the real UI flow
+- cookie/CORS/session behavior is validated for the intended runtime path
+- minimal frontend smoke coverage exists for the renderer/contract/node path
+- no immediate corrective follow-up wave is needed for this same block
+
+Read these V2 governing files first and treat them as mandatory:
+
+- C:\Projects\EIP\eip-core-v2\AGENTS.md
+- C:\Projects\EIP\eip-core-v2\AGENT_TASKS.md
+- C:\Projects\EIP\eip-core-v2\SECURITY_TARGET.md
+- C:\Projects\EIP\eip-core-v2\SECURITY_CHECKLIST.md
+- C:\Projects\EIP\eip-core-v2\DB_V2_STRATEGY.md
+- C:\Projects\EIP\eip-core-v2\docs\codex\ARCHITECTURE_GUARDRAILS.md
+- C:\Projects\EIP\eip-core-v2\docs\codex\SERIAL_CONTEXT_001.md
+- C:\Projects\EIP\eip-core-v2\docs\codex\SERIAL_CONTEXT_003.md
+- C:\Projects\EIP\eip-core-v2\docs\architecture\TASK_EFFECT_MODEL.md
+- C:\Projects\EIP\eip-core-v2\docs\dev\DEVELOPER_MANUAL.md
+- C:\Projects\EIP\eip-core-v2\docs\dev\BANNED_PATTERNS.md
+- C:\Projects\EIP\eip-core-v2\docs\dev\NO_MERGE_GATES.md
+- C:\Projects\EIP\eip-core-v2\docs\db\NEW_TABLE_JUSTIFICATION_REGISTER.md
+- C:\Projects\EIP\eip-core-v2\docs\db\V2_MIGRATION_CHECKLIST.md
+
+Also inspect the current block implementation fully, including at minimum:
+- C:\Projects\EIP\eip-core-v2\apps\workbench-ui\**
+- C:\Projects\EIP\eip-core-v2\services\api\src\routes\ui_surface.js
+- C:\Projects\EIP\eip-core-v2\services\api\src\routes\process\core_process.js
+- current auth/session/csrf/runtime integration
+- current permission enforcement path
+- current V2 surface seeds
+- current V2 workbench endpoints
+
+NON-NEGOTIABLE RULES:
+- No V1 modification
+- No broad module expansion
+- No storefront/public-commerce buildout
+- No hardcoded process/workflow ownership in frontend
+- No bypass of ui_surface / contract / renderer path
+- No bypass of process-engine / DB-driven authority
+- No unjustified new tables
+- Any new table must go through the New Table Justification Register
+- Preserve pooled tenancy with future bridge/silo portability
+- Preserve centralized security/authz boundaries
+- Preserve service object canon
+- Preserve explicit macro/effect governance
+
+WHAT TO DO IN THIS WAVE:
+
+A. Close authenticated runtime proof
+1. Prove the real sign-in/session path for workbench access.
+2. Validate the real authenticated browser/runtime path for:
+   - core_process_workbench
+   - ecom_process_workbench
+3. Validate permission enforcement in the actual UI flow.
+4. Do not accept API-only proof as closure.
+
+B. Close cookie/CORS/session runtime behavior
+1. Validate the real workbench frontend against the intended backend runtime configuration.
+2. Confirm cookies/session/CSRF/CORS behavior works in the real path.
+3. If config fixes are required for this same block, include them now.
+
+C. Add minimal frontend smoke coverage
+Add enough frontend automated smoke coverage to prove:
+- renderer can render governed surface nodes
+- contract resolution works
+- core/ecom workbench load path works at the frontend layer
+- permission or auth failure states fail closed in the UI path as expected
+
+D. Fix any remaining block-local defects automatically
+If full closure of this block requires tightly related fixes inside:
+- workbench-ui app
+- auth/session integration
+- surface loader
+- renderer/registry
+- workbench node components
+- runtime config for the workbench path
+include them automatically in this same wave.
+
+E. Do not widen scope
+Do not turn this into a new module wave.
+This wave is only to finish the rendered workbench frontend block properly.
+
+WORKER SPLIT:
+Worker 1 — full block re-audit + closure dependency discovery
+Worker 2 — authenticated runtime path / session / CSRF / CORS closure
+Worker 3 — frontend smoke coverage
+Worker 4 — renderer/registry/surface-loader defect closure
+Worker 5 — docs/drift-check/final block-closure review
+
+SUCCESS CONDITION:
+This block is complete only if:
+- a real rendered V2 workbench exists in default runtime
+- core_process_workbench renders in authenticated runtime
+- ecom_process_workbench renders in authenticated runtime
+- the UI path uses the governed surface/contract/renderer system
+- permission enforcement is demonstrated in the real UI flow
+- cookie/CORS/session behavior is validated for the real path
+- minimal frontend smoke coverage exists
+- no immediate corrective follow-up wave is needed for this same block
+
+OUTPUT REQUIRED:
+1. target block
+2. dependent subcomponents included automatically
+3. files changed
+4. what exact remaining gaps were found at the start
+5. what was changed to close them
+6. whether authenticated runtime proof now exists
+7. whether core_process_workbench renders in real authenticated runtime
+8. whether ecom_process_workbench renders in real authenticated runtime
+9. whether cookie/CORS/session behavior is validated for this path
+10. what frontend smoke coverage was added
+11. whether any hidden hardcoded UI/process authority remains
+12. whether any new table was proposed or created
+13. what remains intentionally deferred outside this block
+14. final yes/no:
+   - Is the rendered workbench frontend block fully closed in the intended production-safe form?
+
+MANDATORY END-OF-WAVE DRIFT CHECK:
+Include:
+1. drift risks checked
+2. any drift found
+3. what was corrected
+4. what remains deferred
+5. final yes/no:
+   - Is this wave aligned with V2 intent?
+
+STRICT END RULE:
+Do not say yes unless the strict closure conditions above are all met.

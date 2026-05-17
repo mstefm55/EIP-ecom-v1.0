@@ -1,0 +1,9 @@
+{
+  "general": {
+    "previewFeatures": true
+  },
+  "agent": {
+    "mode": "architect",
+    "enforceConsistency": true
+  }
+}

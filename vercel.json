@@ -1,0 +1,6 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "npm install",
+  "buildCommand": "npm --workspace apps/samara-web/my-vite-react-app run build",
+  "outputDirectory": "apps/samara-web/my-vite-react-app/dist"
+}

@@ -1,0 +1,393 @@
+.authui-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(58, 47, 42, 0.35);
+}
+
+.authui-panel {
+  width: min(460px, 92vw);
+  max-height: 92vh;
+  overflow: auto;
+  border-radius: 16px;
+  border: 1px solid rgba(140, 109, 85, 0.32);
+  background: var(--panel-strong, #f8f4ef);
+  box-shadow: 0 24px 48px rgba(58, 47, 42, 0.2);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.authui-auth-panel {
+  width: min(840px, 96vw);
+  background: linear-gradient(140deg, rgba(255, 255, 255, 0.78) 0%, rgba(250, 245, 239, 0.72) 100%);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.authui-signin {
+  width: min(760px, 94vw);
+}
+
+.authui-signup {
+  width: min(840px, 96vw);
+}
+
+.authui-choice-panel {
+  width: min(420px, 92vw);
+}
+
+.authui-header h3 {
+  margin: 0;
+  font-size: 1.4rem;
+  color: var(--ink, #2e2723);
+}
+
+.authui-header p {
+  margin: 6px 0 0;
+  font-size: 0.95rem;
+  color: var(--muted, #6e6258);
+}
+
+.authui-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.authui-body label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.72rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--muted, #6e6258);
+}
+
+.authui-body input,
+.authui-body textarea,
+.authui-picker-trigger {
+  width: 100%;
+  border: 1px solid var(--line, #c8baac);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--ink, #2e2723);
+  font-size: 0.96rem;
+  letter-spacing: 0.01em;
+  padding: 10px 12px;
+}
+
+.authui-body textarea {
+  resize: vertical;
+}
+
+.authui-grid-equal {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.authui-grid-phone {
+  display: grid;
+  grid-template-columns: clamp(150px, 18vw, 190px) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.authui-signin-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(180px, 0.8fr);
+  gap: 16px;
+  align-items: stretch;
+}
+
+.authui-signin-fields {
+  display: grid;
+  gap: 12px;
+}
+
+.authui-signin-visual {
+  border: 1px solid rgba(140, 109, 85, 0.26);
+  border-radius: 12px;
+  overflow: hidden;
+  min-height: 168px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.authui-signin-visual img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.authui-input-wrap {
+  position: relative;
+}
+
+.authui-input-wrap input {
+  padding-right: 42px;
+}
+
+.authui-input-toggle {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: rgba(88, 70, 56, 0.78);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.authui-input-toggle:hover {
+  color: var(--accent-dark, #6f5542);
+}
+
+.authui-icon {
+  width: 15px;
+  height: 15px;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+}
+
+.authui-picker {
+  position: relative;
+}
+
+.authui-picker-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.authui-picker-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--line, #c8baac);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 10px 28px rgba(23, 22, 20, 0.14);
+  z-index: 80;
+}
+
+.authui-phone-menu {
+  width: max-content;
+  min-width: 320px;
+  max-width: min(440px, calc(100vw - 56px));
+}
+
+.authui-picker-option {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid rgba(130, 110, 92, 0.14);
+  background: #fff;
+  color: var(--ink, #2e2723);
+  text-align: left;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+}
+
+.authui-picker-option:last-child {
+  border-bottom: 0;
+}
+
+.authui-picker-option:hover,
+.authui-picker-option.active {
+  background: rgba(140, 109, 85, 0.08);
+}
+
+.authui-picker-option-main {
+  font-size: 0.92rem;
+  letter-spacing: 0.01em;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.authui-picker-option-meta {
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  color: var(--muted, #6e6258);
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.authui-flag-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.authui-flag-mark {
+  width: 18px;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px rgba(70, 57, 46, 0.14);
+  flex: 0 0 auto;
+}
+
+.authui-terms {
+  min-height: 140px;
+  height: 160px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  line-height: 1.4;
+  font-size: 0.86rem;
+}
+
+.authui-term-links {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(140, 109, 85, 0.35);
+  display: grid;
+  gap: 6px;
+}
+
+.authui-term-links a {
+  font-size: 0.8rem;
+  color: var(--accent-dark, #6f5542);
+  text-decoration: underline;
+}
+
+.authui-terms-check {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 10px;
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--ink, #2e2723);
+}
+
+.authui-terms-check input {
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  accent-color: var(--accent, #8d7156);
+  flex: 0 0 auto;
+}
+
+.authui-terms-check span {
+  text-transform: none;
+  letter-spacing: 0.01em;
+}
+
+.authui-choice-list {
+  display: grid;
+  gap: 10px;
+}
+
+.authui-choice-btn {
+  border: 1px solid rgba(140, 109, 85, 0.26);
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 12px;
+  padding: 12px;
+  text-align: left;
+  display: grid;
+  gap: 4px;
+}
+
+.authui-choice-btn strong {
+  font-size: 0.85rem;
+  color: var(--ink, #2e2723);
+  font-weight: 600;
+}
+
+.authui-choice-btn span {
+  font-size: 0.82rem;
+  color: var(--accent-dark, #6f5542);
+  letter-spacing: 0.03em;
+}
+
+.authui-choice-btn:hover {
+  border-color: var(--accent, #8d7156);
+}
+
+.authui-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.authui-btn {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 10px 18px;
+  background: var(--accent, #8d7156);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 0.9rem;
+}
+
+.authui-btn:disabled {
+  opacity: 0.66;
+  cursor: not-allowed;
+}
+
+.authui-btn-ghost {
+  border-color: var(--line, #c8baac);
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--ink, #2e2723);
+}
+
+.authui-alert {
+  margin: 2px 0 0;
+  font-size: 0.86rem;
+}
+
+.authui-alert-error {
+  color: #9f3939;
+}
+
+.authui-alert-success {
+  color: #2f7b4f;
+}
+
+.authui-debug-link {
+  font-size: 0.78rem;
+  color: var(--accent-dark, #6f5542);
+  text-decoration: underline;
+}
+
+@media (max-width: 720px) {
+  .authui-grid-equal,
+  .authui-grid-phone {
+    grid-template-columns: 1fr;
+  }
+
+  .authui-signin-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .authui-signin-visual {
+    min-height: 140px;
+  }
+}

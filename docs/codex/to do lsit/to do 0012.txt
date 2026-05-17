@@ -1,0 +1,64 @@
+Read all current V2 governing docs first, especially:
+- AGENTS.md
+- docs/codex/ARCHITECTURE_GUARDRAILS.md
+- docs/codex/SERIAL_CONTEXT_003.md
+- docs/architecture/TASK_EFFECT_MODEL.md
+- docs/dev/DEVELOPER_MANUAL.md
+- docs/codex/WAVE_4_5_MACRO_RUNTIME_CLOSEOUT.md
+
+MISSION:
+Execute one final zero-drift cleanup wave for the process model.
+
+CURRENT FACTS:
+- macro is now first-class/governed at runtime
+- ecom seeded defs are macro-registry driven
+- hidden transition-effect ownership was blocked
+- one compatibility caveat remains:
+  legacy transitions without macro_code can still run through inline-compat macro wrapping
+- remaining known candidates include legacy W35_SMOKE_* definitions
+
+GOAL:
+Remove the remaining compatibility caveat so the process model is fully explicit and no legacy inline-compat execution path remains.
+
+TASKS:
+1. Identify every remaining legacy definition relying on inline-compat behavior.
+2. Migrate those definitions to explicit macro_code + governed macro structure.
+3. Remove the runtime inline-compat fallback path from the engine.
+4. Harden validation so transitions must follow the explicit model.
+5. Update docs to state that macro is fully first-class with no compatibility caveat remaining.
+6. Do not widen scope beyond this cleanup.
+7. Do not modify V1.
+
+OUTPUT REQUIRED:
+1. files changed
+2. which legacy defs were migrated
+3. whether inline-compat fallback was fully removed
+4. whether any compatibility path remains
+5. final yes/no:
+   - Is the V2 base now fully consolidated with no remaining process-model caveat?
+
+MANDATORY END-OF-WAVE DRIFT CHECK:
+Include:
+1. drift risks checked
+2. any drift found
+3. what was corrected
+4. what remains deferred
+5. final yes/no:
+   - Is this wave aligned with V2 intent?
+   Mandatory end-of-wave drift check:
+Before closing the wave, perform an explicit drift check against:
+- kernel-first alignment
+- service object canon
+- DB-driven process authority
+- 5-layer process model
+- UI-engine / surface-driven direction
+- multi-tenant/security discipline
+- schema discipline
+
+Include in the output:
+1. drift risks checked
+2. any drift found
+3. what was corrected
+4. what remains deferred
+5. final yes/no:
+   - Is this wave aligned with V2 intent?
