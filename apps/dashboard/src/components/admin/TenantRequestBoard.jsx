@@ -14,7 +14,7 @@ import {
   XCircle
 } from "lucide-react";
 import { apiFetch } from "../../services/apiClient";
-import { ActionMiniModal } from "../../../../ui-components/src/index.js";
+import ActionMiniModal from "../shared/ActionMiniModal";
 
 const STATUS_OPTIONS = [
   { value: "ALL", label: "All" },

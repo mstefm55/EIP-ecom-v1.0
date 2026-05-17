@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Plus, Trash2, Copy, Play } from "lucide-react";
 import { apiFetch } from "../../services/apiClient";
-import { ActionMiniModal } from "../../../../ui-components/src/index.js";
+import ActionMiniModal from "../shared/ActionMiniModal";
 
 const STEPS = [
   { id: "identity", label: "Identity" },

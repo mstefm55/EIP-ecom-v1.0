@@ -27,7 +27,8 @@ import {
   XCircle
 } from "lucide-react";
 import { apiFetch } from "../../services/apiClient";
-import { ActionMiniModal, ImageAssetStudioModal } from "../../../../ui-components/src/index.js";
+import ActionMiniModal from "../shared/ActionMiniModal";
+import ImageAssetStudioModal from "../shared/ImageAssetStudioModal";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
 const ECOM_PREVIEW_BASE_URL = import.meta.env.VITE_ECOM_PREVIEW_BASE_URL || "http://localhost:5174";
