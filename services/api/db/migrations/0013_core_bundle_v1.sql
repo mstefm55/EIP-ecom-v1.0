@@ -13,13 +13,18 @@ BEGIN
   IF NOT EXISTS (
     SELECT 1
     FROM eip_core.tenant
-    WHERE id = '18e6209d-155a-4932-9b7b-e11ad09aaf49'::uuid
+    WHERE code = 'eip_demo'
   ) THEN
-    RAISE EXCEPTION 'Tenant not found: %', '18e6209d-155a-4932-9b7b-e11ad09aaf49';
+    RAISE EXCEPTION 'Tenant not found: code=%', 'eip_demo';
   END IF;
 END $$;
 
 WITH
+tenant AS (
+  SELECT id, code
+  FROM eip_core.tenant
+  WHERE code = 'eip_demo'
+),
 -- Dropdown lists included in this core bundle (global lists only)
 dl AS (
   SELECT
@@ -59,8 +64,8 @@ sr AS (
 bundle AS (
   SELECT jsonb_build_object(
     'meta', jsonb_build_object(
-      'tenant_id', '18e6209d-155a-4932-9b7b-e11ad09aaf49',
-      'tenant_code', 'eip_demo',
+      'tenant_id', tenant.id,
+      'tenant_code', tenant.code,
       'module', 'core',
       'version', 1,
       'built_at', now()
@@ -81,6 +86,7 @@ bundle AS (
         '[]'::jsonb
       )
   ) AS bundle_json
+  FROM tenant
 ),
 final_payload AS (
   SELECT
@@ -97,13 +103,14 @@ INSERT INTO eip_core.schema_bundle (
   etag
 )
 SELECT
-  '18e6209d-155a-4932-9b7b-e11ad09aaf49'::uuid,
+  tenant.id,
   'core',
   1,
   true,
   fp.bundle_json,
   fp.etag
 FROM final_payload fp
+CROSS JOIN tenant
 ON CONFLICT (tenant_id, module, version) DO UPDATE
 SET
   is_published = EXCLUDED.is_published,

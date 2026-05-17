@@ -37,7 +37,7 @@ ON CONFLICT (code) DO NOTHING;
 WITH roles AS (
   SELECT id, code
   FROM eip_authz.role
-  WHERE tenant_id = '18e6209d-155a-4932-9b7b-e11ad09aaf49'::uuid
+  WHERE tenant_id = (SELECT id FROM eip_core.tenant WHERE code = 'eip_demo')
     AND code IN ('ADMIN_SUPER','ERP_USER','PARTNER_USER','ECOM_USER')
 ),
 rp(role_code, perm_code) AS (

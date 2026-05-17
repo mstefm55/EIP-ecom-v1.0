@@ -3,18 +3,26 @@ BEGIN;
 -- ============================================================
 -- 0029_authz_ecom_seed.sql
 -- Seed ECOM permissions + menu items + wiring for tenant eip_demo
--- Tenant: 18e6209d-155a-4932-9b7b-e11ad09aaf49
+-- Tenant: resolved by code eip_demo
 -- Role used: ECOM_USER (already exists)
 -- Menu used: ECOM_HOME (already exists)
 -- ============================================================
 
 DO $$
 DECLARE
-  v_tenant  uuid := '18e6209d-155a-4932-9b7b-e11ad09aaf49'::uuid;
+  v_tenant  uuid;
   v_role_id uuid;
-  v_id_test uuid := '439baab7-9ebd-4ba6-992c-b513c8a1b3fb'::uuid; -- test@example.com
+  v_id_test uuid;
   v_menu_id uuid;
 BEGIN
+  SELECT id INTO v_tenant
+  FROM eip_core.tenant
+  WHERE code = 'eip_demo';
+
+  IF v_tenant IS NULL THEN
+    RAISE EXCEPTION 'Tenant not found: code=%', 'eip_demo';
+  END IF;
+
   -- 1) Resolve ECOM role (must exist already)
   SELECT id INTO v_role_id
   FROM eip_authz.role
@@ -100,9 +108,17 @@ BEGIN
 
   -- 6) (DEV convenience) grant ECOM_USER to the test identity
   -- This lets you bootstrap Samara behavior immediately using the same login.
-  INSERT INTO eip_authz.identity_role (tenant_id, identity_id, role_id, granted_by_identity_id)
-  VALUES (v_tenant, v_id_test, v_role_id, NULL)
-  ON CONFLICT (tenant_id, identity_id, role_id) DO NOTHING;
+  SELECT id INTO v_id_test
+  FROM eip_auth.auth_identity
+  WHERE tenant_id = v_tenant
+    AND lower(login) = 'test@example.com'
+  LIMIT 1;
+
+  IF v_id_test IS NOT NULL THEN
+    INSERT INTO eip_authz.identity_role (tenant_id, identity_id, role_id, granted_by_identity_id)
+    VALUES (v_tenant, v_id_test, v_role_id, NULL)
+    ON CONFLICT (tenant_id, identity_id, role_id) DO NOTHING;
+  END IF;
 
 END $$;
 

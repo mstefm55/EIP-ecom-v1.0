@@ -5,10 +5,15 @@ BEGIN;
 -- =========================================================
 
 WITH
+tenant AS (
+  SELECT id
+  FROM eip_core.tenant
+  WHERE code = 'eip_demo'
+),
 r AS (
   SELECT id, tenant_id, code, surface_code
   FROM eip_authz.role
-  WHERE tenant_id = '18e6209d-155a-4932-9b7b-e11ad09aaf49'::uuid
+  WHERE tenant_id = (SELECT id FROM tenant)
     AND code IN ('ADMIN_SUPER','ERP_USER','PARTNER_USER','ECOM_USER')
 ),
 m AS (
@@ -44,14 +49,14 @@ ON CONFLICT DO NOTHING;
 WITH admin_role AS (
   SELECT id
   FROM eip_authz.role
-  WHERE tenant_id = '18e6209d-155a-4932-9b7b-e11ad09aaf49'::uuid
+  WHERE tenant_id = (SELECT id FROM eip_core.tenant WHERE code = 'eip_demo')
     AND code = 'ADMIN_SUPER'
   LIMIT 1
 ),
 eligible_identities AS (
   SELECT ia.tenant_id, ia.identity_id
   FROM eip_auth.auth_identity_agent ia
-  WHERE ia.tenant_id = '18e6209d-155a-4932-9b7b-e11ad09aaf49'::uuid
+  WHERE ia.tenant_id = (SELECT id FROM eip_core.tenant WHERE code = 'eip_demo')
     AND ia.is_primary = true
     AND ia.is_active = true
 ),

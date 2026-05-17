@@ -7,7 +7,7 @@ ON CONFLICT (code) DO NOTHING;
 WITH role AS (
   SELECT id
   FROM eip_authz.role
-  WHERE tenant_id = '18e6209d-155a-4932-9b7b-e11ad09aaf49'::uuid
+  WHERE tenant_id = (SELECT id FROM eip_core.tenant WHERE code = 'eip_demo')
     AND code = 'ADMIN_SUPER'
 )
 INSERT INTO eip_authz.role_permission(role_id, permission_code)

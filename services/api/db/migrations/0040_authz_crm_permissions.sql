@@ -22,16 +22,26 @@ ON CONFLICT (code) DO NOTHING;
 -- =========================================================
 -- CRM roles (demo tenant) + permission wiring
 -- =========================================================
+WITH tenant AS (
+  SELECT id
+  FROM eip_core.tenant
+  WHERE code = 'eip_demo'
+),
+roles(code, label, surface_code, is_system) AS (
+  VALUES
+    ('CRM_ADMIN','CRM Admin','ERP', true),
+    ('CRM_USER','CRM User','ERP', true)
+)
 INSERT INTO eip_authz.role(tenant_id, code, label, surface_code, is_system)
-VALUES
-  ('18e6209d-155a-4932-9b7b-e11ad09aaf49','CRM_ADMIN','CRM Admin','ERP', true),
-  ('18e6209d-155a-4932-9b7b-e11ad09aaf49','CRM_USER','CRM User','ERP', true)
+SELECT tenant.id, roles.code, roles.label, roles.surface_code, roles.is_system
+FROM tenant
+CROSS JOIN roles
 ON CONFLICT (tenant_id, code) DO NOTHING;
 
 WITH roles AS (
   SELECT id, code
   FROM eip_authz.role
-  WHERE tenant_id = '18e6209d-155a-4932-9b7b-e11ad09aaf49'::uuid
+  WHERE tenant_id = (SELECT id FROM eip_core.tenant WHERE code = 'eip_demo')
     AND code IN ('ADMIN_SUPER','CRM_ADMIN','CRM_USER')
 ),
 rp(role_code, perm_code) AS (

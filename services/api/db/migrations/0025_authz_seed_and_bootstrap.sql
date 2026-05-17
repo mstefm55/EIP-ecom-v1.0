@@ -13,12 +13,22 @@ INSERT INTO eip_authz.surface(code, label, sort_order) VALUES
 ON CONFLICT (code) DO NOTHING;
 
 -- Roles (tenant-scoped)
+WITH tenant AS (
+  SELECT id
+  FROM eip_core.tenant
+  WHERE code = 'eip_demo'
+),
+roles(code, label, surface_code, is_system) AS (
+  VALUES
+    ('ADMIN_SUPER','Super Admin','ADMIN', true),
+    ('ERP_USER','ERP User','ERP', true),
+    ('PARTNER_USER','Partner User','PARTNER', true),
+    ('ECOM_USER','Customer','ECOM', true)
+)
 INSERT INTO eip_authz.role(tenant_id, code, label, surface_code, is_system)
-VALUES
-  ('18e6209d-155a-4932-9b7b-e11ad09aaf49','ADMIN_SUPER','Super Admin','ADMIN', true),
-  ('18e6209d-155a-4932-9b7b-e11ad09aaf49','ERP_USER','ERP User','ERP', true),
-  ('18e6209d-155a-4932-9b7b-e11ad09aaf49','PARTNER_USER','Partner User','PARTNER', true),
-  ('18e6209d-155a-4932-9b7b-e11ad09aaf49','ECOM_USER','Customer','ECOM', true)
+SELECT tenant.id, roles.code, roles.label, roles.surface_code, roles.is_system
+FROM tenant
+CROSS JOIN roles
 ON CONFLICT (tenant_id, code) DO NOTHING;
 
 -- =========================================================
