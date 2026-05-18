@@ -25,7 +25,7 @@ const processText = readFileSafe(processFile);
 const uiText = readFileSafe(uiFile);
 
 const processActions = collectMatches(processText, /"action"\s*:\s*"([^"]+)"/g);
-const uiActions = collectMatches(uiText, /"(ORDER|RETURN|REFUND|PAYMENT)_[A-Z0-9_]+"/g);
+const uiActions = collectMatches(uiText, /"((?:ORDER|RETURN|REFUND|PAYMENT)_[A-Z0-9_]+)"/g);
 
 const missing = [...uiActions].filter((action) => !processActions.has(action));
 
