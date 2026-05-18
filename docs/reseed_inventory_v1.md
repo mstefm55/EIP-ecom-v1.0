@@ -32,7 +32,7 @@ SAMARA_TENANT_CODE="t_ed6019735b2f" SAMARA_FRONTEND_URL="https://your-samara-dom
 |---|---|---|
 | `owner-admin` | Runs `services/api/scripts/seed_first_admin.mjs` with `OWNER_TENANT_CODE`, `OWNER_TENANT_NAME`, `OWNER_ADMIN_EMAIL`, `OWNER_ADMIN_PASSWORD`, and optional `OWNER_ADMIN_NAME` / `OWNER_ADMIN_RESET_PASSWORD=true`. It creates or resolves the live owner/admin tenant and grants `ADMIN_SUPER` there. | Safe auto-run when env vars are supplied. |
 | `ui-surfaces` | Applies `ui_surface_admin.sql` and `ui_surface_dashboard.sql` only if a published global surface for that code is missing. | Safe auto-run with guards. |
-| `process-engine` | Verifies process tables, governed effect taxonomy, and static UI/process action alignment. | Safe verification only. |
+| `process-engine` | Verifies process tables, governed effect taxonomy, child service object effect support, and static UI/process action alignment using API-local files. | Safe verification only. |
 | `template-tenant` | Applies `tenant_template_ecom.sql`, `jurisdiction_iso_seed.sql`, and `template_ecom_process.sql`. | Safe auto-run/idempotent. |
 | `samara` | Upserts a Samara gateway profile into `eip_core.tenant.attrs.connection_profiles`. | Conditional auto-run, requires tenant and production connection env vars. |
 
@@ -67,7 +67,7 @@ SAMARA_TENANT_CODE="t_ed6019735b2f" SAMARA_FRONTEND_URL="https://your-samara-dom
 | `services/api/scripts/bootstrap.mjs` | Local HTTP helper for authz bootstrap using supplied cookies and CSRF. | generator-only / support-only | Running API and valid local session cookies. | Maybe | No | No | No |
 | `tools/build_ui_surface_admin_seed.mjs` | Generates `ui_surface_admin.sql` from dashboard surface source. | generator-only / support-only | Dashboard source files; do not run in Railway restore. | No | Supports UI surface seed | No | No |
 | `tools/build_jurisdiction_seed.mjs` | Generates `jurisdiction_iso_seed.sql` from public country/timezone sources. | generator-only / support-only | Network access; do not run in Railway restore unless regenerating seed file intentionally. | No | No | Supports | No |
-| `tools/validate_process_alignment.mjs` | Checks dashboard commerce actions are covered by template process definitions. | generator-only / support-only | Local seed files. | No | Yes | Yes | No |
+| `tools/validate_process_alignment.mjs` | Local development helper that checks dashboard commerce actions are covered by template process definitions. Railway reseed uses the API-local copy of this check inside `services/api/scripts/reseed_post_migration.mjs`. | generator-only / support-only | Full repo checkout with repo-level `tools/`. | No | Yes | Yes | No |
 
 ## Migration Chain Inventory
 
@@ -182,5 +182,5 @@ These files are owned by `npm run migrate`. They should not be rerun independent
 ## Notes
 
 - `connection_profile_samara.sql` is intentionally not part of the runner because it targets a table that current migrations do not create.
-- Child service object creation is represented in the process effect taxonomy through `CHILD_SERVICE_OBJECT_CREATE` and in the process engine source. No current seed process graph uses that effect directly.
-- Effect transition coverage is restored by the migration chain and checked by the `process-engine` stage before template tenant reseeding.
+- Child service object creation is represented in the process effect taxonomy through `CHILD_SERVICE_OBJECT_CREATE` and in the API process engine source. No current seed process graph uses that effect directly.
+- Effect transition coverage is restored by the migration chain and checked by the API-local `process-engine` stage before template tenant reseeding.

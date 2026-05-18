@@ -200,6 +200,15 @@ function urlOrigin(value) {
   }
 }
 
+function collectMatches(text, regex) {
+  const out = new Set();
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    out.add(match[1]);
+  }
+  return out;
+}
+
 async function runNodeScript(scriptPath, args = [], options = {}) {
   await new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [scriptPath, ...args], {
@@ -268,6 +277,32 @@ async function assertEffectTaxonomy(client) {
   console.log(`Verified process effect taxonomy: ${EFFECT_TYPES_REQUIRED.length} required values present`);
 }
 
+async function assertProcessEngineSourceSupport() {
+  const enginePath = path.join(apiRoot, "src", "core", "core_process_engine.js");
+  const source = await fs.readFile(enginePath, "utf8");
+  const requiredTokens = ["CHILD_SERVICE_OBJECT_CREATE", "childServiceObjectCreate"];
+  const missing = requiredTokens.filter((token) => !source.includes(token));
+  if (missing.length > 0) {
+    throw new Error(`Process engine source is missing child service object support token(s): ${missing.join(", ")}`);
+  }
+  console.log("Verified process engine child service object support");
+}
+
+async function assertSeedProcessAlignment() {
+  const processText = await fs.readFile(path.join(seedDir, "template_ecom_process.sql"), "utf8");
+  const uiText = await fs.readFile(path.join(seedDir, "ui_surface_dashboard.sql"), "utf8");
+
+  const processActions = collectMatches(processText, /"action"\s*:\s*"([^"]+)"/g);
+  const uiActions = collectMatches(uiText, /"((?:ORDER|RETURN|REFUND|PAYMENT)_[A-Z0-9_]+)"/g);
+  const missing = [...uiActions].filter((action) => !processActions.has(action));
+
+  if (missing.length > 0) {
+    throw new Error(`Process alignment failed. UI actions missing in process defs: ${missing.sort().join(", ")}`);
+  }
+
+  console.log("Verified process alignment: UI actions are covered by process defs");
+}
+
 async function seedUiSurfaceIfMissing(client, code, filename) {
   const count = await tableCount(
     client,
@@ -317,9 +352,8 @@ async function stageProcessEngine(client) {
   await assertTable(client, "eip_core", "dropdown_list");
   await assertTable(client, "eip_core", "dropdown_value");
   await assertEffectTaxonomy(client);
-  await runNodeScript(path.join(repoRoot, "tools", "validate_process_alignment.mjs"), [], {
-    cwd: repoRoot
-  });
+  await assertProcessEngineSourceSupport();
+  await assertSeedProcessAlignment();
 }
 
 async function stageTemplateTenant(client) {
