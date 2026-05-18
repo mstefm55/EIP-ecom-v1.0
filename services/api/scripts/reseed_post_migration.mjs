@@ -90,7 +90,7 @@ function splitStages(value) {
 function usage() {
   return [
     "Usage:",
-    "  npm run reseed:post-migration -- --stage owner-admin",
+    '  OWNER_TENANT_CODE="eip" OWNER_TENANT_NAME="EIP Owner" OWNER_ADMIN_EMAIL="owner@example.com" OWNER_ADMIN_PASSWORD="..." npm run reseed:post-migration -- --stage owner-admin',
     "  npm run reseed:post-migration -- --stage ui-surfaces --stage process-engine --stage template-tenant",
     "  npm run reseed:post-migration -- --stage samara",
     "  npm run reseed:post-migration -- --recommended",
@@ -291,8 +291,15 @@ async function seedUiSurfaceIfMissing(client, code, filename) {
 }
 
 async function stageOwnerAdmin() {
-  if (!process.env.ADMIN_EMAIL || !process.env.ADMIN_PASSWORD) {
-    throw new Error("owner-admin stage requires ADMIN_EMAIL and ADMIN_PASSWORD");
+  const required = [
+    "OWNER_TENANT_CODE",
+    "OWNER_TENANT_NAME",
+    "OWNER_ADMIN_EMAIL",
+    "OWNER_ADMIN_PASSWORD"
+  ];
+  const missing = required.filter((name) => !String(process.env[name] || "").trim());
+  if (missing.length > 0) {
+    throw new Error(`owner-admin stage requires ${missing.join(", ")}`);
   }
   await runNodeScript(path.join(apiRoot, "scripts", "seed_first_admin.mjs"));
 }

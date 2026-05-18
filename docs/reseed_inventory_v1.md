@@ -19,18 +19,18 @@ From the Railway shell for `services/api`:
 
 ```bash
 npm run migrate
-ADMIN_EMAIL="owner@example.com" ADMIN_PASSWORD="replace-with-strong-password" ADMIN_NAME="Owner Admin" npm run reseed:post-migration -- --stage owner-admin
+OWNER_TENANT_CODE="eip" OWNER_TENANT_NAME="EIP Owner" OWNER_ADMIN_EMAIL="owner@example.com" OWNER_ADMIN_PASSWORD="replace-with-strong-password" OWNER_ADMIN_NAME="Owner Admin" npm run reseed:post-migration -- --stage owner-admin
 npm run reseed:post-migration -- --stage ui-surfaces --stage process-engine --stage template-tenant
 SAMARA_TENANT_CODE="t_ed6019735b2f" SAMARA_FRONTEND_URL="https://your-samara-domain.example" SAMARA_CONNECTION_API_KEY="replace-with-shared-secret" npm run reseed:post-migration -- --stage samara
 ```
 
-`owner-admin` is kept explicit because it requires a real email and password. `samara` is also explicit because production connection profiles require a real origin and verification secret.
+`owner-admin` is kept explicit because it creates or repairs the definitive live owner/admin tenant and requires a real tenant code, tenant name, email, and password. `samara` is also explicit because production connection profiles require a real origin and verification secret.
 
 ## Runner Stages
 
 | Stage | What it does | Default safety |
 |---|---|---|
-| `owner-admin` | Runs `services/api/scripts/seed_first_admin.mjs` with `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and optional `ADMIN_NAME`. | Safe auto-run when env vars are supplied. |
+| `owner-admin` | Runs `services/api/scripts/seed_first_admin.mjs` with `OWNER_TENANT_CODE`, `OWNER_TENANT_NAME`, `OWNER_ADMIN_EMAIL`, `OWNER_ADMIN_PASSWORD`, and optional `OWNER_ADMIN_NAME` / `OWNER_ADMIN_RESET_PASSWORD=true`. It creates or resolves the live owner/admin tenant and grants `ADMIN_SUPER` there. | Safe auto-run when env vars are supplied. |
 | `ui-surfaces` | Applies `ui_surface_admin.sql` and `ui_surface_dashboard.sql` only if a published global surface for that code is missing. | Safe auto-run with guards. |
 | `process-engine` | Verifies process tables, governed effect taxonomy, and static UI/process action alignment. | Safe verification only. |
 | `template-tenant` | Applies `tenant_template_ecom.sql`, `jurisdiction_iso_seed.sql`, and `template_ecom_process.sql`. | Safe auto-run/idempotent. |
@@ -50,7 +50,7 @@ SAMARA_TENANT_CODE="t_ed6019735b2f" SAMARA_FRONTEND_URL="https://your-samara-dom
 
 | Path | Purpose | Category | Dependencies | Owner admin | Process/effect engine | Template tenant | Samara |
 |---|---|---|---|---|---|---|---|
-| `services/api/scripts/seed_first_admin.mjs` | Creates or repairs the first `eip_demo` admin agent, auth identity, password credential, identity-agent link, profile, and `ADMIN_SUPER` grant. | safe auto-run | Migrated auth/authz tables, tenant `eip_demo`, role `ADMIN_SUPER`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`. | Yes | No | No | No |
+| `services/api/scripts/seed_first_admin.mjs` | Creates or repairs the definitive live owner/admin tenant, admin agent, auth identity, password credential, identity-agent link, user profile, and `ADMIN_SUPER` role/grant. The same email can be seeded in other tenants because identities remain tenant-scoped. | safe auto-run | Migrated auth/authz tables, `OWNER_TENANT_CODE`, `OWNER_TENANT_NAME`, `OWNER_ADMIN_EMAIL`, `OWNER_ADMIN_PASSWORD`; optional `OWNER_ADMIN_NAME`, `OWNER_ADMIN_RESET_PASSWORD=true`. | Yes | No | No | No |
 | `services/api/db/seed/tenant_template_ecom.sql` | Creates template tenant `eip_ecom`. | safe auto-run | `eip_core.tenant`. | No | No | Yes | Indirect |
 | `services/api/db/seed/jurisdiction_iso_seed.sql` | Seeds global ISO country jurisdictions generated from public country/timezone sources. | safe auto-run | `eip_core.jurisdiction`, migration `0052`. | No | No | Yes | Indirect |
 | `services/api/db/seed/template_ecom_process.sql` | Seeds ecommerce template process actions, process definitions, task templates, and process bindings for `eip_ecom`. Includes product, order, return, refund, and payment flows. | safe auto-run | `eip_ecom` tenant, process/task/binding tables, governed dropdowns. | No | Yes | Yes | Indirect |
@@ -173,7 +173,7 @@ These files are owned by `npm run migrate`. They should not be rerun independent
 | Item | Why it remains manual |
 |---|---|
 | `clone_template_to_tenant.sql` | It copies template tenant configuration into a real tenant and currently embeds the Samara target code. Confirm the target tenant and desired copy boundary before running. |
-| `grant_ecom_admin.sql` | It embeds a specific email and grants `ECOM_ADMIN` in `eip_ecom`, while the owner admin baseline uses `ADMIN_SUPER` in `eip_demo`. |
+| `grant_ecom_admin.sql` | It embeds a specific email and grants `ECOM_ADMIN` in `eip_ecom`, while the owner admin baseline now grants `ADMIN_SUPER` in the explicit live owner/admin tenant. |
 | `plug_play_sample.sql` | Demo-only seed for tenant `eip`; keep separate from owner/admin and Samara production baselines. |
 | `backfill_ecom_product_materials.sql` | Safe-looking SQL, but it mutates existing product/material relationships. Run only after reviewing production data. |
 | `migrate_gateway_inbound_security.mjs` | May generate new secrets and a local report. Use only during a dedicated connection security migration. |
