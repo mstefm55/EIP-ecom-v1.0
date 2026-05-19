@@ -1,6 +1,5 @@
 export const envSchema = {
   type: "object",
-  // 1. Add them to 'required' so the app won't start if they are missing from .env
   required: [
     "NODE_ENV", 
     "PORT", 
@@ -55,13 +54,22 @@ export const envSchema = {
     TOTP_ISSUER: { type: "string", default: "EIP" },
     TOTP_SECRET_KEY: { type: "string", minLength: 64, maxLength: 64, pattern: "^[0-9a-fA-F]+$" },
     REQUIRED_TENANT_AGREEMENTS: { type: "string", default: "" },
-    // Email settings
+
+    EMAIL_PROVIDER: { type: "string", default: "smtp" },
+    EMAIL_API_KEY: { type: "string", default: "" },
+    EMAIL_API_BASE_URL: { type: "string", default: "https://api.brevo.com/v3/smtp/email" },
+    EMAIL_FROM: { type: "string", default: "noreply@eip-core.com" },
+    EMAIL_FROM_NAME: { type: "string", default: "" },
+    BREVO_API_KEY: { type: "string", default: "" },
+
+    // Email SMTP fallback settings
     SMTP_HOST: { type: "string" },
     SMTP_PORT: { type: "integer", default: 587 },
     SMTP_SECURE: { type: "boolean", default: false },
     SMTP_USER: { type: "string" },
     SMTP_PASS: { type: "string" },
-    EMAIL_FROM: { type: "string", default: "noreply@eip-core.com" },
+    SMTP_FROM: { type: "string", default: "" },
+
     PASSWORD_RESET_URL_BASE: { type: "string" },
     PASSWORD_RESET_PEPPER: { type: "string" },
     RECOVERY_TOKEN_URL_BASE: { type: "string" },
