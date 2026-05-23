@@ -2258,6 +2258,7 @@ export default async function authRoutes(app) {
 
     const access = await resolveEipSurfaceAccess(app, s.session);
 
+    reply.header("Cache-Control", "no-store");
     return reply.send({
       ok: true,
       ...access,

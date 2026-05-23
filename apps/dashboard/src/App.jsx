@@ -52,6 +52,7 @@ function isSurfaceAllowedByAccess(code, access) {
 }
 
 export default function App() {
+  const initialUrlSurface = readSurfaceCodeFromUrl();
   const [modalId, setModalId] = useState(null);
   const [form, setForm] = useState({ organisation: "", email: "", password: "", totp: "", totpLost: false });
   const [otpCode, setOtpCode] = useState("");
@@ -75,15 +76,14 @@ export default function App() {
   const [resetForm, setResetForm] = useState({ token: "", password: "", confirmPassword: "" });
   const [recoveryForm, setRecoveryForm] = useState({ token: "" });
   const authApi = useAuthApi();
-  const [surfaceCode, setSurfaceCode] = useState(readSurfaceCodeFromUrl);
+  const [pendingSurfaceRequest, setPendingSurfaceRequest] = useState(initialUrlSurface);
+  const [surfaceCode, setSurfaceCode] = useState(() => (initialUrlSurface === "auth" ? "auth" : null));
   const [surfaceAccess, setSurfaceAccess] = useState(null);
-  const [surfaceAccessLoading, setSurfaceAccessLoading] = useState(() => readSurfaceCodeFromUrl() !== "auth");
+  const [surfaceAccessLoading, setSurfaceAccessLoading] = useState(initialUrlSurface !== "auth");
   const [dataStore, setDataStore] = useState({});
   const [resetReady, setResetReady] = useState(false);
   const [recoveryReady, setRecoveryReady] = useState(false);
-  const surfaceLoaderEnabled =
-    surfaceCode === "auth" ||
-    (!surfaceAccessLoading && isSurfaceAllowedByAccess(surfaceCode, surfaceAccess));
+  const surfaceLoaderEnabled = Boolean(surfaceCode);
 
   const fallbackSurface =
     !surfaceLoaderEnabled
@@ -94,33 +94,62 @@ export default function App() {
         ? dashboardSurface
         : authSurface;
   const surfaceState = useSurfaceLoader(surfaceLoaderEnabled ? surfaceCode : null, fallbackSurface);
+  const loadedSurfaceCode = normalizeSurfaceCode(surfaceState.surface?.code || surfaceState.surface?.id);
+  const renderSurface = surfaceCode
+    ? loadedSurfaceCode === surfaceCode
+      ? surfaceState.surface
+      : fallbackSurface
+    : null;
 
-  const applySurfaceCode = (code) => {
+  const writeSurfaceToUrl = (code) => {
     const next = normalizeSurfaceCode(code);
-    if (next === "auth") {
-      setSurfaceAccess(null);
-    }
-    setSurfaceCode(next);
     const url = new URL(window.location.href);
     url.searchParams.set("surface", next);
     window.history.replaceState({}, "", url);
   };
 
+  const renderCanonicalSurface = (code) => {
+    const next = normalizeSurfaceCode(code);
+    if (next === "auth") {
+      setSurfaceAccess(null);
+      setSurfaceAccessLoading(false);
+    }
+    setPendingSurfaceRequest(next);
+    setSurfaceCode(next);
+    writeSurfaceToUrl(next);
+  };
+
   const redirectToSurface = (code) => {
     const requested = normalizeSurfaceCode(code || "dashboard");
+    if (requested === "auth") {
+      renderCanonicalSurface("auth");
+      return;
+    }
+
     const next =
       surfaceAccess && requested !== "auth" && !isSurfaceAllowedByAccess(requested, surfaceAccess)
         ? chooseDefaultSurface(surfaceAccess)
         : requested;
-    applySurfaceCode(next);
+    if (surfaceAccess && isSurfaceAllowedByAccess(next, surfaceAccess)) {
+      renderCanonicalSurface(next);
+      return;
+    }
+
+    setPendingSurfaceRequest(next);
+    setSurfaceCode(null);
+    setSurfaceAccessLoading(true);
+    writeSurfaceToUrl(next);
   };
 
-  const resolvePostAuthSurface = async () => {
+  const resolvePostAuthSurface = async (requestedSurface = "dashboard") => {
     try {
       const who = await apiFetch("/api/eip/auth/whoami");
       setSurfaceAccess(who);
       setSurfaceAccessLoading(false);
-      return chooseDefaultSurface(who);
+      const requested = normalizeSurfaceCode(requestedSurface);
+      return requested !== "auth" && isSurfaceAllowedByAccess(requested, who)
+        ? requested
+        : chooseDefaultSurface(who);
     } catch {
       setSurfaceAccess(null);
       setSurfaceAccessLoading(false);
@@ -129,8 +158,8 @@ export default function App() {
   };
 
   const redirectAfterAuth = async () => {
-    const target = await resolvePostAuthSurface();
-    redirectToSurface(target);
+    const target = await resolvePostAuthSurface(pendingSurfaceRequest);
+    renderCanonicalSurface(target);
   };
 
   useEffect(() => {
@@ -152,37 +181,48 @@ export default function App() {
   useEffect(() => {
     let active = true;
 
-    async function resolveSurfaceAccess() {
-      if (surfaceCode === "auth") {
+    async function bootstrapAuthenticatedSurface() {
+      const requested = normalizeSurfaceCode(pendingSurfaceRequest);
+      if (requested === "auth") {
+        setSurfaceCode("auth");
         setSurfaceAccessLoading(false);
+        return;
+      }
+      if (surfaceAccess && isSurfaceAllowedByAccess(requested, surfaceAccess)) {
+        setSurfaceCode(requested);
+        setSurfaceAccessLoading(false);
+        writeSurfaceToUrl(requested);
         return;
       }
 
       setSurfaceAccessLoading(true);
+      setSurfaceCode(null);
       try {
         const who = await apiFetch("/api/eip/auth/whoami");
         if (!active) return;
         setSurfaceAccess(who);
-        const next = isSurfaceAllowedByAccess(surfaceCode, who)
-          ? surfaceCode
+        const next = isSurfaceAllowedByAccess(requested, who)
+          ? requested
           : chooseDefaultSurface(who);
-        if (next !== surfaceCode) {
-          applySurfaceCode(next);
-        }
+        setSurfaceCode(next);
+        setPendingSurfaceRequest(next);
+        writeSurfaceToUrl(next);
       } catch {
         if (!active) return;
         setSurfaceAccess(null);
-        applySurfaceCode("auth");
+        setSurfaceCode("auth");
+        setPendingSurfaceRequest("auth");
+        writeSurfaceToUrl("auth");
       } finally {
         if (active) setSurfaceAccessLoading(false);
       }
     }
 
-    resolveSurfaceAccess();
+    bootstrapAuthenticatedSurface();
     return () => {
       active = false;
     };
-  }, [surfaceCode]);
+  }, [pendingSurfaceRequest, surfaceAccess]);
 
   useEffect(() => {
     if (!surfaceState.error || surfaceCode === "auth") return;
@@ -207,7 +247,7 @@ export default function App() {
       surface: {
         code: surfaceCode,
         setCode: redirectToSurface,
-        loading: surfaceState.loading,
+        loading: surfaceAccessLoading || surfaceState.loading,
         error: surfaceState.error,
       },
       data: {
@@ -346,6 +386,6 @@ export default function App() {
   );
 
   return (
-    <EngineRenderer surface={surfaceState.surface} registry={registry} ctx={engineCtx} />
+    <EngineRenderer surface={renderSurface} registry={registry} ctx={engineCtx} />
   );
 }
