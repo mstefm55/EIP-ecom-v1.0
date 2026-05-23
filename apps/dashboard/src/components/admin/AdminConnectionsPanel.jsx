@@ -901,10 +901,12 @@ export default function AdminConnectionsPanel() {
     }
   };
 
+  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
   const inboundUrls = selectedConnection?.inbound?.inbound_path_suffix
     ? {
-        public: `${import.meta.env.VITE_API_BASE_URL || "http://localhost:4000"}/api/public/gateway/intake/${selectedConnection.inbound.inbound_path_suffix}`,
-        edi: `${import.meta.env.VITE_API_BASE_URL || "http://localhost:4000"}/api/edi/gateway/webhook/${selectedConnection.inbound.inbound_path_suffix}`
+        storefront: `${apiBaseUrl}/api/public/commerce/${selectedConnection.inbound.inbound_path_suffix}`,
+        public: `${apiBaseUrl}/api/public/gateway/intake/${selectedConnection.inbound.inbound_path_suffix}`,
+        edi: `${apiBaseUrl}/api/edi/gateway/webhook/${selectedConnection.inbound.inbound_path_suffix}`
       }
     : null;
 
@@ -1264,7 +1266,23 @@ export default function AdminConnectionsPanel() {
                 </div>
 
                 {inboundUrls ? (
-                  <div className="grid gap-3 md:grid-cols-2">
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <div className="rounded-xl border border-ink-200/70 bg-white px-3 py-2 text-xs">
+                      <p className="text-[0.65rem] uppercase tracking-[0.2em] text-ink-400">Storefront endpoint</p>
+                      <div className="mt-1 flex items-center justify-between gap-2">
+                        <span className="truncate text-ink-700">{inboundUrls.storefront}</span>
+                        <button
+                          type="button"
+                          onClick={() => navigator.clipboard?.writeText?.(inboundUrls.storefront)}
+                          title="Copy endpoint"
+                          aria-label="Copy storefront endpoint"
+                          className="rounded-full border border-ink-200/70 px-2 py-1 text-[0.6rem] uppercase tracking-[0.2em]"
+                        >
+                          <Copy className="mr-1 inline h-3 w-3" />
+                          Copy
+                        </button>
+                      </div>
+                    </div>
                     <div className="rounded-xl border border-ink-200/70 bg-white px-3 py-2 text-xs">
                       <p className="text-[0.65rem] uppercase tracking-[0.2em] text-ink-400">Public intake URL</p>
                       <div className="mt-1 flex items-center justify-between gap-2">

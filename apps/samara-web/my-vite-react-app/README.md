@@ -20,13 +20,11 @@ Output directory: dist
 
 ## EIP Connection
 
-Use values created through EIP Admin > Connections:
+Use the plug-and-play values created through EIP Admin > Connections:
 
-- `VITE_EIP_GATEWAY_BASE_URL`
-- `VITE_EIP_SUFFIX`
-- `VITE_EIP_CONNECTION_CODE`
-- `VITE_EIP_EVENT_ID_HEADER`
-- optional `VITE_EIP_GATEWAY_API_KEY` for bootstrap/manifest
-- optional `VITE_EIP_COMMERCE_VERIFICATION_KEY` only if the browser-facing connection profile requires it
+- `VITE_EIP_ENDPOINT`
+- `VITE_EIP_API_KEY`
+
+The endpoint is the full storefront endpoint copied from Admin > Connections. It already contains the tenant routing details, so Samara does not need a suffix, connection code, verification mode, or manifest settings.
 
 Samara's deployed origin belongs in API `CORS_ORIGIN_PUBLIC` and in the connection profile `origin_allowlist`, not in internal dashboard `CORS_ORIGIN`.

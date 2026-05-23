@@ -1,14 +1,46 @@
-const rawGatewayBaseUrl =
-  import.meta.env.VITE_EIP_GATEWAY_BASE_URL ??
-  import.meta.env.VITE_EIP_API_BASE_URL ??
-  import.meta.env.VITE_API_BASE_URL;
+function cleanUrl(value) {
+  return String(value || "").trim().replace(/\/+$/, "");
+}
+
+function buildLegacyEndpoint() {
+  const legacyBase = cleanUrl(
+    import.meta.env.VITE_EIP_GATEWAY_BASE_URL ??
+      import.meta.env.VITE_EIP_API_BASE_URL ??
+      import.meta.env.VITE_API_BASE_URL
+  );
+  const legacySuffix = String(import.meta.env.VITE_EIP_SUFFIX || "").trim();
+  if (!legacyBase || !legacySuffix) return "";
+  return `${legacyBase}/api/public/commerce/${encodeURIComponent(legacySuffix)}`;
+}
+
+function buildConnectionKey(endpoint) {
+  if (!endpoint) return "default";
+  try {
+    const parsed = new URL(endpoint, typeof window !== "undefined" ? window.location.origin : "http://localhost");
+    return `${parsed.hostname}${parsed.pathname}`.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "") || "default";
+  } catch {
+    return String(endpoint).replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "") || "default";
+  }
+}
+
+const endpoint = cleanUrl(
+  import.meta.env.VITE_EIP_ENDPOINT ||
+    import.meta.env.VITE_EIP_SITE_ENDPOINT ||
+    buildLegacyEndpoint()
+);
+
+const apiKey =
+  import.meta.env.VITE_EIP_API_KEY ||
+  import.meta.env.VITE_EIP_GATEWAY_API_KEY ||
+  import.meta.env.VITE_EIP_COMMERCE_VERIFICATION_KEY ||
+  import.meta.env.VITE_EIP_PUBLIC_API_KEY ||
+  "";
 
 export const EIP_CONFIG = {
-  gatewayBaseUrl: rawGatewayBaseUrl ?? "http://localhost:4000",
-  suffix: import.meta.env.VITE_EIP_SUFFIX || "",
-  connectionCode: import.meta.env.VITE_EIP_CONNECTION_CODE || "",
-  templateCode: import.meta.env.VITE_EIP_TEMPLATE_CODE || "",
-  manifestObjectId: import.meta.env.VITE_EIP_MANIFEST_OBJECT_ID || "",
+  endpoint,
+  apiKey,
+  apiKeyHeader: "X-API-Key",
+  connectionKey: buildConnectionKey(endpoint),
   materialType: import.meta.env.VITE_EIP_MATERIAL_TYPE || "PRODUCT",
   featuredTag: import.meta.env.VITE_EIP_FEATURED_TAG || "featured",
   dropTag: import.meta.env.VITE_EIP_DROP_TAG || "drop",
@@ -21,25 +53,9 @@ export const EIP_CONFIG = {
   homeCatalogLimit: Number(import.meta.env.VITE_EIP_HOME_CATALOG_LIMIT || 96),
   refreshMs: Number(import.meta.env.VITE_EIP_REFRESH_MS || 0),
   pageSize: Number(import.meta.env.VITE_EIP_PAGE_SIZE || 12),
-  gatewayApiKey:
-    import.meta.env.VITE_EIP_GATEWAY_API_KEY ||
-    import.meta.env.VITE_EIP_PUBLIC_API_KEY ||
-    "",
-  gatewayApiKeyHeader:
-    import.meta.env.VITE_EIP_GATEWAY_API_KEY_HEADER ||
-    import.meta.env.VITE_EIP_PUBLIC_API_KEY_HEADER ||
-    "X-API-Key",
-  commerceVerificationKey:
-    import.meta.env.VITE_EIP_COMMERCE_VERIFICATION_KEY ||
-    import.meta.env.VITE_EIP_PUBLIC_API_KEY ||
-    "",
-  commerceVerificationHeader:
-    import.meta.env.VITE_EIP_COMMERCE_VERIFICATION_HEADER ||
-    import.meta.env.VITE_EIP_PUBLIC_API_KEY_HEADER ||
-    "X-API-Key",
-  eventIdHeader: import.meta.env.VITE_EIP_EVENT_ID_HEADER || "X-Event-Id",
-  clientSource: import.meta.env.VITE_EIP_CLIENT_SOURCE || "web-client",
-  externalRefPrefix: import.meta.env.VITE_EIP_EXTERNAL_REF_PREFIX || "web",
+  eventIdHeader: "X-Event-Id",
+  clientSource: "web-client",
+  externalRefPrefix: "web",
   lookbookUrl: import.meta.env.VITE_EIP_LOOKBOOK_URL || "",
   dropCardCarouselTest: String(import.meta.env.VITE_EIP_DROP_CARD_CAROUSEL_TEST || "")
     .trim()

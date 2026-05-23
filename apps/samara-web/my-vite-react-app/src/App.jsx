@@ -16,8 +16,6 @@ import {
   fetchMemberMe,
   fetchCatalog,
   fetchCountries,
-  fetchGatewayBootstrap,
-  fetchGatewayManifest,
   fetchTradeConditions,
   fetchProductByCode,
   fetchProductReviews,
@@ -701,7 +699,7 @@ const COPY = {
       reviewFailed: "Review submission failed.",
     },
     alerts: {
-      connectEip: "Connect EIP by setting VITE_EIP_SUFFIX to enable live products.",
+      connectEip: "Connect EIP by setting VITE_EIP_ENDPOINT to enable live products.",
       refreshingFeatured: "Refreshing featured products…",
     },
     products: {
@@ -854,7 +852,7 @@ const COPY = {
       orderFailed: "Не удалось оформить заказ.",
     },
     alerts: {
-      connectEip: "Подключите EIP, указав VITE_EIP_SUFFIX, чтобы включить живые товары.",
+      connectEip: "Подключите EIP, указав VITE_EIP_ENDPOINT, чтобы включить живые товары.",
       refreshingFeatured: "Обновляем избранные товары…",
     },
     products: {
@@ -1007,7 +1005,7 @@ const COPY = {
       orderFailed: "Буйрутма ишке ашкан жок.",
     },
     alerts: {
-      connectEip: "Жандуу продукттар үчүн VITE_EIP_SUFFIX коюп, EIP туташтырыңыз.",
+      connectEip: "Жандуу продукттар үчүн VITE_EIP_ENDPOINT коюп, EIP туташтырыңыз.",
       refreshingFeatured: "Тандалган продукттар жаңыланууда…",
     },
     products: {
@@ -1160,7 +1158,7 @@ const COPY = {
       orderFailed: "Echec de la commande.",
     },
     alerts: {
-      connectEip: "Connectez EIP en definissant VITE_EIP_SUFFIX pour activer les produits.",
+      connectEip: "Connectez EIP en definissant VITE_EIP_ENDPOINT pour activer les produits.",
       refreshingFeatured: "Actualisation des produits en vedette…",
     },
     products: {
@@ -1313,7 +1311,7 @@ const COPY = {
       orderFailed: "No se pudo realizar el pedido.",
     },
     alerts: {
-      connectEip: "Conecta EIP configurando VITE_EIP_SUFFIX para activar productos.",
+      connectEip: "Conecta EIP configurando VITE_EIP_ENDPOINT para activar productos.",
       refreshingFeatured: "Actualizando productos destacados…",
     },
     products: {
@@ -1408,8 +1406,8 @@ const SORT_OPTIONS = [
 ];
 
 const PROCESS_STEPS = ["concept", "grading", "mockups", "finishing"];
-const CART_STORAGE_KEY = `eip-cart-${EIP_CONFIG.suffix || "default"}-v1`;
-const FAVORITES_STORAGE_KEY_PREFIX = `eip-favorites-${EIP_CONFIG.suffix || "default"}-v1`;
+const CART_STORAGE_KEY = `eip-cart-${EIP_CONFIG.connectionKey || "default"}-v1`;
+const FAVORITES_STORAGE_KEY_PREFIX = `eip-favorites-${EIP_CONFIG.connectionKey || "default"}-v1`;
 
 const SIZE_MEASUREMENTS = [
   {
@@ -4271,7 +4269,6 @@ function BlogFeedPage({
       for (const file of composeFiles) {
         // eslint-disable-next-line no-await-in-loop
         const upload = await uploadMemberBlogAsset({
-          suffix: EIP_CONFIG.suffix,
           csrf: readCookie("member_csrf"),
           file
         });
@@ -6012,7 +6009,7 @@ export default function App() {
   const [blogLoading, setBlogLoading] = useState(false);
   const [blogError, setBlogError] = useState("");
   const t = useTranslator(language);
-  const plugReady = Boolean(EIP_CONFIG.suffix);
+  const plugReady = Boolean(EIP_CONFIG.endpoint);
   const pageSize = EIP_CONFIG.pageSize;
   const clientSource = EIP_CONFIG.clientSource;
   const externalRefPrefix = EIP_CONFIG.externalRefPrefix;
@@ -6071,7 +6068,6 @@ export default function App() {
     }
     if (mlChallenge && mlToken) {
       verifyMemberAuth({
-        suffix: EIP_CONFIG.suffix,
         payload: { challenge_id: mlChallenge, token: mlToken },
       })
         .then((res) => {
@@ -6111,7 +6107,6 @@ export default function App() {
         24
       );
       const res = await fetchCatalog({
-        suffix: EIP_CONFIG.suffix,
         materialType: EIP_CONFIG.materialType,
         limit: requestedHomeLimit,
         offset: 0,
@@ -6136,7 +6131,6 @@ export default function App() {
       const previewSlot = search?.get("content_slot");
       const previewMode = search?.get("content_preview") === "1";
       const res = await fetchStorefrontContent({
-        suffix: EIP_CONFIG.suffix,
         slot: previewSlot || "home.hero",
         publishedOnly: !previewMode,
       });
@@ -6162,7 +6156,6 @@ export default function App() {
         const previewMode = search?.get("content_preview") === "1";
         const isPreviewTarget = previewMode && previewSlot && previewSlot.toLowerCase() === normalizedSlot;
         const res = await fetchStorefrontContent({
-          suffix: EIP_CONFIG.suffix,
           slot: normalizedSlot,
           publishedOnly: !isPreviewTarget,
         });
@@ -6187,7 +6180,6 @@ export default function App() {
       if (!normalizedSlot) return [];
       try {
         const res = await fetchStorefrontContentList({
-          suffix: EIP_CONFIG.suffix,
           slot: normalizedSlot,
           page: options.page,
           contentModel: options.contentModel,
@@ -6213,7 +6205,7 @@ export default function App() {
     setBlogLoading(true);
     setBlogError("");
     try {
-      const res = await fetchBlogPosts({ suffix: EIP_CONFIG.suffix, limit: 40, offset: 0 });
+      const res = await fetchBlogPosts({ limit: 40, offset: 0 });
       const incoming = Array.isArray(res?.items)
         ? res.items.map((item, index) => normalizePublicBlogPost(item, index)).filter(Boolean)
         : [];
@@ -6232,7 +6224,6 @@ export default function App() {
     const offset = (catalogPage - 1) * pageSize;
     try {
       const res = await fetchCatalog({
-        suffix: EIP_CONFIG.suffix,
         materialType: EIP_CONFIG.materialType,
         limit: pageSize,
         offset,
@@ -6254,7 +6245,6 @@ export default function App() {
     setProductDetailError("");
     try {
       const res = await fetchProductByCode({
-        suffix: EIP_CONFIG.suffix,
         code,
       });
       setProductDetail(res?.item || null);
@@ -6272,7 +6262,6 @@ export default function App() {
     setProductReviewsError("");
     try {
       const res = await fetchProductReviews({
-        suffix: EIP_CONFIG.suffix,
         code,
         limit: 50,
         offset: 0,
@@ -6308,7 +6297,7 @@ export default function App() {
       return;
     }
     let cancelled = false;
-    fetchStorefrontLocales({ suffix: EIP_CONFIG.suffix })
+    fetchStorefrontLocales({})
       .then((res) => {
         if (cancelled) return;
         const incoming = Array.isArray(res?.locales) ? res.locales : [];
@@ -6329,7 +6318,7 @@ export default function App() {
       return;
     }
     let cancelled = false;
-    fetchStorefrontFx({ suffix: EIP_CONFIG.suffix })
+    fetchStorefrontFx({})
       .then((res) => {
         if (cancelled) return;
         const fxPayload = res && typeof res === "object" ? res : {};
@@ -6386,7 +6375,7 @@ export default function App() {
       return;
     }
     let cancelled = false;
-    fetchMemberMe({ suffix: EIP_CONFIG.suffix })
+    fetchMemberMe({})
       .then((res) => {
         if (cancelled) return;
         setMemberUser(res?.member || null);
@@ -6427,7 +6416,7 @@ export default function App() {
       return;
     }
     let cancelled = false;
-    fetchCountries({ suffix: EIP_CONFIG.suffix })
+    fetchCountries({})
       .then((res) => {
         if (cancelled) return;
         const incoming = Array.isArray(res?.items) ? res.items : [];
@@ -6499,7 +6488,6 @@ export default function App() {
     let cancelled = false;
     setTradeTermsLoading(true);
     fetchTradeConditions({
-      suffix: EIP_CONFIG.suffix,
       channel: "WEB",
       jurisdiction: priceContext.jurisdiction || "",
       currency: priceContext.currency || "",
@@ -6540,7 +6528,7 @@ export default function App() {
       return;
     }
     let cancelled = false;
-    fetchCheckoutConfig({ suffix: EIP_CONFIG.suffix })
+    fetchCheckoutConfig({})
       .then((res) => {
         if (cancelled) return;
         const normalized = normalizeCheckoutConfig({ payment: res?.payment || {} });
@@ -6610,7 +6598,7 @@ export default function App() {
     if (activePage !== "account" || !memberUser?.login || !plugReady) return;
     let cancelled = false;
     setMemberHistoryLoading(true);
-    fetchMemberHistory({ suffix: EIP_CONFIG.suffix, limit: 25 })
+    fetchMemberHistory({ limit: 25 })
       .then((res) => {
         if (cancelled) return;
         setMemberHistory(Array.isArray(res?.items) ? res.items : []);
@@ -6630,27 +6618,16 @@ export default function App() {
 
   useEffect(() => {
     let active = true;
-    if (!EIP_CONFIG.gatewayApiKey) return undefined;
+    if (!plugReady) return undefined;
     const run = async () => {
       setGatewayStatus({ loading: true, ok: false, manifestOk: false, error: "" });
       try {
-        const bootstrap = await fetchGatewayBootstrap({
-          connectionCode: EIP_CONFIG.connectionCode || undefined,
-          templateCode: EIP_CONFIG.templateCode || undefined,
-        });
-        let manifest = null;
-        if (EIP_CONFIG.templateCode) {
-          manifest = await fetchGatewayManifest({
-            templateCode: EIP_CONFIG.templateCode,
-            objectId: EIP_CONFIG.manifestObjectId || undefined,
-            connectionCode: EIP_CONFIG.connectionCode || undefined,
-          });
-        }
+        await fetchCatalog({ limit: 1 });
         if (!active) return;
         setGatewayStatus({
           loading: false,
-          ok: Boolean(bootstrap?.ok),
-          manifestOk: Boolean(manifest?.ok || !EIP_CONFIG.templateCode),
+          ok: true,
+          manifestOk: true,
           error: "",
         });
       } catch (err) {
@@ -6855,7 +6832,6 @@ export default function App() {
     setSubscribeStatus({ loading: true, error: "", success: false });
     try {
       await createSubscriber({
-        suffix: EIP_CONFIG.suffix,
         payload: {
           source: clientSource,
           form: "subscribe",
@@ -7060,7 +7036,6 @@ export default function App() {
     });
     try {
       const res = await startMemberAuth({
-        suffix: EIP_CONFIG.suffix,
         payload: {
           mode: requestedMode,
           credential,
@@ -7138,7 +7113,7 @@ export default function App() {
   const handleMemberLogout = async () => {
     const csrf = readCookie("member_csrf");
     try {
-      await logoutMember({ suffix: EIP_CONFIG.suffix, csrf });
+      await logoutMember({ csrf });
     } catch {
       // ignore and still clear local state
     }
@@ -7170,7 +7145,6 @@ export default function App() {
     setProfileStatus({ loading: true, error: "", success: "" });
     try {
       const result = await updateMemberProfile({
-        suffix: EIP_CONFIG.suffix,
         csrf,
         payload: {
           display_name: String(profileForm.display_name || "").trim() || null,
@@ -7609,7 +7583,7 @@ export default function App() {
           },
         },
       };
-      const result = await createOrder({ suffix: EIP_CONFIG.suffix, payload });
+      const result = await createOrder({ payload });
       const orderCode =
         String(
           result?.order?.code ||
@@ -7677,7 +7651,6 @@ export default function App() {
         };
       }
       const paymentResult = await createPayment({
-        suffix: EIP_CONFIG.suffix,
         payload: {
           order_code: orderCode || undefined,
           order_id: orderId || undefined,
@@ -7765,7 +7738,6 @@ export default function App() {
     setReviewSubmitState({ loading: true, error: "", success: false, pending: false });
     try {
       const result = await createProductReview({
-        suffix: EIP_CONFIG.suffix,
         payload: {
           product_code: selectedProductCode,
           rating: Number(reviewForm.rating),
@@ -7833,7 +7805,6 @@ export default function App() {
       }
       const csrf = readCookie("member_csrf");
       const response = await createBlogPost({
-        suffix: EIP_CONFIG.suffix,
         csrf,
         payload,
       });
@@ -7855,7 +7826,6 @@ export default function App() {
       if (!id) throw new Error("Post ID required.");
       const csrf = readCookie("member_csrf");
       await deleteBlogPost({
-        suffix: EIP_CONFIG.suffix,
         csrf,
         postId: id,
       });

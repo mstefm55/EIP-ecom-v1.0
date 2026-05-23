@@ -3,7 +3,10 @@
 import { EIP_CONFIG } from "../config/eip";
 
 export async function callEndpoint(endpoint, options = {}) {
-  const baseUrl = EIP_CONFIG.gatewayBaseUrl;
+  const baseUrl = EIP_CONFIG.endpoint;
+  if (!baseUrl) {
+    throw new Error("Missing VITE_EIP_ENDPOINT. Configure the storefront endpoint from Admin > Connections.");
+  }
   const method = String(options.method || "GET").toUpperCase();
   const hasBody = options.body !== undefined;
   const isFormData =
@@ -15,9 +18,8 @@ export async function callEndpoint(endpoint, options = {}) {
   if (hasBody && !isFormData) {
     defaultHeaders["Content-Type"] = "application/json";
   }
-  if (EIP_CONFIG.commerceVerificationKey) {
-    defaultHeaders[EIP_CONFIG.commerceVerificationHeader || "X-API-Key"] =
-      EIP_CONFIG.commerceVerificationKey;
+  if (EIP_CONFIG.apiKey) {
+    defaultHeaders[EIP_CONFIG.apiKeyHeader] = EIP_CONFIG.apiKey;
   }
 
   const config = {
@@ -47,66 +49,50 @@ function buildEventId(prefix) {
   return `${prefix}-${Date.now()}-${base}`;
 }
 
-async function callGateway(endpoint) {
-  const baseUrl = EIP_CONFIG.gatewayBaseUrl;
-  const headers = {};
-  if (EIP_CONFIG.gatewayApiKey) {
-    headers[EIP_CONFIG.gatewayApiKeyHeader || "X-API-Key"] = EIP_CONFIG.gatewayApiKey;
-  }
-  const response = await fetch(`${baseUrl}${endpoint}`, { headers, credentials: "omit" });
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Gateway Error (${response.status}): ${errorText}`);
-  }
-  return await response.json();
-}
-
-function buildPublicCommercePath(suffix, path, params) {
-  const cleanSuffix = String(suffix || "").trim();
-  if (!cleanSuffix) {
-    throw new Error("Missing VITE_EIP_SUFFIX. Configure the tenant connection suffix.");
+function buildPublicCommercePath(path, params) {
+  if (!EIP_CONFIG.endpoint) {
+    throw new Error("Missing VITE_EIP_ENDPOINT. Configure the storefront endpoint from Admin > Connections.");
   }
   const query = params && Object.keys(params).length
     ? `?${new URLSearchParams(params).toString()}`
     : "";
-  return `/api/public/commerce/${cleanSuffix}${path}${query}`;
+  return `${path}${query}`;
 }
 
-export async function fetchCatalog({ suffix, materialType, q, limit, offset } = {}) {
+export async function fetchCatalog({ materialType, q, limit, offset } = {}) {
   const params = {};
   if (materialType) params.material_type = materialType;
   if (q) params.q = q;
   if (limit) params.limit = String(limit);
   if (offset) params.offset = String(offset);
-  return callEndpoint(buildPublicCommercePath(suffix, "/catalog", params));
+  return callEndpoint(buildPublicCommercePath("/catalog", params));
 }
 
-export async function fetchCountries({ suffix } = {}) {
-  return callEndpoint(buildPublicCommercePath(suffix, "/meta/countries"));
+export async function fetchCountries() {
+  return callEndpoint(buildPublicCommercePath("/meta/countries"));
 }
 
-export async function fetchTradeConditions({ suffix, channel = "WEB", jurisdiction = "", currency = "" } = {}) {
+export async function fetchTradeConditions({ channel = "WEB", jurisdiction = "", currency = "" } = {}) {
   const params = {};
   if (channel) params.channel = channel;
   if (jurisdiction) params.jurisdiction = jurisdiction;
   if (currency) params.currency = currency;
-  return callEndpoint(buildPublicCommercePath(suffix, "/meta/trade-conditions", params));
+  return callEndpoint(buildPublicCommercePath("/meta/trade-conditions", params));
 }
 
-export async function fetchCheckoutConfig({ suffix } = {}) {
-  return callEndpoint(buildPublicCommercePath(suffix, "/meta/checkout-config"));
+export async function fetchCheckoutConfig() {
+  return callEndpoint(buildPublicCommercePath("/meta/checkout-config"));
 }
 
-export async function fetchStorefrontLocales({ suffix } = {}) {
-  return callEndpoint(buildPublicCommercePath(suffix, "/meta/locales"));
+export async function fetchStorefrontLocales() {
+  return callEndpoint(buildPublicCommercePath("/meta/locales"));
 }
 
-export async function fetchStorefrontFx({ suffix } = {}) {
-  return callEndpoint(buildPublicCommercePath(suffix, "/meta/fx"));
+export async function fetchStorefrontFx() {
+  return callEndpoint(buildPublicCommercePath("/meta/fx"));
 }
 
 export async function fetchStorefrontContent({
-  suffix,
   slot = "home.hero",
   activeOnly = true,
   publishedOnly = true
@@ -115,11 +101,10 @@ export async function fetchStorefrontContent({
   if (slot) params.slot = slot;
   if (!activeOnly) params.active_only = "false";
   if (!publishedOnly) params.published_only = "false";
-  return callEndpoint(buildPublicCommercePath(suffix, "/content", params));
+  return callEndpoint(buildPublicCommercePath("/content", params));
 }
 
 export async function fetchStorefrontContentList({
-  suffix,
   slot,
   page,
   contentModel,
@@ -136,19 +121,19 @@ export async function fetchStorefrontContentList({
   if (!publishedOnly) params.published_only = "false";
   if (limit) params.limit = String(limit);
   if (offset) params.offset = String(offset);
-  return callEndpoint(buildPublicCommercePath(suffix, "/content/list", params));
+  return callEndpoint(buildPublicCommercePath("/content/list", params));
 }
 
-export async function fetchBlogPosts({ suffix, q, limit = 20, offset = 0 } = {}) {
+export async function fetchBlogPosts({ q, limit = 20, offset = 0 } = {}) {
   const params = {};
   if (q) params.q = String(q);
   if (limit) params.limit = String(limit);
   if (offset) params.offset = String(offset);
-  return callEndpoint(buildPublicCommercePath(suffix, "/blog/posts", params));
+  return callEndpoint(buildPublicCommercePath("/blog/posts", params));
 }
 
-export async function createBlogPost({ suffix, csrf, payload } = {}) {
-  return callEndpoint(buildPublicCommercePath(suffix, "/blog/posts"), {
+export async function createBlogPost({ csrf, payload } = {}) {
+  return callEndpoint(buildPublicCommercePath("/blog/posts"), {
     method: "POST",
     headers: csrf ? { "X-Member-Csrf": csrf } : {},
     credentials: "include",
@@ -156,11 +141,11 @@ export async function createBlogPost({ suffix, csrf, payload } = {}) {
   });
 }
 
-export async function uploadMemberBlogAsset({ suffix, csrf, file } = {}) {
+export async function uploadMemberBlogAsset({ csrf, file } = {}) {
   if (!file) throw new Error("Image file required.");
   const formData = new FormData();
   formData.append("file", file);
-  return callEndpoint(buildPublicCommercePath(suffix, "/member/uploads"), {
+  return callEndpoint(buildPublicCommercePath("/member/uploads"), {
     method: "POST",
     headers: csrf ? { "X-Member-Csrf": csrf } : {},
     credentials: "include",
@@ -168,58 +153,40 @@ export async function uploadMemberBlogAsset({ suffix, csrf, file } = {}) {
   });
 }
 
-export async function deleteBlogPost({ suffix, csrf, postId } = {}) {
+export async function deleteBlogPost({ csrf, postId } = {}) {
   if (!postId) throw new Error("Post ID required.");
-  return callEndpoint(buildPublicCommercePath(suffix, `/blog/posts/${encodeURIComponent(postId)}`), {
+  return callEndpoint(buildPublicCommercePath(`/blog/posts/${encodeURIComponent(postId)}`), {
     method: "DELETE",
     headers: csrf ? { "X-Member-Csrf": csrf } : {},
     credentials: "include",
   });
 }
 
-export async function fetchProductByCode({ suffix, code } = {}) {
+export async function fetchProductByCode({ code } = {}) {
   if (!code) throw new Error("Product code required.");
-  return callEndpoint(buildPublicCommercePath(suffix, `/product/${code}`));
+  return callEndpoint(buildPublicCommercePath(`/product/${code}`));
 }
 
-export async function fetchProductReviews({ suffix, code, limit, offset } = {}) {
+export async function fetchProductReviews({ code, limit, offset } = {}) {
   if (!code) throw new Error("Product code required.");
   const params = {};
   if (limit) params.limit = String(limit);
   if (offset) params.offset = String(offset);
-  return callEndpoint(buildPublicCommercePath(suffix, `/product/${code}/reviews`, params));
+  return callEndpoint(buildPublicCommercePath(`/product/${code}/reviews`, params));
 }
 
-export async function fetchGatewayBootstrap({ connectionCode, templateCode } = {}) {
-  const params = new URLSearchParams();
-  if (connectionCode) params.set("connection_code", connectionCode);
-  if (templateCode) params.set("template_code", templateCode);
-  const query = params.toString();
-  return callGateway(`/api/public/gateway/bootstrap${query ? `?${query}` : ""}`);
-}
-
-export async function fetchGatewayManifest({ templateCode, objectId, connectionCode } = {}) {
-  if (!templateCode) throw new Error("Missing template code for gateway manifest.");
-  const params = new URLSearchParams();
-  if (connectionCode) params.set("connection_code", connectionCode);
-  const query = params.toString();
-  const encodedTemplate = encodeURIComponent(templateCode);
-  const encodedObject = objectId ? `/${encodeURIComponent(objectId)}` : "";
-  return callGateway(`/api/public/gateway/manifest/${encodedTemplate}${encodedObject}${query ? `?${query}` : ""}`);
-}
-
-export async function createSubscriber({ suffix, payload } = {}) {
+export async function createSubscriber({ payload } = {}) {
   const eventIdHeader = EIP_CONFIG.eventIdHeader || "X-Event-Id";
-  return callEndpoint(buildPublicCommercePath(suffix, "/subscribe"), {
+  return callEndpoint(buildPublicCommercePath("/subscribe"), {
     method: "POST",
     headers: { [eventIdHeader]: buildEventId("subscribe") },
     body: payload || {},
   });
 }
 
-export async function createOrder({ suffix, payload } = {}) {
+export async function createOrder({ payload } = {}) {
   const eventIdHeader = EIP_CONFIG.eventIdHeader || "X-Event-Id";
-  return callEndpoint(buildPublicCommercePath(suffix, "/order"), {
+  return callEndpoint(buildPublicCommercePath("/order"), {
     method: "POST",
     headers: { [eventIdHeader]: buildEventId("order") },
     credentials: "include",
@@ -227,47 +194,47 @@ export async function createOrder({ suffix, payload } = {}) {
   });
 }
 
-export async function createPayment({ suffix, payload } = {}) {
+export async function createPayment({ payload } = {}) {
   const eventIdHeader = EIP_CONFIG.eventIdHeader || "X-Event-Id";
-  return callEndpoint(buildPublicCommercePath(suffix, "/payment"), {
+  return callEndpoint(buildPublicCommercePath("/payment"), {
     method: "POST",
     headers: { [eventIdHeader]: buildEventId("payment") },
     body: payload || {},
   });
 }
 
-export async function createProductReview({ suffix, payload } = {}) {
-  return callEndpoint(buildPublicCommercePath(suffix, "/reviews"), {
+export async function createProductReview({ payload } = {}) {
+  return callEndpoint(buildPublicCommercePath("/reviews"), {
     method: "POST",
     credentials: "include",
     body: payload || {},
   });
 }
 
-export async function startMemberAuth({ suffix, payload } = {}) {
-  return callEndpoint(buildPublicCommercePath(suffix, "/member/auth/start"), {
+export async function startMemberAuth({ payload } = {}) {
+  return callEndpoint(buildPublicCommercePath("/member/auth/start"), {
     method: "POST",
     credentials: "include",
     body: payload || {},
   });
 }
 
-export async function verifyMemberAuth({ suffix, payload } = {}) {
-  return callEndpoint(buildPublicCommercePath(suffix, "/member/auth/verify"), {
+export async function verifyMemberAuth({ payload } = {}) {
+  return callEndpoint(buildPublicCommercePath("/member/auth/verify"), {
     method: "POST",
     credentials: "include",
     body: payload || {},
   });
 }
 
-export async function fetchMemberMe({ suffix } = {}) {
-  return callEndpoint(buildPublicCommercePath(suffix, "/member/auth/me"), {
+export async function fetchMemberMe() {
+  return callEndpoint(buildPublicCommercePath("/member/auth/me"), {
     credentials: "include",
   });
 }
 
-export async function logoutMember({ suffix, csrf } = {}) {
-  return callEndpoint(buildPublicCommercePath(suffix, "/member/auth/logout"), {
+export async function logoutMember({ csrf } = {}) {
+  return callEndpoint(buildPublicCommercePath("/member/auth/logout"), {
     method: "POST",
     headers: csrf ? { "X-Member-Csrf": csrf } : {},
     credentials: "include",
@@ -275,8 +242,8 @@ export async function logoutMember({ suffix, csrf } = {}) {
   });
 }
 
-export async function updateMemberProfile({ suffix, csrf, payload } = {}) {
-  return callEndpoint(buildPublicCommercePath(suffix, "/member/profile"), {
+export async function updateMemberProfile({ csrf, payload } = {}) {
+  return callEndpoint(buildPublicCommercePath("/member/profile"), {
     method: "PATCH",
     headers: csrf ? { "X-Member-Csrf": csrf } : {},
     credentials: "include",
@@ -284,8 +251,8 @@ export async function updateMemberProfile({ suffix, csrf, payload } = {}) {
   });
 }
 
-export async function fetchMemberHistory({ suffix, limit = 20 } = {}) {
-  return callEndpoint(buildPublicCommercePath(suffix, "/member/history", { limit: String(limit) }), {
+export async function fetchMemberHistory({ limit = 20 } = {}) {
+  return callEndpoint(buildPublicCommercePath("/member/history", { limit: String(limit) }), {
     credentials: "include",
   });
 }
@@ -295,7 +262,7 @@ export function resolveAssetUrl(url) {
   const value = String(url);
   if (value.startsWith("http")) return value;
   if (value.startsWith("blob:") || value.startsWith("data:")) return value;
-  const base = new URL(EIP_CONFIG.gatewayBaseUrl, window.location.origin).origin;
+  const base = new URL(EIP_CONFIG.endpoint || window.location.origin, window.location.origin).origin;
   if (value.startsWith("/")) return `${base}${value}`;
   return `${base}/${value}`;
 }
