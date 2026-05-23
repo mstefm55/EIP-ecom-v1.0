@@ -58,7 +58,6 @@ npm run reseed:post-migration -- --stage ui-surfaces --stage process-engine --st
 | `services/api/db/seed/ui_surface_dashboard.sql` | Seeds published global Dashboard UI surface. File itself increments versions on each run, so the runner guards it. | safe auto-run with guard | `eip_core.ui_surface`, migration `0046`. | Yes | Yes | No | No |
 | `services/api/db/seed/clone_template_to_tenant.sql` | Legacy manual clone SQL. It hardcodes `source_code='eip_ecom'` and `target_code='t_ed6019735b2f'`. Do not use it for Samara onboarding; use Admin > Templates instead. | skip for Samara | Manual SQL review only. | No | Yes | Yes | No |
 | `services/api/db/seed/grant_ecom_admin.sql` | Grants `ECOM_ADMIN` to a hardcoded email in `eip_ecom`. | conditional/manual | Edit tenant code and login email; identity and role must already exist. | Maybe | No | Yes | No |
-| `services/api/db/seed/connection_profile_samara.sql` | Legacy Samara Mode B profile seed. It writes to `eip_core.tenant_connection_profile`, but current migrations intentionally do not create that table. | skip | Current system stores profiles in `eip_core.tenant.attrs.connection_profiles`; create Samara profiles in Admin > Connections instead. | No | No | No | No |
 | `services/api/db/seed/plug_play_sample.sql` | Demo SDUI mapping, sample service object, and plug-and-play UI surface for tenant `eip`. | conditional/manual | Demo tenant `eip`; should stay separate from owner/admin and Samara production data. | No | No | No | No |
 | `services/api/scripts/backfill_ecom_product_materials.sql` | Backfills materials from existing product service objects and links them. | backfill-only / one-off | Manual review of existing product/material data. | No | Supports product flow after review | No | Possible after review |
 | `services/api/scripts/migrate.mjs` | Ordered SQL migration runner with psql meta-command stripping and `schema_migrations` ledger. | generator-only / support-only | DB env vars. | Supports | Supports | Supports | Supports |
@@ -182,7 +181,7 @@ These files are owned by `npm run migrate`. They should not be rerun independent
 
 ## Notes
 
-- `connection_profile_samara.sql` is intentionally not part of the runner because it targets a table that current migrations do not create.
+- The stale `connection_profile_samara.sql` seed was removed; Samara connection profiles belong in Admin > Connections.
 - Samara tenant creation, ecommerce template cloning, and connection profile setup must be performed through the Admin UI path, not through DB seed/reseed helpers.
 - Child service object creation is represented in the process effect taxonomy, the API process engine source, and the canonical order process through `ORDER_RETURN_REQUEST` / `ORDER_REFUND_REQUEST`.
 - Effect transition coverage is restored by the migration chain and checked by the API-local `process-engine` stage before template tenant reseeding.

@@ -100,7 +100,7 @@ Keep `AUTH_COOKIE_CROSS_SITE=true` on the API service for hosted cross-origin me
 
 ## Explicit Non-Goals
 
-- Do not run `connection_profile_samara.sql`.
+- Do not recreate the removed `connection_profile_samara.sql` seed.
 - Do not run `clone_template_to_tenant.sql` for Samara.
 - Do not add or run a Samara seed/reseed stage.
 - Do not claim Samara is live-connected until the UI flow above has been completed.
