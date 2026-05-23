@@ -2264,6 +2264,24 @@ export default async function authRoutes(app) {
     });
   });
 
+  app.get("/auth/csrf", async (req, reply) => {
+    const s = await app.requireSession(req, { realm: "EIP" });
+    if (!s.ok) return reply.code(s.status).send({ ok: false, error: s.error });
+
+    const csrf = req.cookies?.csrf;
+    if (!csrf) {
+      return reply.code(403).send({ ok: false, error: "CSRF_MISSING" });
+    }
+
+    const expected = sha256Hex(`${csrf}:${app.config.CSRF_PEPPER}`);
+    if (!s.session.csrf_secret_hash || !timingSafeEqual(expected, s.session.csrf_secret_hash)) {
+      return reply.code(403).send({ ok: false, error: "CSRF_INVALID" });
+    }
+
+    reply.header("Cache-Control", "no-store");
+    return reply.send({ ok: true, csrf });
+  });
+
   /* ===================== PROFILE (EIP) ===================== */
   app.get("/auth/profile", async (req, reply) => {
     const s = await app.requireSession(req, { realm: "EIP" });

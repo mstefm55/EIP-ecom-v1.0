@@ -1,8 +1,70 @@
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
+const CSRF_ENDPOINT = "/api/eip/auth/csrf";
+const CSRF_ERROR_CODES = new Set(["CSRF_MISSING", "CSRF_MISMATCH", "CSRF_INVALID"]);
+
+let cachedCsrfToken = null;
+let csrfTokenPromise = null;
 
 function readCookie(name) {
   const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
   return match ? decodeURIComponent(match[1]) : null;
+}
+
+function isFormDataBody(body) {
+  return typeof FormData !== "undefined" && body instanceof FormData;
+}
+
+function normalizeHeaders(headers = {}) {
+  if (headers instanceof Headers) {
+    return Object.fromEntries(headers.entries());
+  }
+  return { ...headers };
+}
+
+function parseErrorPayload(errorText) {
+  try {
+    return JSON.parse(errorText);
+  } catch {
+    return null;
+  }
+}
+
+export function resetCsrfToken() {
+  cachedCsrfToken = null;
+  csrfTokenPromise = null;
+}
+
+export async function getCsrfToken({ refresh = false } = {}) {
+  if (!refresh) {
+    const readableCookie = readCookie("csrf");
+    if (readableCookie) {
+      cachedCsrfToken = readableCookie;
+      return readableCookie;
+    }
+    if (cachedCsrfToken) return cachedCsrfToken;
+    if (csrfTokenPromise) return csrfTokenPromise;
+  } else {
+    resetCsrfToken();
+  }
+
+  csrfTokenPromise = fetch(`${BASE_URL}${CSRF_ENDPOINT}`, {
+    method: "GET",
+    credentials: "include",
+    headers: { Accept: "application/json" },
+  })
+    .then(async (response) => {
+      if (!response.ok) return null;
+      const payload = await response.json().catch(() => null);
+      const token = payload?.csrf || payload?.csrfToken || null;
+      cachedCsrfToken = token;
+      return token;
+    })
+    .catch(() => null)
+    .finally(() => {
+      csrfTokenPromise = null;
+    });
+
+  return csrfTokenPromise;
 }
 
 export async function apiFetch(path, options = {}) {
@@ -13,47 +75,69 @@ export async function apiFetch(path, options = {}) {
 export async function apiFetchWithMeta(path, options = {}) {
   const url = `${BASE_URL}${path}`;
   const method = options.method || "GET";
-  const headers = {
-    ...(options.headers || {}),
-  };
   const hasBody = options.body !== undefined;
-  if (hasBody) {
-    headers["Content-Type"] = "application/json";
-  }
+  const isFormData = isFormDataBody(options.body);
+  const body = hasBody ? (isFormData ? options.body : JSON.stringify(options.body)) : undefined;
 
-  if (method !== "GET" && method !== "HEAD") {
-    const csrf = readCookie("csrf");
-    if (csrf) {
-      headers["x-csrf"] = csrf;
+  const performRequest = async ({ refreshCsrf = false } = {}) => {
+    const headers = normalizeHeaders(options.headers);
+    if (hasBody && !isFormData && !headers["Content-Type"] && !headers["content-type"]) {
+      headers["Content-Type"] = "application/json";
     }
-  }
 
-  const response = await fetch(url, {
-    method,
-    headers,
-    credentials: "include",
-    body: hasBody ? JSON.stringify(options.body) : undefined,
-  });
+    if (method !== "GET" && method !== "HEAD") {
+      const csrf = await getCsrfToken({ refresh: refreshCsrf });
+      if (csrf) {
+        headers["x-csrf"] = csrf;
+      }
+    }
+
+    return fetch(url, {
+      method,
+      headers,
+      credentials: "include",
+      body,
+    });
+  };
+
+  let response = await performRequest();
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    const payload = parseErrorPayload(errorText);
+    if (CSRF_ERROR_CODES.has(payload?.error)) {
+      response = await performRequest({ refreshCsrf: true });
+      if (response.ok) {
+        const data = await response.json();
+        return { status: response.status, headers: response.headers, data };
+      }
+      resetCsrfToken();
+      return handleErrorResponse(response);
+    }
+    return handleParsedError(response, errorText, payload);
+  }
 
   if (response.status === 304) {
     return { status: 304, headers: response.headers, data: null };
   }
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    try {
-      const payload = JSON.parse(errorText);
-      if (payload?.error === "STEP_UP_REQUIRED") {
-        window.dispatchEvent(
-          new CustomEvent("eip-step-up-required", { detail: payload })
-        );
-      }
-    } catch {
-      // ignore parse errors
-    }
-    throw new Error(`API ${response.status}: ${errorText}`);
-  }
-
   const data = await response.json();
   return { status: response.status, headers: response.headers, data };
+}
+
+async function handleErrorResponse(response) {
+  const errorText = await response.text();
+  return handleParsedError(response, errorText, parseErrorPayload(errorText));
+}
+
+function handleParsedError(response, errorText, payload) {
+  if (payload?.error === "STEP_UP_REQUIRED") {
+    window.dispatchEvent(
+      new CustomEvent("eip-step-up-required", { detail: payload })
+    );
+  }
+  if (response.status === 401) {
+    resetCsrfToken();
+  }
+  throw new Error(`API ${response.status}: ${errorText}`);
 }

@@ -53,11 +53,6 @@ function formatTenantLabel(tenant) {
   return `${name} - ${code}`;
 }
 
-function readCookie(name) {
-  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
-  return match ? decodeURIComponent(match[1]) : null;
-}
-
 function resolveAssetUrl(url) {
   if (!url) return "";
   if (url.startsWith("http://") || url.startsWith("https://")) return url;
@@ -362,21 +357,10 @@ export default function AdminUsersPanel({ node }) {
     try {
       const formData = new FormData();
       formData.append("file", file);
-      const csrf = readCookie("csrf");
-      const response = await fetch(
-        `${BASE_URL}/api/eip/admin/tenants/${selectedTenant.id}/users/${selectedUser.id}/avatar`,
-        {
-          method: "POST",
-          headers: csrf ? { "x-csrf": csrf } : undefined,
-          credentials: "include",
-          body: formData,
-        }
+      const data = await apiFetch(
+        `/api/eip/admin/tenants/${selectedTenant.id}/users/${selectedUser.id}/avatar`,
+        { method: "POST", body: formData }
       );
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || "Upload failed");
-      }
-      const data = await response.json();
       setProfileForm((prev) => ({ ...prev, avatar_url: data.avatar_url || prev.avatar_url }));
       await loadTenantData(selectedTenant.id);
       setProfileNotice("Avatar updated.");

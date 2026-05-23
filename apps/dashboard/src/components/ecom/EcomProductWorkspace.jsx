@@ -712,11 +712,6 @@ function sanitizeMediaAttrs(media) {
   return next;
 }
 
-function readCookie(name) {
-  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
-  return match ? decodeURIComponent(match[1]) : null;
-}
-
 function pickThumbnail(item) {
   const media = item?.attrs?.media || {};
   const mainAsset = normalizeAsset(media.main_asset || media.main_url || media.hero_asset || media.hero_url);
@@ -732,20 +727,10 @@ async function fileToAsset(file, options = {}) {
   const formData = new FormData();
   formData.append("file", file);
   formData.append("asset_kind", assetKind);
-  const csrf = readCookie("csrf");
-  const response = await fetch(`${API_BASE_URL}/api/eip/ecom/uploads`, {
+  const payload = await apiFetch("/api/eip/ecom/uploads", {
     method: "POST",
-    credentials: "include",
-    headers: csrf ? { "x-csrf": csrf } : {},
     body: formData
   });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`API ${response.status}: ${errorText}`);
-  }
-
-  const payload = await response.json();
   const asset = payload?.asset || {};
   return {
     name: asset.name || file.name,

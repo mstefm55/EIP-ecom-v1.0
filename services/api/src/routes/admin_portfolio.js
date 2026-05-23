@@ -22,17 +22,7 @@ async function requireAdminPerm(app, req, reply, permCode, opts = {}) {
   return session;
 }
 
-async function resolveEipTenantId(app) {
-  const r = await app.db.query(
-    "SELECT id FROM eip_core.tenant WHERE code = 'eip' LIMIT 1"
-  );
-  return r.rows[0]?.id || null;
-}
-
-async function resolveAdminIdentity(app, { adminIdentityId, adminLogin }) {
-  const eipTenantId = await resolveEipTenantId(app);
-  if (!eipTenantId) return null;
-
+async function resolveAdminIdentity(app, tenantId, { adminIdentityId, adminLogin }) {
   if (adminIdentityId) {
     const r = await app.db.query(
       `
@@ -46,7 +36,7 @@ async function resolveAdminIdentity(app, { adminIdentityId, adminLogin }) {
         AND r.code IN ('ADMIN_EXEC','ADMIN_ASSOC','ADMIN_SUPER')
       LIMIT 1
       `,
-      [eipTenantId, adminIdentityId]
+      [tenantId, adminIdentityId]
     );
     return r.rows[0] || null;
   }
@@ -64,7 +54,7 @@ async function resolveAdminIdentity(app, { adminIdentityId, adminLogin }) {
         AND r.code IN ('ADMIN_EXEC','ADMIN_ASSOC','ADMIN_SUPER')
       LIMIT 1
       `,
-      [eipTenantId, adminLogin]
+      [tenantId, adminLogin]
     );
     return r.rows[0] || null;
   }
@@ -90,11 +80,6 @@ export default async function adminPortfolioRoutes(app) {
     const session = await requireAdminPerm(app, req, reply, "admin.portfolio.read");
     if (!session) return;
 
-    const eipTenantId = await resolveEipTenantId(app);
-    if (!eipTenantId) {
-      return reply.code(500).send({ ok: false, error: "EIP_TENANT_NOT_FOUND" });
-    }
-
     const r = await app.db.query(
       `
       SELECT
@@ -118,7 +103,7 @@ export default async function adminPortfolioRoutes(app) {
       GROUP BY p.id, i.login
       ORDER BY i.login
       `,
-      [eipTenantId]
+      [session.tenant_id]
     );
 
     return reply.send({ ok: true, portfolios: r.rows || [] });
@@ -127,11 +112,6 @@ export default async function adminPortfolioRoutes(app) {
   app.get("/admin/portfolios/admins", async (req, reply) => {
     const session = await requireAdminPerm(app, req, reply, "admin.portfolio.read");
     if (!session) return;
-
-    const eipTenantId = await resolveEipTenantId(app);
-    if (!eipTenantId) {
-      return reply.code(500).send({ ok: false, error: "EIP_TENANT_NOT_FOUND" });
-    }
 
     const r = await app.db.query(
       `
@@ -148,7 +128,7 @@ export default async function adminPortfolioRoutes(app) {
       GROUP BY i.id, i.login
       ORDER BY i.login
       `,
-      [eipTenantId]
+      [session.tenant_id]
     );
 
     return reply.send({ ok: true, admins: r.rows || [] });
@@ -214,7 +194,7 @@ export default async function adminPortfolioRoutes(app) {
     const name = normalizeText(req.body?.name) || null;
     const isActive = req.body?.is_active !== false;
 
-    const adminIdentity = await resolveAdminIdentity(app, {
+    const adminIdentity = await resolveAdminIdentity(app, session.tenant_id, {
       adminIdentityId,
       adminLogin,
     });

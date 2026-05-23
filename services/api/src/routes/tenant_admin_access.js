@@ -29,16 +29,19 @@ async function requireTenantPerm(app, req, reply, permCode, opts = {}) {
   return session;
 }
 
-async function resolveEipTenantId(app) {
+async function resolveOwnerAdminTenantId(app, fallbackTenantId = null) {
+  const ownerCode = normalizeText(app.config.OWNER_TENANT_CODE);
+  if (!ownerCode) return fallbackTenantId;
+
   const r = await app.db.query(
-    "SELECT id FROM eip_core.tenant WHERE code = 'eip' LIMIT 1"
+    "SELECT id FROM eip_core.tenant WHERE code = $1 AND is_active = true LIMIT 1",
+    [ownerCode]
   );
   return r.rows[0]?.id || null;
 }
 
-async function resolveEipAdminIdentity(app, { adminLogin, adminIdentityId }) {
-  const eipTenantId = await resolveEipTenantId(app);
-  if (!eipTenantId) return null;
+async function resolveOwnerAdminIdentity(app, sourceTenantId, { adminLogin, adminIdentityId }) {
+  if (!sourceTenantId) return null;
 
   if (adminIdentityId) {
     const r = await app.db.query(
@@ -53,7 +56,7 @@ async function resolveEipAdminIdentity(app, { adminLogin, adminIdentityId }) {
         AND r.code IN ('ADMIN_EXEC','ADMIN_ASSOC','ADMIN_SUPER')
       LIMIT 1
       `,
-      [eipTenantId, adminIdentityId]
+      [sourceTenantId, adminIdentityId]
     );
     return r.rows[0] || null;
   }
@@ -71,7 +74,7 @@ async function resolveEipAdminIdentity(app, { adminLogin, adminIdentityId }) {
         AND r.code IN ('ADMIN_EXEC','ADMIN_ASSOC','ADMIN_SUPER')
       LIMIT 1
       `,
-      [eipTenantId, adminLogin]
+      [sourceTenantId, adminLogin]
     );
     return r.rows[0] || null;
   }
@@ -119,9 +122,9 @@ export default async function tenantAdminAccessRoutes(app) {
     const session = await requireTenantPerm(app, req, reply, "tenant.admin_access.read");
     if (!session) return;
 
-    const eipTenantId = await resolveEipTenantId(app);
-    if (!eipTenantId) {
-      return reply.code(500).send({ ok: false, error: "EIP_TENANT_NOT_FOUND" });
+    const ownerTenantId = await resolveOwnerAdminTenantId(app, session.tenant_id);
+    if (!ownerTenantId) {
+      return reply.code(500).send({ ok: false, error: "OWNER_TENANT_NOT_FOUND" });
     }
 
     const r = await app.db.query(
@@ -139,7 +142,7 @@ export default async function tenantAdminAccessRoutes(app) {
       GROUP BY i.id, i.login
       ORDER BY i.login
       `,
-      [eipTenantId]
+      [ownerTenantId]
     );
 
     return reply.send({ ok: true, admins: r.rows });
@@ -154,7 +157,8 @@ export default async function tenantAdminAccessRoutes(app) {
     const accessLevel = normalizeLevel(req.body?.access_level) || "ASSOC";
     const sensitiveAllowed = Boolean(req.body?.sensitive_allowed);
 
-    const adminIdentity = await resolveEipAdminIdentity(app, {
+    const ownerTenantId = await resolveOwnerAdminTenantId(app, session.tenant_id);
+    const adminIdentity = await resolveOwnerAdminIdentity(app, ownerTenantId, {
       adminLogin,
       adminIdentityId,
     });
@@ -229,7 +233,8 @@ export default async function tenantAdminAccessRoutes(app) {
 
     const adminLogin = normalizeText(req.body?.admin_login);
     const adminIdentityId = normalizeText(req.body?.admin_identity_id);
-    const adminIdentity = await resolveEipAdminIdentity(app, {
+    const ownerTenantId = await resolveOwnerAdminTenantId(app, session.tenant_id);
+    const adminIdentity = await resolveOwnerAdminIdentity(app, ownerTenantId, {
       adminLogin,
       adminIdentityId,
     });
@@ -292,7 +297,8 @@ export default async function tenantAdminAccessRoutes(app) {
     const adminIdentityId = normalizeText(req.body?.admin_identity_id);
     const revokeAll = Boolean(req.body?.revoke_all);
 
-    const adminIdentity = await resolveEipAdminIdentity(app, {
+    const ownerTenantId = await resolveOwnerAdminTenantId(app, session.tenant_id);
+    const adminIdentity = await resolveOwnerAdminIdentity(app, ownerTenantId, {
       adminLogin,
       adminIdentityId,
     });
