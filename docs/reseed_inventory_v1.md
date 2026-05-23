@@ -9,7 +9,8 @@ The controlled reseed path is intentionally narrow:
 3. Seed global UI surfaces only when missing.
 4. Verify process/effect taxonomy, including child service object creation support.
 5. Seed the ecommerce template tenant and canonical clone-ready process metadata.
-6. Seed Samara connection metadata through the current `tenant.attrs.connection_profiles` storage model.
+
+Samara tenant onboarding and connection setup are intentionally not part of this reseed runner. Use the Admin UI tenant onboarding, template clone, and Connections panels for that operational path.
 
 Do not blindly execute every SQL file in this repo. Some files are generators, stale support seeds, demo samples, clone scripts with hardcoded tenant codes, or one-off backfills.
 
@@ -21,10 +22,9 @@ From the Railway shell for `services/api`:
 npm run migrate
 OWNER_TENANT_CODE="eip" OWNER_TENANT_NAME="EIP Owner" OWNER_ADMIN_EMAIL="owner@example.com" OWNER_ADMIN_PASSWORD="replace-with-strong-password" OWNER_ADMIN_NAME="Owner Admin" npm run reseed:post-migration -- --stage owner-admin
 npm run reseed:post-migration -- --stage ui-surfaces --stage process-engine --stage template-tenant
-SAMARA_TENANT_CODE="samara" SAMARA_TENANT_NAME="Samara" SAMARA_FRONTEND_URL="https://your-samara-domain.example" SAMARA_CONNECTION_API_KEY="replace-with-shared-secret" npm run samara:connect
 ```
 
-`owner-admin` is kept explicit because it creates or repairs the definitive live owner/admin tenant and requires a real tenant code, tenant name, email, and password. `samara` is also explicit because it creates or reconciles the real Samara tenant from `eip_ecom`, and production connection profiles require a real origin and verification secret.
+`owner-admin` is kept explicit because it creates or repairs the definitive live owner/admin tenant and requires a real tenant code, tenant name, email, and password. Do not use this runner to create or connect Samara.
 
 ## Runner Stages
 
@@ -34,7 +34,6 @@ SAMARA_TENANT_CODE="samara" SAMARA_TENANT_NAME="Samara" SAMARA_FRONTEND_URL="htt
 | `ui-surfaces` | Applies `ui_surface_admin.sql` and `ui_surface_dashboard.sql` only if a published global surface for that code is missing. | Safe auto-run with guards. |
 | `process-engine` | Verifies process tables, governed effect taxonomy, child service object effect support, and static UI/process action alignment using API-local files. | Safe verification only. |
 | `template-tenant` | Applies `tenant_template_ecom.sql`, `jurisdiction_iso_seed.sql`, `template_ecom_process.sql`, and `template_ecom_canonical_v1.sql`, then verifies canonical processes, bindings, task templates, and template-scoped effect governance. | Safe auto-run/idempotent. |
-| `samara` | Creates or resolves the real Samara tenant, clones/reconciles the canonical `eip_ecom` ecommerce metadata baseline, verifies processes/tasks/bindings/effect governance, and upserts the Samara gateway profile into `eip_core.tenant.attrs.connection_profiles`. If `SAMARA_TENANT_CODE` is omitted, it uses an existing `samara` tenant, then the legacy `t_ed6019735b2f` tenant if present, otherwise creates `samara`. | Conditional auto-run, requires production origin and connection env vars. |
 
 ## Category Legend
 
@@ -57,14 +56,13 @@ SAMARA_TENANT_CODE="samara" SAMARA_TENANT_NAME="Samara" SAMARA_FRONTEND_URL="htt
 | `services/api/db/seed/template_ecom_canonical_v1.sql` | Rebuilds the definitive V1 `eip_ecom` template baseline after the base seed. It upserts canonical product, sales order, payment, return, refund, and storefront content processes; task templates; process bindings; and template-scoped effect governance, including child service object creation for order return/refund requests. | safe auto-run | `eip_ecom` tenant, process/task/binding tables, dropdown governance, migrated effect handlers. | No | Yes | Yes | Indirect |
 | `services/api/db/seed/ui_surface_admin.sql` | Seeds published global Admin UI surface. File itself increments versions on each run, so the runner guards it. | safe auto-run with guard | `eip_core.ui_surface`, migration `0046`. | Yes | Yes | No | No |
 | `services/api/db/seed/ui_surface_dashboard.sql` | Seeds published global Dashboard UI surface. File itself increments versions on each run, so the runner guards it. | safe auto-run with guard | `eip_core.ui_surface`, migration `0046`. | Yes | Yes | No | No |
-| `services/api/db/seed/clone_template_to_tenant.sql` | Clones template tenant config into a target tenant. Hardcodes `source_code='eip_ecom'` and `target_code='t_ed6019735b2f'`. | conditional/manual | Confirm target tenant, source template, and business approval before running. | No | Yes | Yes | Yes |
+| `services/api/db/seed/clone_template_to_tenant.sql` | Legacy manual clone SQL. It hardcodes `source_code='eip_ecom'` and `target_code='t_ed6019735b2f'`. Do not use it for Samara onboarding; use Admin > Templates instead. | skip for Samara | Manual SQL review only. | No | Yes | Yes | No |
 | `services/api/db/seed/grant_ecom_admin.sql` | Grants `ECOM_ADMIN` to a hardcoded email in `eip_ecom`. | conditional/manual | Edit tenant code and login email; identity and role must already exist. | Maybe | No | Yes | No |
-| `services/api/db/seed/connection_profile_samara.sql` | Legacy Samara Mode B profile seed. It writes to `eip_core.tenant_connection_profile`, but current migrations intentionally do not create that table. | skip | Current system stores profiles in `eip_core.tenant.attrs.connection_profiles`. Use runner `samara` stage instead. | No | No | No | Yes |
+| `services/api/db/seed/connection_profile_samara.sql` | Legacy Samara Mode B profile seed. It writes to `eip_core.tenant_connection_profile`, but current migrations intentionally do not create that table. | skip | Current system stores profiles in `eip_core.tenant.attrs.connection_profiles`; create Samara profiles in Admin > Connections instead. | No | No | No | No |
 | `services/api/db/seed/plug_play_sample.sql` | Demo SDUI mapping, sample service object, and plug-and-play UI surface for tenant `eip`. | conditional/manual | Demo tenant `eip`; should stay separate from owner/admin and Samara production data. | No | No | No | No |
 | `services/api/scripts/backfill_ecom_product_materials.sql` | Backfills materials from existing product service objects and links them. | backfill-only / one-off | Manual review of existing product/material data. | No | Supports product flow after review | No | Possible after review |
 | `services/api/scripts/migrate.mjs` | Ordered SQL migration runner with psql meta-command stripping and `schema_migrations` ledger. | generator-only / support-only | DB env vars. | Supports | Supports | Supports | Supports |
 | `services/api/scripts/smoke_clone_ecom_template.mjs` | Parameterized smoke clone/verification script for proving `eip_ecom` can clone into a disposable tenant. It copies only tenant smoke metadata, template-scoped process governance, canonical process defs, active task templates, and active process bindings. | conditional/manual | DB env vars, `SMOKE_CLONE_TARGET_TENANT_CODE`/`--target-code`, `SMOKE_CLONE_TARGET_TENANT_NAME`/`--target-name`; optional source code defaults to `eip_ecom`. | No | Yes | Yes | No |
-| `services/api/scripts/reseed_post_migration.mjs --stage samara` | Definitive Samara connection/reconcile path. Creates or resolves the real Samara tenant, clones ecommerce metadata from `eip_ecom` without deleting existing business data, verifies the canonical baseline, and writes the current `tenant.attrs.connection_profiles` contract. | conditional/manual | DB env vars, migrated schema, seeded `eip_ecom`, `SAMARA_FRONTEND_URL` or `SAMARA_ORIGIN_ALLOWLIST`, and `SAMARA_CONNECTION_API_KEY` unless an existing profile secret is already stored. | No | Yes | Yes | Yes |
 | `services/api/scripts/enrich_jurisdiction_currency.mjs` | Fetches currency data from Rest Countries and enriches jurisdiction attrs. | conditional/manual | Network access, existing jurisdictions. | No | No | Optional | Optional |
 | `services/api/scripts/migrate_gateway_inbound_security.mjs` | One-off migration for existing tenant connection profiles; can generate API keys and a local report. | backfill-only / one-off | Existing connection profiles and manual secret handling. | No | No | No | Possible after review |
 | `services/api/scripts/bootstrap.mjs` | Local HTTP helper for authz bootstrap using supplied cookies and CSRF. | generator-only / support-only | Running API and valid local session cookies. | Maybe | No | No | No |
@@ -175,7 +173,7 @@ These files are owned by `npm run migrate`. They should not be rerun independent
 
 | Item | Why it remains manual |
 |---|---|
-| `clone_template_to_tenant.sql` | It copies template tenant configuration into a real tenant and currently embeds the Samara target code. Confirm the target tenant and desired copy boundary before running. |
+| `clone_template_to_tenant.sql` | It embeds a legacy Samara target code. Use Admin > Templates for Samara instead of running this SQL. |
 | `grant_ecom_admin.sql` | It embeds a specific email and grants `ECOM_ADMIN` in `eip_ecom`, while the owner admin baseline now grants `ADMIN_SUPER` in the explicit live owner/admin tenant. |
 | `plug_play_sample.sql` | Demo-only seed for tenant `eip`; keep separate from owner/admin and Samara production baselines. |
 | `backfill_ecom_product_materials.sql` | Safe-looking SQL, but it mutates existing product/material relationships. Run only after reviewing production data. |
@@ -185,5 +183,6 @@ These files are owned by `npm run migrate`. They should not be rerun independent
 ## Notes
 
 - `connection_profile_samara.sql` is intentionally not part of the runner because it targets a table that current migrations do not create.
+- Samara tenant creation, ecommerce template cloning, and connection profile setup must be performed through the Admin UI path, not through DB seed/reseed helpers.
 - Child service object creation is represented in the process effect taxonomy, the API process engine source, and the canonical order process through `ORDER_RETURN_REQUEST` / `ORDER_REFUND_REQUEST`.
 - Effect transition coverage is restored by the migration chain and checked by the API-local `process-engine` stage before template tenant reseeding.

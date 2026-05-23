@@ -6,8 +6,8 @@ export const EIP_CONFIG = {
     rawApiBaseUrl !== undefined
       ? rawApiBaseUrl
       : fallbackApiBaseUrl ?? "http://localhost:4000",
-  suffix: import.meta.env.VITE_EIP_SUFFIX || "samara",
-  connectionCode: import.meta.env.VITE_EIP_CONNECTION_CODE || "samara",
+  suffix: import.meta.env.VITE_EIP_SUFFIX || "",
+  connectionCode: import.meta.env.VITE_EIP_CONNECTION_CODE || "",
   templateCode: import.meta.env.VITE_EIP_TEMPLATE_CODE || "",
   manifestObjectId: import.meta.env.VITE_EIP_MANIFEST_OBJECT_ID || "",
   materialType: import.meta.env.VITE_EIP_MATERIAL_TYPE || "PRODUCT",
