@@ -32,11 +32,52 @@ const EFFECT_TYPES_REQUIRED = [
   "CHILD_SERVICE_OBJECT_CREATE",
   "INFO_RECORD_WRITE",
   "ACCESS_GRANT_CREATE",
+  "INSTANCE_START",
   "HTTP_REQUEST",
   "INVENTORY_MOVE",
   "INVENTORY_CONSUME",
   "INVENTORY_PRODUCE",
   "INVENTORY_CONVERT",
+  "VARIANT_INVENTORY_VALIDATE"
+];
+
+const TEMPLATE_PROCESS_CODES = [
+  "ECOM_PRODUCT_ONBOARDING",
+  "ECOM_SALES_ORDER_FLOW",
+  "ECOM_RETURN_FLOW",
+  "ECOM_REFUND_FLOW",
+  "ECOM_PAYMENT_FLOW",
+  "ECOM_STOREFRONT_CONTENT_FLOW"
+];
+
+const TEMPLATE_BINDING_TYPES = [
+  "product",
+  "sales_order",
+  "return_request",
+  "refund_request",
+  "payment",
+  "storefront_content"
+];
+
+const TEMPLATE_TASK_TYPES = [
+  "PRODUCT_DRAFT_ENRICH",
+  "PRODUCT_QA_REVIEW",
+  "ORDER_CONFIRM_TASK",
+  "ORDER_FULFILLMENT_TASK",
+  "RETURN_REVIEW",
+  "RETURN_RECEIVE_TASK",
+  "REFUND_REVIEW",
+  "REFUND_ISSUE_TASK",
+  "PAYMENT_REVIEW",
+  "CONTENT_REVIEW"
+];
+
+const TEMPLATE_EFFECT_TYPES = [
+  "STATUS_SET",
+  "JSON_MERGE",
+  "CHILD_SERVICE_OBJECT_CREATE",
+  "INSTANCE_START",
+  "ACCESS_GRANT_CREATE",
   "VARIANT_INVENTORY_VALIDATE"
 ];
 
@@ -289,7 +330,10 @@ async function assertProcessEngineSourceSupport() {
 }
 
 async function assertSeedProcessAlignment() {
-  const processText = await fs.readFile(path.join(seedDir, "template_ecom_process.sql"), "utf8");
+  const processText = [
+    await fs.readFile(path.join(seedDir, "template_ecom_process.sql"), "utf8"),
+    await fs.readFile(path.join(seedDir, "template_ecom_canonical_v1.sql"), "utf8")
+  ].join("\n");
   const uiText = await fs.readFile(path.join(seedDir, "ui_surface_dashboard.sql"), "utf8");
 
   const processActions = collectMatches(processText, /"action"\s*:\s*"([^"]+)"/g);
@@ -360,6 +404,7 @@ async function stageTemplateTenant(client) {
   await executeSqlFile(client, "tenant_template_ecom.sql");
   await executeSqlFile(client, "jurisdiction_iso_seed.sql");
   await executeSqlFile(client, "template_ecom_process.sql");
+  await executeSqlFile(client, "template_ecom_canonical_v1.sql");
 
   const templateCount = await tableCount(
     client,
@@ -379,19 +424,72 @@ async function stageTemplateTenant(client) {
       AND pd.code = ANY($1::text[])
       AND pd.is_active = true
     `,
-    [[
-      "ECOM_PRODUCT_ONBOARDING",
-      "ECOM_SALES_ORDER_FLOW",
-      "ECOM_RETURN_FLOW",
-      "ECOM_REFUND_FLOW",
-      "ECOM_PAYMENT_FLOW"
-    ]]
+    [TEMPLATE_PROCESS_CODES]
   );
-  if (processCount < 5) {
+  if (processCount < TEMPLATE_PROCESS_CODES.length) {
     throw new Error("Template tenant is missing one or more ecommerce process definitions");
   }
 
-  console.log("Verified eip_ecom template tenant and ecommerce process definitions");
+  const bindingCount = await tableCount(
+    client,
+    `
+    SELECT count(DISTINCT pb.service_object_type)::int AS count
+    FROM eip_core.process_binding pb
+    JOIN eip_core.tenant t ON t.id = pb.tenant_id
+    JOIN eip_core.process_def pd ON pd.id = pb.process_def_id
+    WHERE t.code = 'eip_ecom'
+      AND pb.service_object_type = ANY($1::text[])
+      AND pb.is_active = true
+      AND pd.is_active = true
+    `,
+    [TEMPLATE_BINDING_TYPES]
+  );
+  if (bindingCount < TEMPLATE_BINDING_TYPES.length) {
+    throw new Error("Template tenant is missing one or more ecommerce process bindings");
+  }
+
+  const taskCount = await tableCount(
+    client,
+    `
+    SELECT count(DISTINCT tt.task_type)::int AS count
+    FROM eip_core.task_template tt
+    JOIN eip_core.tenant t ON t.id = tt.tenant_id
+    JOIN eip_core.process_def pd ON pd.id = tt.process_def_id
+    WHERE t.code = 'eip_ecom'
+      AND tt.task_type = ANY($1::text[])
+      AND tt.is_active = true
+      AND pd.is_active = true
+    `,
+    [TEMPLATE_TASK_TYPES]
+  );
+  if (taskCount < TEMPLATE_TASK_TYPES.length) {
+    throw new Error("Template tenant is missing one or more ecommerce task templates");
+  }
+
+  const effectCount = await tableCount(
+    client,
+    `
+    SELECT count(DISTINCT dv.code)::int AS count
+    FROM eip_core.tenant t
+    JOIN eip_core.dropdown_list dl
+      ON dl.tenant_id = t.id
+     AND dl.module = 'core'
+     AND dl.code = 'PROCESS_EFFECT_TYPE'
+     AND dl.version = 1
+     AND dl.is_active = true
+    JOIN eip_core.dropdown_value dv
+      ON dv.list_id = dl.id
+     AND dv.is_active = true
+    WHERE t.code = 'eip_ecom'
+      AND dv.code = ANY($1::text[])
+    `,
+    [TEMPLATE_EFFECT_TYPES]
+  );
+  if (effectCount < TEMPLATE_EFFECT_TYPES.length) {
+    throw new Error("Template tenant is missing one or more governed ecommerce effect types");
+  }
+
+  console.log("Verified eip_ecom canonical template tenant, processes, bindings, tasks, and effect governance");
 }
 
 async function stageSamara(client) {

@@ -8,7 +8,7 @@ The controlled reseed path is intentionally narrow:
 2. Seed the first owner admin from explicit env vars.
 3. Seed global UI surfaces only when missing.
 4. Verify process/effect taxonomy, including child service object creation support.
-5. Seed the ecommerce template tenant and template process metadata.
+5. Seed the ecommerce template tenant and canonical clone-ready process metadata.
 6. Seed Samara connection metadata through the current `tenant.attrs.connection_profiles` storage model.
 
 Do not blindly execute every SQL file in this repo. Some files are generators, stale support seeds, demo samples, clone scripts with hardcoded tenant codes, or one-off backfills.
@@ -33,7 +33,7 @@ SAMARA_TENANT_CODE="t_ed6019735b2f" SAMARA_FRONTEND_URL="https://your-samara-dom
 | `owner-admin` | Runs `services/api/scripts/seed_first_admin.mjs` with `OWNER_TENANT_CODE`, `OWNER_TENANT_NAME`, `OWNER_ADMIN_EMAIL`, `OWNER_ADMIN_PASSWORD`, and optional `OWNER_ADMIN_NAME` / `OWNER_ADMIN_RESET_PASSWORD=true`. It creates or resolves the live owner/admin tenant and grants `ADMIN_SUPER` there. | Safe auto-run when env vars are supplied. |
 | `ui-surfaces` | Applies `ui_surface_admin.sql` and `ui_surface_dashboard.sql` only if a published global surface for that code is missing. | Safe auto-run with guards. |
 | `process-engine` | Verifies process tables, governed effect taxonomy, child service object effect support, and static UI/process action alignment using API-local files. | Safe verification only. |
-| `template-tenant` | Applies `tenant_template_ecom.sql`, `jurisdiction_iso_seed.sql`, and `template_ecom_process.sql`. | Safe auto-run/idempotent. |
+| `template-tenant` | Applies `tenant_template_ecom.sql`, `jurisdiction_iso_seed.sql`, `template_ecom_process.sql`, and `template_ecom_canonical_v1.sql`, then verifies canonical processes, bindings, task templates, and template-scoped effect governance. | Safe auto-run/idempotent. |
 | `samara` | Upserts a Samara gateway profile into `eip_core.tenant.attrs.connection_profiles`. | Conditional auto-run, requires tenant and production connection env vars. |
 
 ## Category Legend
@@ -51,9 +51,10 @@ SAMARA_TENANT_CODE="t_ed6019735b2f" SAMARA_FRONTEND_URL="https://your-samara-dom
 | Path | Purpose | Category | Dependencies | Owner admin | Process/effect engine | Template tenant | Samara |
 |---|---|---|---|---|---|---|---|
 | `services/api/scripts/seed_first_admin.mjs` | Creates or repairs the definitive live owner/admin tenant, admin agent, auth identity, password credential, identity-agent link, user profile, and `ADMIN_SUPER` role/grant. The same email can be seeded in other tenants because identities remain tenant-scoped. | safe auto-run | Migrated auth/authz tables, `OWNER_TENANT_CODE`, `OWNER_TENANT_NAME`, `OWNER_ADMIN_EMAIL`, `OWNER_ADMIN_PASSWORD`; optional `OWNER_ADMIN_NAME`, `OWNER_ADMIN_RESET_PASSWORD=true`. | Yes | No | No | No |
-| `services/api/db/seed/tenant_template_ecom.sql` | Creates template tenant `eip_ecom`. | safe auto-run | `eip_core.tenant`. | No | No | Yes | Indirect |
+| `services/api/db/seed/tenant_template_ecom.sql` | Creates or refreshes template tenant `eip_ecom` and marks it as the canonical V1 clone source. | safe auto-run | `eip_core.tenant`. | No | No | Yes | Indirect |
 | `services/api/db/seed/jurisdiction_iso_seed.sql` | Seeds global ISO country jurisdictions generated from public country/timezone sources. | safe auto-run | `eip_core.jurisdiction`, migration `0052`. | No | No | Yes | Indirect |
 | `services/api/db/seed/template_ecom_process.sql` | Seeds ecommerce template process actions, process definitions, task templates, and process bindings for `eip_ecom`. Includes product, order, return, refund, and payment flows. | safe auto-run | `eip_ecom` tenant, process/task/binding tables, governed dropdowns. | No | Yes | Yes | Indirect |
+| `services/api/db/seed/template_ecom_canonical_v1.sql` | Rebuilds the definitive V1 `eip_ecom` template baseline after the base seed. It upserts canonical product, sales order, payment, return, refund, and storefront content processes; task templates; process bindings; and template-scoped effect governance, including child service object creation for order return/refund requests. | safe auto-run | `eip_ecom` tenant, process/task/binding tables, dropdown governance, migrated effect handlers. | No | Yes | Yes | Indirect |
 | `services/api/db/seed/ui_surface_admin.sql` | Seeds published global Admin UI surface. File itself increments versions on each run, so the runner guards it. | safe auto-run with guard | `eip_core.ui_surface`, migration `0046`. | Yes | Yes | No | No |
 | `services/api/db/seed/ui_surface_dashboard.sql` | Seeds published global Dashboard UI surface. File itself increments versions on each run, so the runner guards it. | safe auto-run with guard | `eip_core.ui_surface`, migration `0046`. | Yes | Yes | No | No |
 | `services/api/db/seed/clone_template_to_tenant.sql` | Clones template tenant config into a target tenant. Hardcodes `source_code='eip_ecom'` and `target_code='t_ed6019735b2f'`. | conditional/manual | Confirm target tenant, source template, and business approval before running. | No | Yes | Yes | Yes |
@@ -182,5 +183,5 @@ These files are owned by `npm run migrate`. They should not be rerun independent
 ## Notes
 
 - `connection_profile_samara.sql` is intentionally not part of the runner because it targets a table that current migrations do not create.
-- Child service object creation is represented in the process effect taxonomy through `CHILD_SERVICE_OBJECT_CREATE` and in the API process engine source. No current seed process graph uses that effect directly.
+- Child service object creation is represented in the process effect taxonomy, the API process engine source, and the canonical order process through `ORDER_RETURN_REQUEST` / `ORDER_REFUND_REQUEST`.
 - Effect transition coverage is restored by the migration chain and checked by the API-local `process-engine` stage before template tenant reseeding.

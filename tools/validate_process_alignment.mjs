@@ -3,6 +3,7 @@ import path from "node:path";
 
 const root = path.resolve(process.cwd());
 const processFile = path.join(root, "services", "api", "db", "seed", "template_ecom_process.sql");
+const canonicalProcessFile = path.join(root, "services", "api", "db", "seed", "template_ecom_canonical_v1.sql");
 const uiFile = path.join(root, "services", "api", "db", "seed", "ui_surface_dashboard.sql");
 
 function readFileSafe(filePath) {
@@ -21,7 +22,7 @@ function collectMatches(text, regex) {
   return out;
 }
 
-const processText = readFileSafe(processFile);
+const processText = [readFileSafe(processFile), readFileSafe(canonicalProcessFile)].join("\n");
 const uiText = readFileSafe(uiFile);
 
 const processActions = collectMatches(processText, /"action"\s*:\s*"([^"]+)"/g);
