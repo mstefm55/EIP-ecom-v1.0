@@ -407,8 +407,14 @@ export default async function gatewayRoutes(app) {
       if (!headerName) return reply.code(400).send({ ok: false, error: "JWT_HEADER_REQUIRED" });
       const tokenPrefix = String(profile.verification.oauth2_jwt?.token_prefix || "").trim();
       if (profile.verification.oauth2_jwt?.secret) {
+        const nowSec = Math.floor(Date.now() / 1000);
         const token = buildJwtHs256(
-          { iss: profile.verification.oauth2_jwt?.issuer, aud: profile.verification.oauth2_jwt?.audience },
+          {
+            iss: profile.verification.oauth2_jwt?.issuer,
+            aud: profile.verification.oauth2_jwt?.audience,
+            iat: nowSec,
+            exp: nowSec + 300
+          },
           profile.verification.oauth2_jwt.secret
         );
         headers[headerName] = tokenPrefix ? `${tokenPrefix} ${token}` : token;

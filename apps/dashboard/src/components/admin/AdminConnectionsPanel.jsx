@@ -494,10 +494,9 @@ function validateProfile(profile) {
   }
   if (
     profile.verification.mode === "none" &&
-    profile.identity.environment !== "sandbox" &&
-    profile.verification.allow_unverified !== true
+    profile.identity.environment !== "sandbox"
   ) {
-    errors.push("Verification is required for production (enable allow unverified to override)");
+    errors.push("Verification is required for production connections");
   }
 
   if (!profile.idempotency.event_id_location) errors.push("Idempotency location is required");
@@ -1578,7 +1577,7 @@ export default function AdminConnectionsPanel() {
                     checked={selectedConnection.verification.allow_unverified}
                     onChange={(event) => updateSection("verification", { allow_unverified: event.target.checked })}
                   />
-                  Allow unverified (production override)
+                  Allow unverified (sandbox only)
                 </label>
 
                 {selectedConnection.verification.mode === "api_key" ? (

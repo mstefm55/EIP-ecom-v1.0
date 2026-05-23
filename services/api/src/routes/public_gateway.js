@@ -1,29 +1,22 @@
 // services/api/src/routes/public_gateway.js
-import crypto from "node:crypto";
-import { sha256Hex, timingSafeEqual } from "../auth/crypto.js";
+import { sha256Hex } from "../auth/crypto.js";
 import { handlePublicIntake } from "../services/gateway/intake.js";
 import { resolveTenantByCode } from "../services/gateway/tenantResolve.js";
 import { registerRawBody, parseJsonBody } from "../services/gateway/rawBody.js";
 import { insertGatewayAudit } from "../services/gateway/audit.js";
 import { buildRequestHash, ensureIdempotency, finalizeIdempotency } from "../services/gateway/idempotency.js";
 import { extractProfiles } from "../services/gateway/connectionProfile.js";
+import { connectionAllowsOrigin, extractEventId, verifyConnectionRequest } from "../services/gateway/verification.js";
 import { LRUCache } from "lru-cache";
 
 const INTAKE_RATE_LIMIT = { max: 30, timeWindow: "1 minute" };
 const INTAKE_BODY_LIMIT = 64 * 1024;
 const BOOTSTRAP_BODY_LIMIT = 256 * 1024;
 const INBOUND_BODY_LIMIT = 512 * 1024;
-const JWKS_CACHE = new Map();
-const JWKS_TTL_MS = 10 * 60 * 1000;
 const INBOUND_RATE_CACHE = new LRUCache({ max: 20000 });
 
 function normalizeText(value) {
   return String(value || "").trim();
-}
-
-function normalizeOrigin(origin) {
-  if (!origin) return "";
-  return origin.trim().toLowerCase();
 }
 
 function applyCors(reply, origin, requestHeaders) {
@@ -49,123 +42,6 @@ function isUuid(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value || "");
 }
 
-function getHeader(req, name) {
-  if (!name) return "";
-  const key = String(name).toLowerCase();
-  return String(req.headers?.[key] || "").trim();
-}
-
-function getBodyPath(body, path) {
-  if (!body || !path) return null;
-  return path.split(".").reduce((acc, key) => (acc ? acc[key] : undefined), body);
-}
-
-function base64UrlDecode(value) {
-  const padded = value.replace(/-/g, "+").replace(/_/g, "/") + "==".slice(0, (4 - (value.length % 4)) % 4);
-  return Buffer.from(padded, "base64");
-}
-
-function decodeJwt(token) {
-  const parts = String(token || "").split(".");
-  if (parts.length !== 3) return null;
-  const [headerB64, payloadB64, signatureB64] = parts;
-  const header = JSON.parse(base64UrlDecode(headerB64).toString("utf8"));
-  const payload = JSON.parse(base64UrlDecode(payloadB64).toString("utf8"));
-  return {
-    header,
-    payload,
-    signature: signatureB64,
-    data: `${headerB64}.${payloadB64}`
-  };
-}
-
-function normalizeEpochSeconds(value) {
-  if (value === null || value === undefined) return null;
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value > 1e12 ? Math.floor(value / 1000) : Math.floor(value);
-  }
-  const raw = String(value).trim();
-  if (!raw) return null;
-  if (/^\d+$/.test(raw)) {
-    const n = Number(raw);
-    return n > 1e12 ? Math.floor(n / 1000) : Math.floor(n);
-  }
-  const parsed = Date.parse(raw);
-  if (Number.isNaN(parsed)) return null;
-  return Math.floor(parsed / 1000);
-}
-
-async function fetchJwks(url) {
-  const cached = JWKS_CACHE.get(url);
-  if (cached && cached.expires > Date.now()) return cached.keys;
-  const response = await fetch(url, { method: "GET" });
-  if (!response.ok) throw new Error("JWKS_FETCH_FAILED");
-  const data = await response.json();
-  const keys = Array.isArray(data.keys) ? data.keys : [];
-  JWKS_CACHE.set(url, { keys, expires: Date.now() + JWKS_TTL_MS });
-  return keys;
-}
-
-async function verifyJwtSignature(token, config) {
-  const decoded = decodeJwt(token);
-  if (!decoded) return false;
-  const { header, payload, signature, data } = decoded;
-
-  if (config.issuer && payload.iss !== config.issuer) return false;
-  if (config.audience) {
-    const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
-    if (!aud.includes(config.audience)) return false;
-  }
-
-  const nowSec = Math.floor(Date.now() / 1000);
-  const skewSec = Number.isFinite(Number(config.max_skew_sec))
-    ? Number(config.max_skew_sec)
-    : 300;
-  const exp = normalizeEpochSeconds(payload.exp);
-  if (exp && nowSec > exp + skewSec) return false;
-  const nbf = normalizeEpochSeconds(payload.nbf);
-  if (nbf && nowSec + skewSec < nbf) return false;
-  const iat = normalizeEpochSeconds(payload.iat);
-  if (Number.isFinite(Number(config.max_age_sec)) && iat) {
-    if (nowSec - iat > Number(config.max_age_sec)) return false;
-  }
-
-  const alg = String(header.alg || "").toUpperCase();
-  if (alg === "HS256") {
-    const secret = config.secret || "";
-    if (!secret) return false;
-    const expected = crypto
-      .createHmac("sha256", secret)
-      .update(data)
-      .digest("base64url");
-    return timingSafeEqual(signature, expected);
-  }
-
-  if (alg === "RS256") {
-    if (!config.jwks_url) return false;
-    const keys = await fetchJwks(config.jwks_url);
-    const jwk = keys.find((item) => item.kid === header.kid) || keys[0];
-    if (!jwk) return false;
-    const key = crypto.createPublicKey({ key: jwk, format: "jwk" });
-    const sig = base64UrlDecode(signature);
-    return crypto.verify("RSA-SHA256", Buffer.from(data), key, sig);
-  }
-
-  return false;
-}
-
-function buildHmacSignature(config, rawBody) {
-  const algorithm = String(config.algorithm || "sha256").toLowerCase();
-  const encoding = String(config.encoding || "hex").toLowerCase();
-  const payloadMode = String(config.payload_mode || "raw").toLowerCase();
-  let payload = rawBody;
-  if (payloadMode === "timestamp_sha256") {
-    const timestamp = normalizeText(config.timestamp || "");
-    payload = `${timestamp}\n${crypto.createHash("sha256").update(rawBody).digest("hex")}`;
-  }
-  return crypto.createHmac(algorithm, config.secret).update(payload).digest(encoding);
-}
-
 function applyRedaction(payload, policy) {
   if (!policy || !payload) return payload;
   const redactPaths = Array.isArray(policy.paths) ? policy.paths : [];
@@ -180,26 +56,6 @@ function applyRedaction(payload, policy) {
     }
   }
   return clone;
-}
-
-function connectionAllowsOrigin(profile, origin) {
-  const allowlist = Array.isArray(profile?.inbound?.origin_allowlist)
-    ? profile.inbound.origin_allowlist
-    : [];
-  if (!allowlist.length) {
-    return profile?.identity?.environment === "sandbox";
-  }
-  if (!origin) {
-    return allowlist.some((entry) => {
-      const normalized = normalizeOrigin(entry);
-      return normalized === "no-origin" || normalized === "server";
-    });
-  }
-  const normalized = normalizeOrigin(origin);
-  return allowlist.some((entry) => {
-    const allowed = normalizeOrigin(entry);
-    return allowed === "*" || allowed === normalized;
-  });
 }
 
 function connectionAllowsIp(profile, ip) {
@@ -327,89 +183,6 @@ async function resolveTenantBySuffix(app, suffix) {
   return { tenant, profile, profiles };
 }
 
-async function verifyInboundRequest(req, profile, rawBody) {
-  const verification = profile?.verification || {};
-  if (verification.mode === "none") {
-    if (verification.allow_unverified === true || profile?.identity?.environment === "sandbox") {
-      return { ok: true };
-    }
-    return { ok: false, error: "VERIFICATION_REQUIRED" };
-  }
-
-  if (verification.mode === "api_key") {
-    const headerName = verification.api_key?.header_name;
-    const provided = getHeader(req, headerName);
-    const expected = normalizeText(verification.api_key?.secret);
-    if (!headerName || !expected) return { ok: false, error: "MISSING_API_KEY_CONFIG" };
-    if (!timingSafeEqual(provided, expected)) {
-      return { ok: false, error: "INVALID_API_KEY" };
-    }
-    return { ok: true };
-  }
-
-  if (verification.mode === "hmac_signature") {
-    const config = verification.hmac_signature || {};
-    const headerName = normalizeText(config.header_name);
-    const expected = getHeader(req, headerName);
-    if (!headerName || !expected) return { ok: false, error: "SIGNATURE_HEADER_MISSING" };
-    if (!normalizeText(config.secret)) return { ok: false, error: "SIGNATURE_SECRET_MISSING" };
-    if (config.timestamp_header) {
-      const tsHeader = normalizeText(config.timestamp_header);
-      const rawTs = getHeader(req, tsHeader);
-      if (!rawTs) return { ok: false, error: "SIGNATURE_TIMESTAMP_MISSING" };
-      const ts = normalizeEpochSeconds(rawTs);
-      if (!ts) return { ok: false, error: "SIGNATURE_TIMESTAMP_INVALID" };
-      const maxSkew = Number.isFinite(Number(config.max_skew_sec))
-        ? Number(config.max_skew_sec)
-        : 300;
-      const nowSec = Math.floor(Date.now() / 1000);
-      if (Math.abs(nowSec - ts) > maxSkew) {
-        return { ok: false, error: "SIGNATURE_TIMESTAMP_EXPIRED" };
-      }
-      config.timestamp = String(ts);
-    }
-    const computed = buildHmacSignature(config, rawBody);
-    if (!timingSafeEqual(expected, computed)) return { ok: false, error: "SIGNATURE_MISMATCH" };
-    return { ok: true };
-  }
-
-  if (verification.mode === "oauth2_jwt") {
-    const config = verification.oauth2_jwt || {};
-    const headerName = normalizeText(config.header_name);
-    const headerValue = getHeader(req, headerName);
-    if (!headerName || !headerValue) return { ok: false, error: "JWT_HEADER_MISSING" };
-    const tokenPrefix = normalizeText(config.token_prefix || "");
-    const token =
-      tokenPrefix && headerValue.startsWith(tokenPrefix)
-        ? headerValue.slice(tokenPrefix.length).trim()
-        : headerValue;
-    const ok = await verifyJwtSignature(token, {
-      issuer: config.issuer,
-      audience: config.audience,
-      jwks_url: config.jwks_url,
-      secret: config.secret
-    });
-    if (!ok) return { ok: false, error: "JWT_INVALID" };
-    return { ok: true };
-  }
-
-  return { ok: false, error: "VERIFICATION_MODE_UNSUPPORTED" };
-}
-
-function extractEventId(req, body, profile) {
-  const idem = profile?.idempotency || {};
-  const location = normalizeText(idem.event_id_location).toLowerCase();
-  const key = normalizeText(idem.event_id_key);
-  if (!location || !key) return null;
-  if (location === "header") {
-    return getHeader(req, key);
-  }
-  if (location === "body") {
-    return normalizeText(getBodyPath(body, key));
-  }
-  return null;
-}
-
 async function handleInbound(app, req, reply, opts) {
   const { suffix, channel } = opts;
   const resolved = await resolveTenantBySuffix(app, suffix);
@@ -455,7 +228,7 @@ async function handleInbound(app, req, reply, opts) {
     return reply.code(413).send({ ok: false, error: "PAYLOAD_TOO_LARGE" });
   }
 
-  const verify = await verifyInboundRequest(req, profile, rawBody);
+  const verify = await verifyConnectionRequest(req, profile, rawBody);
   if (!verify.ok) return reply.code(401).send({ ok: false, error: verify.error });
 
   let body = {};

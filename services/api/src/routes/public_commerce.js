@@ -11,6 +11,7 @@ import { randomToken, sha256Hex, timingSafeEqual } from "../auth/crypto.js";
 import { buildRequestHash, ensureIdempotency, finalizeIdempotency } from "../services/gateway/idempotency.js";
 import { extractProfiles } from "../services/gateway/connectionProfile.js";
 import { registerRawBody, parseJsonBody } from "../services/gateway/rawBody.js";
+import { connectionAllowsOrigin, extractEventId, verifyConnectionRequest } from "../services/gateway/verification.js";
 import { isTenantAssetPath, toLocalAssetPath } from "../services/assets/url_policy.js";
 import { sendEmail } from "../lib/email.js";
 import { safeUploadTarget, uploadPartToBuffer, validateImageUpload } from "../lib/uploadSecurity.js";
@@ -18,8 +19,6 @@ import { resolveMarketplaceFxContext } from "../services/fx/marketFxSync.js";
 
 const RATE_LIMIT = { max: 120, timeWindow: "1 minute" };
 const MAX_BODY = 512 * 1024;
-const JWKS_CACHE = new Map();
-const JWKS_TTL_MS = 10 * 60 * 1000;
 const PRODUCT_REVIEW_OBJECT_TYPE = "product_review";
 const BLOG_POST_OBJECT_TYPE = "blog_post";
 const REVIEW_VISIBLE_STATUSES = new Set(["approved", "published", "visible"]);
@@ -345,11 +344,6 @@ function normalizePaymentSettings(input, fallback = DEFAULT_PAYMENT_SETTINGS) {
   };
 }
 
-function normalizeOrigin(origin) {
-  if (!origin) return "";
-  return origin.trim().toLowerCase();
-}
-
 function signAssetUrl(url, app, tenantId) {
   const localPath = toLocalAssetPath(url);
   if (!localPath) return url;
@@ -416,27 +410,6 @@ function applyCors(reply, origin, requestHeaders) {
     requestHeaders || "Content-Type, X-API-Key, Authorization, X-Event-Id, X-Member-Csrf"
   );
   reply.header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
-}
-
-function getHeader(req, name) {
-  if (!name) return "";
-  const key = String(name).toLowerCase();
-  return String(req.headers?.[key] || "").trim();
-}
-
-function getBodyPath(body, path) {
-  if (!body || !path) return null;
-  return path.split(".").reduce((acc, key) => (acc ? acc[key] : undefined), body);
-}
-
-function connectionAllowsOrigin(profile, origin) {
-  const allowlist = Array.isArray(profile?.inbound?.origin_allowlist)
-    ? profile.inbound.origin_allowlist
-    : [];
-  if (!allowlist.length) return true;
-  if (!origin) return false;
-  const normalized = normalizeOrigin(origin);
-  return allowlist.some((entry) => normalizeOrigin(entry) === normalized || entry === "*");
 }
 
 function connectionAllowsIp(profile, ip) {
@@ -574,146 +547,6 @@ async function resolveTenantBySuffix(app, suffix) {
   const profiles = extractProfiles(tenant.attrs);
   const profile = profiles.find((item) => item?.inbound?.inbound_path_suffix === suffix);
   return { tenant, profile, profiles };
-}
-
-function base64UrlDecode(value) {
-  const padded = value.replace(/-/g, "+").replace(/_/g, "/") + "==".slice(0, (4 - (value.length % 4)) % 4);
-  return Buffer.from(padded, "base64");
-}
-
-function decodeJwt(token) {
-  const parts = String(token || "").split(".");
-  if (parts.length !== 3) return null;
-  const [headerB64, payloadB64, signatureB64] = parts;
-  const header = JSON.parse(base64UrlDecode(headerB64).toString("utf8"));
-  const payload = JSON.parse(base64UrlDecode(payloadB64).toString("utf8"));
-  return {
-    header,
-    payload,
-    signature: signatureB64,
-    data: `${headerB64}.${payloadB64}`
-  };
-}
-
-async function fetchJwks(url) {
-  const cached = JWKS_CACHE.get(url);
-  if (cached && cached.expires > Date.now()) return cached.keys;
-  const response = await fetch(url, { method: "GET" });
-  if (!response.ok) throw new Error("JWKS_FETCH_FAILED");
-  const data = await response.json();
-  const keys = Array.isArray(data.keys) ? data.keys : [];
-  JWKS_CACHE.set(url, { keys, expires: Date.now() + JWKS_TTL_MS });
-  return keys;
-}
-
-async function verifyJwtSignature(token, config) {
-  const decoded = decodeJwt(token);
-  if (!decoded) return false;
-  const { header, payload, signature, data } = decoded;
-
-  if (config.issuer && payload.iss !== config.issuer) return false;
-  if (config.audience) {
-    const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
-    if (!aud.includes(config.audience)) return false;
-  }
-
-  const alg = String(header.alg || "").toUpperCase();
-  if (alg === "HS256") {
-    const secret = config.secret || "";
-    if (!secret) return false;
-    const expected = crypto
-      .createHmac("sha256", secret)
-      .update(data)
-      .digest("base64url");
-    return timingSafeEqual(signature, expected);
-  }
-
-  if (alg === "RS256") {
-    if (!config.jwks_url) return false;
-    const keys = await fetchJwks(config.jwks_url);
-    const jwk = keys.find((item) => item.kid === header.kid) || keys[0];
-    if (!jwk) return false;
-    const key = crypto.createPublicKey({ key: jwk, format: "jwk" });
-    const sig = base64UrlDecode(signature);
-    return crypto.verify("RSA-SHA256", Buffer.from(data), key, sig);
-  }
-
-  return false;
-}
-
-function buildHmacSignature(config, rawBody) {
-  const algorithm = String(config.algorithm || "sha256").toLowerCase();
-  const encoding = String(config.encoding || "hex").toLowerCase();
-  const payloadMode = String(config.payload_mode || "raw").toLowerCase();
-  let payload = rawBody;
-  if (payloadMode === "timestamp_sha256") {
-    const timestamp = normalizeText(config.timestamp || "");
-    payload = `${timestamp}\n${crypto.createHash("sha256").update(rawBody).digest("hex")}`;
-  }
-  return crypto.createHmac(algorithm, config.secret).update(payload).digest(encoding);
-}
-
-async function verifyInboundRequest(req, profile, rawBody) {
-  const verification = profile?.verification || {};
-  if (verification.mode === "none") return { ok: true };
-
-  if (verification.mode === "api_key") {
-    const headerName = verification.api_key?.header_name;
-    const provided = getHeader(req, headerName);
-    const expected = normalizeText(verification.api_key?.secret);
-    if (!headerName || !expected) return { ok: false, error: "MISSING_API_KEY_CONFIG" };
-    if (!timingSafeEqual(provided, expected)) {
-      return { ok: false, error: "INVALID_API_KEY" };
-    }
-    return { ok: true };
-  }
-
-  if (verification.mode === "hmac_signature") {
-    const config = verification.hmac_signature || {};
-    const headerName = normalizeText(config.header_name);
-    const expected = getHeader(req, headerName);
-    if (!headerName || !expected) return { ok: false, error: "SIGNATURE_HEADER_MISSING" };
-    if (!normalizeText(config.secret)) return { ok: false, error: "SIGNATURE_SECRET_MISSING" };
-    const computed = buildHmacSignature(config, rawBody);
-    if (!timingSafeEqual(expected, computed)) return { ok: false, error: "SIGNATURE_MISMATCH" };
-    return { ok: true };
-  }
-
-  if (verification.mode === "oauth2_jwt") {
-    const config = verification.oauth2_jwt || {};
-    const headerName = normalizeText(config.header_name);
-    const headerValue = getHeader(req, headerName);
-    if (!headerName || !headerValue) return { ok: false, error: "JWT_HEADER_MISSING" };
-    const tokenPrefix = normalizeText(config.token_prefix || "");
-    const token =
-      tokenPrefix && headerValue.startsWith(tokenPrefix)
-        ? headerValue.slice(tokenPrefix.length).trim()
-        : headerValue;
-    const ok = await verifyJwtSignature(token, {
-      issuer: config.issuer,
-      audience: config.audience,
-      jwks_url: config.jwks_url,
-      secret: config.secret
-    });
-    if (!ok) return { ok: false, error: "JWT_INVALID" };
-    return { ok: true };
-  }
-
-  return { ok: false, error: "VERIFICATION_MODE_UNSUPPORTED" };
-}
-
-function extractEventId(req, body, profile) {
-  const idem = profile?.idempotency || {};
-  const location = normalizeText(idem.event_id_location).toLowerCase();
-  const key = normalizeText(idem.event_id_key);
-  if (!location || !key) return null;
-  if (location === "header") {
-    return getHeader(req, key);
-  }
-  if (location === "body") {
-    return normalizeText(getBodyPath(body, key));
-  }
-  return null;
 }
 
 function normalizeScopeArray(value) {
@@ -1978,7 +1811,7 @@ export default async function publicCommerceRoutes(app) {
     // A profile-wide method gate caused valid member actions (e.g. blog delete) to fail
     // with METHOD_NOT_ALLOWED expected POST.
 
-    const verify = await verifyInboundRequest(req, profile, rawBody);
+    const verify = await verifyConnectionRequest(req, profile, rawBody);
     if (!verify.ok) {
       reply.code(401).send({ ok: false, error: verify.error });
       return null;

@@ -309,10 +309,9 @@ function validateProfile(profile) {
     }
     if (
       verification.mode === "none" &&
-      identity.environment !== "sandbox" &&
-      verification.allow_unverified !== true
+      identity.environment !== "sandbox"
     ) {
-      errors.push(`${id}: verification required for production (set allow_unverified to override)`);
+      errors.push(`${id}: verification required for production`);
     }
     if (verification.mode === "api_key") {
       if (!normalizeText(verification.api_key?.header_name)) {

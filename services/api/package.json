@@ -6,6 +6,8 @@
   "main": "src/server.js",
   "scripts": {
     "dev": "nodemon src/server.js",
+    "test": "node --test",
+    "test:gateway-verification": "node --test test/gateway_verification.test.mjs test/public_gateway_runtime.test.mjs",
     "migrate": "node scripts/migrate.mjs",
     "reseed:post-migration": "node scripts/reseed_post_migration.mjs",
     "seed:first-admin": "node scripts/seed_first_admin.mjs",
