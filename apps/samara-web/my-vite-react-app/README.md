@@ -1,18 +1,32 @@
-# React + Vite
+# Samara Vite Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Samara is deployed as an external storefront connected to EIP through the public gateway/connection contract. It is not an internal EIP dashboard surface and should not call `/api/eip/*`.
 
-Currently, two official plugins are available:
+## Local commands
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+```bash
+npm ci
+npm run build
+```
 
-## React Compiler
+## Railway
 
-The React Compiler is enabled on this template. See [this documentation](https://react.dev/learn/react-compiler) for more information.
+```text
+Root directory: apps/samara-web/my-vite-react-app
+Install command: npm ci
+Build command: npm run build
+Output directory: dist
+```
 
-Note: This will impact Vite dev & build performances.
+## EIP Connection
 
-## Expanding the ESLint configuration
+Use values created through EIP Admin > Connections:
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+- `VITE_EIP_GATEWAY_BASE_URL`
+- `VITE_EIP_SUFFIX`
+- `VITE_EIP_CONNECTION_CODE`
+- `VITE_EIP_EVENT_ID_HEADER`
+- optional `VITE_EIP_GATEWAY_API_KEY` for bootstrap/manifest
+- optional `VITE_EIP_COMMERCE_VERIFICATION_KEY` only if the browser-facing connection profile requires it
+
+Samara's deployed origin belongs in API `CORS_ORIGIN_PUBLIC` and in the connection profile `origin_allowlist`, not in internal dashboard `CORS_ORIGIN`.

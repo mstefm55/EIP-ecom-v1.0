@@ -1,6 +1,8 @@
-# Samara V1 UI Onboarding And Frontend Deployment
+# Samara V1 External Gateway Onboarding And Frontend Deployment
 
 This is the operational path for connecting the real Samara Vite frontend to EIP V1. Samara must be created and connected through the product UI, not through DB seed/reseed helpers.
+
+Samara is an external storefront, not an internal EIP dashboard surface. It must not call `/api/eip/*`, must not depend on owner/admin dashboard cookies, and must not be added as a dashboard CORS origin. EIP feeds Samara through public/gateway read contracts, and Samara feeds EIP through connection-profile governed public commerce and gateway intake contracts.
 
 ## Source Of Truth
 
@@ -9,7 +11,9 @@ This is the operational path for connecting the real Samara Vite frontend to EIP
 - Bootstrap: existing bootstrap token flow under `/api/eip/bootstrap/*`.
 - Template clone: Admin Console > Templates, backed by `POST /api/eip/admin/template-clone`.
 - Connection setup: Admin Console > Connections, backed by `POST /api/eip/gateway/connections/:tenantId/profile`.
-- Public storefront reads/writes: Samara frontend calls `/api/public/commerce/:suffix/...`.
+- Public storefront reads/feed: Samara calls `/api/public/commerce/:suffix/...`.
+- Public gateway bootstrap/manifest: Samara may call `/api/public/gateway/bootstrap` and `/api/public/gateway/manifest/...` when an Admin-created gateway API key is configured.
+- External intake: Samara or a Samara-side server may send events to `/api/public/gateway/intake/:suffix` using the profile's verification and idempotency settings.
 
 ## Operational Sequence
 
@@ -48,10 +52,10 @@ This is the operational path for connecting the real Samara Vite frontend to EIP
      - Expected content type: `application/json`
      - Origin allowlist: the exact Samara frontend origin, for example `https://samara.example.com`
    - Set Security:
-     - Use API key verification for production unless a different approved mode is intentionally selected.
-     - Header name should match `VITE_EIP_PUBLIC_API_KEY_HEADER`, normally `X-API-Key`.
-     - Secret should match `VITE_EIP_PUBLIC_API_KEY`.
-     - For `/api/public/commerce/:suffix`, the frontend key is the connection profile API key secret. Do not substitute a DB seed value.
+     - For browser storefront reads and browser-origin commerce writes, prefer exact origin allowlisting, rate limits, idempotency, and member CSRF where applicable.
+     - If the profile uses API-key verification for browser-facing public commerce, deploy that browser-facing value as `VITE_EIP_COMMERCE_VERIFICATION_KEY` and the matching header as `VITE_EIP_COMMERCE_VERIFICATION_HEADER`.
+     - Do not put HMAC/shared-signature secrets in the Vite frontend. Use a Samara-side server/edge function for HMAC or other true shared-secret signing.
+     - Admin > Connections > API keys are separate from profile verification. A created API key may be deployed as `VITE_EIP_GATEWAY_API_KEY` for bootstrap/manifest checks.
    - Set Idempotency:
      - Location: `header`
      - Key: `X-Event-Id`
@@ -67,7 +71,7 @@ Use these settings for the Samara frontend service:
 
 ```text
 Root directory: apps/samara-web/my-vite-react-app
-Install command: npm install
+Install command: npm ci
 Build command: npm run build
 Output directory: dist
 ```
@@ -75,17 +79,21 @@ Output directory: dist
 Set these Railway variables from the UI-created connection:
 
 ```bash
-VITE_EIP_API_BASE_URL=https://eip-ecom-v1.up.railway.app
+VITE_EIP_GATEWAY_BASE_URL=https://eip-ecom-v1.up.railway.app
 VITE_EIP_SUFFIX=<Admin Connections inbound path suffix>
 VITE_EIP_CONNECTION_CODE=<Admin Connections connection code>
-VITE_EIP_PUBLIC_API_KEY=<Admin Connections API key secret, if API key verification is enabled>
-VITE_EIP_PUBLIC_API_KEY_HEADER=X-API-Key
 VITE_EIP_EVENT_ID_HEADER=X-Event-Id
 VITE_EIP_CLIENT_SOURCE=web-client
 VITE_EIP_EXTERNAL_REF_PREFIX=web
+VITE_EIP_GATEWAY_API_KEY=<Admin Connections API key raw value, only if bootstrap/manifest is used>
+VITE_EIP_GATEWAY_API_KEY_HEADER=X-API-Key
+VITE_EIP_COMMERCE_VERIFICATION_KEY=<connection profile browser verification key, only if required>
+VITE_EIP_COMMERCE_VERIFICATION_HEADER=X-API-Key
 ```
 
 Keep `AUTH_COOKIE_CROSS_SITE=true` on the API service for hosted cross-origin member sessions.
+
+Do not add Samara to `CORS_ORIGIN`. That variable is for internal `/api/eip/*` dashboard/admin callers. Add the Samara frontend origin to `CORS_ORIGIN_PUBLIC` for public onboarding/bootstrap routes, and add the exact same origin to the Samara connection profile's `origin_allowlist` in Admin > Connections for public commerce and gateway traffic.
 
 ## Retest Checklist
 
@@ -96,6 +104,7 @@ Keep `AUTH_COOKIE_CROSS_SITE=true` on the API service for hosted cross-origin me
 - Admin > Connections can save the Samara inbound connection.
 - Samara frontend deploy reads catalog/content metadata from `/api/public/commerce/:suffix`.
 - One Samara write path sends `X-Event-Id` and the configured API key header.
+- Samara does not call `/api/eip/*` and does not require an EIP dashboard session.
 - Owner/admin tenant context does not leak into the Samara tenant.
 
 ## Explicit Non-Goals

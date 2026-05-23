@@ -6630,7 +6630,7 @@ export default function App() {
 
   useEffect(() => {
     let active = true;
-    if (!EIP_CONFIG.publicApiKey) return undefined;
+    if (!EIP_CONFIG.gatewayApiKey) return undefined;
     const run = async () => {
       setGatewayStatus({ loading: true, ok: false, manifestOk: false, error: "" });
       try {

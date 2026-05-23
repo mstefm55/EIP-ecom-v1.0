@@ -3,7 +3,7 @@
 import { EIP_CONFIG } from "../config/eip";
 
 export async function callEndpoint(endpoint, options = {}) {
-  const baseUrl = EIP_CONFIG.apiBaseUrl;
+  const baseUrl = EIP_CONFIG.gatewayBaseUrl;
   const method = String(options.method || "GET").toUpperCase();
   const hasBody = options.body !== undefined;
   const isFormData =
@@ -15,14 +15,15 @@ export async function callEndpoint(endpoint, options = {}) {
   if (hasBody && !isFormData) {
     defaultHeaders["Content-Type"] = "application/json";
   }
-  if (EIP_CONFIG.publicApiKey) {
-    defaultHeaders[EIP_CONFIG.publicApiKeyHeader || "X-API-Key"] = EIP_CONFIG.publicApiKey;
+  if (EIP_CONFIG.commerceVerificationKey) {
+    defaultHeaders[EIP_CONFIG.commerceVerificationHeader || "X-API-Key"] =
+      EIP_CONFIG.commerceVerificationKey;
   }
 
   const config = {
     headers: { ...defaultHeaders, ...options.headers },
     method,
-    credentials: options.credentials || "include",
+    credentials: options.credentials || "omit",
   };
 
   if (hasBody) {
@@ -47,12 +48,12 @@ function buildEventId(prefix) {
 }
 
 async function callGateway(endpoint) {
-  const baseUrl = EIP_CONFIG.apiBaseUrl;
+  const baseUrl = EIP_CONFIG.gatewayBaseUrl;
   const headers = {};
-  if (EIP_CONFIG.publicApiKey) {
-    headers["X-API-Key"] = EIP_CONFIG.publicApiKey;
+  if (EIP_CONFIG.gatewayApiKey) {
+    headers[EIP_CONFIG.gatewayApiKeyHeader || "X-API-Key"] = EIP_CONFIG.gatewayApiKey;
   }
-  const response = await fetch(`${baseUrl}${endpoint}`, { headers });
+  const response = await fetch(`${baseUrl}${endpoint}`, { headers, credentials: "omit" });
   if (!response.ok) {
     const errorText = await response.text();
     throw new Error(`Gateway Error (${response.status}): ${errorText}`);
@@ -150,6 +151,7 @@ export async function createBlogPost({ suffix, csrf, payload } = {}) {
   return callEndpoint(buildPublicCommercePath(suffix, "/blog/posts"), {
     method: "POST",
     headers: csrf ? { "X-Member-Csrf": csrf } : {},
+    credentials: "include",
     body: payload || {},
   });
 }
@@ -161,6 +163,7 @@ export async function uploadMemberBlogAsset({ suffix, csrf, file } = {}) {
   return callEndpoint(buildPublicCommercePath(suffix, "/member/uploads"), {
     method: "POST",
     headers: csrf ? { "X-Member-Csrf": csrf } : {},
+    credentials: "include",
     body: formData,
   });
 }
@@ -170,6 +173,7 @@ export async function deleteBlogPost({ suffix, csrf, postId } = {}) {
   return callEndpoint(buildPublicCommercePath(suffix, `/blog/posts/${encodeURIComponent(postId)}`), {
     method: "DELETE",
     headers: csrf ? { "X-Member-Csrf": csrf } : {},
+    credentials: "include",
   });
 }
 
@@ -218,6 +222,7 @@ export async function createOrder({ suffix, payload } = {}) {
   return callEndpoint(buildPublicCommercePath(suffix, "/order"), {
     method: "POST",
     headers: { [eventIdHeader]: buildEventId("order") },
+    credentials: "include",
     body: payload || {},
   });
 }
@@ -234,6 +239,7 @@ export async function createPayment({ suffix, payload } = {}) {
 export async function createProductReview({ suffix, payload } = {}) {
   return callEndpoint(buildPublicCommercePath(suffix, "/reviews"), {
     method: "POST",
+    credentials: "include",
     body: payload || {},
   });
 }
@@ -241,6 +247,7 @@ export async function createProductReview({ suffix, payload } = {}) {
 export async function startMemberAuth({ suffix, payload } = {}) {
   return callEndpoint(buildPublicCommercePath(suffix, "/member/auth/start"), {
     method: "POST",
+    credentials: "include",
     body: payload || {},
   });
 }
@@ -248,18 +255,22 @@ export async function startMemberAuth({ suffix, payload } = {}) {
 export async function verifyMemberAuth({ suffix, payload } = {}) {
   return callEndpoint(buildPublicCommercePath(suffix, "/member/auth/verify"), {
     method: "POST",
+    credentials: "include",
     body: payload || {},
   });
 }
 
 export async function fetchMemberMe({ suffix } = {}) {
-  return callEndpoint(buildPublicCommercePath(suffix, "/member/auth/me"));
+  return callEndpoint(buildPublicCommercePath(suffix, "/member/auth/me"), {
+    credentials: "include",
+  });
 }
 
 export async function logoutMember({ suffix, csrf } = {}) {
   return callEndpoint(buildPublicCommercePath(suffix, "/member/auth/logout"), {
     method: "POST",
     headers: csrf ? { "X-Member-Csrf": csrf } : {},
+    credentials: "include",
     body: {},
   });
 }
@@ -268,12 +279,15 @@ export async function updateMemberProfile({ suffix, csrf, payload } = {}) {
   return callEndpoint(buildPublicCommercePath(suffix, "/member/profile"), {
     method: "PATCH",
     headers: csrf ? { "X-Member-Csrf": csrf } : {},
+    credentials: "include",
     body: payload || {},
   });
 }
 
 export async function fetchMemberHistory({ suffix, limit = 20 } = {}) {
-  return callEndpoint(buildPublicCommercePath(suffix, "/member/history", { limit: String(limit) }));
+  return callEndpoint(buildPublicCommercePath(suffix, "/member/history", { limit: String(limit) }), {
+    credentials: "include",
+  });
 }
 
 export function resolveAssetUrl(url) {
@@ -281,7 +295,7 @@ export function resolveAssetUrl(url) {
   const value = String(url);
   if (value.startsWith("http")) return value;
   if (value.startsWith("blob:") || value.startsWith("data:")) return value;
-  const base = new URL(EIP_CONFIG.apiBaseUrl, window.location.origin).origin;
+  const base = new URL(EIP_CONFIG.gatewayBaseUrl, window.location.origin).origin;
   if (value.startsWith("/")) return `${base}${value}`;
   return `${base}/${value}`;
 }
