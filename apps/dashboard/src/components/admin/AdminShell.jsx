@@ -77,6 +77,7 @@ export default function AdminShell({ node, children, ctx }) {
     locale: "",
     timezone: "",
     avatar_url: "",
+    avatar_display_url: "",
   });
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
@@ -139,6 +140,7 @@ export default function AdminShell({ node, children, ctx }) {
   );
 
   const initial = (user.name || "E")[0]?.toUpperCase();
+  const profileAvatarSrc = resolveAssetUrl(profileForm.avatar_display_url || profileForm.avatar_url);
 
   const handleSignOut = useCallback(async () => {
     try {
@@ -208,6 +210,7 @@ export default function AdminShell({ node, children, ctx }) {
         locale: profile.locale || "",
         timezone: profile.timezone || "",
         avatar_url: profile.avatar_url || "",
+        avatar_display_url: profile.avatar_display_url || profile.avatar_url || "",
       });
     } catch (err) {
       setProfileError(err.message || "Unable to load profile.");
@@ -231,9 +234,30 @@ export default function AdminShell({ node, children, ctx }) {
     setProfileError(null);
     setProfileNotice(null);
     try {
-      await apiFetch("/api/eip/auth/profile", { method: "PUT", body: { ...profileForm } });
-      if (profileForm.display_name) {
-        setUser((prev) => ({ ...prev, name: profileForm.display_name }));
+      const result = await apiFetch("/api/eip/auth/profile", {
+        method: "PUT",
+        body: {
+          display_name: profileForm.display_name,
+          title: profileForm.title,
+          phone: profileForm.phone,
+          locale: profileForm.locale,
+          timezone: profileForm.timezone,
+          avatar_url: profileForm.avatar_url,
+        },
+      });
+      const profile = result.profile || {};
+      setProfileForm((prev) => ({
+        ...prev,
+        display_name: profile.display_name || prev.display_name,
+        title: profile.title || "",
+        phone: profile.phone || "",
+        locale: profile.locale || "",
+        timezone: profile.timezone || "",
+        avatar_url: profile.avatar_url || prev.avatar_url,
+        avatar_display_url: profile.avatar_display_url || profile.avatar_url || prev.avatar_display_url,
+      }));
+      if (profile.display_name || profileForm.display_name) {
+        setUser((prev) => ({ ...prev, name: profile.display_name || profileForm.display_name }));
       }
       setProfileNotice("Profile saved.");
     } catch (err) {
@@ -255,7 +279,13 @@ export default function AdminShell({ node, children, ctx }) {
         method: "POST",
         body: formData,
       });
-      setProfileForm((prev) => ({ ...prev, avatar_url: data.avatar_url || prev.avatar_url }));
+      const profile = data.profile || {};
+      setProfileForm((prev) => ({
+        ...prev,
+        avatar_url: data.avatar_url || profile.avatar_url || prev.avatar_url,
+        avatar_display_url:
+          data.avatar_display_url || profile.avatar_display_url || data.avatar_url || prev.avatar_display_url,
+      }));
       setProfileNotice("Avatar updated.");
     } catch (err) {
       setProfileError(err.message || "Failed to upload avatar.");
@@ -333,9 +363,9 @@ export default function AdminShell({ node, children, ctx }) {
                   className="flex items-center gap-3 rounded-full border border-white/60 bg-white/80 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-ink-600"
                 >
                   <span className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-ink-900 text-xs font-semibold text-white">
-                    {profileForm.avatar_url ? (
+                    {profileAvatarSrc ? (
                       <img
-                        src={resolveAssetUrl(profileForm.avatar_url)}
+                        src={profileAvatarSrc}
                         alt="avatar"
                         className="h-full w-full object-cover"
                       />
@@ -358,9 +388,9 @@ export default function AdminShell({ node, children, ctx }) {
                   <div className="absolute right-0 z-[70] mt-3 w-64 rounded-3xl border border-white/60 bg-white/95 p-4 shadow-strong">
                     <div className="flex items-center gap-3 rounded-2xl border border-ink-100 bg-ink-50/80 px-3 py-3">
                       <span className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-ink-900 text-sm font-semibold text-white">
-                        {profileForm.avatar_url ? (
+                        {profileAvatarSrc ? (
                           <img
-                            src={resolveAssetUrl(profileForm.avatar_url)}
+                            src={profileAvatarSrc}
                             alt="avatar"
                             className="h-full w-full object-cover"
                           />
@@ -559,9 +589,9 @@ export default function AdminShell({ node, children, ctx }) {
 
             <div className="mt-4 flex items-center gap-4">
               <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl border border-ink-100 bg-ink-50 text-ink-400">
-                {profileForm.avatar_url ? (
+                {profileAvatarSrc ? (
                   <img
-                    src={resolveAssetUrl(profileForm.avatar_url)}
+                    src={profileAvatarSrc}
                     alt="avatar"
                     className="h-full w-full object-cover"
                   />

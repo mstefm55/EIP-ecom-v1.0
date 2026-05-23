@@ -26,6 +26,8 @@ import { auditSecurityEvent } from "../lib/securityAudit.js";
 import { resolveEipSurfaceAccess } from "../lib/surfaceAccess.js";
 import { safeUploadTarget, uploadPartToBuffer, validateImageUpload } from "../lib/uploadSecurity.js";
 import { evaluatePasswordStrength, generateStrongPassword, checkPasswordHistory } from "../auth/password.js";
+import { buildSignedAssetUrl } from "../services/assets/signing.js";
+import { isTenantAssetPath, sanitizeAssetUrlForStorage, toLocalAssetPath } from "../services/assets/url_policy.js";
 
 const OTP_REQUEST_LIMIT_MAX = 5;
 const OTP_REQUEST_LIMIT_WINDOW_MIN = 10;
@@ -83,6 +85,10 @@ const totp = new TOTP({
   period: TOTP_PERIOD_SEC,
   epochTolerance: TOTP_EPOCH_TOLERANCE_SEC
 });
+
+function normalizeText(value) {
+  return String(value || "").trim();
+}
 
 function normalizeOtp(value) {
   if (typeof value === "number" && Number.isInteger(value) && value >= 0) {
@@ -307,6 +313,46 @@ async function upsertUserProfile(client, tenantId, identityId, payload = {}) {
     ]
   );
   return r.rows[0] || null;
+}
+
+async function upsertUserProfileAvatar(client, tenantId, identityId, avatarUrl) {
+  const r = await client.query(
+    `
+    INSERT INTO eip_core.user_profile
+      (tenant_id, identity_id, avatar_url, attrs)
+    VALUES
+      ($1, $2, $3, '{}'::jsonb)
+    ON CONFLICT (tenant_id, identity_id) DO UPDATE
+      SET avatar_url = EXCLUDED.avatar_url,
+          updated_at = now()
+    RETURNING id, tenant_id, identity_id, display_name, title, phone, locale, timezone, avatar_url, attrs
+    `,
+    [tenantId, identityId, avatarUrl]
+  );
+  return r.rows[0] || null;
+}
+
+function signProfileAvatarUrl(app, profile) {
+  const rawUrl = normalizeText(profile?.avatar_url);
+  if (!rawUrl) return null;
+
+  const localPath = toLocalAssetPath(rawUrl);
+  if (!localPath) return rawUrl;
+  if (!isTenantAssetPath(localPath, profile?.tenant_id)) return null;
+
+  const ttlSec = Number(app.config.ASSET_TOKEN_TTL_SEC || 604800);
+  const expiresAt = Math.floor(Date.now() / 1000) + (Number.isFinite(ttlSec) ? ttlSec : 604800);
+  return buildSignedAssetUrl(localPath, expiresAt, app.config.API_KEY_PEPPER);
+}
+
+function serializeUserProfile(app, profile) {
+  if (!profile) return profile;
+  const avatarUrl = normalizeText(profile.avatar_url);
+  return {
+    ...profile,
+    avatar_url: avatarUrl || null,
+    avatar_display_url: avatarUrl ? signProfileAvatarUrl(app, profile) : null
+  };
 }
 
 /* ============================================================
@@ -2307,7 +2353,7 @@ export default async function authRoutes(app) {
         display_name: defaultName || null
       });
     }
-    return reply.send({ ok: true, profile });
+    return reply.send({ ok: true, profile: serializeUserProfile(app, profile) });
   });
 
   app.put("/auth/profile", async (req, reply) => {
@@ -2317,13 +2363,23 @@ export default async function authRoutes(app) {
     if (!c.ok) return reply.code(c.status).send({ ok: false, error: c.error });
 
     const { tenant_id, identity_id } = s.session;
+    let avatarUrl = normalizeText(req.body?.avatar_url) || null;
+    try {
+      avatarUrl = avatarUrl ? sanitizeAssetUrlForStorage(avatarUrl, tenant_id) : null;
+    } catch (err) {
+      if (err.message === "ASSET_TENANT_MISMATCH") {
+        return reply.code(400).send({ ok: false, error: "AVATAR_TENANT_MISMATCH" });
+      }
+      throw err;
+    }
+
     const payload = {
       display_name: normalizeText(req.body?.display_name) || null,
       title: normalizeText(req.body?.title) || null,
       phone: normalizeText(req.body?.phone) || null,
       locale: normalizeText(req.body?.locale) || null,
       timezone: normalizeText(req.body?.timezone) || null,
-      avatar_url: normalizeText(req.body?.avatar_url) || null,
+      avatar_url: avatarUrl,
       attrs: req.body?.attrs && typeof req.body.attrs === "object" ? req.body.attrs : {}
     };
 
@@ -2334,7 +2390,7 @@ export default async function authRoutes(app) {
       outcome: "success",
       ip: req.ip
     });
-    return reply.send({ ok: true, profile });
+    return reply.send({ ok: true, profile: serializeUserProfile(app, profile) });
   });
 
   app.post("/auth/profile/avatar", async (req, reply) => {
@@ -2378,9 +2434,7 @@ export default async function authRoutes(app) {
     }
 
     const rawUrl = `/assets/${tenant_id}/avatars/${storedName}`;
-    const profile = await upsertUserProfile(app.db, tenant_id, identity_id, {
-      avatar_url: rawUrl
-    });
+    const profile = await upsertUserProfileAvatar(app.db, tenant_id, identity_id, rawUrl);
     auditSecurityEvent(app, "avatar_upload", {
       tenantId: tenant_id,
       identityId: identity_id,
@@ -2388,7 +2442,13 @@ export default async function authRoutes(app) {
       ip: req.ip
     });
 
-    return reply.send({ ok: true, avatar_url: rawUrl, profile });
+    const serializedProfile = serializeUserProfile(app, profile);
+    return reply.send({
+      ok: true,
+      avatar_url: rawUrl,
+      avatar_display_url: serializedProfile?.avatar_display_url || rawUrl,
+      profile: serializedProfile
+    });
   });
 
   /* ===================== DEVICES LIST (EIP) ===================== */
