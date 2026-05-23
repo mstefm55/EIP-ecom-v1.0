@@ -44,6 +44,31 @@ The canonical seed `services/api/db/seed/template_ecom_canonical_v1.sql` runs af
 
 The seed is idempotent and updates process defs, task templates, bindings, tenant attrs, and template-scoped effect dropdown values.
 
+## Smoke Clone Validation
+
+Use `services/api/scripts/smoke_clone_ecom_template.mjs` through `npm run template:smoke-clone` to prove clone-path readiness without using the hardcoded manual clone SQL.
+
+The smoke clone copies only:
+- Target tenant smoke metadata.
+- Template-scoped `PROCESS_ACTION` and `PROCESS_EFFECT_TYPE` governance.
+- The six canonical process definitions.
+- Active task templates for those process definitions.
+- Active process bindings for the canonical ecommerce object types.
+
+The verification checks for six processes, required active task templates, required process bindings, required governed effects, graph action governance, graph effect governance, and human-task template references.
+
+Railway smoke clone command:
+
+```bash
+npm run template:smoke-clone -- --source-code eip_ecom --target-code eip_ecom_smoke --target-name "EIP Ecom Smoke Clone"
+```
+
+Railway verification-only command:
+
+```bash
+npm run template:smoke-clone -- --source-code eip_ecom --target-code eip_ecom_smoke --verify-only
+```
+
 ## Deferred
 
 - Dedicated shipment/fulfilment service object and process.
