@@ -1,3 +1,5 @@
+import { isAuthenticatedSurfaceAllowed, resolveEipSurfaceAccess } from "../lib/surfaceAccess.js";
+
 function normalizeText(value) {
   return String(value || "").trim();
 }
@@ -70,45 +72,6 @@ async function fetchSurface(app, { code, tenantId, publicOnly }) {
   return r.rows[0] || null;
 }
 
-async function resolveSurfaceAccessContext(app, session) {
-  const r = await app.db.query(
-    `
-    SELECT
-      t.code AS tenant_code,
-      COALESCE(i.attrs, '{}'::jsonb) AS identity_attrs
-    FROM eip_auth.auth_identity i
-    JOIN eip_core.tenant t ON t.id = i.tenant_id
-    WHERE i.tenant_id = $1 AND i.id = $2
-    LIMIT 1
-    `,
-    [session.tenant_id, session.identity_id]
-  );
-
-  const row = r.rows[0] || {};
-  const tenantCode = normalizeText(row.tenant_code);
-  const identityAttrs = row.identity_attrs || {};
-  const isSystemAdmin = Boolean(identityAttrs?.system_admin);
-  const ownerTenantCode = normalizeText(app.config.OWNER_TENANT_CODE);
-  const isOwnerTenantSession = ownerTenantCode ? tenantCode === ownerTenantCode : isSystemAdmin;
-  const allowedSurfaces = isOwnerTenantSession ? ["admin"] : ["dashboard"];
-  const defaultSurface = allowedSurfaces[0] || "dashboard";
-
-  return {
-    tenantCode,
-    isSystemAdmin,
-    isOwnerTenantSession,
-    allowedSurfaces,
-    defaultSurface,
-  };
-}
-
-function isAuthenticatedSurfaceAllowed(code, accessCtx) {
-  const normalized = normalizeText(code);
-  if (normalized === "admin") return accessCtx.isOwnerTenantSession;
-  if (normalized === "dashboard") return !accessCtx.isOwnerTenantSession;
-  return true;
-}
-
 export default async function uiSurfaceRoutes(app, opts = {}) {
   const isPublic = opts.public === true;
 
@@ -172,13 +135,14 @@ export default async function uiSurfaceRoutes(app, opts = {}) {
       if (!s.ok) return reply.code(s.status).send({ ok: false, error: s.error });
 
       const code = normalizeText(req.params.code);
-      const accessCtx = await resolveSurfaceAccessContext(app, s.session);
+      const accessCtx = await resolveEipSurfaceAccess(app, s.session);
       if (!isAuthenticatedSurfaceAllowed(code, accessCtx)) {
         return reply.code(403).send({
           ok: false,
           error: "SURFACE_FORBIDDEN",
-          allowed_surfaces: accessCtx.allowedSurfaces,
-          default_surface: accessCtx.defaultSurface,
+          allowed_surfaces: accessCtx.allowed_surfaces,
+          default_surface: accessCtx.default_surface,
+          surface_classification: accessCtx.surface_classification,
         });
       }
 

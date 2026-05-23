@@ -15,10 +15,40 @@ function parseApiErrorCode(error) {
   return match?.[1] || "";
 }
 
-function resolveFallbackSurfaceForForbidden(currentSurface) {
-  if (currentSurface === "admin") return "dashboard";
-  if (currentSurface === "dashboard") return "admin";
+function parseApiErrorPayload(error) {
+  const message = String(error?.message || "");
+  const match = message.match(/API \d+:\s*(\{.*\})/s);
+  if (!match) return null;
+  try {
+    return JSON.parse(match[1]);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeSurfaceCode(code) {
+  const normalized = String(code || "").trim().toLowerCase();
+  if (normalized === "admin" || normalized === "dashboard" || normalized === "auth") {
+    return normalized;
+  }
   return "auth";
+}
+
+function readSurfaceCodeFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  return normalizeSurfaceCode(params.get("surface") || "auth");
+}
+
+function chooseDefaultSurface(access) {
+  const allowed = Array.isArray(access?.allowed_surfaces) ? access.allowed_surfaces : [];
+  return normalizeSurfaceCode(access?.default_surface || allowed[0] || "auth");
+}
+
+function isSurfaceAllowedByAccess(code, access) {
+  const normalized = normalizeSurfaceCode(code);
+  if (normalized === "auth") return true;
+  const allowed = Array.isArray(access?.allowed_surfaces) ? access.allowed_surfaces : [];
+  return allowed.map(normalizeSurfaceCode).includes(normalized);
 }
 
 export default function App() {
@@ -45,38 +75,56 @@ export default function App() {
   const [resetForm, setResetForm] = useState({ token: "", password: "", confirmPassword: "" });
   const [recoveryForm, setRecoveryForm] = useState({ token: "" });
   const authApi = useAuthApi();
-  const [surfaceCode, setSurfaceCode] = useState(() => {
-    const params = new URLSearchParams(window.location.search);
-    return params.get("surface") || "auth";
-  });
+  const [surfaceCode, setSurfaceCode] = useState(readSurfaceCodeFromUrl);
+  const [surfaceAccess, setSurfaceAccess] = useState(null);
+  const [surfaceAccessLoading, setSurfaceAccessLoading] = useState(() => readSurfaceCodeFromUrl() !== "auth");
   const [dataStore, setDataStore] = useState({});
   const [resetReady, setResetReady] = useState(false);
   const [recoveryReady, setRecoveryReady] = useState(false);
+  const surfaceLoaderEnabled =
+    surfaceCode === "auth" ||
+    (!surfaceAccessLoading && isSurfaceAllowedByAccess(surfaceCode, surfaceAccess));
 
   const fallbackSurface =
-    surfaceCode === "admin"
+    !surfaceLoaderEnabled
+      ? null
+      : surfaceCode === "admin"
       ? adminSurface
       : surfaceCode === "dashboard"
         ? dashboardSurface
         : authSurface;
-  const surfaceState = useSurfaceLoader(surfaceCode, fallbackSurface);
+  const surfaceState = useSurfaceLoader(surfaceLoaderEnabled ? surfaceCode : null, fallbackSurface);
 
-  const redirectToSurface = (code) => {
-    const next = code || "dashboard";
+  const applySurfaceCode = (code) => {
+    const next = normalizeSurfaceCode(code);
+    if (next === "auth") {
+      setSurfaceAccess(null);
+    }
     setSurfaceCode(next);
     const url = new URL(window.location.href);
     url.searchParams.set("surface", next);
     window.history.replaceState({}, "", url);
   };
 
+  const redirectToSurface = (code) => {
+    const requested = normalizeSurfaceCode(code || "dashboard");
+    const next =
+      surfaceAccess && requested !== "auth" && !isSurfaceAllowedByAccess(requested, surfaceAccess)
+        ? chooseDefaultSurface(surfaceAccess)
+        : requested;
+    applySurfaceCode(next);
+  };
+
   const resolvePostAuthSurface = async () => {
     try {
       const who = await apiFetch("/api/eip/auth/whoami");
-      if (who?.default_surface) return who.default_surface;
-      if (who?.is_system_admin) return "admin";
-      return "dashboard";
+      setSurfaceAccess(who);
+      setSurfaceAccessLoading(false);
+      return chooseDefaultSurface(who);
     } catch {
-      return "dashboard";
+      setSurfaceAccess(null);
+      setSurfaceAccessLoading(false);
+      return "auth";
     }
   };
 
@@ -102,10 +150,46 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    let active = true;
+
+    async function resolveSurfaceAccess() {
+      if (surfaceCode === "auth") {
+        setSurfaceAccessLoading(false);
+        return;
+      }
+
+      setSurfaceAccessLoading(true);
+      try {
+        const who = await apiFetch("/api/eip/auth/whoami");
+        if (!active) return;
+        setSurfaceAccess(who);
+        const next = isSurfaceAllowedByAccess(surfaceCode, who)
+          ? surfaceCode
+          : chooseDefaultSurface(who);
+        if (next !== surfaceCode) {
+          applySurfaceCode(next);
+        }
+      } catch {
+        if (!active) return;
+        setSurfaceAccess(null);
+        applySurfaceCode("auth");
+      } finally {
+        if (active) setSurfaceAccessLoading(false);
+      }
+    }
+
+    resolveSurfaceAccess();
+    return () => {
+      active = false;
+    };
+  }, [surfaceCode]);
+
+  useEffect(() => {
     if (!surfaceState.error || surfaceCode === "auth") return;
     const errorCode = parseApiErrorCode(surfaceState.error);
     if (errorCode === "SURFACE_FORBIDDEN") {
-      redirectToSurface(resolveFallbackSurfaceForForbidden(surfaceCode));
+      const payload = parseApiErrorPayload(surfaceState.error);
+      redirectToSurface(payload?.default_surface || chooseDefaultSurface(surfaceAccess));
       return;
     }
     if (errorCode === "UNAUTHENTICATED" || errorCode === "WRONG_REALM") {

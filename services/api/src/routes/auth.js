@@ -23,6 +23,7 @@ import {
   sessionTtlMs
 } from "../lib/authCookies.js";
 import { auditSecurityEvent } from "../lib/securityAudit.js";
+import { resolveEipSurfaceAccess } from "../lib/surfaceAccess.js";
 import { safeUploadTarget, uploadPartToBuffer, validateImageUpload } from "../lib/uploadSecurity.js";
 import { evaluatePasswordStrength, generateStrongPassword, checkPasswordHistory } from "../auth/password.js";
 
@@ -2255,42 +2256,11 @@ export default async function authRoutes(app) {
     const s = await app.requireSession(req, { realm: "EIP" });
     if (!s.ok) return reply.code(s.status).send({ ok: false, error: s.error });
 
-    const { tenant_id, identity_id } = s.session;
-
-    const r = await app.db.query(
-      `
-      SELECT
-        i.login,
-        i.attrs,
-        t.code AS tenant_code,
-        t.name AS tenant_name,
-        COALESCE(
-          t.attrs->'branding'->>'logo_url',
-          t.attrs->'branding'->>'logo',
-          t.attrs->>'logo_url',
-          t.attrs->>'logo',
-          t.attrs->>'brand_logo_url'
-        ) AS tenant_logo_url
-      FROM eip_auth.auth_identity i
-      JOIN eip_core.tenant t ON t.id = i.tenant_id
-      WHERE i.tenant_id=$1 AND i.id=$2
-      `,
-      [tenant_id, identity_id]
-    );
-
-    const row = r.rows[0] || {};
-    const attrs = row.attrs || {};
-    const isSystemAdmin = Boolean(attrs?.system_admin);
+    const access = await resolveEipSurfaceAccess(app, s.session);
 
     return reply.send({
       ok: true,
-      tenant_id,
-      tenant_code: row.tenant_code || null,
-      tenant_name: row.tenant_name || null,
-      tenant_logo_url: row.tenant_logo_url || null,
-      identity_id,
-      login: row.login ?? null,
-      is_system_admin: isSystemAdmin,
+      ...access,
       session: s.session
     });
   });

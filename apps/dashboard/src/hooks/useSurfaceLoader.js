@@ -12,9 +12,17 @@ export function useSurfaceLoader(code, fallbackSurface) {
     let active = true;
 
     async function load() {
-      if (!code) return;
+      if (!code) {
+        if (active) {
+          setSurface(fallbackSurface || null);
+          setLoading(false);
+          setError(null);
+        }
+        return;
+      }
       setLoading(true);
       setError(null);
+      if (fallbackSurface) setSurface(fallbackSurface);
       try {
         const endpointBase = code === "auth"
           ? `/api/public/ui/surfaces/${code}`
