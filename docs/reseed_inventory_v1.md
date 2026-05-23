@@ -21,10 +21,10 @@ From the Railway shell for `services/api`:
 npm run migrate
 OWNER_TENANT_CODE="eip" OWNER_TENANT_NAME="EIP Owner" OWNER_ADMIN_EMAIL="owner@example.com" OWNER_ADMIN_PASSWORD="replace-with-strong-password" OWNER_ADMIN_NAME="Owner Admin" npm run reseed:post-migration -- --stage owner-admin
 npm run reseed:post-migration -- --stage ui-surfaces --stage process-engine --stage template-tenant
-SAMARA_TENANT_CODE="t_ed6019735b2f" SAMARA_FRONTEND_URL="https://your-samara-domain.example" SAMARA_CONNECTION_API_KEY="replace-with-shared-secret" npm run reseed:post-migration -- --stage samara
+SAMARA_TENANT_CODE="samara" SAMARA_TENANT_NAME="Samara" SAMARA_FRONTEND_URL="https://your-samara-domain.example" SAMARA_CONNECTION_API_KEY="replace-with-shared-secret" npm run samara:connect
 ```
 
-`owner-admin` is kept explicit because it creates or repairs the definitive live owner/admin tenant and requires a real tenant code, tenant name, email, and password. `samara` is also explicit because production connection profiles require a real origin and verification secret.
+`owner-admin` is kept explicit because it creates or repairs the definitive live owner/admin tenant and requires a real tenant code, tenant name, email, and password. `samara` is also explicit because it creates or reconciles the real Samara tenant from `eip_ecom`, and production connection profiles require a real origin and verification secret.
 
 ## Runner Stages
 
@@ -34,7 +34,7 @@ SAMARA_TENANT_CODE="t_ed6019735b2f" SAMARA_FRONTEND_URL="https://your-samara-dom
 | `ui-surfaces` | Applies `ui_surface_admin.sql` and `ui_surface_dashboard.sql` only if a published global surface for that code is missing. | Safe auto-run with guards. |
 | `process-engine` | Verifies process tables, governed effect taxonomy, child service object effect support, and static UI/process action alignment using API-local files. | Safe verification only. |
 | `template-tenant` | Applies `tenant_template_ecom.sql`, `jurisdiction_iso_seed.sql`, `template_ecom_process.sql`, and `template_ecom_canonical_v1.sql`, then verifies canonical processes, bindings, task templates, and template-scoped effect governance. | Safe auto-run/idempotent. |
-| `samara` | Upserts a Samara gateway profile into `eip_core.tenant.attrs.connection_profiles`. | Conditional auto-run, requires tenant and production connection env vars. |
+| `samara` | Creates or resolves the real Samara tenant, clones/reconciles the canonical `eip_ecom` ecommerce metadata baseline, verifies processes/tasks/bindings/effect governance, and upserts the Samara gateway profile into `eip_core.tenant.attrs.connection_profiles`. If `SAMARA_TENANT_CODE` is omitted, it uses an existing `samara` tenant, then the legacy `t_ed6019735b2f` tenant if present, otherwise creates `samara`. | Conditional auto-run, requires production origin and connection env vars. |
 
 ## Category Legend
 
@@ -64,6 +64,7 @@ SAMARA_TENANT_CODE="t_ed6019735b2f" SAMARA_FRONTEND_URL="https://your-samara-dom
 | `services/api/scripts/backfill_ecom_product_materials.sql` | Backfills materials from existing product service objects and links them. | backfill-only / one-off | Manual review of existing product/material data. | No | Supports product flow after review | No | Possible after review |
 | `services/api/scripts/migrate.mjs` | Ordered SQL migration runner with psql meta-command stripping and `schema_migrations` ledger. | generator-only / support-only | DB env vars. | Supports | Supports | Supports | Supports |
 | `services/api/scripts/smoke_clone_ecom_template.mjs` | Parameterized smoke clone/verification script for proving `eip_ecom` can clone into a disposable tenant. It copies only tenant smoke metadata, template-scoped process governance, canonical process defs, active task templates, and active process bindings. | conditional/manual | DB env vars, `SMOKE_CLONE_TARGET_TENANT_CODE`/`--target-code`, `SMOKE_CLONE_TARGET_TENANT_NAME`/`--target-name`; optional source code defaults to `eip_ecom`. | No | Yes | Yes | No |
+| `services/api/scripts/reseed_post_migration.mjs --stage samara` | Definitive Samara connection/reconcile path. Creates or resolves the real Samara tenant, clones ecommerce metadata from `eip_ecom` without deleting existing business data, verifies the canonical baseline, and writes the current `tenant.attrs.connection_profiles` contract. | conditional/manual | DB env vars, migrated schema, seeded `eip_ecom`, `SAMARA_FRONTEND_URL` or `SAMARA_ORIGIN_ALLOWLIST`, and `SAMARA_CONNECTION_API_KEY` unless an existing profile secret is already stored. | No | Yes | Yes | Yes |
 | `services/api/scripts/enrich_jurisdiction_currency.mjs` | Fetches currency data from Rest Countries and enriches jurisdiction attrs. | conditional/manual | Network access, existing jurisdictions. | No | No | Optional | Optional |
 | `services/api/scripts/migrate_gateway_inbound_security.mjs` | One-off migration for existing tenant connection profiles; can generate API keys and a local report. | backfill-only / one-off | Existing connection profiles and manual secret handling. | No | No | No | Possible after review |
 | `services/api/scripts/bootstrap.mjs` | Local HTTP helper for authz bootstrap using supplied cookies and CSRF. | generator-only / support-only | Running API and valid local session cookies. | Maybe | No | No | No |

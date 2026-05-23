@@ -1293,10 +1293,11 @@ function isLikelyEmail(value) {
 
 function memberCookieBase(app) {
   const isProd = app.config.NODE_ENV === "production";
+  const crossSite = Boolean(app.config.AUTH_COOKIE_CROSS_SITE);
   return {
     path: "/",
-    sameSite: "lax",
-    secure: isProd
+    sameSite: crossSite ? "none" : "lax",
+    secure: isProd || crossSite
   };
 }
 

@@ -8,6 +8,7 @@
     "dev": "nodemon src/server.js",
     "migrate": "node scripts/migrate.mjs",
     "reseed:post-migration": "node scripts/reseed_post_migration.mjs",
+    "samara:connect": "node scripts/reseed_post_migration.mjs --stage samara",
     "seed:first-admin": "node scripts/seed_first_admin.mjs",
     "template:smoke-clone": "node scripts/smoke_clone_ecom_template.mjs",
     "email:probe": "node scripts/email_probe.mjs",
