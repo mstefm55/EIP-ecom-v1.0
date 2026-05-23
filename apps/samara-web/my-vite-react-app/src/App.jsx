@@ -38,7 +38,7 @@ import {
   FeaturedCoverflow,
   HeroViewportSlider,
   ImageAssetStudioModal,
-} from "../../../ui-components/src/index.js";
+} from "./component-library";
 
 import heroImage from "./assets/hero/slide1.jpg";
 import dropMain from "./assets/hero/pexels-aydin-sefidi-41034179-12367369.jpg";

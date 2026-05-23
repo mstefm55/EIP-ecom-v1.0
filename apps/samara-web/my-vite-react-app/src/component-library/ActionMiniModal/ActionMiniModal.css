@@ -1,0 +1,160 @@
+.action-mini-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(2px);
+}
+
+.action-mini-modal {
+  width: min(30rem, 100%);
+  border-radius: 1.1rem;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 16px 44px rgba(15, 23, 42, 0.2);
+  color: #111827;
+}
+
+.action-mini-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 1rem 1.05rem 0.55rem;
+}
+
+.action-mini-modal-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.action-mini-modal-message {
+  margin: 0.45rem 0 0;
+  color: #4b5563;
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
+.action-mini-modal-close {
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: #fff;
+  color: #475569;
+  border-radius: 999px;
+  width: 1.85rem;
+  height: 1.85rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.16s ease;
+}
+
+.action-mini-modal-close:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.action-mini-modal-close:hover:not(:disabled) {
+  border-color: rgba(15, 23, 42, 0.75);
+  background: rgba(15, 23, 42, 0.06);
+  color: #0f172a;
+}
+
+.action-mini-modal-close-icon {
+  width: 0.95rem;
+  height: 0.95rem;
+  stroke-width: 2.4;
+}
+
+.action-mini-modal-body {
+  padding: 0.2rem 1.05rem 0.45rem;
+}
+
+.action-mini-modal-label {
+  display: block;
+  margin: 0 0 0.38rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: #64748b;
+}
+
+.action-mini-modal-input {
+  width: 100%;
+  border-radius: 0.8rem;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(255, 255, 255, 0.98);
+  color: #0f172a;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.88rem;
+  outline: none;
+}
+
+.action-mini-modal-input:focus {
+  border-color: rgba(15, 23, 42, 0.36);
+  box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.08);
+}
+
+.action-mini-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.82rem 1.05rem 1.02rem;
+}
+
+.action-mini-modal-btn {
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: #fff;
+  color: #334155;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 0.48rem 0.95rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  cursor: pointer;
+  transition: all 0.16s ease;
+}
+
+.action-mini-modal-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.action-mini-modal-btn-primary {
+  border-color: transparent;
+  background: #111827;
+  color: #fff;
+}
+
+.action-mini-modal-btn-primary:hover:not(:disabled) {
+  background: #0b1226;
+}
+
+.action-mini-modal-btn-danger {
+  border-color: transparent;
+  background: #be123c;
+  color: #fff;
+}
+
+.action-mini-modal-btn-danger:hover:not(:disabled) {
+  background: #9f1239;
+}
+
+.action-mini-modal-btn-icon {
+  width: 0.92rem;
+  height: 0.92rem;
+  stroke-width: 2.2;
+}
