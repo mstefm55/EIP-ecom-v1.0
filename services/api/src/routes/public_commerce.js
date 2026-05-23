@@ -4,7 +4,6 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
 import argon2 from "argon2";
 import { buildSignedAssetUrl } from "../services/assets/signing.js";
@@ -14,6 +13,7 @@ import { extractProfiles } from "../services/gateway/connectionProfile.js";
 import { registerRawBody, parseJsonBody } from "../services/gateway/rawBody.js";
 import { isTenantAssetPath, toLocalAssetPath } from "../services/assets/url_policy.js";
 import { sendEmail } from "../lib/email.js";
+import { safeUploadTarget, uploadPartToBuffer, validateImageUpload } from "../lib/uploadSecurity.js";
 import { resolveMarketplaceFxContext } from "../services/fx/marketFxSync.js";
 
 const RATE_LIMIT = { max: 120, timeWindow: "1 minute" };
@@ -50,7 +50,6 @@ const STOREFRONT_CTA_ACTIONS = new Set([
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ASSET_ROOT = path.join(__dirname, "../../assets");
-const BLOG_MEDIA_ALLOWED_MIME_PREFIX = ["image/"];
 const COMMERCE_SETTINGS_MODULE = "ecom";
 const COMMERCE_SETTINGS_CODE = "commerce";
 const DEFAULT_PAYMENT_SETTINGS = {
@@ -3030,24 +3029,18 @@ export default async function publicCommerceRoutes(app) {
 
       const filename = normalizeText(filePart.filename || "");
       const mimetype = normalizeText(filePart.mimetype || "").toLowerCase();
-      if (!BLOG_MEDIA_ALLOWED_MIME_PREFIX.some((prefix) => mimetype.startsWith(prefix))) {
-        return reply.code(415).send({ ok: false, error: "UNSUPPORTED_MEDIA" });
-      }
+      const buffer = await uploadPartToBuffer(filePart);
+      const validation = validateImageUpload({ buffer, filename, mimetype });
+      if (!validation.ok) return reply.code(415).send({ ok: false, error: validation.error });
 
-      const extension = path.extname(filename).toLowerCase().slice(0, 10);
       const uploadDir = path.join(ASSET_ROOT, access.tenant.id, "blog");
       fs.mkdirSync(uploadDir, { recursive: true });
 
-      const storedName = `${crypto.randomUUID()}${extension || ""}`;
-      const targetPath = path.join(uploadDir, storedName);
+      const storedName = `${crypto.randomUUID()}${validation.safeExt}`;
+      const targetPath = safeUploadTarget(uploadDir, storedName);
 
       try {
-        if (typeof filePart.toBuffer === "function") {
-          const buffer = await filePart.toBuffer();
-          fs.writeFileSync(targetPath, buffer);
-        } else {
-          await pipeline(filePart.file, fs.createWriteStream(targetPath, { flags: "w" }));
-        }
+        fs.writeFileSync(targetPath, buffer);
       } catch (error) {
         app.log.error({ event: "member_blog_upload_failed", tenantId: access.tenant.id, error: error.message });
         return reply.code(500).send({ ok: false, error: "UPLOAD_FAILED" });

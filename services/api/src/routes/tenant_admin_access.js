@@ -1,6 +1,7 @@
 // services/api/src/routes/tenant_admin_access.js
 import { hasPermission } from "../auth/perm.js";
 import { randomToken, sha256Hex } from "../auth/crypto.js";
+import { auditSecurityEvent } from "../lib/securityAudit.js";
 
 const TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -215,6 +216,16 @@ export default async function tenantAdminAccessRoutes(app) {
         issuedBy,
       ]
     );
+    auditSecurityEvent(app, "tenant_admin_access_grant", {
+      actorTenantId: session.tenant_id,
+      actorIdentityId: session.identity_id,
+      targetTenantId: session.tenant_id,
+      adminIdentityId: adminIdentity.id,
+      accessLevel,
+      sensitiveAllowed,
+      outcome: "success",
+      ip: req.ip
+    });
 
     return reply.send({
       ok: true,
@@ -279,6 +290,14 @@ export default async function tenantAdminAccessRoutes(app) {
         session.identity_id,
       ]
     );
+    auditSecurityEvent(app, "tenant_admin_access_rotate", {
+      actorTenantId: session.tenant_id,
+      actorIdentityId: session.identity_id,
+      targetTenantId: session.tenant_id,
+      adminIdentityId: adminIdentity.id,
+      outcome: "success",
+      ip: req.ip
+    });
 
     return reply.send({
       ok: true,
@@ -321,6 +340,15 @@ export default async function tenantAdminAccessRoutes(app) {
       `,
       [adminIdentity.id, session.tenant_id, session.identity_id, revokeAll]
     );
+    auditSecurityEvent(app, "tenant_admin_access_revoke", {
+      actorTenantId: session.tenant_id,
+      actorIdentityId: session.identity_id,
+      targetTenantId: session.tenant_id,
+      adminIdentityId: adminIdentity.id,
+      revokeAll,
+      outcome: "success",
+      ip: req.ip
+    });
 
     return reply.send({
       ok: true,

@@ -3,11 +3,15 @@ import crypto from "node:crypto";
 import argon2 from "argon2";
 import { NobleCryptoPlugin, ScureBase32Plugin, TOTP } from "otplib";
 import { randomToken, sha256Hex } from "../auth/crypto.js";
-import { authCookieBase } from "../lib/authCookies.js";
+import {
+  clearAuthCookie,
+  deviceCookieTtlMs,
+  getAuthCookie,
+  setAuthCookie,
+  sessionTtlMs
+} from "../lib/authCookies.js";
 import { evaluatePasswordStrength } from "../auth/password.js";
 
-const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
-const DEVICE_COOKIE_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 const TOTP_WINDOW = 1;
 const TOTP_PERIOD_SEC = 30;
 const TOTP_EPOCH_TOLERANCE_SEC = TOTP_WINDOW * TOTP_PERIOD_SEC;
@@ -265,7 +269,7 @@ export default async function bootstrapRoutes(app) {
           return reply.code(500).send({ ok: false, error: "BOOTSTRAP_STATE_INVALID" });
         }
 
-        const deviceToken = req.cookies?.did || randomToken(24);
+        const deviceToken = getAuthCookie(req, app, "did") || randomToken(24);
         const deviceRow = await upsertBrowserDevice(app, client, {
           tenantId: row.tenant_id,
           identityId: row.admin_identity_id,
@@ -282,7 +286,7 @@ export default async function bootstrapRoutes(app) {
         }
 
         const sessionId = crypto.randomUUID();
-        const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
+        const expiresAt = new Date(Date.now() + sessionTtlMs(app));
         const csrf = randomToken(24);
         const csrfHash = sha256Hex(`${csrf}:${app.config.CSRF_PEPPER}`);
         const uaHash = sha256Hex(String(req.headers["user-agent"] || ""));
@@ -326,13 +330,12 @@ export default async function bootstrapRoutes(app) {
 
         await client.query("COMMIT");
 
-        const cookieBase = authCookieBase(app);
         const sessionExpires = expiresAt;
-        const deviceExpires = new Date(Date.now() + DEVICE_COOKIE_TTL_MS);
+        const deviceExpires = new Date(Date.now() + deviceCookieTtlMs(app));
 
-        reply.setCookie("sid", sessionId, { ...cookieBase, httpOnly: true, expires: sessionExpires });
-        reply.setCookie("csrf", csrf, { ...cookieBase, expires: sessionExpires });
-        reply.setCookie("did", deviceToken, { ...cookieBase, httpOnly: true, expires: deviceExpires });
+        setAuthCookie(reply, app, "sid", sessionId, { httpOnly: true, expires: sessionExpires });
+        setAuthCookie(reply, app, "csrf", csrf, { httpOnly: true, expires: sessionExpires });
+        setAuthCookie(reply, app, "did", deviceToken, { httpOnly: true, expires: deviceExpires });
 
         return reply.send({
           ok: true,
@@ -799,9 +802,8 @@ export default async function bootstrapRoutes(app) {
 
       await client.query("COMMIT");
 
-      const clearOpts = authCookieBase(app);
-      reply.clearCookie("sid", clearOpts);
-      reply.clearCookie("csrf", clearOpts);
+      clearAuthCookie(reply, app, "sid");
+      clearAuthCookie(reply, app, "csrf");
 
       app.log.info({ event: "bootstrap_completed", tenantId: session.tenant_id, identityId: session.identity_id, ip: req.ip });
       return reply.code(204).send();

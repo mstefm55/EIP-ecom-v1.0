@@ -156,13 +156,21 @@ export async function sendEmail(app, to, subject, text, html) {
   if (provider === "brevo") {
     result = await sendEmailWithBrevo(app.config, { from, fromName, to, subject, text, html });
   } else if (provider === "smtp") {
+    if (!String(app.config.SMTP_HOST || "").trim()) {
+      app.log.error({ event: "email_provider_not_configured", provider });
+      throw new Error("EMAIL_SMTP_NOT_CONFIGURED");
+    }
     const transporter = createEmailTransporter(app.config);
     result = await sendEmailWithTransporter(transporter, { from, to, subject, text, html });
+  } else if (provider === "mock") {
+    app.log.error({ event: "email_mock_disabled_in_production" });
+    throw new Error("EMAIL_MOCK_DISABLED_IN_PRODUCTION");
   } else {
     throw new Error(`EMAIL_PROVIDER_UNSUPPORTED: ${provider}`);
   }
 
   if (!result.ok) {
+    app.log.error({ event: "email_delivery_failed", provider, error: result.error });
     throw new Error(result.error);
   }
   return result;

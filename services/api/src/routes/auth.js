@@ -4,7 +4,6 @@ import { hasPermission } from "../auth/perm.js";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { pipeline } from "node:stream/promises";
 import crypto from "node:crypto";
 import { promisify } from "node:util";
 import argon2 from "argon2";
@@ -16,7 +15,15 @@ import {
   timingSafeEqual
 } from "../auth/crypto.js";
 import { sendEmail } from "../lib/email.js";
-import { authCookieBase } from "../lib/authCookies.js";
+import {
+  clearAuthCookie,
+  deviceCookieTtlMs,
+  getAuthCookie,
+  setAuthCookie,
+  sessionTtlMs
+} from "../lib/authCookies.js";
+import { auditSecurityEvent } from "../lib/securityAudit.js";
+import { safeUploadTarget, uploadPartToBuffer, validateImageUpload } from "../lib/uploadSecurity.js";
 import { evaluatePasswordStrength, generateStrongPassword, checkPasswordHistory } from "../auth/password.js";
 
 const OTP_REQUEST_LIMIT_MAX = 5;
@@ -32,14 +39,11 @@ const RECOVERY_REQUEST_RATE_LIMIT = { max: 10, timeWindow: "1 minute" };
 const RECOVERY_CONSUME_RATE_LIMIT = { max: 10, timeWindow: "1 minute" };
 const RECOVERY_LOST_RATE_LIMIT = { max: 10, timeWindow: "1 minute" };
 const OTP_TTL_MS = 10 * 60 * 1000;
-const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
-const DEVICE_COOKIE_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000;
 const RECOVERY_TOKEN_DEFAULT_TTL_MIN = 30;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ASSET_ROOT = path.join(__dirname, "../../assets");
-const AVATAR_MIME_PREFIX = ["image/"];
 
 function getRecoveryPepper(app) {
   const raw = String(app?.config?.RECOVERY_TOKEN_PEPPER || "").trim();
@@ -370,6 +374,7 @@ export default async function authRoutes(app) {
       if (idRes.rowCount === 0) {
         await client.query("COMMIT");
         app.log.warn({ event: "otp_request_unknown_identity", tenantId, login: login.substring(0, 3) + "...", ip: req.ip });
+        auditSecurityEvent(app, "login_failure", { tenantId, outcome: "failed", reason: "unknown_identity", ip: req.ip });
         if (strictErrors) {
           return reply.code(404).send({ ok: false, error: "IDENTITY_NOT_FOUND" });
         }
@@ -380,6 +385,13 @@ export default async function authRoutes(app) {
       if (!identity.is_active || identity.is_locked) {
         await client.query("COMMIT");
         app.log.warn({ event: "otp_request_disabled_identity", tenantId, login: login.substring(0, 3) + "...", ip: req.ip });
+        auditSecurityEvent(app, "login_failure", {
+          tenantId,
+          identityId: identity.id,
+          outcome: "failed",
+          reason: "identity_disabled",
+          ip: req.ip
+        });
         if (strictErrors) {
           return reply.code(403).send({ ok: false, error: "IDENTITY_DISABLED" });
         }
@@ -406,6 +418,13 @@ export default async function authRoutes(app) {
       if (!passwordOk) {
         await client.query("COMMIT");
         app.log.warn({ event: "otp_request_bad_password", tenantId, login: login.substring(0, 3) + "...", ip: req.ip });
+        auditSecurityEvent(app, "login_failure", {
+          tenantId,
+          identityId: identity.id,
+          outcome: "failed",
+          reason: "bad_password",
+          ip: req.ip
+        });
         if (strictErrors) {
           return reply.code(401).send({ ok: false, error: "BAD_PASSWORD" });
         }
@@ -487,7 +506,7 @@ export default async function authRoutes(app) {
       return reply.code(400).send({ ok: false, error: "BAD_REQUEST" });
     }
 
-    const deviceToken = req.cookies?.did;
+    const deviceToken = getAuthCookie(req, app, "did");
     if (!deviceToken) {
       return reply.code(403).send({ ok: false, error: "STEP_UP_REQUIRED" });
     }
@@ -576,7 +595,7 @@ export default async function authRoutes(app) {
       }
 
       const sessionId = crypto.randomUUID();
-      const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
+      const expiresAt = new Date(Date.now() + sessionTtlMs(app));
 
       const csrf = randomToken(24);
       const csrfHash = sha256Hex(`${csrf}:${app.config.CSRF_PEPPER}`);
@@ -607,12 +626,15 @@ export default async function authRoutes(app) {
       await client.query("COMMIT");
 
       app.log.info({ event: "password_login_success", tenantId, identityId: identity.id, deviceId: deviceRes.rows[0].id, ip: req.ip });
+      auditSecurityEvent(app, "login_success", {
+        tenantId,
+        identityId: identity.id,
+        outcome: "success",
+        ip: req.ip
+      });
 
-      const cookieBase = authCookieBase(app);
-      const sessionExpires = expiresAt;
-
-      reply.setCookie("sid", sessionId, { ...cookieBase, httpOnly: true, expires: sessionExpires });
-      reply.setCookie("csrf", csrf, { ...cookieBase, expires: sessionExpires });
+      setAuthCookie(reply, app, "sid", sessionId, { httpOnly: true, expires: expiresAt });
+      setAuthCookie(reply, app, "csrf", csrf, { httpOnly: true, expires: expiresAt });
 
       return reply.send({ ok: true, assurance: "low" });
     } catch (e) {
@@ -1195,7 +1217,7 @@ export default async function authRoutes(app) {
         return reply.code(403).send({ ok: false, error: "FORBIDDEN" });
       }
 
-      const deviceToken = req.cookies?.did || crypto.randomUUID();
+      const deviceToken = getAuthCookie(req, app, "did") || crypto.randomUUID();
       let deviceRow = await upsertBrowserDevice(app, client, {
         tenantId: row.tenant_id,
         identityId: row.identity_id,
@@ -1224,7 +1246,7 @@ export default async function authRoutes(app) {
       }
 
       const sessionId = crypto.randomUUID();
-      const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
+      const expiresAt = new Date(Date.now() + sessionTtlMs(app));
       const csrf = randomToken(24);
       const csrfHash = sha256Hex(`${csrf}:${app.config.CSRF_PEPPER}`);
       const uaHash = sha256Hex(String(req.headers["user-agent"] || ""));
@@ -1262,11 +1284,10 @@ export default async function authRoutes(app) {
 
       await client.query("COMMIT");
 
-      const cookieBase = authCookieBase(app);
-      const deviceExpires = new Date(Date.now() + DEVICE_COOKIE_TTL_MS);
-      reply.setCookie("sid", sessionId, { ...cookieBase, httpOnly: true, expires: expiresAt });
-      reply.setCookie("csrf", csrf, { ...cookieBase, expires: expiresAt });
-      reply.setCookie("did", deviceToken, { ...cookieBase, httpOnly: true, expires: deviceExpires });
+      const deviceExpires = new Date(Date.now() + deviceCookieTtlMs(app));
+      setAuthCookie(reply, app, "sid", sessionId, { httpOnly: true, expires: expiresAt });
+      setAuthCookie(reply, app, "csrf", csrf, { httpOnly: true, expires: expiresAt });
+      setAuthCookie(reply, app, "did", deviceToken, { httpOnly: true, expires: deviceExpires });
 
       return reply.send({ ok: true });
     } catch (e) {
@@ -2056,7 +2077,7 @@ export default async function authRoutes(app) {
       );
 
       // If an existing session matches this identity, treat this as step-up completion.
-      const existingSid = req.cookies?.sid;
+      const existingSid = getAuthCookie(req, app, "sid");
       if (existingSid) {
         const sRes = await client.query(
           `
@@ -2092,7 +2113,7 @@ export default async function authRoutes(app) {
       }
 
       /* ---- DEVICE ---- */
-      const deviceToken = req.cookies?.did || crypto.randomUUID();
+      const deviceToken = getAuthCookie(req, app, "did") || crypto.randomUUID();
       let deviceRow = await upsertBrowserDevice(app, client, {
         tenantId,
         identityId,
@@ -2154,9 +2175,8 @@ export default async function authRoutes(app) {
 
         if (deviceRow.trust_state !== "trusted") {
           await client.query("COMMIT");
-          const cookieBase = authCookieBase(app);
-          const deviceExpires = new Date(Date.now() + DEVICE_COOKIE_TTL_MS);
-          reply.setCookie("did", deviceToken, { ...cookieBase, httpOnly: true, expires: deviceExpires });
+          const deviceExpires = new Date(Date.now() + deviceCookieTtlMs(app));
+          setAuthCookie(reply, app, "did", deviceToken, { httpOnly: true, expires: deviceExpires });
           return reply.code(401).send({ ok: false, error: "DEVICE_UNTRUSTED", deviceId: deviceRow.id });
         }
       }
@@ -2165,7 +2185,7 @@ export default async function authRoutes(app) {
 
       /* ---- SESSION ---- */
       const sessionId = crypto.randomUUID();
-      const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
+      const expiresAt = new Date(Date.now() + sessionTtlMs(app));
 
       const csrf = randomToken(24);
       const csrfHash = sha256Hex(`${csrf}:${app.config.CSRF_PEPPER}`);
@@ -2196,20 +2216,31 @@ export default async function authRoutes(app) {
       await client.query("COMMIT");
 
       app.log.info({ event: "otp_verify_success", tenantId, identityId, deviceId, ip: req.ip });
+      auditSecurityEvent(app, "login_success", {
+        tenantId,
+        identityId,
+        outcome: "success",
+        ip: req.ip
+      });
 
-      const cookieBase = authCookieBase(app);
       const sessionExpires = expiresAt;
-      const deviceExpires = new Date(Date.now() + DEVICE_COOKIE_TTL_MS);
+      const deviceExpires = new Date(Date.now() + deviceCookieTtlMs(app));
 
-      reply.setCookie("sid", sessionId, { ...cookieBase, httpOnly: true, expires: sessionExpires });
-      reply.setCookie("csrf", csrf, { ...cookieBase, expires: sessionExpires });
-      reply.setCookie("did", deviceToken, { ...cookieBase, httpOnly: true, expires: deviceExpires });
+      setAuthCookie(reply, app, "sid", sessionId, { httpOnly: true, expires: sessionExpires });
+      setAuthCookie(reply, app, "csrf", csrf, { httpOnly: true, expires: sessionExpires });
+      setAuthCookie(reply, app, "did", deviceToken, { httpOnly: true, expires: deviceExpires });
 
       return reply.send({ ok: true });
     } catch (e) {
       await client.query("ROLLBACK");
       if (e.message === "OTP_EXPIRED" || e.message === "INVALID" || e.message === "IDENTITY_DISABLED") {
         app.log.warn({ event: "otp_verify_failed", tenantId, login: login.substring(0, 3) + '...', ip: req.ip, reason: e.message });
+        auditSecurityEvent(app, "login_failure", {
+          tenantId,
+          outcome: "failed",
+          reason: e.message,
+          ip: req.ip
+        });
         return reply.code(401).send({ ok: false, error: "INVALID_OTP" });
       }
       app.log.error({ event: "otp_verify_error", tenantId, login, ip: req.ip, error: e.message });
@@ -2268,7 +2299,7 @@ export default async function authRoutes(app) {
     const s = await app.requireSession(req, { realm: "EIP" });
     if (!s.ok) return reply.code(s.status).send({ ok: false, error: s.error });
 
-    const csrf = req.cookies?.csrf;
+    const csrf = getAuthCookie(req, app, "csrf");
     if (!csrf) {
       return reply.code(403).send({ ok: false, error: "CSRF_MISSING" });
     }
@@ -2326,6 +2357,12 @@ export default async function authRoutes(app) {
     };
 
     const profile = await upsertUserProfile(app.db, tenant_id, identity_id, payload);
+    auditSecurityEvent(app, "profile_update", {
+      tenantId: tenant_id,
+      identityId: identity_id,
+      outcome: "success",
+      ip: req.ip
+    });
     return reply.send({ ok: true, profile });
   });
 
@@ -2349,26 +2386,21 @@ export default async function authRoutes(app) {
       return reply.code(400).send({ ok: false, error: "FILE_REQUIRED" });
     }
 
-    const { filename, mimetype, file } = filePart;
-    const allowed = AVATAR_MIME_PREFIX.some((prefix) => String(mimetype || "").startsWith(prefix));
-    if (!allowed) {
-      return reply.code(415).send({ ok: false, error: "UNSUPPORTED_MEDIA" });
+    const { filename, mimetype } = filePart;
+    const buffer = await uploadPartToBuffer(filePart);
+    const validation = validateImageUpload({ buffer, filename, mimetype });
+    if (!validation.ok) {
+      return reply.code(415).send({ ok: false, error: validation.error });
     }
 
-    const safeExt = path.extname(filename || "").slice(0, 10) || "";
     const uploadDir = path.join(ASSET_ROOT, tenant_id, "avatars");
     fs.mkdirSync(uploadDir, { recursive: true });
 
-    const storedName = `${identity_id}-${crypto.randomUUID()}${safeExt}`;
-    const targetPath = path.join(uploadDir, storedName);
+    const storedName = `${identity_id}-${crypto.randomUUID()}${validation.safeExt}`;
+    const targetPath = safeUploadTarget(uploadDir, storedName);
 
     try {
-      if (typeof filePart.toBuffer === "function") {
-        const buffer = await filePart.toBuffer();
-        fs.writeFileSync(targetPath, buffer);
-      } else {
-        await pipeline(file, fs.createWriteStream(targetPath, { flags: "w" }));
-      }
+      fs.writeFileSync(targetPath, buffer);
     } catch (err) {
       app.log.error({ event: "profile_avatar_upload_error", error: err.message });
       return reply.code(500).send({ ok: false, error: "UPLOAD_FAILED" });
@@ -2377,6 +2409,12 @@ export default async function authRoutes(app) {
     const rawUrl = `/assets/${tenant_id}/avatars/${storedName}`;
     const profile = await upsertUserProfile(app.db, tenant_id, identity_id, {
       avatar_url: rawUrl
+    });
+    auditSecurityEvent(app, "avatar_upload", {
+      tenantId: tenant_id,
+      identityId: identity_id,
+      outcome: "success",
+      ip: req.ip
     });
 
     return reply.send({ ok: true, avatar_url: rawUrl, profile });
@@ -2437,6 +2475,7 @@ export default async function authRoutes(app) {
       if (idRes.rowCount === 0) {
         await client.query("COMMIT");
         app.log.warn({ event: "totp_login_unknown_identity", tenantId, login: login.substring(0, 3) + "...", ip: req.ip });
+        auditSecurityEvent(app, "login_failure", { tenantId, outcome: "failed", reason: "unknown_identity", ip: req.ip });
         return reply.code(401).send({ ok: false, error: "LOGIN_FAILED" });
       }
 
@@ -2444,6 +2483,13 @@ export default async function authRoutes(app) {
       if (!identity.is_active || identity.is_locked) {
         await client.query("COMMIT");
         app.log.warn({ event: "totp_login_disabled_identity", tenantId, login: login.substring(0, 3) + "...", ip: req.ip });
+        auditSecurityEvent(app, "login_failure", {
+          tenantId,
+          identityId: identity.id,
+          outcome: "failed",
+          reason: "identity_disabled",
+          ip: req.ip
+        });
         return reply.code(401).send({ ok: false, error: "LOGIN_FAILED" });
       }
 
@@ -2467,6 +2513,13 @@ export default async function authRoutes(app) {
       if (!passwordOk) {
         await client.query("COMMIT");
         app.log.warn({ event: "totp_login_bad_password", tenantId, login: login.substring(0, 3) + "...", ip: req.ip });
+        auditSecurityEvent(app, "login_failure", {
+          tenantId,
+          identityId: identity.id,
+          outcome: "failed",
+          reason: "bad_password",
+          ip: req.ip
+        });
         return reply.code(401).send({ ok: false, error: "LOGIN_FAILED" });
       }
 
@@ -2513,11 +2566,18 @@ export default async function authRoutes(app) {
 
       if (!valid) {
         await client.query("COMMIT");
+        auditSecurityEvent(app, "login_failure", {
+          tenantId,
+          identityId: identity.id,
+          outcome: "failed",
+          reason: "invalid_totp",
+          ip: req.ip
+        });
         return reply.code(401).send({ ok: false, error: "INVALID_TOTP" });
       }
 
       // If an existing session matches this identity, treat this as step-up completion.
-      const existingSid = req.cookies?.sid;
+      const existingSid = getAuthCookie(req, app, "sid");
       if (existingSid) {
         const sRes = await client.query(
           `
@@ -2553,7 +2613,7 @@ export default async function authRoutes(app) {
       }
 
       /* ---- DEVICE ---- */
-      const deviceToken = req.cookies?.did || crypto.randomUUID();
+      const deviceToken = getAuthCookie(req, app, "did") || crypto.randomUUID();
       let deviceRow = await upsertBrowserDevice(app, client, {
         tenantId,
         identityId: identity.id,
@@ -2615,9 +2675,8 @@ export default async function authRoutes(app) {
 
         if (deviceRow.trust_state !== "trusted") {
           await client.query("COMMIT");
-          const cookieBase = authCookieBase(app);
-          const deviceExpires = new Date(Date.now() + DEVICE_COOKIE_TTL_MS);
-          reply.setCookie("did", deviceToken, { ...cookieBase, httpOnly: true, expires: deviceExpires });
+          const deviceExpires = new Date(Date.now() + deviceCookieTtlMs(app));
+          setAuthCookie(reply, app, "did", deviceToken, { httpOnly: true, expires: deviceExpires });
           return reply.code(401).send({ ok: false, error: "DEVICE_UNTRUSTED", deviceId: deviceRow.id });
         }
       }
@@ -2626,7 +2685,7 @@ export default async function authRoutes(app) {
 
       /* ---- SESSION ---- */
       const sessionId = crypto.randomUUID();
-      const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
+      const expiresAt = new Date(Date.now() + sessionTtlMs(app));
 
       const csrf = randomToken(24);
       const csrfHash = sha256Hex(`${csrf}:${app.config.CSRF_PEPPER}`);
@@ -2657,14 +2716,19 @@ export default async function authRoutes(app) {
       await client.query("COMMIT");
 
       app.log.info({ event: "totp_login_success", tenantId, identityId: identity.id, deviceId, ip: req.ip });
+      auditSecurityEvent(app, "login_success", {
+        tenantId,
+        identityId: identity.id,
+        outcome: "success",
+        ip: req.ip
+      });
 
-      const cookieBase = authCookieBase(app);
       const sessionExpires = expiresAt;
-      const deviceExpires = new Date(Date.now() + DEVICE_COOKIE_TTL_MS);
+      const deviceExpires = new Date(Date.now() + deviceCookieTtlMs(app));
 
-      reply.setCookie("sid", sessionId, { ...cookieBase, httpOnly: true, expires: sessionExpires });
-      reply.setCookie("csrf", csrf, { ...cookieBase, expires: sessionExpires });
-      reply.setCookie("did", deviceToken, { ...cookieBase, httpOnly: true, expires: deviceExpires });
+      setAuthCookie(reply, app, "sid", sessionId, { httpOnly: true, expires: sessionExpires });
+      setAuthCookie(reply, app, "csrf", csrf, { httpOnly: true, expires: sessionExpires });
+      setAuthCookie(reply, app, "did", deviceToken, { httpOnly: true, expires: deviceExpires });
 
       return reply.send({ ok: true });
     } catch (e) {
@@ -2776,11 +2840,16 @@ export default async function authRoutes(app) {
     );
 
     app.log.info({ event: "logout", tenantId: s.session.tenant_id, identityId: s.session.identity_id, sessionId: s.session.id, ip: req.ip });
+    auditSecurityEvent(app, "logout", {
+      tenantId: s.session.tenant_id,
+      identityId: s.session.identity_id,
+      outcome: "success",
+      ip: req.ip
+    });
 
-    const clearOpts = authCookieBase(app);
-
-    reply.clearCookie("sid", clearOpts);
-    reply.clearCookie("csrf", clearOpts);
+    clearAuthCookie(reply, app, "sid");
+    clearAuthCookie(reply, app, "csrf");
+    clearAuthCookie(reply, app, "did");
 
     return reply.send({ ok: true });
   });

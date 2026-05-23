@@ -1,5 +1,6 @@
 // services/api/src/routes/admin_portfolio.js
 import { hasPermission } from "../auth/perm.js";
+import { auditSecurityEvent } from "../lib/securityAudit.js";
 
 function normalizeText(value) {
   return String(value || "").trim();
@@ -216,6 +217,14 @@ export default async function adminPortfolioRoutes(app) {
       `,
       [adminIdentity.id, code, name, isActive]
     );
+    auditSecurityEvent(app, "admin_portfolio_upsert", {
+      actorTenantId: session.tenant_id,
+      actorIdentityId: session.identity_id,
+      adminIdentityId: adminIdentity.id,
+      portfolioId: r.rows[0]?.id,
+      outcome: "success",
+      ip: req.ip
+    });
 
     return reply.send({ ok: true, portfolio: r.rows[0] });
   });
@@ -249,6 +258,13 @@ export default async function adminPortfolioRoutes(app) {
       `,
       [portfolioId, code, name, isActive]
     );
+    auditSecurityEvent(app, "admin_portfolio_update", {
+      actorTenantId: session.tenant_id,
+      actorIdentityId: session.identity_id,
+      portfolioId,
+      outcome: "success",
+      ip: req.ip
+    });
 
     return reply.send({ ok: true, portfolio: r.rows[0] });
   });
@@ -278,6 +294,14 @@ export default async function adminPortfolioRoutes(app) {
       `,
       [portfolioId, tenantId]
     );
+    auditSecurityEvent(app, "admin_portfolio_tenant_assign", {
+      actorTenantId: session.tenant_id,
+      actorIdentityId: session.identity_id,
+      portfolioId,
+      targetTenantId: tenantId,
+      outcome: "success",
+      ip: req.ip
+    });
 
     return reply.send({ ok: true });
   });
@@ -300,6 +324,14 @@ export default async function adminPortfolioRoutes(app) {
       `,
       [portfolioId, tenantId]
     );
+    auditSecurityEvent(app, "admin_portfolio_tenant_remove", {
+      actorTenantId: session.tenant_id,
+      actorIdentityId: session.identity_id,
+      portfolioId,
+      targetTenantId: tenantId,
+      outcome: "success",
+      ip: req.ip
+    });
 
     return reply.send({ ok: true });
   });

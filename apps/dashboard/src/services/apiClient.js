@@ -5,11 +5,6 @@ const CSRF_ERROR_CODES = new Set(["CSRF_MISSING", "CSRF_MISMATCH", "CSRF_INVALID
 let cachedCsrfToken = null;
 let csrfTokenPromise = null;
 
-function readCookie(name) {
-  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
-  return match ? decodeURIComponent(match[1]) : null;
-}
-
 function isFormDataBody(body) {
   return typeof FormData !== "undefined" && body instanceof FormData;
 }
@@ -36,11 +31,6 @@ export function resetCsrfToken() {
 
 export async function getCsrfToken({ refresh = false } = {}) {
   if (!refresh) {
-    const readableCookie = readCookie("csrf");
-    if (readableCookie) {
-      cachedCsrfToken = readableCookie;
-      return readableCookie;
-    }
     if (cachedCsrfToken) return cachedCsrfToken;
     if (csrfTokenPromise) return csrfTokenPromise;
   } else {

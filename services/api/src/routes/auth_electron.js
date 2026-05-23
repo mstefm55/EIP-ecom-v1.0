@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { randomToken, sha256Hex, timingSafeEqual } from "../auth/crypto.js";
-import { authCookieBase } from "../lib/authCookies.js";
+import { setAuthCookie, sessionTtlMs } from "../lib/authCookies.js";
 
 /**
  * In-memory challenges (dev + single instance).
@@ -82,7 +82,7 @@ async function upsertElectronDevice(app, client, { tenantId, identityId, publicK
 
 async function createSession(app, client, { tenantId, identityId, deviceId, req }) {
   const sessionId = crypto.randomUUID();
-  const expiresAt = new Date(Date.now() + 12 * 60 * 60 * 1000); // 12h
+  const expiresAt = new Date(Date.now() + sessionTtlMs(app));
   const csrf = randomToken(24);
   const csrfHash = sha256Hex(`${csrf}:${app.config.CSRF_PEPPER}`);
   const uaHash = sha256Hex(String(req.headers["user-agent"] || ""));
@@ -247,11 +247,9 @@ export default async function authElectronRoutes(app) {
       await client.query("COMMIT");
 
       // Cookies for parity with browser flow
-      const cookieBase = { ...authCookieBase(app), expires: sess.expiresAt };
-
-      reply.setCookie("sid", sess.sessionId, { ...cookieBase, httpOnly: true });
-      reply.setCookie("csrf", sess.csrf, { ...cookieBase });
-      reply.setCookie("did", deviceRow.id, { ...cookieBase, httpOnly: true });
+      setAuthCookie(reply, app, "sid", sess.sessionId, { httpOnly: true, expires: sess.expiresAt });
+      setAuthCookie(reply, app, "csrf", sess.csrf, { httpOnly: true, expires: sess.expiresAt });
+      setAuthCookie(reply, app, "did", deviceRow.id, { httpOnly: true, expires: sess.expiresAt });
 
       return reply.send({
         ok: true,

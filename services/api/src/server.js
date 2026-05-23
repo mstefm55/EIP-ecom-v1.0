@@ -42,6 +42,7 @@ import privacyRoutes from "./routes/privacy.js";
 import uiSurfaceRoutes from "./routes/ui_surface.js";
 
 import { sha256Hex, timingSafeEqual } from "./auth/crypto.js";
+import { getAuthCookie } from "./lib/authCookies.js";
 import { advanceInstance, createInstance, findActiveInstance, updateTaskStatus } from "./core/core_process_engine.js";
 import { verifyAssetToken } from "./services/assets/signing.js";
 import { syncAllTenantMarketplaceFx } from "./services/fx/marketFxSync.js";
@@ -49,8 +50,19 @@ import { syncAllTenantMarketplaceFx } from "./services/fx/marketFxSync.js";
 const DEFAULT_BODY_LIMIT = 1024 * 1024; // 1 MiB
 const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 const STEP_UP_TTL_MS = 10 * 60 * 1000;
+const STATE_CHANGING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+function originFromHeader(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  try {
+    return new URL(raw).origin;
+  } catch {
+    return "";
+  }
+}
 
 // Tenant validation cache (LRU: max 100 entries, 5 min TTL)
 const tenantCache = new LRUCache({
@@ -140,6 +152,44 @@ async function buildServer() {
   await app.register(cors, {
     origin: eipOrigins,
     credentials: true,
+  });
+
+  // Browser state-changing EIP requests must come from an expected dashboard origin.
+  app.addHook("onRequest", async (req, reply) => {
+    const method = String(req.method || "GET").toUpperCase();
+    const url = String(req.url || "");
+    if (!STATE_CHANGING_METHODS.has(method) || !url.startsWith("/api/eip/")) return;
+
+    const origin = originFromHeader(req.headers.origin);
+    const refererOrigin = originFromHeader(req.headers.referer);
+    const requestOrigin = origin || refererOrigin;
+    const fetchSite = String(req.headers["sec-fetch-site"] || "").toLowerCase();
+    const fetchMode = String(req.headers["sec-fetch-mode"] || "").toLowerCase();
+    const allowed = requestOrigin && app.EIP_ORIGINS.includes(requestOrigin);
+    const requireOrigin = app.config.NODE_ENV === "production" || app.config.EIP_ORIGIN_REQUIRED === true;
+
+    if (origin && !app.EIP_ORIGINS.includes(origin)) {
+      app.log.warn({ event: "eip_origin_rejected", origin, path: url, ip: req.ip });
+      return reply.code(403).send({ ok: false, error: "ORIGIN_NOT_ALLOWED" });
+    }
+    if (!origin && refererOrigin && !app.EIP_ORIGINS.includes(refererOrigin)) {
+      app.log.warn({ event: "eip_referer_rejected", refererOrigin, path: url, ip: req.ip });
+      return reply.code(403).send({ ok: false, error: "ORIGIN_NOT_ALLOWED" });
+    }
+    if (!requestOrigin && requireOrigin) {
+      app.log.warn({ event: "eip_origin_missing", path: url, ip: req.ip });
+      return reply.code(403).send({ ok: false, error: "ORIGIN_REQUIRED" });
+    }
+    if (app.config.EIP_FETCH_METADATA_GUARD !== false) {
+      if (fetchSite === "cross-site" && !allowed) {
+        app.log.warn({ event: "eip_fetch_metadata_rejected", fetchSite, path: url, ip: req.ip });
+        return reply.code(403).send({ ok: false, error: "ORIGIN_NOT_ALLOWED" });
+      }
+      if (fetchMode === "navigate") {
+        app.log.warn({ event: "eip_fetch_navigate_rejected", path: url, ip: req.ip });
+        return reply.code(403).send({ ok: false, error: "BROWSER_NAVIGATION_BLOCKED" });
+      }
+    }
   });
 
   // ---- static file serving for tenant websites ----
@@ -282,7 +332,7 @@ async function buildServer() {
   // SESSION LOAD (cookie sid)
   // ============================================================
   app.decorate("loadSession", async function loadSession(req) {
-    const sid = req.cookies?.sid;
+    const sid = getAuthCookie(req, app, "sid");
     if (!sid) return null;
 
     const r = await app.db.query(
@@ -357,7 +407,7 @@ async function buildServer() {
 
   app.addHook("onRequest", async (req, reply) => {
     if (!req.url.startsWith("/assets/")) return;
-    const match = req.url.match(/^\/assets\/([0-9a-f-]{36})\/products\/[^?]+/i);
+    const match = req.url.match(/^\/assets\/([0-9a-f-]{36})\/(?:products|avatars|blog)\/[^?]+/i);
     if (!match) return;
     if (!assetTokenRequired) return;
 
@@ -438,7 +488,7 @@ async function buildServer() {
     const needs = m === "POST" || m === "PUT" || m === "PATCH" || m === "DELETE";
     if (!needs) return { ok: true };
 
-    const csrfCookie = req.cookies?.csrf;
+    const csrfCookie = getAuthCookie(req, app, "csrf");
     const csrfHeader = req.headers["x-csrf"];
 
     if (!csrfCookie || !csrfHeader) {
@@ -494,7 +544,7 @@ async function buildServer() {
     const url = String(req.url || "").split("?")[0];
     if (!url.startsWith("/api/eip/")) return;
 
-    const sid = req.cookies?.sid;
+    const sid = getAuthCookie(req, app, "sid");
     if (!sid) return;
 
     const s = req.session || (await app.loadSession(req));

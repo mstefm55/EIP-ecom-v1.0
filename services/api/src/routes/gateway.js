@@ -1,6 +1,5 @@
 // services/api/src/routes/gateway.js
 import crypto from "node:crypto";
-import { sha256Hex, timingSafeEqual } from "../auth/crypto.js";
 import { buildBootstrapPayload } from "../services/gateway/bootstrap.js";
 import { hasPermission } from "../auth/perm.js";
 import { fetchWithTimeout, buildOutboundAuth } from "../services/gateway/outbound.js";
@@ -62,22 +61,6 @@ async function requireSessionWithCsrf(app, req, reply) {
   const c = await app.requireCsrf(req);
   if (!c.ok) {
     reply.code(c.status).send({ ok: false, error: c.error });
-    return null;
-  }
-
-  const csrfCookie = req.cookies?.csrf;
-  const csrfHeader = req.headers["x-csrf"];
-  if (!csrfCookie || !csrfHeader) {
-    reply.code(403).send({ ok: false, error: "CSRF_MISSING" });
-    return null;
-  }
-  if (String(csrfHeader) !== String(csrfCookie)) {
-    reply.code(403).send({ ok: false, error: "CSRF_MISMATCH" });
-    return null;
-  }
-  const expected = sha256Hex(`${csrfCookie}:${app.config.CSRF_PEPPER}`);
-  if (!s.session.csrf_secret_hash || !timingSafeEqual(expected, s.session.csrf_secret_hash)) {
-    reply.code(403).send({ ok: false, error: "CSRF_INVALID" });
     return null;
   }
 

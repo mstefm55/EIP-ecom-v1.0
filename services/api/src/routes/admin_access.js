@@ -2,16 +2,16 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { pipeline } from "node:stream/promises";
 import { randomUUID } from "node:crypto";
 import argon2 from "argon2";
 import { hasPermission } from "../auth/perm.js";
 import { evaluatePasswordStrength } from "../auth/password.js";
+import { auditSecurityEvent } from "../lib/securityAudit.js";
+import { safeUploadTarget, uploadPartToBuffer, validateImageUpload } from "../lib/uploadSecurity.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ASSET_ROOT = path.join(__dirname, "../../assets");
-const ALLOWED_MIME_PREFIX = ["image/"];
 const DEFAULT_TRANSLATION_BILLING = {
   charge_mode: "pass_through",
   markup_percent: 0,
@@ -496,6 +496,14 @@ export default async function adminAccessRoutes(app) {
     };
 
     const profile = await upsertProfile(app, tenantId, identityId, payload);
+    auditSecurityEvent(app, "admin_profile_update", {
+      actorTenantId: session.tenant_id,
+      actorIdentityId: session.identity_id,
+      targetTenantId: tenantId,
+      targetIdentityId: identityId,
+      outcome: "success",
+      ip: req.ip
+    });
     return reply.send({ ok: true, profile });
   });
 
@@ -527,26 +535,21 @@ export default async function adminAccessRoutes(app) {
       return reply.code(400).send({ ok: false, error: "FILE_REQUIRED" });
     }
 
-    const { filename, mimetype, file } = filePart;
-    const allowed = ALLOWED_MIME_PREFIX.some((prefix) => String(mimetype || "").startsWith(prefix));
-    if (!allowed) {
-      return reply.code(415).send({ ok: false, error: "UNSUPPORTED_MEDIA" });
+    const { filename, mimetype } = filePart;
+    const buffer = await uploadPartToBuffer(filePart);
+    const validation = validateImageUpload({ buffer, filename, mimetype });
+    if (!validation.ok) {
+      return reply.code(415).send({ ok: false, error: validation.error });
     }
 
-    const safeExt = path.extname(filename || "").slice(0, 10) || "";
     const uploadDir = path.join(ASSET_ROOT, tenantId, "avatars");
     fs.mkdirSync(uploadDir, { recursive: true });
 
-    const storedName = `${identityId}-${randomUUID()}${safeExt}`;
-    const targetPath = path.join(uploadDir, storedName);
+    const storedName = `${identityId}-${randomUUID()}${validation.safeExt}`;
+    const targetPath = safeUploadTarget(uploadDir, storedName);
 
     try {
-      if (typeof filePart.toBuffer === "function") {
-        const buffer = await filePart.toBuffer();
-        fs.writeFileSync(targetPath, buffer);
-      } else {
-        await pipeline(file, fs.createWriteStream(targetPath, { flags: "w" }));
-      }
+      fs.writeFileSync(targetPath, buffer);
     } catch (err) {
       app.log.error({ event: "profile_avatar_upload_error", error: err.message });
       return reply.code(500).send({ ok: false, error: "UPLOAD_FAILED" });
@@ -555,6 +558,14 @@ export default async function adminAccessRoutes(app) {
     const rawUrl = `/assets/${tenantId}/avatars/${storedName}`;
     const profile = await upsertProfile(app, tenantId, identityId, {
       avatar_url: rawUrl
+    });
+    auditSecurityEvent(app, "admin_avatar_upload", {
+      actorTenantId: session.tenant_id,
+      actorIdentityId: session.identity_id,
+      targetTenantId: tenantId,
+      targetIdentityId: identityId,
+      outcome: "success",
+      ip: req.ip
     });
 
     return reply.send({ ok: true, avatar_url: rawUrl, profile });

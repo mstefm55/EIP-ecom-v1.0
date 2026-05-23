@@ -2,13 +2,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { pipeline } from "node:stream/promises";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { hasPermission } from "../auth/perm.js";
 import { sha256Hex } from "../auth/crypto.js";
 import { buildSignedAssetUrl } from "../services/assets/signing.js";
 import { sanitizeMediaForStorage } from "../services/assets/url_policy.js";
+import { safeUploadTarget, uploadPartToBuffer, validateEcomUpload } from "../lib/uploadSecurity.js";
 import { extractProfiles } from "../services/gateway/connectionProfile.js";
 import { fetchWithTimeout } from "../services/gateway/outbound.js";
 import {
@@ -50,7 +50,6 @@ const STOREFRONT_CONTENT_ACTIONS = new Set(["INTAKE", "DRAFT_READY", "APPROVE", 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ASSET_ROOT = path.join(__dirname, "../../assets");
-const MEDIA_ALLOWED_MIME_PREFIX = ["image/", "video/"];
 const DOCUMENT_ALLOWED_MIME = new Set([
   "application/pdf",
   "application/zip",
@@ -2903,26 +2902,22 @@ export default async function ecomRoutes(app) {
         return reply.code(400).send({ ok: false, error: "FILE_REQUIRED" });
       }
 
-      const { filename, mimetype, file } = filePart;
+      const { filename, mimetype } = filePart;
       const assetKind = readMultipartValue(req.body?.asset_kind).toLowerCase() === "document"
         ? "document"
         : "media";
-
-      const extension = path.extname(filename || "").toLowerCase();
-      const isMediaMime = MEDIA_ALLOWED_MIME_PREFIX.some((prefix) =>
-        String(mimetype || "").startsWith(prefix)
-      );
-      const isDocumentMime = DOCUMENT_ALLOWED_MIME.has(String(mimetype || "").toLowerCase());
-      const isDocumentExt = DOCUMENT_ALLOWED_EXT.has(extension);
-
-      if (assetKind === "media" && !isMediaMime) {
-        return reply.code(415).send({ ok: false, error: "UNSUPPORTED_MEDIA" });
+      const buffer = await uploadPartToBuffer(filePart);
+      const validation = validateEcomUpload({
+        buffer,
+        filename,
+        mimetype,
+        assetKind,
+        allowedDocumentExt: DOCUMENT_ALLOWED_EXT,
+        allowedDocumentMime: DOCUMENT_ALLOWED_MIME
+      });
+      if (!validation.ok) {
+        return reply.code(415).send({ ok: false, error: validation.error });
       }
-      if (assetKind === "document" && !(isDocumentMime || isDocumentExt)) {
-        return reply.code(415).send({ ok: false, error: "UNSUPPORTED_DOCUMENT" });
-      }
-
-      const safeExt = extension.slice(0, 10) || "";
       const uploadDir = path.join(
         ASSET_ROOT,
         session.tenant_id,
@@ -2931,17 +2926,11 @@ export default async function ecomRoutes(app) {
       );
       fs.mkdirSync(uploadDir, { recursive: true });
 
-      const storedName = `${randomUUID()}${safeExt}`;
-      const targetPath = path.join(uploadDir, storedName);
+      const storedName = `${randomUUID()}${validation.safeExt}`;
+      const targetPath = safeUploadTarget(uploadDir, storedName);
 
       try {
-        if (typeof filePart.toBuffer === "function") {
-          const buffer = await filePart.toBuffer();
-          fs.writeFileSync(targetPath, buffer);
-        } else {
-          const limitedStream = file;
-          await pipeline(limitedStream, fs.createWriteStream(targetPath, { flags: "w" }));
-        }
+        fs.writeFileSync(targetPath, buffer);
       } catch (err) {
         app.log.error({ event: "ecom_upload_error", error: err.message });
         return reply.code(500).send({ ok: false, error: "UPLOAD_FAILED" });
