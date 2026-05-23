@@ -9,6 +9,18 @@ import { useAuthApi } from "./hooks/useAuthApi";
 import { useSurfaceLoader } from "./hooks/useSurfaceLoader";
 import { apiFetch } from "./services/apiClient";
 
+function parseApiErrorCode(error) {
+  const message = String(error?.message || "");
+  const match = message.match(/"error"\s*:\s*"([A-Z0-9_]+)"/i);
+  return match?.[1] || "";
+}
+
+function resolveFallbackSurfaceForForbidden(currentSurface) {
+  if (currentSurface === "admin") return "dashboard";
+  if (currentSurface === "dashboard") return "admin";
+  return "auth";
+}
+
 export default function App() {
   const [modalId, setModalId] = useState(null);
   const [form, setForm] = useState({ organisation: "", email: "", password: "", totp: "", totpLost: false });
@@ -60,6 +72,7 @@ export default function App() {
   const resolvePostAuthSurface = async () => {
     try {
       const who = await apiFetch("/api/eip/auth/whoami");
+      if (who?.default_surface) return who.default_surface;
       if (who?.is_system_admin) return "admin";
       return "dashboard";
     } catch {
@@ -88,6 +101,17 @@ export default function App() {
     }
   }, []);
 
+  useEffect(() => {
+    if (!surfaceState.error || surfaceCode === "auth") return;
+    const errorCode = parseApiErrorCode(surfaceState.error);
+    if (errorCode === "SURFACE_FORBIDDEN") {
+      redirectToSurface(resolveFallbackSurfaceForForbidden(surfaceCode));
+      return;
+    }
+    if (errorCode === "UNAUTHENTICATED" || errorCode === "WRONG_REALM") {
+      redirectToSurface("auth");
+    }
+  }, [surfaceCode, surfaceState.error]);
 
   const engineCtx = useMemo(
     () => ({
@@ -98,7 +122,7 @@ export default function App() {
       },
       surface: {
         code: surfaceCode,
-        setCode: setSurfaceCode,
+        setCode: redirectToSurface,
         loading: surfaceState.loading,
         error: surfaceState.error,
       },
