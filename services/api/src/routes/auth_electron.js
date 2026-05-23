@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { randomToken, sha256Hex, timingSafeEqual } from "../auth/crypto.js";
+import { authCookieBase } from "../lib/authCookies.js";
 
 /**
  * In-memory challenges (dev + single instance).
@@ -246,8 +247,7 @@ export default async function authElectronRoutes(app) {
       await client.query("COMMIT");
 
       // Cookies for parity with browser flow
-      const isProd = app.config.NODE_ENV === "production";
-      const cookieBase = { path: "/", sameSite: "lax", secure: isProd, expires: sess.expiresAt };
+      const cookieBase = { ...authCookieBase(app), expires: sess.expiresAt };
 
       reply.setCookie("sid", sess.sessionId, { ...cookieBase, httpOnly: true });
       reply.setCookie("csrf", sess.csrf, { ...cookieBase });

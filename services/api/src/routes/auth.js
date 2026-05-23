@@ -16,6 +16,7 @@ import {
   timingSafeEqual
 } from "../auth/crypto.js";
 import { sendEmail } from "../lib/email.js";
+import { authCookieBase } from "../lib/authCookies.js";
 import { evaluatePasswordStrength, generateStrongPassword, checkPasswordHistory } from "../auth/password.js";
 
 const OTP_REQUEST_LIMIT_MAX = 5;
@@ -607,8 +608,7 @@ export default async function authRoutes(app) {
 
       app.log.info({ event: "password_login_success", tenantId, identityId: identity.id, deviceId: deviceRes.rows[0].id, ip: req.ip });
 
-      const isProd = app.config.NODE_ENV === "production";
-      const cookieBase = { path: "/", sameSite: "lax", secure: isProd };
+      const cookieBase = authCookieBase(app);
       const sessionExpires = expiresAt;
 
       reply.setCookie("sid", sessionId, { ...cookieBase, httpOnly: true, expires: sessionExpires });
@@ -1262,8 +1262,7 @@ export default async function authRoutes(app) {
 
       await client.query("COMMIT");
 
-      const isProd = app.config.NODE_ENV === "production";
-      const cookieBase = { path: "/", sameSite: "lax", secure: isProd };
+      const cookieBase = authCookieBase(app);
       const deviceExpires = new Date(Date.now() + DEVICE_COOKIE_TTL_MS);
       reply.setCookie("sid", sessionId, { ...cookieBase, httpOnly: true, expires: expiresAt });
       reply.setCookie("csrf", csrf, { ...cookieBase, expires: expiresAt });
@@ -2155,8 +2154,7 @@ export default async function authRoutes(app) {
 
         if (deviceRow.trust_state !== "trusted") {
           await client.query("COMMIT");
-          const isProd = app.config.NODE_ENV === "production";
-          const cookieBase = { path: "/", sameSite: "lax", secure: isProd };
+          const cookieBase = authCookieBase(app);
           const deviceExpires = new Date(Date.now() + DEVICE_COOKIE_TTL_MS);
           reply.setCookie("did", deviceToken, { ...cookieBase, httpOnly: true, expires: deviceExpires });
           return reply.code(401).send({ ok: false, error: "DEVICE_UNTRUSTED", deviceId: deviceRow.id });
@@ -2199,8 +2197,7 @@ export default async function authRoutes(app) {
 
       app.log.info({ event: "otp_verify_success", tenantId, identityId, deviceId, ip: req.ip });
 
-      const isProd = app.config.NODE_ENV === "production";
-      const cookieBase = { path: "/", sameSite: "lax", secure: isProd };
+      const cookieBase = authCookieBase(app);
       const sessionExpires = expiresAt;
       const deviceExpires = new Date(Date.now() + DEVICE_COOKIE_TTL_MS);
 
@@ -2600,8 +2597,7 @@ export default async function authRoutes(app) {
 
         if (deviceRow.trust_state !== "trusted") {
           await client.query("COMMIT");
-          const isProd = app.config.NODE_ENV === "production";
-          const cookieBase = { path: "/", sameSite: "lax", secure: isProd };
+          const cookieBase = authCookieBase(app);
           const deviceExpires = new Date(Date.now() + DEVICE_COOKIE_TTL_MS);
           reply.setCookie("did", deviceToken, { ...cookieBase, httpOnly: true, expires: deviceExpires });
           return reply.code(401).send({ ok: false, error: "DEVICE_UNTRUSTED", deviceId: deviceRow.id });
@@ -2644,8 +2640,7 @@ export default async function authRoutes(app) {
 
       app.log.info({ event: "totp_login_success", tenantId, identityId: identity.id, deviceId, ip: req.ip });
 
-      const isProd = app.config.NODE_ENV === "production";
-      const cookieBase = { path: "/", sameSite: "lax", secure: isProd };
+      const cookieBase = authCookieBase(app);
       const sessionExpires = expiresAt;
       const deviceExpires = new Date(Date.now() + DEVICE_COOKIE_TTL_MS);
 
@@ -2764,8 +2759,7 @@ export default async function authRoutes(app) {
 
     app.log.info({ event: "logout", tenantId: s.session.tenant_id, identityId: s.session.identity_id, sessionId: s.session.id, ip: req.ip });
 
-    const isProd = app.config.NODE_ENV === "production";
-    const clearOpts = { path: "/", sameSite: "lax", secure: isProd };
+    const clearOpts = authCookieBase(app);
 
     reply.clearCookie("sid", clearOpts);
     reply.clearCookie("csrf", clearOpts);

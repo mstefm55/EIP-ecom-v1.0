@@ -27,6 +27,7 @@ export const envSchema = {
     CORS_ORIGIN: { type: "string", default: "http://localhost:5173,http://localhost:5174" },
     CORS_ORIGIN_PUBLIC: { type: "string" },
     COOKIE_SECRET: { type: "string", minLength: 1 },
+    AUTH_COOKIE_CROSS_SITE: { type: "boolean", default: false },
     API_KEY_PEPPER: { type: "string", minLength: 1 },
     ACCESS_GRANT_PEPPER: { type: "string" },
     CSRF_PEPPER: { type: "string", minLength: 1 },

@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import argon2 from "argon2";
 import { NobleCryptoPlugin, ScureBase32Plugin, TOTP } from "otplib";
 import { randomToken, sha256Hex } from "../auth/crypto.js";
+import { authCookieBase } from "../lib/authCookies.js";
 import { evaluatePasswordStrength } from "../auth/password.js";
 
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
@@ -325,8 +326,7 @@ export default async function bootstrapRoutes(app) {
 
         await client.query("COMMIT");
 
-        const isProd = app.config.NODE_ENV === "production";
-        const cookieBase = { path: "/", sameSite: "lax", secure: isProd };
+        const cookieBase = authCookieBase(app);
         const sessionExpires = expiresAt;
         const deviceExpires = new Date(Date.now() + DEVICE_COOKIE_TTL_MS);
 
@@ -799,8 +799,7 @@ export default async function bootstrapRoutes(app) {
 
       await client.query("COMMIT");
 
-      const isProd = app.config.NODE_ENV === "production";
-      const clearOpts = { path: "/", sameSite: "lax", secure: isProd };
+      const clearOpts = authCookieBase(app);
       reply.clearCookie("sid", clearOpts);
       reply.clearCookie("csrf", clearOpts);
 
