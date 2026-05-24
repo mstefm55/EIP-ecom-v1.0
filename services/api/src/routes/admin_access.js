@@ -20,255 +20,6 @@ const DEFAULT_TRANSLATION_BILLING = {
   currency: "USD"
 };
 
-const TENANT_USER_ROLE_BASELINE = [
-  { code: "ADMIN_SUPER", label: "Super Admin", surface_code: "ADMIN", is_system: true },
-  { code: "ADMIN_EXEC", label: "Executive Admin", surface_code: "ADMIN", is_system: true },
-  { code: "ADMIN_ASSOC", label: "Associate Admin", surface_code: "ADMIN", is_system: true },
-  { code: "ECOM_ADMIN", label: "ECOM Admin", surface_code: "ERP", is_system: true },
-  { code: "ECOM_USER", label: "ECOM User", surface_code: "ECOM", is_system: true },
-  { code: "ERP_USER", label: "ERP User", surface_code: "ERP", is_system: true },
-  { code: "PARTNER_USER", label: "Partner User", surface_code: "PARTNER", is_system: true },
-  { code: "CRM_ADMIN", label: "CRM Admin", surface_code: "ERP", is_system: true },
-  { code: "CRM_USER", label: "CRM User", surface_code: "ERP", is_system: true },
-  { code: "ACCESS_UNIVERSAL", label: "Universal Access", surface_code: "ERP", is_system: false },
-  { code: "ACCESS_ECOM_FULL", label: "Ecommerce Full Access", surface_code: "ERP", is_system: false },
-  { code: "ACCESS_ECOM_CATALOG", label: "Product & Content Studio", surface_code: "ERP", is_system: false },
-  { code: "ACCESS_ECOM_ORDERS", label: "Orders & Payments", surface_code: "ERP", is_system: false },
-  { code: "ACCESS_CRM_FULL", label: "CRM Full Access", surface_code: "ERP", is_system: false },
-  { code: "ACCESS_READ_ONLY", label: "Read Only", surface_code: "ERP", is_system: false }
-];
-
-const TENANT_USER_ROLE_PERMISSION_BUNDLES = [
-  ["ADMIN_SUPER", "auth.device.read"],
-  ["ADMIN_SUPER", "auth.device.trust"],
-  ["ADMIN_SUPER", "auth.device.revoke"],
-  ["ADMIN_SUPER", "auth.password.write"],
-  ["ADMIN_SUPER", "authz.bootstrap.read"],
-  ["ADMIN_SUPER", "core.home.read"],
-  ["ADMIN_SUPER", "core.agent.read"],
-  ["ADMIN_SUPER", "core.agent.write"],
-  ["ADMIN_SUPER", "core.material.read"],
-  ["ADMIN_SUPER", "core.material.write"],
-  ["ADMIN_SUPER", "core.task.read"],
-  ["ADMIN_SUPER", "core.task.write"],
-  ["ADMIN_SUPER", "core.process.read"],
-  ["ADMIN_SUPER", "core.process.write"],
-  ["ADMIN_SUPER", "PROCESS_DEF_READ"],
-  ["ADMIN_SUPER", "PROCESS_DEF_WRITE"],
-  ["ADMIN_SUPER", "PROCESS_INSTANCE_READ"],
-  ["ADMIN_SUPER", "PROCESS_INSTANCE_WRITE"],
-  ["ADMIN_SUPER", "CRM_AGENT_READ"],
-  ["ADMIN_SUPER", "CRM_AGENT_WRITE"],
-  ["ADMIN_SUPER", "CRM_INTERACTION_READ"],
-  ["ADMIN_SUPER", "CRM_INTERACTION_WRITE"],
-  ["ADMIN_SUPER", "CRM_CASE_READ"],
-  ["ADMIN_SUPER", "CRM_CASE_WRITE"],
-  ["ADMIN_SUPER", "CRM_OPPORTUNITY_READ"],
-  ["ADMIN_SUPER", "CRM_OPPORTUNITY_WRITE"],
-  ["ADMIN_SUPER", "CRM_TASK_READ"],
-  ["ADMIN_SUPER", "CRM_TASK_WRITE"],
-  ["ADMIN_SUPER", "CRM_DASHBOARD_READ"],
-  ["ADMIN_SUPER", "CRM_PROCESS_DEF_READ"],
-  ["ADMIN_SUPER", "CRM_PROCESS_DEF_WRITE"],
-  ["ADMIN_SUPER", "ECOM_PRODUCT_READ"],
-  ["ADMIN_SUPER", "ECOM_PRODUCT_WRITE"],
-  ["ADMIN_SUPER", "ECOM_REVIEW_READ"],
-  ["ADMIN_SUPER", "ECOM_REVIEW_MODERATE"],
-  ["ADMIN_SUPER", "ECOM_ORDER_READ"],
-  ["ADMIN_SUPER", "ECOM_ORDER_WRITE"],
-  ["ADMIN_SUPER", "ECOM_RETURN_READ"],
-  ["ADMIN_SUPER", "ECOM_RETURN_WRITE"],
-  ["ADMIN_SUPER", "ECOM_REFUND_READ"],
-  ["ADMIN_SUPER", "ECOM_REFUND_WRITE"],
-  ["ADMIN_SUPER", "ECOM_SETTINGS_WRITE"],
-  ["ADMIN_SUPER", "tenant.admin_access.read"],
-  ["ADMIN_SUPER", "tenant.admin_access.write"],
-  ["ADMIN_SUPER", "tenant.connection.read"],
-  ["ADMIN_SUPER", "tenant.connection.write"],
-  ["ADMIN_SUPER", "tenant.connection.api_key"],
-  ["ADMIN_SUPER", "tenant.connection.template"],
-  ["ADMIN_SUPER", "tenant.connection.log"],
-  ["ADMIN_SUPER", "privacy.data.export"],
-  ["ADMIN_SUPER", "privacy.erasure.execute"],
-  ["ADMIN_SUPER", "privacy.consent.manage"],
-  ["ADMIN_SUPER", "privacy.audit.view"],
-  ["ECOM_ADMIN", "ECOM_PRODUCT_READ"],
-  ["ECOM_ADMIN", "ECOM_PRODUCT_WRITE"],
-  ["ECOM_ADMIN", "ECOM_REVIEW_READ"],
-  ["ECOM_ADMIN", "ECOM_REVIEW_MODERATE"],
-  ["ECOM_ADMIN", "ECOM_ORDER_READ"],
-  ["ECOM_ADMIN", "ECOM_ORDER_WRITE"],
-  ["ECOM_ADMIN", "ECOM_RETURN_READ"],
-  ["ECOM_ADMIN", "ECOM_RETURN_WRITE"],
-  ["ECOM_ADMIN", "ECOM_REFUND_READ"],
-  ["ECOM_ADMIN", "ECOM_REFUND_WRITE"],
-  ["ECOM_ADMIN", "ECOM_SETTINGS_WRITE"],
-  ["ECOM_ADMIN", "tenant.admin_access.read"],
-  ["ECOM_ADMIN", "tenant.admin_access.write"],
-  ["ECOM_USER", "ECOM_PRODUCT_READ"],
-  ["ECOM_USER", "ECOM_ORDER_READ"],
-  ["ECOM_USER", "ECOM_RETURN_READ"],
-  ["ECOM_USER", "ECOM_REFUND_READ"],
-  ["ERP_USER", "authz.bootstrap.read"],
-  ["ERP_USER", "core.home.read"],
-  ["ERP_USER", "core.agent.read"],
-  ["ERP_USER", "core.material.read"],
-  ["ERP_USER", "core.task.read"],
-  ["ERP_USER", "core.process.read"],
-  ["ERP_USER", "ECOM_PRODUCT_READ"],
-  ["ERP_USER", "ECOM_PRODUCT_WRITE"],
-  ["ERP_USER", "ECOM_ORDER_READ"],
-  ["ERP_USER", "ECOM_ORDER_WRITE"],
-  ["ERP_USER", "ECOM_RETURN_READ"],
-  ["ERP_USER", "ECOM_RETURN_WRITE"],
-  ["ERP_USER", "ECOM_REFUND_READ"],
-  ["ERP_USER", "ECOM_REFUND_WRITE"],
-  ["PARTNER_USER", "authz.bootstrap.read"],
-  ["PARTNER_USER", "core.home.read"],
-  ["CRM_ADMIN", "CRM_AGENT_READ"],
-  ["CRM_ADMIN", "CRM_AGENT_WRITE"],
-  ["CRM_ADMIN", "CRM_INTERACTION_READ"],
-  ["CRM_ADMIN", "CRM_INTERACTION_WRITE"],
-  ["CRM_ADMIN", "CRM_CASE_READ"],
-  ["CRM_ADMIN", "CRM_CASE_WRITE"],
-  ["CRM_ADMIN", "CRM_OPPORTUNITY_READ"],
-  ["CRM_ADMIN", "CRM_OPPORTUNITY_WRITE"],
-  ["CRM_ADMIN", "CRM_TASK_READ"],
-  ["CRM_ADMIN", "CRM_TASK_WRITE"],
-  ["CRM_ADMIN", "CRM_DASHBOARD_READ"],
-  ["CRM_ADMIN", "PROCESS_DEF_READ"],
-  ["CRM_ADMIN", "PROCESS_DEF_WRITE"],
-  ["CRM_ADMIN", "PROCESS_INSTANCE_READ"],
-  ["CRM_ADMIN", "PROCESS_INSTANCE_WRITE"],
-  ["CRM_USER", "CRM_AGENT_READ"],
-  ["CRM_USER", "CRM_INTERACTION_READ"],
-  ["CRM_USER", "CRM_INTERACTION_WRITE"],
-  ["CRM_USER", "CRM_CASE_READ"],
-  ["CRM_USER", "CRM_CASE_WRITE"],
-  ["CRM_USER", "CRM_OPPORTUNITY_READ"],
-  ["CRM_USER", "CRM_TASK_READ"],
-  ["CRM_USER", "CRM_TASK_WRITE"],
-  ["CRM_USER", "CRM_DASHBOARD_READ"],
-  ["CRM_USER", "PROCESS_DEF_READ"],
-  ["CRM_USER", "PROCESS_INSTANCE_READ"],
-  ["ACCESS_UNIVERSAL", "auth.device.read"],
-  ["ACCESS_UNIVERSAL", "auth.device.trust"],
-  ["ACCESS_UNIVERSAL", "auth.device.revoke"],
-  ["ACCESS_UNIVERSAL", "auth.password.write"],
-  ["ACCESS_UNIVERSAL", "authz.bootstrap.read"],
-  ["ACCESS_UNIVERSAL", "core.home.read"],
-  ["ACCESS_UNIVERSAL", "core.agent.read"],
-  ["ACCESS_UNIVERSAL", "core.agent.write"],
-  ["ACCESS_UNIVERSAL", "core.material.read"],
-  ["ACCESS_UNIVERSAL", "core.material.write"],
-  ["ACCESS_UNIVERSAL", "core.task.read"],
-  ["ACCESS_UNIVERSAL", "core.task.write"],
-  ["ACCESS_UNIVERSAL", "core.process.read"],
-  ["ACCESS_UNIVERSAL", "core.process.write"],
-  ["ACCESS_UNIVERSAL", "PROCESS_DEF_READ"],
-  ["ACCESS_UNIVERSAL", "PROCESS_DEF_WRITE"],
-  ["ACCESS_UNIVERSAL", "PROCESS_INSTANCE_READ"],
-  ["ACCESS_UNIVERSAL", "PROCESS_INSTANCE_WRITE"],
-  ["ACCESS_UNIVERSAL", "CRM_AGENT_READ"],
-  ["ACCESS_UNIVERSAL", "CRM_AGENT_WRITE"],
-  ["ACCESS_UNIVERSAL", "CRM_INTERACTION_READ"],
-  ["ACCESS_UNIVERSAL", "CRM_INTERACTION_WRITE"],
-  ["ACCESS_UNIVERSAL", "CRM_CASE_READ"],
-  ["ACCESS_UNIVERSAL", "CRM_CASE_WRITE"],
-  ["ACCESS_UNIVERSAL", "CRM_OPPORTUNITY_READ"],
-  ["ACCESS_UNIVERSAL", "CRM_OPPORTUNITY_WRITE"],
-  ["ACCESS_UNIVERSAL", "CRM_TASK_READ"],
-  ["ACCESS_UNIVERSAL", "CRM_TASK_WRITE"],
-  ["ACCESS_UNIVERSAL", "CRM_DASHBOARD_READ"],
-  ["ACCESS_UNIVERSAL", "CRM_PROCESS_DEF_READ"],
-  ["ACCESS_UNIVERSAL", "CRM_PROCESS_DEF_WRITE"],
-  ["ACCESS_UNIVERSAL", "ECOM_PRODUCT_READ"],
-  ["ACCESS_UNIVERSAL", "ECOM_PRODUCT_WRITE"],
-  ["ACCESS_UNIVERSAL", "ECOM_REVIEW_READ"],
-  ["ACCESS_UNIVERSAL", "ECOM_REVIEW_MODERATE"],
-  ["ACCESS_UNIVERSAL", "ECOM_ORDER_READ"],
-  ["ACCESS_UNIVERSAL", "ECOM_ORDER_WRITE"],
-  ["ACCESS_UNIVERSAL", "ECOM_RETURN_READ"],
-  ["ACCESS_UNIVERSAL", "ECOM_RETURN_WRITE"],
-  ["ACCESS_UNIVERSAL", "ECOM_REFUND_READ"],
-  ["ACCESS_UNIVERSAL", "ECOM_REFUND_WRITE"],
-  ["ACCESS_UNIVERSAL", "ECOM_SETTINGS_WRITE"],
-  ["ACCESS_UNIVERSAL", "tenant.admin_access.read"],
-  ["ACCESS_UNIVERSAL", "tenant.admin_access.write"],
-  ["ACCESS_UNIVERSAL", "tenant.connection.read"],
-  ["ACCESS_UNIVERSAL", "tenant.connection.write"],
-  ["ACCESS_UNIVERSAL", "tenant.connection.api_key"],
-  ["ACCESS_UNIVERSAL", "tenant.connection.template"],
-  ["ACCESS_UNIVERSAL", "tenant.connection.log"],
-  ["ACCESS_UNIVERSAL", "privacy.data.export"],
-  ["ACCESS_UNIVERSAL", "privacy.erasure.execute"],
-  ["ACCESS_UNIVERSAL", "privacy.consent.manage"],
-  ["ACCESS_UNIVERSAL", "privacy.audit.view"],
-  ["ACCESS_ECOM_FULL", "authz.bootstrap.read"],
-  ["ACCESS_ECOM_FULL", "core.home.read"],
-  ["ACCESS_ECOM_FULL", "ECOM_PRODUCT_READ"],
-  ["ACCESS_ECOM_FULL", "ECOM_PRODUCT_WRITE"],
-  ["ACCESS_ECOM_FULL", "ECOM_REVIEW_READ"],
-  ["ACCESS_ECOM_FULL", "ECOM_REVIEW_MODERATE"],
-  ["ACCESS_ECOM_FULL", "ECOM_ORDER_READ"],
-  ["ACCESS_ECOM_FULL", "ECOM_ORDER_WRITE"],
-  ["ACCESS_ECOM_FULL", "ECOM_RETURN_READ"],
-  ["ACCESS_ECOM_FULL", "ECOM_RETURN_WRITE"],
-  ["ACCESS_ECOM_FULL", "ECOM_REFUND_READ"],
-  ["ACCESS_ECOM_FULL", "ECOM_REFUND_WRITE"],
-  ["ACCESS_ECOM_FULL", "ECOM_SETTINGS_WRITE"],
-  ["ACCESS_ECOM_CATALOG", "authz.bootstrap.read"],
-  ["ACCESS_ECOM_CATALOG", "core.home.read"],
-  ["ACCESS_ECOM_CATALOG", "ECOM_PRODUCT_READ"],
-  ["ACCESS_ECOM_CATALOG", "ECOM_PRODUCT_WRITE"],
-  ["ACCESS_ECOM_CATALOG", "ECOM_REVIEW_READ"],
-  ["ACCESS_ECOM_CATALOG", "ECOM_REVIEW_MODERATE"],
-  ["ACCESS_ECOM_ORDERS", "authz.bootstrap.read"],
-  ["ACCESS_ECOM_ORDERS", "core.home.read"],
-  ["ACCESS_ECOM_ORDERS", "ECOM_ORDER_READ"],
-  ["ACCESS_ECOM_ORDERS", "ECOM_ORDER_WRITE"],
-  ["ACCESS_ECOM_ORDERS", "ECOM_RETURN_READ"],
-  ["ACCESS_ECOM_ORDERS", "ECOM_RETURN_WRITE"],
-  ["ACCESS_ECOM_ORDERS", "ECOM_REFUND_READ"],
-  ["ACCESS_ECOM_ORDERS", "ECOM_REFUND_WRITE"],
-  ["ACCESS_CRM_FULL", "authz.bootstrap.read"],
-  ["ACCESS_CRM_FULL", "core.home.read"],
-  ["ACCESS_CRM_FULL", "CRM_AGENT_READ"],
-  ["ACCESS_CRM_FULL", "CRM_AGENT_WRITE"],
-  ["ACCESS_CRM_FULL", "CRM_INTERACTION_READ"],
-  ["ACCESS_CRM_FULL", "CRM_INTERACTION_WRITE"],
-  ["ACCESS_CRM_FULL", "CRM_CASE_READ"],
-  ["ACCESS_CRM_FULL", "CRM_CASE_WRITE"],
-  ["ACCESS_CRM_FULL", "CRM_OPPORTUNITY_READ"],
-  ["ACCESS_CRM_FULL", "CRM_OPPORTUNITY_WRITE"],
-  ["ACCESS_CRM_FULL", "CRM_TASK_READ"],
-  ["ACCESS_CRM_FULL", "CRM_TASK_WRITE"],
-  ["ACCESS_CRM_FULL", "CRM_DASHBOARD_READ"],
-  ["ACCESS_CRM_FULL", "PROCESS_DEF_READ"],
-  ["ACCESS_CRM_FULL", "PROCESS_DEF_WRITE"],
-  ["ACCESS_CRM_FULL", "PROCESS_INSTANCE_READ"],
-  ["ACCESS_CRM_FULL", "PROCESS_INSTANCE_WRITE"],
-  ["ACCESS_READ_ONLY", "authz.bootstrap.read"],
-  ["ACCESS_READ_ONLY", "core.home.read"],
-  ["ACCESS_READ_ONLY", "core.agent.read"],
-  ["ACCESS_READ_ONLY", "core.material.read"],
-  ["ACCESS_READ_ONLY", "core.task.read"],
-  ["ACCESS_READ_ONLY", "core.process.read"],
-  ["ACCESS_READ_ONLY", "ECOM_PRODUCT_READ"],
-  ["ACCESS_READ_ONLY", "ECOM_REVIEW_READ"],
-  ["ACCESS_READ_ONLY", "ECOM_ORDER_READ"],
-  ["ACCESS_READ_ONLY", "ECOM_RETURN_READ"],
-  ["ACCESS_READ_ONLY", "ECOM_REFUND_READ"],
-  ["ACCESS_READ_ONLY", "CRM_AGENT_READ"],
-  ["ACCESS_READ_ONLY", "CRM_INTERACTION_READ"],
-  ["ACCESS_READ_ONLY", "CRM_CASE_READ"],
-  ["ACCESS_READ_ONLY", "CRM_OPPORTUNITY_READ"],
-  ["ACCESS_READ_ONLY", "CRM_TASK_READ"],
-  ["ACCESS_READ_ONLY", "CRM_DASHBOARD_READ"],
-  ["ACCESS_READ_ONLY", "PROCESS_DEF_READ"],
-  ["ACCESS_READ_ONLY", "PROCESS_INSTANCE_READ"]
-].map(([role_code, permission_code]) => ({ role_code, permission_code }));
-
 function normalizeText(value) {
   return String(value || "").trim();
 }
@@ -333,7 +84,14 @@ async function hashPassword(password) {
   return argon2.hash(password, { type: argon2.argon2id });
 }
 
+async function roleTemplatesAvailable(client) {
+  const r = await client.query("SELECT to_regclass('eip_authz.role_template') AS table_name");
+  return Boolean(r.rows[0]?.table_name);
+}
+
 async function ensureTenantUserRoleBaseline(client, tenantId) {
+  if (!(await roleTemplatesAvailable(client))) return;
+
   await client.query(
     `
     INSERT INTO eip_authz.surface(code, label, sort_order) VALUES
@@ -347,38 +105,30 @@ async function ensureTenantUserRoleBaseline(client, tenantId) {
 
   await client.query(
     `
-    WITH role_defs AS (
-      SELECT *
-      FROM jsonb_to_recordset($2::jsonb) AS r(
-        code text,
-        label text,
-        surface_code text,
-        is_system boolean
-      )
-    )
     INSERT INTO eip_authz.role(tenant_id, code, label, surface_code, is_system, is_active)
-    SELECT $1::uuid, code, label, surface_code, is_system, true
-    FROM role_defs
-    ON CONFLICT (tenant_id, code) DO NOTHING
+    SELECT $1::uuid, rt.code, rt.label, rt.surface_code, rt.is_system, true
+    FROM eip_authz.role_template rt
+    WHERE rt.is_active = true
+    ON CONFLICT (tenant_id, code) DO UPDATE SET
+      label = EXCLUDED.label,
+      surface_code = EXCLUDED.surface_code,
+      is_system = EXCLUDED.is_system,
+      is_active = true
     `,
-    [tenantId, JSON.stringify(TENANT_USER_ROLE_BASELINE)]
+    [tenantId]
   );
 
   await client.query(
     `
-    WITH bundles AS (
-      SELECT *
-      FROM jsonb_to_recordset($2::jsonb) AS b(role_code text, permission_code text)
-    )
     INSERT INTO eip_authz.role_permission(role_id, permission_code)
-    SELECT r.id, p.code
+    SELECT r.id, rtp.permission_code
     FROM eip_authz.role r
-    JOIN bundles b ON b.role_code = r.code
-    JOIN eip_authz.permission p ON p.code = b.permission_code
+    JOIN eip_authz.role_template_permission rtp ON rtp.role_code = r.code
+    JOIN eip_authz.permission p ON p.code = rtp.permission_code
     WHERE r.tenant_id = $1::uuid
     ON CONFLICT DO NOTHING
     `,
-    [tenantId, JSON.stringify(TENANT_USER_ROLE_PERMISSION_BUNDLES)]
+    [tenantId]
   );
 }
 
@@ -559,9 +309,42 @@ export default async function adminAccessRoutes(app) {
 
     await ensureTenantUserRoleBaseline(app.db, tenantId);
 
+    const hasRoleTemplates = await roleTemplatesAvailable(app.db);
     const r = await app.db.query(
+      hasRoleTemplates
+        ? `
+      SELECT
+        r.id,
+        r.code,
+        r.label,
+        r.surface_code,
+        r.is_system,
+        r.is_active,
+        COALESCE(rt.role_kind, CASE WHEN r.is_system THEN 'profile' ELSE 'access' END) AS role_kind,
+        COALESCE(rt.sort_order, 1000) AS sort_order
+      FROM eip_authz.role r
+      LEFT JOIN eip_authz.role_template rt ON rt.code = r.code
+      WHERE r.tenant_id = $1::uuid
+      ORDER BY
+        CASE COALESCE(rt.role_kind, CASE WHEN r.is_system THEN 'profile' ELSE 'access' END)
+          WHEN 'profile' THEN 1
+          WHEN 'access' THEN 2
+          ELSE 3
+        END,
+        COALESCE(rt.sort_order, 1000),
+        r.label,
+        r.code
       `
-      SELECT id, code, label, surface_code, is_system, is_active
+        : `
+      SELECT
+        id,
+        code,
+        label,
+        surface_code,
+        is_system,
+        is_active,
+        CASE WHEN is_system THEN 'profile' ELSE 'access' END AS role_kind,
+        1000 AS sort_order
       FROM eip_authz.role
       WHERE tenant_id = $1::uuid
       ORDER BY is_system DESC, surface_code, code

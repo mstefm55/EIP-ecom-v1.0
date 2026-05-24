@@ -67,6 +67,11 @@ function formatDate(value) {
   return date.toLocaleString();
 }
 
+function resolveRoleKind(role) {
+  if (role?.role_kind) return String(role.role_kind).toLowerCase();
+  return role?.is_system ? "profile" : "access";
+}
+
 export default function AdminUsersPanel({ node }) {
   const layout = useMemo(
     () => mergeLayout(DEFAULT_LAYOUT, node?.props?.layout),
@@ -133,8 +138,8 @@ export default function AdminUsersPanel({ node }) {
     return map;
   }, [roles]);
 
-  const profileRoles = useMemo(() => roles.filter((role) => role.is_system), [roles]);
-  const accessRoles = useMemo(() => roles.filter((role) => !role.is_system), [roles]);
+  const profileRoles = useMemo(() => roles.filter((role) => resolveRoleKind(role) === "profile"), [roles]);
+  const accessRoles = useMemo(() => roles.filter((role) => resolveRoleKind(role) === "access"), [roles]);
   const profileRoleOptions = profileRoles;
   const accessRoleOptions = accessRoles;
   const permissionOptions = permissions || [];
