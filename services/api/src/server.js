@@ -42,6 +42,7 @@ import privacyRoutes from "./routes/privacy.js";
 import uiSurfaceRoutes from "./routes/ui_surface.js";
 
 import { sha256Hex, timingSafeEqual } from "./auth/crypto.js";
+import { evaluateStepUp } from "./auth/sessionPolicy.js";
 import { getAuthCookie } from "./lib/authCookies.js";
 import { advanceInstance, createInstance, findActiveInstance, updateTaskStatus } from "./core/core_process_engine.js";
 import { verifyAssetToken } from "./services/assets/signing.js";
@@ -49,7 +50,6 @@ import { syncAllTenantMarketplaceFx } from "./services/fx/marketFxSync.js";
 
 const DEFAULT_BODY_LIMIT = 1024 * 1024; // 1 MiB
 const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
-const STEP_UP_TTL_MS = 10 * 60 * 1000;
 const STATE_CHANGING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -515,26 +515,20 @@ async function buildServer() {
   });
 
   // ============================================================
-  // REQUIRE STEP-UP (recent OTP/TOTP)
+  // REQUIRE STEP-UP (recent OTP/TOTP/passkey)
   // ============================================================
-  app.decorate("requireStepUp", async function requireStepUp(req) {
+  app.decorate("requireStepUp", async function requireStepUp(req, opts = {}) {
     const s = req.session || (await app.loadSession(req));
-    if (!s) return { ok: false, status: 401, error: "UNAUTHENTICATED" };
-
-    const stepAt = s.attrs?.step_up_at;
-    if (!stepAt) return { ok: false, status: 403, error: "STEP_UP_REQUIRED" };
-
-    const stepMs = new Date(stepAt).getTime();
-    if (!Number.isFinite(stepMs)) {
-      return { ok: false, status: 403, error: "STEP_UP_REQUIRED" };
-    }
-    if (Date.now() - stepMs > STEP_UP_TTL_MS) {
-      return { ok: false, status: 403, error: "STEP_UP_REQUIRED" };
-    }
+    const ttlMin = Number(opts.ttlMin || app.config.STEP_UP_TTL_MIN || 5);
+    const check = evaluateStepUp(s, {
+      ttlMin,
+      phishingResistant: opts.phishingResistant === true
+    });
+    if (!check.ok) return check;
 
     req.session = s;
     req.realm = s.realm;
-    return { ok: true };
+    return { ok: true, ...check };
   });
 
   // ============================================================

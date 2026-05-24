@@ -19,6 +19,15 @@ async function requireAdminPerm(app, req, reply, permCode, opts = {}) {
     reply.code(403).send({ ok: false, error: "FORBIDDEN" });
     return null;
   }
+  if (opts.stepUp) {
+    const step = await app.requireStepUp(req, {
+      phishingResistant: app.config.REQUIRE_PASSKEY_FOR_PRIVILEGED_ACTIONS === true
+    });
+    if (!step.ok) {
+      reply.code(step.status).send({ ok: false, error: step.error });
+      return null;
+    }
+  }
   return session;
 }
 
@@ -84,6 +93,7 @@ export default async function adminTemplateCloneRoutes(app) {
   app.post("/admin/template-clone", async (req, reply) => {
     const session = await requireAdminPerm(app, req, reply, "admin.template.clone", {
       csrf: true,
+      stepUp: true,
     });
     if (!session) return;
 

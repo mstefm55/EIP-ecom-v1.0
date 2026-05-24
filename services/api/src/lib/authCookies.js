@@ -53,7 +53,7 @@ export function sessionTtlMs(app) {
 }
 
 export function deviceCookieTtlMs(app) {
-  const days = Number(app?.config?.DEVICE_COOKIE_TTL_DAYS || 30);
-  const safeDays = Number.isFinite(days) && days > 0 ? Math.min(days, 90) : 30;
+  const days = Number(app?.config?.DEVICE_COOKIE_TTL_DAYS || 14);
+  const safeDays = Number.isFinite(days) && days > 0 ? Math.min(days, 30) : 14;
   return safeDays * 24 * 60 * 60 * 1000;
 }

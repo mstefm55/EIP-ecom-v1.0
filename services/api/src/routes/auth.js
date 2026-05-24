@@ -26,6 +26,19 @@ import { auditSecurityEvent } from "../lib/securityAudit.js";
 import { resolveEipSurfaceAccess } from "../lib/surfaceAccess.js";
 import { safeUploadTarget, uploadPartToBuffer, validateImageUpload } from "../lib/uploadSecurity.js";
 import { evaluatePasswordStrength, generateStrongPassword, checkPasswordHistory } from "../auth/password.js";
+import { buildStepUpAttrs } from "../auth/sessionPolicy.js";
+import {
+  buildAuthenticationOptions,
+  buildRegistrationOptions,
+  loadActivePasskeys,
+  loadAndConsumePasskeyChallenge,
+  loadPasskeyByCredential,
+  publicPasskey,
+  storePasskeyChallenge,
+  toBase64Url,
+  verifyPasskeyAuthentication,
+  verifyPasskeyRegistration
+} from "../auth/passkeys.js";
 import { buildSignedAssetUrl } from "../services/assets/signing.js";
 import { isTenantAssetPath, sanitizeAssetUrlForStorage, toLocalAssetPath } from "../services/assets/url_policy.js";
 
@@ -380,6 +393,103 @@ async function upsertBrowserDevice(app, client, { tenantId, identityId, deviceTo
   );
 
   return r.rows[0];
+}
+
+async function finalizeBrowserDeviceAfterStrongAuth(app, client, { tenantId, identityId, deviceRow, method, req }) {
+  if (!deviceRow) throw new Error("DEVICE_UPSERT_FAILED");
+  if (deviceRow.trust_state === "revoked") {
+    return { ok: false, status: 401, error: "DEVICE_REVOKED" };
+  }
+  if (deviceRow.trust_state === "trusted") {
+    return { ok: true, device: deviceRow };
+  }
+
+  const trustedRes = await client.query(
+    `
+    SELECT 1
+    FROM eip_auth.auth_device
+    WHERE tenant_id=$1
+      AND identity_id=$2
+      AND trust_state='trusted'
+    LIMIT 1
+    `,
+    [tenantId, identityId]
+  );
+  const hasTrustedDevice = trustedRes.rowCount > 0;
+  const autoTrust =
+    method === "passkey" ||
+    method === "recovery" ||
+    app.config.AUTH_AUTO_TRUST_ON_STEP_UP === true ||
+    !hasTrustedDevice;
+
+  if (autoTrust) {
+    const trustRes = await client.query(
+      `
+      UPDATE eip_auth.auth_device
+      SET trust_state='trusted', updated_at=now()
+      WHERE tenant_id=$1 AND id=$2 AND trust_state='untrusted'
+      RETURNING id, trust_state
+      `,
+      [tenantId, deviceRow.id]
+    );
+    if (trustRes.rowCount > 0) {
+      const next = { ...deviceRow, trust_state: trustRes.rows[0].trust_state };
+      app.log.info({
+        event: "device_trusted_after_strong_auth",
+        method,
+        tenantId,
+        identityId,
+        deviceId: next.id,
+        ip: req.ip
+      });
+      return { ok: true, device: next };
+    }
+  }
+
+  if (app.config.REQUIRE_TRUSTED_DEVICE) {
+    return { ok: false, status: 401, error: "DEVICE_UNTRUSTED", deviceId: deviceRow.id };
+  }
+
+  return { ok: true, device: deviceRow };
+}
+
+async function issueEipSession(app, client, reply, req, { tenantId, identityId, deviceId, deviceToken, method }) {
+  const sessionId = crypto.randomUUID();
+  const expiresAt = new Date(Date.now() + sessionTtlMs(app));
+  const csrf = randomToken(24);
+  const csrfHash = sha256Hex(`${csrf}:${app.config.CSRF_PEPPER}`);
+  const uaHash = sha256Hex(String(req.headers["user-agent"] || ""));
+  const stepUpAttrs = buildStepUpAttrs(method);
+
+  await client.query(
+    `
+    INSERT INTO eip_auth.auth_session
+      (id, tenant_id, identity_id, device_id,
+       expires_at, csrf_secret_hash, ip_address, user_agent_hash, attrs)
+    VALUES
+      ($1,$2,$3,$4,$5,$6,$7,$8,
+       COALESCE($9::jsonb,'{}'::jsonb) || jsonb_build_object('realm', $10::text))
+    `,
+    [
+      sessionId,
+      tenantId,
+      identityId,
+      deviceId,
+      expiresAt,
+      csrfHash,
+      req.ip,
+      uaHash,
+      JSON.stringify(stepUpAttrs),
+      "EIP"
+    ]
+  );
+
+  const deviceExpires = new Date(Date.now() + deviceCookieTtlMs(app));
+  setAuthCookie(reply, app, "sid", sessionId, { httpOnly: true, expires: expiresAt });
+  setAuthCookie(reply, app, "csrf", csrf, { httpOnly: true, expires: expiresAt });
+  setAuthCookie(reply, app, "did", deviceToken, { httpOnly: true, expires: deviceExpires });
+
+  return { sessionId, expiresAt };
 }
 
 /* ============================================================
@@ -976,6 +1086,20 @@ export default async function authRoutes(app) {
         [reset.id]
       );
 
+      await client.query(
+        `
+        UPDATE eip_auth.auth_session
+        SET is_revoked=true,
+            revoked_at=now(),
+            attrs = COALESCE(attrs,'{}'::jsonb)
+              || jsonb_build_object('revoked_reason', 'password_reset')
+        WHERE tenant_id=$1
+          AND identity_id=$2
+          AND is_revoked=false
+        `,
+        [reset.tenant_id, reset.identity_id]
+      );
+
       await client.query("COMMIT");
       return reply.send({ ok: true });
     } catch (e) {
@@ -1271,54 +1395,40 @@ export default async function authRoutes(app) {
         deviceToken,
         req
       });
-      if (!deviceRow) throw new Error("DEVICE_UPSERT_FAILED");
-      if (deviceRow.trust_state === "revoked") {
+      const deviceCheck = await finalizeBrowserDeviceAfterStrongAuth(app, client, {
+        tenantId: row.tenant_id,
+        identityId: row.identity_id,
+        deviceRow,
+        method: "recovery",
+        req
+      });
+      if (!deviceCheck.ok) {
         await client.query("ROLLBACK");
-        return reply.code(401).send({ ok: false, error: "DEVICE_REVOKED" });
+        return reply.code(deviceCheck.status).send({ ok: false, error: deviceCheck.error, deviceId: deviceCheck.deviceId });
       }
-      if (deviceRow.trust_state === "untrusted") {
-        const trustRes = await client.query(
-          `
-          UPDATE eip_auth.auth_device
-          SET trust_state='trusted', updated_at=now()
-          WHERE tenant_id=$1 AND id=$2 AND trust_state='untrusted'
-          RETURNING trust_state
-          `,
-          [row.tenant_id, deviceRow.id]
-        );
-        if (trustRes.rowCount > 0) {
-          deviceRow = { ...deviceRow, trust_state: trustRes.rows[0].trust_state };
-          app.log.info({ event: "device_trusted_via_recovery", tenantId: row.tenant_id, identityId: row.identity_id, deviceId: deviceRow.id, ip: req.ip });
-        }
-      }
-
-      const sessionId = crypto.randomUUID();
-      const expiresAt = new Date(Date.now() + sessionTtlMs(app));
-      const csrf = randomToken(24);
-      const csrfHash = sha256Hex(`${csrf}:${app.config.CSRF_PEPPER}`);
-      const uaHash = sha256Hex(String(req.headers["user-agent"] || ""));
+      deviceRow = deviceCheck.device;
 
       await client.query(
         `
-        INSERT INTO eip_auth.auth_session
-          (id, tenant_id, identity_id, device_id,
-           expires_at, csrf_secret_hash, ip_address, user_agent_hash, attrs)
-        VALUES
-          ($1,$2,$3,$4,$5,$6,$7,$8,
-           jsonb_build_object('realm', $9::text, 'step_up_at', now(), 'assurance', 'recovery'))
+        UPDATE eip_auth.auth_session
+        SET is_revoked=true,
+            revoked_at=now(),
+            attrs = COALESCE(attrs,'{}'::jsonb)
+              || jsonb_build_object('revoked_reason', 'recovery_used')
+        WHERE tenant_id=$1
+          AND identity_id=$2
+          AND is_revoked=false
         `,
-        [
-          sessionId,
-          row.tenant_id,
-          row.identity_id,
-          deviceRow.id,
-          expiresAt,
-          csrfHash,
-          req.ip,
-          uaHash,
-          "EIP"
-        ]
+        [row.tenant_id, row.identity_id]
       );
+
+      await issueEipSession(app, client, reply, req, {
+        tenantId: row.tenant_id,
+        identityId: row.identity_id,
+        deviceId: deviceRow.id,
+        deviceToken,
+        method: "recovery"
+      });
 
       await client.query(
         `
@@ -1330,11 +1440,6 @@ export default async function authRoutes(app) {
       );
 
       await client.query("COMMIT");
-
-      const deviceExpires = new Date(Date.now() + deviceCookieTtlMs(app));
-      setAuthCookie(reply, app, "sid", sessionId, { httpOnly: true, expires: expiresAt });
-      setAuthCookie(reply, app, "csrf", csrf, { httpOnly: true, expires: expiresAt });
-      setAuthCookie(reply, app, "did", deviceToken, { httpOnly: true, expires: deviceExpires });
 
       return reply.send({ ok: true });
     } catch (e) {
@@ -2147,10 +2252,10 @@ export default async function authRoutes(app) {
             `
             UPDATE eip_auth.auth_session
             SET attrs = COALESCE(attrs,'{}'::jsonb)
-              || jsonb_build_object('step_up_at', now(), 'assurance', 'high')
+              || $2::jsonb
             WHERE id=$1::uuid
             `,
-            [sRes.rows[0].id]
+            [sRes.rows[0].id, JSON.stringify(buildStepUpAttrs("otp"))]
           );
 
           await client.query("COMMIT");
@@ -2167,98 +2272,30 @@ export default async function authRoutes(app) {
         deviceToken,
         req
       });
-      if (!deviceRow) {
-        throw new Error("DEVICE_UPSERT_FAILED");
+      const deviceCheck = await finalizeBrowserDeviceAfterStrongAuth(app, client, {
+        tenantId,
+        identityId,
+        deviceRow,
+        method: "otp",
+        req
+      });
+      if (!deviceCheck.ok) {
+        await client.query("COMMIT");
+        const deviceExpires = new Date(Date.now() + deviceCookieTtlMs(app));
+        setAuthCookie(reply, app, "did", deviceToken, { httpOnly: true, expires: deviceExpires });
+        return reply.code(deviceCheck.status).send({ ok: false, error: deviceCheck.error, deviceId: deviceCheck.deviceId });
       }
-
-        if (deviceRow.trust_state === "revoked") {
-          await client.query("ROLLBACK");
-          return reply.code(401).send({ ok: false, error: "DEVICE_REVOKED" });
-        }
-
-        if (deviceRow.trust_state === "untrusted") {
-          const trustRes = await client.query(
-            `
-            UPDATE eip_auth.auth_device
-            SET trust_state='trusted', updated_at=now()
-            WHERE tenant_id=$1 AND id=$2 AND trust_state='untrusted'
-            RETURNING trust_state
-            `,
-            [tenantId, deviceRow.id]
-          );
-          if (trustRes.rowCount > 0) {
-            deviceRow = { ...deviceRow, trust_state: trustRes.rows[0].trust_state };
-            app.log.info({ event: "device_trusted_via_otp", tenantId, identityId, deviceId: deviceRow.id, ip: req.ip });
-          }
-        }
-
-        if (app.config.REQUIRE_TRUSTED_DEVICE && deviceRow.trust_state !== "trusted") {
-          const trustedRes = await client.query(
-            `
-            SELECT 1
-            FROM eip_auth.auth_device
-          WHERE tenant_id=$1 AND identity_id=$2 AND trust_state='trusted'
-          LIMIT 1
-          `,
-          [tenantId, identityId]
-        );
-
-        if (trustedRes.rowCount === 0 && deviceRow.trust_state === "untrusted") {
-          const trustRes = await client.query(
-            `
-            UPDATE eip_auth.auth_device
-            SET trust_state='trusted', updated_at=now()
-            WHERE tenant_id=$1 AND id=$2 AND trust_state='untrusted'
-            RETURNING trust_state
-            `,
-            [tenantId, deviceRow.id]
-          );
-
-          if (trustRes.rowCount > 0) {
-            deviceRow = { ...deviceRow, trust_state: trustRes.rows[0].trust_state };
-            app.log.info({ event: "device_autotrusted", tenantId, identityId, deviceId: deviceRow.id, ip: req.ip });
-          }
-        }
-
-        if (deviceRow.trust_state !== "trusted") {
-          await client.query("COMMIT");
-          const deviceExpires = new Date(Date.now() + deviceCookieTtlMs(app));
-          setAuthCookie(reply, app, "did", deviceToken, { httpOnly: true, expires: deviceExpires });
-          return reply.code(401).send({ ok: false, error: "DEVICE_UNTRUSTED", deviceId: deviceRow.id });
-        }
-      }
+      deviceRow = deviceCheck.device;
 
       const deviceId = deviceRow.id;
 
-      /* ---- SESSION ---- */
-      const sessionId = crypto.randomUUID();
-      const expiresAt = new Date(Date.now() + sessionTtlMs(app));
-
-      const csrf = randomToken(24);
-      const csrfHash = sha256Hex(`${csrf}:${app.config.CSRF_PEPPER}`);
-      const uaHash = sha256Hex(String(req.headers["user-agent"] || ""));
-
-      await client.query(
-        `
-        INSERT INTO eip_auth.auth_session
-          (id, tenant_id, identity_id, device_id,
-           expires_at, csrf_secret_hash, ip_address, user_agent_hash, attrs)
-        VALUES
-          ($1,$2,$3,$4,$5,$6,$7,$8,
-           jsonb_build_object('realm', $9::text, 'step_up_at', now(), 'assurance', 'high'))
-        `,
-        [
-          sessionId,
-          tenantId,
-          identityId,
-          deviceId,
-          expiresAt,
-          csrfHash,
-          req.ip,
-          uaHash,
-          "EIP"
-        ]
-      );
+      await issueEipSession(app, client, reply, req, {
+        tenantId,
+        identityId,
+        deviceId,
+        deviceToken,
+        method: "otp"
+      });
 
       await client.query("COMMIT");
 
@@ -2269,13 +2306,6 @@ export default async function authRoutes(app) {
         outcome: "success",
         ip: req.ip
       });
-
-      const sessionExpires = expiresAt;
-      const deviceExpires = new Date(Date.now() + deviceCookieTtlMs(app));
-
-      setAuthCookie(reply, app, "sid", sessionId, { httpOnly: true, expires: sessionExpires });
-      setAuthCookie(reply, app, "csrf", csrf, { httpOnly: true, expires: sessionExpires });
-      setAuthCookie(reply, app, "did", deviceToken, { httpOnly: true, expires: deviceExpires });
 
       return reply.send({ ok: true });
     } catch (e) {
@@ -2474,6 +2504,446 @@ export default async function authRoutes(app) {
     return reply.send({ ok: true, devices: dRes.rows });
   });
 
+  /* ===================== PASSKEYS (STAGED WEBAUTHN) ===================== */
+  app.get("/auth/passkeys", async (req, reply) => {
+    const s = await app.requireSession(req, { realm: "EIP" });
+    if (!s.ok) return reply.code(s.status).send({ ok: false, error: s.error });
+
+    const passkeys = await loadActivePasskeys(app.db, s.session.tenant_id, s.session.identity_id);
+    return reply.send({ ok: true, passkeys: passkeys.map(publicPasskey) });
+  });
+
+  app.post("/auth/passkeys/register/options", async (req, reply) => {
+    const s = await app.requireSession(req, { realm: "EIP" });
+    if (!s.ok) return reply.code(s.status).send({ ok: false, error: s.error });
+    const c = await app.requireCsrf(req);
+    if (!c.ok) return reply.code(c.status).send({ ok: false, error: c.error });
+    const step = await app.requireStepUp(req);
+    if (!step.ok) return reply.code(step.status).send({ ok: false, error: step.error });
+
+    const { tenant_id, identity_id } = s.session;
+    const label = normalizeText(req.body?.label).slice(0, 120) || "Passkey";
+    const client = await app.db.connect();
+    try {
+      await client.query("BEGIN");
+      const identityRes = await client.query(
+        `
+        SELECT login, is_active, is_locked
+        FROM eip_auth.auth_identity
+        WHERE tenant_id=$1 AND id=$2
+        LIMIT 1
+        `,
+        [tenant_id, identity_id]
+      );
+      const identity = identityRes.rows[0];
+      if (!identity || !identity.is_active || identity.is_locked) {
+        await client.query("ROLLBACK");
+        return reply.code(403).send({ ok: false, error: "IDENTITY_DISABLED" });
+      }
+
+      const { options, rp } = await buildRegistrationOptions(app, client, {
+        tenantId: tenant_id,
+        identityId: identity_id,
+        login: identity.login,
+        displayName: identity.login
+      });
+      const challenge = await storePasskeyChallenge(client, {
+        tenantId: tenant_id,
+        identityId: identity_id,
+        sessionId: s.session.id,
+        challenge: options.challenge,
+        challengeType: "registration",
+        ttlSec: Math.ceil(Number(app.config.WEBAUTHN_TIMEOUT_MS || 60000) / 1000) + 60,
+        attrs: { label, rp_id: rp.rpID, expected_origin: rp.expectedOrigin }
+      });
+
+      await client.query("COMMIT");
+      reply.header("Cache-Control", "no-store");
+      return reply.send({ ok: true, challenge_id: challenge.id, options });
+    } catch (e) {
+      await client.query("ROLLBACK");
+      app.log.error({ event: "passkey_registration_options_error", tenantId: tenant_id, identityId: identity_id, error: e.message });
+      return reply.code(500).send({ ok: false, error: "PASSKEY_OPTIONS_FAILED" });
+    } finally {
+      client.release();
+    }
+  });
+
+  app.post("/auth/passkeys/register/verify", async (req, reply) => {
+    const s = await app.requireSession(req, { realm: "EIP" });
+    if (!s.ok) return reply.code(s.status).send({ ok: false, error: s.error });
+    const c = await app.requireCsrf(req);
+    if (!c.ok) return reply.code(c.status).send({ ok: false, error: c.error });
+    const step = await app.requireStepUp(req);
+    if (!step.ok) return reply.code(step.status).send({ ok: false, error: step.error });
+
+    const credentialResponse = req.body?.credential || req.body?.response || req.body;
+    const challengeId = normalizeText(req.body?.challenge_id || req.body?.challengeId);
+    if (!challengeId || !credentialResponse?.id) {
+      return reply.code(400).send({ ok: false, error: "BAD_REQUEST" });
+    }
+
+    const { tenant_id, identity_id } = s.session;
+    const client = await app.db.connect();
+    try {
+      await client.query("BEGIN");
+      const challenge = await loadAndConsumePasskeyChallenge(client, {
+        challengeId,
+        challengeType: "registration",
+        tenantId: tenant_id,
+        identityId: identity_id,
+        sessionId: s.session.id
+      });
+      if (!challenge) {
+        await client.query("ROLLBACK");
+        return reply.code(401).send({ ok: false, error: "PASSKEY_CHALLENGE_INVALID" });
+      }
+
+      const verification = await verifyPasskeyRegistration(app, credentialResponse, challenge.challenge);
+      if (!verification.verified || !verification.registrationInfo?.credential) {
+        await client.query("ROLLBACK");
+        return reply.code(401).send({ ok: false, error: "PASSKEY_VERIFICATION_FAILED" });
+      }
+
+      const info = verification.registrationInfo;
+      const credential = info.credential;
+      const label = normalizeText(challenge.attrs?.label).slice(0, 120) || "Passkey";
+      const r = await client.query(
+        `
+        INSERT INTO eip_auth.auth_passkey
+          (tenant_id, identity_id, credential_id, public_key, counter,
+           transports, device_type, backed_up, label, attrs)
+        VALUES
+          ($1,$2,$3,$4,$5,$6::text[],$7,$8,$9,$10::jsonb)
+        ON CONFLICT (credential_id) DO NOTHING
+        RETURNING id, credential_id, public_key, counter, transports, device_type,
+                  backed_up, label, last_used_at, created_at, is_revoked
+        `,
+        [
+          tenant_id,
+          identity_id,
+          credential.id,
+          toBase64Url(credential.publicKey),
+          Number(credential.counter || 0),
+          credential.transports || [],
+          info.credentialDeviceType || null,
+          info.credentialBackedUp === true,
+          label,
+          JSON.stringify({
+            aaguid: info.aaguid || null,
+            fmt: info.fmt || null,
+            origin: info.origin || null,
+            rp_id: info.rpID || null,
+            user_verified: info.userVerified === true
+          })
+        ]
+      );
+      if (r.rowCount === 0) {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({ ok: false, error: "PASSKEY_ALREADY_REGISTERED" });
+      }
+
+      await client.query("COMMIT");
+      app.log.info({ event: "passkey_registered", tenantId: tenant_id, identityId: identity_id, passkeyId: r.rows[0].id, ip: req.ip });
+      return reply.send({ ok: true, passkey: publicPasskey(r.rows[0]) });
+    } catch (e) {
+      await client.query("ROLLBACK");
+      app.log.error({ event: "passkey_registration_verify_error", tenantId: tenant_id, identityId: identity_id, error: e.message });
+      return reply.code(500).send({ ok: false, error: "PASSKEY_REGISTRATION_FAILED" });
+    } finally {
+      client.release();
+    }
+  });
+
+  app.post("/auth/passkeys/login/options", { config: { rateLimit: TOTP_LOGIN_RATE_LIMIT } }, async (req, reply) => {
+    const { tenantId: tenantIdRaw, tenantCode, email } = req.body || {};
+    const login = String(email || "").trim().toLowerCase();
+    if (!login) return reply.code(400).send({ ok: false, error: "BAD_REQUEST" });
+
+    const client = await app.db.connect();
+    try {
+      await client.query("BEGIN");
+      const tenantId = tenantIdRaw || (await resolveTenantIdByCode(client, tenantCode));
+      if (!tenantId) {
+        await client.query("COMMIT");
+        return reply.code(400).send({ ok: false, error: "BAD_REQUEST" });
+      }
+      const identityRes = await client.query(
+        `
+        SELECT id, is_active, is_locked
+        FROM eip_auth.auth_identity
+        WHERE tenant_id=$1 AND login=$2
+        LIMIT 1
+        `,
+        [tenantId, login]
+      );
+      const identity = identityRes.rows[0];
+      if (!identity || !identity.is_active || identity.is_locked) {
+        await client.query("COMMIT");
+        return reply.code(401).send({ ok: false, error: "LOGIN_FAILED" });
+      }
+      const passkeys = await loadActivePasskeys(client, tenantId, identity.id);
+      if (!passkeys.length) {
+        await client.query("COMMIT");
+        return reply.code(404).send({ ok: false, error: "PASSKEY_NOT_FOUND" });
+      }
+      const { options, rp } = await buildAuthenticationOptions(app, passkeys);
+      const challenge = await storePasskeyChallenge(client, {
+        tenantId,
+        identityId: identity.id,
+        challenge: options.challenge,
+        challengeType: "login",
+        ttlSec: Math.ceil(Number(app.config.WEBAUTHN_TIMEOUT_MS || 60000) / 1000) + 60,
+        attrs: { rp_id: rp.rpID, expected_origin: rp.expectedOrigin }
+      });
+
+      await client.query("COMMIT");
+      reply.header("Cache-Control", "no-store");
+      return reply.send({ ok: true, challenge_id: challenge.id, options });
+    } catch (e) {
+      await client.query("ROLLBACK");
+      app.log.error({ event: "passkey_login_options_error", login: login.substring(0, 3) + "...", error: e.message });
+      return reply.code(500).send({ ok: false, error: "PASSKEY_OPTIONS_FAILED" });
+    } finally {
+      client.release();
+    }
+  });
+
+  app.post("/auth/passkeys/login/verify", { config: { rateLimit: TOTP_LOGIN_RATE_LIMIT } }, async (req, reply) => {
+    const credentialResponse = req.body?.credential || req.body?.response || req.body;
+    const challengeId = normalizeText(req.body?.challenge_id || req.body?.challengeId);
+    if (!challengeId || !credentialResponse?.id) {
+      return reply.code(400).send({ ok: false, error: "BAD_REQUEST" });
+    }
+
+    const client = await app.db.connect();
+    try {
+      await client.query("BEGIN");
+      const passkey = await loadPasskeyByCredential(client, credentialResponse.id);
+      if (!passkey || !passkey.is_active || passkey.is_locked) {
+        await client.query("ROLLBACK");
+        return reply.code(401).send({ ok: false, error: "LOGIN_FAILED" });
+      }
+      const challenge = await loadAndConsumePasskeyChallenge(client, {
+        challengeId,
+        challengeType: "login",
+        tenantId: passkey.tenant_id,
+        identityId: passkey.identity_id
+      });
+      if (!challenge) {
+        await client.query("ROLLBACK");
+        return reply.code(401).send({ ok: false, error: "PASSKEY_CHALLENGE_INVALID" });
+      }
+
+      const verification = await verifyPasskeyAuthentication(app, credentialResponse, challenge.challenge, passkey);
+      if (!verification.verified) {
+        await client.query("ROLLBACK");
+        return reply.code(401).send({ ok: false, error: "PASSKEY_VERIFICATION_FAILED" });
+      }
+
+      await client.query(
+        `
+        UPDATE eip_auth.auth_passkey
+        SET counter=$2,
+            last_used_at=now(),
+            device_type=COALESCE($3, device_type),
+            backed_up=$4
+        WHERE id=$1
+        `,
+        [
+          passkey.id,
+          Number(verification.authenticationInfo?.newCounter || passkey.counter || 0),
+          verification.authenticationInfo?.credentialDeviceType || null,
+          verification.authenticationInfo?.credentialBackedUp === true
+        ]
+      );
+
+      const deviceToken = getAuthCookie(req, app, "did") || crypto.randomUUID();
+      let deviceRow = await upsertBrowserDevice(app, client, {
+        tenantId: passkey.tenant_id,
+        identityId: passkey.identity_id,
+        deviceToken,
+        req
+      });
+      const deviceCheck = await finalizeBrowserDeviceAfterStrongAuth(app, client, {
+        tenantId: passkey.tenant_id,
+        identityId: passkey.identity_id,
+        deviceRow,
+        method: "passkey",
+        req
+      });
+      if (!deviceCheck.ok) {
+        await client.query("ROLLBACK");
+        return reply.code(deviceCheck.status).send({ ok: false, error: deviceCheck.error, deviceId: deviceCheck.deviceId });
+      }
+      deviceRow = deviceCheck.device;
+
+      const issued = await issueEipSession(app, client, reply, req, {
+        tenantId: passkey.tenant_id,
+        identityId: passkey.identity_id,
+        deviceId: deviceRow.id,
+        deviceToken,
+        method: "passkey"
+      });
+
+      await client.query("COMMIT");
+      app.log.info({ event: "passkey_login_success", tenantId: passkey.tenant_id, identityId: passkey.identity_id, sessionId: issued.sessionId, ip: req.ip });
+      auditSecurityEvent(app, "login_success", {
+        tenantId: passkey.tenant_id,
+        identityId: passkey.identity_id,
+        outcome: "success",
+        ip: req.ip
+      });
+      return reply.send({ ok: true, assurance: "phishing_resistant" });
+    } catch (e) {
+      await client.query("ROLLBACK");
+      app.log.error({ event: "passkey_login_verify_error", ip: req.ip, error: e.message });
+      return reply.code(500).send({ ok: false, error: "PASSKEY_LOGIN_FAILED" });
+    } finally {
+      client.release();
+    }
+  });
+
+  app.post("/auth/passkeys/step-up/options", async (req, reply) => {
+    const s = await app.requireSession(req, { realm: "EIP" });
+    if (!s.ok) return reply.code(s.status).send({ ok: false, error: s.error });
+    const c = await app.requireCsrf(req);
+    if (!c.ok) return reply.code(c.status).send({ ok: false, error: c.error });
+
+    const passkeys = await loadActivePasskeys(app.db, s.session.tenant_id, s.session.identity_id);
+    if (!passkeys.length) {
+      return reply.code(404).send({ ok: false, error: "PASSKEY_NOT_FOUND" });
+    }
+
+    const client = await app.db.connect();
+    try {
+      await client.query("BEGIN");
+      const { options, rp } = await buildAuthenticationOptions(app, passkeys);
+      const challenge = await storePasskeyChallenge(client, {
+        tenantId: s.session.tenant_id,
+        identityId: s.session.identity_id,
+        sessionId: s.session.id,
+        challenge: options.challenge,
+        challengeType: "step_up",
+        ttlSec: Math.ceil(Number(app.config.WEBAUTHN_TIMEOUT_MS || 60000) / 1000) + 60,
+        attrs: { rp_id: rp.rpID, expected_origin: rp.expectedOrigin }
+      });
+      await client.query("COMMIT");
+      reply.header("Cache-Control", "no-store");
+      return reply.send({ ok: true, challenge_id: challenge.id, options });
+    } catch (e) {
+      await client.query("ROLLBACK");
+      app.log.error({ event: "passkey_step_up_options_error", tenantId: s.session.tenant_id, identityId: s.session.identity_id, error: e.message });
+      return reply.code(500).send({ ok: false, error: "PASSKEY_OPTIONS_FAILED" });
+    } finally {
+      client.release();
+    }
+  });
+
+  app.post("/auth/passkeys/step-up/verify", async (req, reply) => {
+    const s = await app.requireSession(req, { realm: "EIP" });
+    if (!s.ok) return reply.code(s.status).send({ ok: false, error: s.error });
+    const c = await app.requireCsrf(req);
+    if (!c.ok) return reply.code(c.status).send({ ok: false, error: c.error });
+
+    const credentialResponse = req.body?.credential || req.body?.response || req.body;
+    const challengeId = normalizeText(req.body?.challenge_id || req.body?.challengeId);
+    if (!challengeId || !credentialResponse?.id) {
+      return reply.code(400).send({ ok: false, error: "BAD_REQUEST" });
+    }
+
+    const client = await app.db.connect();
+    try {
+      await client.query("BEGIN");
+      const passkey = await loadPasskeyByCredential(client, credentialResponse.id);
+      if (
+        !passkey ||
+        String(passkey.tenant_id) !== String(s.session.tenant_id) ||
+        String(passkey.identity_id) !== String(s.session.identity_id)
+      ) {
+        await client.query("ROLLBACK");
+        return reply.code(401).send({ ok: false, error: "PASSKEY_NOT_FOUND" });
+      }
+      const challenge = await loadAndConsumePasskeyChallenge(client, {
+        challengeId,
+        challengeType: "step_up",
+        tenantId: s.session.tenant_id,
+        identityId: s.session.identity_id,
+        sessionId: s.session.id
+      });
+      if (!challenge) {
+        await client.query("ROLLBACK");
+        return reply.code(401).send({ ok: false, error: "PASSKEY_CHALLENGE_INVALID" });
+      }
+      const verification = await verifyPasskeyAuthentication(app, credentialResponse, challenge.challenge, passkey);
+      if (!verification.verified) {
+        await client.query("ROLLBACK");
+        return reply.code(401).send({ ok: false, error: "PASSKEY_VERIFICATION_FAILED" });
+      }
+
+      await client.query(
+        `
+        UPDATE eip_auth.auth_passkey
+        SET counter=$2,
+            last_used_at=now(),
+            device_type=COALESCE($3, device_type),
+            backed_up=$4
+        WHERE id=$1
+        `,
+        [
+          passkey.id,
+          Number(verification.authenticationInfo?.newCounter || passkey.counter || 0),
+          verification.authenticationInfo?.credentialDeviceType || null,
+          verification.authenticationInfo?.credentialBackedUp === true
+        ]
+      );
+
+      await client.query(
+        `
+        UPDATE eip_auth.auth_session
+        SET attrs = COALESCE(attrs,'{}'::jsonb) || $2::jsonb
+        WHERE id=$1::uuid
+        `,
+        [s.session.id, JSON.stringify(buildStepUpAttrs("passkey"))]
+      );
+
+      await client.query("COMMIT");
+      app.log.info({ event: "passkey_step_up_success", tenantId: s.session.tenant_id, identityId: s.session.identity_id, sessionId: s.session.id, ip: req.ip });
+      return reply.send({ ok: true, step_up: true, assurance: "phishing_resistant" });
+    } catch (e) {
+      await client.query("ROLLBACK");
+      app.log.error({ event: "passkey_step_up_verify_error", tenantId: s.session.tenant_id, identityId: s.session.identity_id, error: e.message });
+      return reply.code(500).send({ ok: false, error: "PASSKEY_STEP_UP_FAILED" });
+    } finally {
+      client.release();
+    }
+  });
+
+  app.post("/auth/passkeys/:passkeyId/revoke", async (req, reply) => {
+    const s = await app.requireSession(req, { realm: "EIP" });
+    if (!s.ok) return reply.code(s.status).send({ ok: false, error: s.error });
+    const c = await app.requireCsrf(req);
+    if (!c.ok) return reply.code(c.status).send({ ok: false, error: c.error });
+    const step = await app.requireStepUp(req);
+    if (!step.ok) return reply.code(step.status).send({ ok: false, error: step.error });
+
+    const r = await app.db.query(
+      `
+      UPDATE eip_auth.auth_passkey
+      SET is_revoked=true,
+          revoked_at=now(),
+          revoked_by=$4::uuid
+      WHERE id=$1::uuid
+        AND tenant_id=$2
+        AND identity_id=$3
+      RETURNING id
+      `,
+      [req.params.passkeyId, s.session.tenant_id, s.session.identity_id, s.session.identity_id]
+    );
+    if (r.rowCount === 0) return reply.code(404).send({ ok: false, error: "NOT_FOUND" });
+    return reply.send({ ok: true });
+  });
+
   /* ===================== TOTP LOGIN (PASSWORD + TOTP) ===================== */
   app.post("/auth/totp/login", { config: { rateLimit: TOTP_LOGIN_RATE_LIMIT } }, async (req, reply) => {
     const { tenantId: tenantIdRaw, tenantCode, email, password, token } = req.body || {};
@@ -2631,10 +3101,10 @@ export default async function authRoutes(app) {
             `
             UPDATE eip_auth.auth_session
             SET attrs = COALESCE(attrs,'{}'::jsonb)
-              || jsonb_build_object('step_up_at', now(), 'assurance', 'high')
+              || $2::jsonb
             WHERE id=$1::uuid
             `,
-            [sRes.rows[0].id]
+            [sRes.rows[0].id, JSON.stringify(buildStepUpAttrs("totp"))]
           );
 
           await client.query("COMMIT");
@@ -2651,98 +3121,30 @@ export default async function authRoutes(app) {
         deviceToken,
         req
       });
-      if (!deviceRow) {
-        throw new Error("DEVICE_UPSERT_FAILED");
+      const deviceCheck = await finalizeBrowserDeviceAfterStrongAuth(app, client, {
+        tenantId,
+        identityId: identity.id,
+        deviceRow,
+        method: "totp",
+        req
+      });
+      if (!deviceCheck.ok) {
+        await client.query("COMMIT");
+        const deviceExpires = new Date(Date.now() + deviceCookieTtlMs(app));
+        setAuthCookie(reply, app, "did", deviceToken, { httpOnly: true, expires: deviceExpires });
+        return reply.code(deviceCheck.status).send({ ok: false, error: deviceCheck.error, deviceId: deviceCheck.deviceId });
       }
-
-        if (deviceRow.trust_state === "revoked") {
-          await client.query("ROLLBACK");
-          return reply.code(401).send({ ok: false, error: "DEVICE_REVOKED" });
-        }
-
-        if (deviceRow.trust_state === "untrusted") {
-          const trustRes = await client.query(
-            `
-            UPDATE eip_auth.auth_device
-            SET trust_state='trusted', updated_at=now()
-            WHERE tenant_id=$1 AND id=$2 AND trust_state='untrusted'
-            RETURNING trust_state
-            `,
-            [tenantId, deviceRow.id]
-          );
-          if (trustRes.rowCount > 0) {
-            deviceRow = { ...deviceRow, trust_state: trustRes.rows[0].trust_state };
-            app.log.info({ event: "device_trusted_via_totp", tenantId, identityId: identity.id, deviceId: deviceRow.id, ip: req.ip });
-          }
-        }
-
-        if (app.config.REQUIRE_TRUSTED_DEVICE && deviceRow.trust_state !== "trusted") {
-          const trustedRes = await client.query(
-            `
-            SELECT 1
-            FROM eip_auth.auth_device
-          WHERE tenant_id=$1 AND identity_id=$2 AND trust_state='trusted'
-          LIMIT 1
-          `,
-          [tenantId, identity.id]
-        );
-
-        if (trustedRes.rowCount === 0 && deviceRow.trust_state === "untrusted") {
-          const trustRes = await client.query(
-            `
-            UPDATE eip_auth.auth_device
-            SET trust_state='trusted', updated_at=now()
-            WHERE tenant_id=$1 AND id=$2 AND trust_state='untrusted'
-            RETURNING trust_state
-            `,
-            [tenantId, deviceRow.id]
-          );
-
-          if (trustRes.rowCount > 0) {
-            deviceRow = { ...deviceRow, trust_state: trustRes.rows[0].trust_state };
-            app.log.info({ event: "device_autotrusted", tenantId, identityId: identity.id, deviceId: deviceRow.id, ip: req.ip });
-          }
-        }
-
-        if (deviceRow.trust_state !== "trusted") {
-          await client.query("COMMIT");
-          const deviceExpires = new Date(Date.now() + deviceCookieTtlMs(app));
-          setAuthCookie(reply, app, "did", deviceToken, { httpOnly: true, expires: deviceExpires });
-          return reply.code(401).send({ ok: false, error: "DEVICE_UNTRUSTED", deviceId: deviceRow.id });
-        }
-      }
+      deviceRow = deviceCheck.device;
 
       const deviceId = deviceRow.id;
 
-      /* ---- SESSION ---- */
-      const sessionId = crypto.randomUUID();
-      const expiresAt = new Date(Date.now() + sessionTtlMs(app));
-
-      const csrf = randomToken(24);
-      const csrfHash = sha256Hex(`${csrf}:${app.config.CSRF_PEPPER}`);
-      const uaHash = sha256Hex(String(req.headers["user-agent"] || ""));
-
-      await client.query(
-        `
-        INSERT INTO eip_auth.auth_session
-          (id, tenant_id, identity_id, device_id,
-           expires_at, csrf_secret_hash, ip_address, user_agent_hash, attrs)
-        VALUES
-          ($1,$2,$3,$4,$5,$6,$7,$8,
-           jsonb_build_object('realm', $9::text, 'step_up_at', now(), 'assurance', 'high'))
-        `,
-        [
-          sessionId,
-          tenantId,
-          identity.id,
-          deviceId,
-          expiresAt,
-          csrfHash,
-          req.ip,
-          uaHash,
-          "EIP"
-        ]
-      );
+      await issueEipSession(app, client, reply, req, {
+        tenantId,
+        identityId: identity.id,
+        deviceId,
+        deviceToken,
+        method: "totp"
+      });
 
       await client.query("COMMIT");
 
@@ -2753,13 +3155,6 @@ export default async function authRoutes(app) {
         outcome: "success",
         ip: req.ip
       });
-
-      const sessionExpires = expiresAt;
-      const deviceExpires = new Date(Date.now() + deviceCookieTtlMs(app));
-
-      setAuthCookie(reply, app, "sid", sessionId, { httpOnly: true, expires: sessionExpires });
-      setAuthCookie(reply, app, "csrf", csrf, { httpOnly: true, expires: sessionExpires });
-      setAuthCookie(reply, app, "did", deviceToken, { httpOnly: true, expires: deviceExpires });
 
       return reply.send({ ok: true });
     } catch (e) {

@@ -74,6 +74,17 @@ async function requireSessionWithCsrf(app, req, reply) {
   return s.session;
 }
 
+async function requirePrivilegedStepUp(app, req, reply) {
+  const step = await app.requireStepUp(req, {
+    phishingResistant: app.config.REQUIRE_PASSKEY_FOR_PRIVILEGED_ACTIONS === true
+  });
+  if (!step.ok) {
+    reply.code(step.status).send({ ok: false, error: step.error });
+    return null;
+  }
+  return step;
+}
+
 export default async function gatewayRoutes(app) {
   app.get("/gateway/bootstrap", async (req, reply) => {
     const session = await requireSessionWithCsrf(app, req, reply);
@@ -231,8 +242,8 @@ export default async function gatewayRoutes(app) {
     const c = await app.requireCsrf(req);
     if (!c.ok) return reply.code(c.status).send({ ok: false, error: c.error });
 
-    const step = await app.requireStepUp(req);
-    if (!step.ok) return reply.code(step.status).send({ ok: false, error: step.error });
+    const step = await requirePrivilegedStepUp(app, req, reply);
+    if (!step) return;
 
     const allowed = await hasPermission(app, s.session.tenant_id, s.session.identity_id, "tenant.connection.write");
     if (!allowed) return reply.code(403).send({ ok: false, error: "FORBIDDEN" });
@@ -342,8 +353,8 @@ export default async function gatewayRoutes(app) {
     const c = await app.requireCsrf(req);
     if (!c.ok) return reply.code(c.status).send({ ok: false, error: c.error });
 
-    const step = await app.requireStepUp(req);
-    if (!step.ok) return reply.code(step.status).send({ ok: false, error: step.error });
+    const step = await requirePrivilegedStepUp(app, req, reply);
+    if (!step) return;
 
     const allowed = await hasPermission(app, s.session.tenant_id, s.session.identity_id, "tenant.connection.write");
     if (!allowed) return reply.code(403).send({ ok: false, error: "FORBIDDEN" });
@@ -422,8 +433,8 @@ export default async function gatewayRoutes(app) {
     const c = await app.requireCsrf(req);
     if (!c.ok) return reply.code(c.status).send({ ok: false, error: c.error });
 
-    const step = await app.requireStepUp(req);
-    if (!step.ok) return reply.code(step.status).send({ ok: false, error: step.error });
+    const step = await requirePrivilegedStepUp(app, req, reply);
+    if (!step) return;
 
     const allowed = await hasPermission(app, s.session.tenant_id, s.session.identity_id, "tenant.connection.write");
     if (!allowed) return reply.code(403).send({ ok: false, error: "FORBIDDEN" });
@@ -569,8 +580,8 @@ export default async function gatewayRoutes(app) {
     const c = await app.requireCsrf(req);
     if (!c.ok) return reply.code(c.status).send({ ok: false, error: c.error });
 
-    const step = await app.requireStepUp(req);
-    if (!step.ok) return reply.code(step.status).send({ ok: false, error: step.error });
+    const step = await requirePrivilegedStepUp(app, req, reply);
+    if (!step) return;
 
     const allowed = await hasPermission(app, s.session.tenant_id, s.session.identity_id, "tenant.connection.write");
     if (!allowed) return reply.code(403).send({ ok: false, error: "FORBIDDEN" });
@@ -647,8 +658,8 @@ export default async function gatewayRoutes(app) {
     const c = await app.requireCsrf(req);
     if (!c.ok) return reply.code(c.status).send({ ok: false, error: c.error });
 
-    const step = await app.requireStepUp(req);
-    if (!step.ok) return reply.code(step.status).send({ ok: false, error: step.error });
+    const step = await requirePrivilegedStepUp(app, req, reply);
+    if (!step) return;
 
     const allowed = await hasPermission(app, s.session.tenant_id, s.session.identity_id, "tenant.connection.api_key");
     if (!allowed) return reply.code(403).send({ ok: false, error: "FORBIDDEN" });
@@ -706,8 +717,8 @@ export default async function gatewayRoutes(app) {
     const c = await app.requireCsrf(req);
     if (!c.ok) return reply.code(c.status).send({ ok: false, error: c.error });
 
-    const step = await app.requireStepUp(req);
-    if (!step.ok) return reply.code(step.status).send({ ok: false, error: step.error });
+    const step = await requirePrivilegedStepUp(app, req, reply);
+    if (!step) return;
 
     const allowed = await hasPermission(app, s.session.tenant_id, s.session.identity_id, "tenant.connection.api_key");
     if (!allowed) return reply.code(403).send({ ok: false, error: "FORBIDDEN" });
@@ -756,8 +767,8 @@ export default async function gatewayRoutes(app) {
     const c = await app.requireCsrf(req);
     if (!c.ok) return reply.code(c.status).send({ ok: false, error: c.error });
 
-    const step = await app.requireStepUp(req);
-    if (!step.ok) return reply.code(step.status).send({ ok: false, error: step.error });
+    const step = await requirePrivilegedStepUp(app, req, reply);
+    if (!step) return;
 
     const allowed = await hasPermission(app, s.session.tenant_id, s.session.identity_id, "tenant.connection.api_key");
     if (!allowed) return reply.code(403).send({ ok: false, error: "FORBIDDEN" });
