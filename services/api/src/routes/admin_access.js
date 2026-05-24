@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import argon2 from "argon2";
 import { hasPermission } from "../auth/perm.js";
 import { evaluatePasswordStrength } from "../auth/password.js";
+import { loadActivePasskeys, publicPasskey } from "../auth/passkeys.js";
 import { auditSecurityEvent } from "../lib/securityAudit.js";
 import { safeUploadTarget, uploadPartToBuffer, validateImageUpload } from "../lib/uploadSecurity.js";
 
@@ -21,6 +22,12 @@ const DEFAULT_TRANSLATION_BILLING = {
 
 function normalizeText(value) {
   return String(value || "").trim();
+}
+
+function publicAdminPasskey(row) {
+  const passkey = publicPasskey(row);
+  delete passkey.credential_id;
+  return passkey;
 }
 
 function normalizeCurrency(value, fallback = "USD") {
@@ -569,6 +576,79 @@ export default async function adminAccessRoutes(app) {
     });
 
     return reply.send({ ok: true, avatar_url: rawUrl, profile });
+  });
+
+  app.get("/admin/tenants/:tenantId/users/:identityId/passkeys", async (req, reply) => {
+    const session = await requireAdminPerm(app, req, reply, "admin.user.read");
+    if (!session) return;
+
+    const tenantId = normalizeText(req.params.tenantId);
+    const identityId = normalizeText(req.params.identityId);
+    const tenant = await loadTenant(app, tenantId);
+    if (!tenant) {
+      return reply.code(404).send({ ok: false, error: "TENANT_NOT_FOUND" });
+    }
+    const identity = await loadIdentity(app, tenantId, identityId);
+    if (!identity) {
+      return reply.code(404).send({ ok: false, error: "IDENTITY_NOT_FOUND" });
+    }
+
+    const passkeys = await loadActivePasskeys(app.db, tenantId, identityId);
+    return reply.send({
+      ok: true,
+      login: identity.login,
+      passkeys: passkeys.map(publicAdminPasskey)
+    });
+  });
+
+  app.post("/admin/tenants/:tenantId/users/:identityId/passkeys/:passkeyId/revoke", async (req, reply) => {
+    const session = await requireAdminPerm(app, req, reply, "admin.user.write", { csrf: true });
+    if (!session) return;
+
+    const step = await app.requireStepUp(req);
+    if (!step.ok) return reply.code(step.status).send({ ok: false, error: step.error });
+
+    const tenantId = normalizeText(req.params.tenantId);
+    const identityId = normalizeText(req.params.identityId);
+    const passkeyId = normalizeText(req.params.passkeyId);
+    const tenant = await loadTenant(app, tenantId);
+    if (!tenant) {
+      return reply.code(404).send({ ok: false, error: "TENANT_NOT_FOUND" });
+    }
+    const identity = await loadIdentity(app, tenantId, identityId);
+    if (!identity) {
+      return reply.code(404).send({ ok: false, error: "IDENTITY_NOT_FOUND" });
+    }
+
+    const r = await app.db.query(
+      `
+      UPDATE eip_auth.auth_passkey
+      SET is_revoked = true,
+          revoked_at = now(),
+          revoked_by = $4::uuid
+      WHERE id = $1::uuid
+        AND tenant_id = $2::uuid
+        AND identity_id = $3::uuid
+        AND is_revoked = false
+      RETURNING id, credential_id, transports, device_type, backed_up,
+                label, last_used_at, created_at, is_revoked
+      `,
+      [passkeyId, tenantId, identityId, session.identity_id]
+    );
+    if (r.rowCount === 0) {
+      return reply.code(404).send({ ok: false, error: "PASSKEY_NOT_FOUND" });
+    }
+
+    auditSecurityEvent(app, "admin_passkey_revoke", {
+      actorTenantId: session.tenant_id,
+      actorIdentityId: session.identity_id,
+      targetTenantId: tenantId,
+      targetIdentityId: identityId,
+      outcome: "success",
+      ip: req.ip
+    });
+
+    return reply.send({ ok: true, passkey: publicAdminPasskey(r.rows[0]) });
   });
 
   app.post("/admin/tenants/:tenantId/users/:identityId/roles", async (req, reply) => {

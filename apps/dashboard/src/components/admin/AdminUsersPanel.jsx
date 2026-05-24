@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { RefreshCw, UserPlus, Users, XCircle, Image, Pencil } from "lucide-react";
+import { Fingerprint, Image, Loader2, Pencil, RefreshCw, Trash2, UserPlus, Users, XCircle } from "lucide-react";
 import { apiFetch } from "../../services/apiClient";
+import { adminRevokeUserPasskey, listUserPasskeys } from "../../services/passkeys";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
 
@@ -59,6 +60,13 @@ function resolveAssetUrl(url) {
   return `${BASE_URL}${url}`;
 }
 
+function formatDate(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString();
+}
+
 export default function AdminUsersPanel({ node }) {
   const layout = useMemo(
     () => mergeLayout(DEFAULT_LAYOUT, node?.props?.layout),
@@ -107,6 +115,11 @@ export default function AdminUsersPanel({ node }) {
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileNotice, setProfileNotice] = useState(null);
   const [profileError, setProfileError] = useState(null);
+  const [userPasskeys, setUserPasskeys] = useState([]);
+  const [passkeyLoading, setPasskeyLoading] = useState(false);
+  const [passkeyAction, setPasskeyAction] = useState("");
+  const [passkeyNotice, setPasskeyNotice] = useState(null);
+  const [passkeyError, setPasskeyError] = useState(null);
 
   const tenantDisplay = tenantMenuOpen
     ? tenantInput
@@ -189,6 +202,22 @@ export default function AdminUsersPanel({ node }) {
     }
   };
 
+  const loadUserPasskeyData = async (tenantId, user) => {
+    if (!tenantId || !user?.id) return;
+    setPasskeyLoading(true);
+    setPasskeyError(null);
+    setPasskeyNotice(null);
+    try {
+      const result = await listUserPasskeys(tenantId, user.id);
+      setUserPasskeys(Array.isArray(result?.passkeys) ? result.passkeys : []);
+    } catch (err) {
+      setUserPasskeys([]);
+      setPasskeyError(err.message || "Unable to load passkeys.");
+    } finally {
+      setPasskeyLoading(false);
+    }
+  };
+
   const handleTenantPick = (tenant) => {
     setSelectedTenant(tenant);
     setTenantInput(formatTenantLabel(tenant));
@@ -199,6 +228,9 @@ export default function AdminUsersPanel({ node }) {
     setCreateForm({ email: "", password: "", profileRoleId: "", accessRoleId: "", permissionCode: "" });
     setCreateNotice(null);
     setCreateError(null);
+    setUserPasskeys([]);
+    setPasskeyNotice(null);
+    setPasskeyError(null);
     loadTenantData(tenant.id);
   };
 
@@ -262,8 +294,13 @@ export default function AdminUsersPanel({ node }) {
   const handleSelectUser = async (user) => {
     setSelectedUser(user);
     setAssignForm({ profileRoleId: "", accessRoleId: "", permissionCode: "" });
+    setPasskeyNotice(null);
+    setPasskeyError(null);
     if (selectedTenant?.id) {
-      await loadProfile(selectedTenant.id, user);
+      await Promise.all([
+        loadProfile(selectedTenant.id, user),
+        loadUserPasskeyData(selectedTenant.id, user),
+      ]);
     }
   };
 
@@ -368,6 +405,26 @@ export default function AdminUsersPanel({ node }) {
       setProfileError(err.message || "Failed to upload avatar.");
     } finally {
       event.target.value = "";
+    }
+  };
+
+  const handleRevokeUserPasskey = async (passkey) => {
+    if (!selectedTenant || !selectedUser || !passkey?.id) return;
+    const ok = window.confirm(
+      `Revoke passkey "${passkey.label || "Passkey"}" for ${selectedUser.login || selectedUser.id}?`
+    );
+    if (!ok) return;
+    setPasskeyAction(`revoke:${passkey.id}`);
+    setPasskeyError(null);
+    setPasskeyNotice(null);
+    try {
+      await adminRevokeUserPasskey(selectedTenant.id, selectedUser.id, passkey.id);
+      setPasskeyNotice("Passkey revoked.");
+      await loadUserPasskeyData(selectedTenant.id, selectedUser);
+    } catch (err) {
+      setPasskeyError(err.message || "Failed to revoke passkey.");
+    } finally {
+      setPasskeyAction("");
     }
   };
 
@@ -692,6 +749,9 @@ export default function AdminUsersPanel({ node }) {
                       onClick={() => {
                         setSelectedUser(null);
                         setAssignForm({ profileRoleId: "", accessRoleId: "", permissionCode: "" });
+                        setUserPasskeys([]);
+                        setPasskeyNotice(null);
+                        setPasskeyError(null);
                       }}
                       className="rounded-full border border-ink-200/70 px-2 py-0.5 text-[0.6rem] font-semibold uppercase tracking-[0.2em] text-ink-500 hover:bg-ink-50"
                     >
@@ -867,6 +927,92 @@ export default function AdminUsersPanel({ node }) {
                 <Pencil className="h-4 w-4" />
                 {profileSaving ? "Saving..." : "Save profile"}
               </button>
+            </div>
+          ) : null}
+
+          {selectedUser ? (
+            <div className="rounded-2xl border border-ink-100 bg-white/90 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Fingerprint className="h-4 w-4 text-ink-500" />
+                  <div>
+                    <h3 className="text-sm font-semibold text-ink-900">Passkeys</h3>
+                    <p className="text-xs text-ink-400">{selectedUser.login}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => loadUserPasskeyData(selectedTenant?.id, selectedUser)}
+                  disabled={passkeyLoading || Boolean(passkeyAction)}
+                  className="flex items-center gap-2 rounded-full border border-ink-200/70 bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-ink-500 hover:bg-ink-50 disabled:opacity-60"
+                >
+                  <RefreshCw className={`h-4 w-4 ${passkeyLoading ? "animate-spin" : ""}`} />
+                  Refresh
+                </button>
+              </div>
+
+              <p className="mt-3 text-xs text-ink-500">
+                Admins can revoke a tenant user's passkey, but enrollment stays personal to that user.
+              </p>
+
+              {passkeyError ? (
+                <div className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-600">
+                  {passkeyError}
+                </div>
+              ) : null}
+              {passkeyNotice ? (
+                <div className="mt-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs text-emerald-700">
+                  {passkeyNotice}
+                </div>
+              ) : null}
+
+              <div className="mt-4 space-y-3">
+                {passkeyLoading ? (
+                  <div className="rounded-xl border border-ink-100 bg-ink-50/60 px-3 py-2 text-xs text-ink-500">
+                    Loading passkeys...
+                  </div>
+                ) : null}
+
+                {!passkeyLoading && userPasskeys.length === 0 ? (
+                  <div className="rounded-xl border border-ink-100 bg-ink-50/60 px-3 py-2 text-xs text-ink-500">
+                    No active passkeys for this user.
+                  </div>
+                ) : null}
+
+                {userPasskeys.map((passkey) => (
+                  <div
+                    key={passkey.id}
+                    className="rounded-2xl border border-ink-100 bg-white px-3 py-3"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-ink-900">
+                          {passkey.label || "Passkey"}
+                        </p>
+                        <p className="text-xs text-ink-400">
+                          Last used {formatDate(passkey.last_used_at)} / Created {formatDate(passkey.created_at)}
+                        </p>
+                        <p className="mt-1 text-[0.65rem] uppercase tracking-[0.2em] text-ink-400">
+                          {passkey.device_type || "device"} {passkey.backed_up ? "/ backed up" : ""}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRevokeUserPasskey(passkey)}
+                        disabled={Boolean(passkeyAction)}
+                        className="flex items-center gap-2 rounded-full border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-rose-600 hover:bg-rose-100 disabled:opacity-50"
+                      >
+                        {passkeyAction === `revoke:${passkey.id}` ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-4 w-4" />
+                        )}
+                        Revoke
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           ) : null}
         </div>

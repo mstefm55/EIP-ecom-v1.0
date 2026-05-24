@@ -154,7 +154,14 @@ export default function UserShell({ node, children, ctx }) {
                   </div>
                 </div>
                 <div className="mt-4 space-y-2 text-sm text-ink-600">
-                  <button type="button" className="flex w-full items-center gap-3 rounded-2xl px-3 py-2 hover:bg-ink-50">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab?.("security");
+                      setProfileOpen(false);
+                    }}
+                    className="flex w-full items-center gap-3 rounded-2xl px-3 py-2 hover:bg-ink-50"
+                  >
                     <UserCircle2 className="h-4 w-4" />
                     Account
                   </button>

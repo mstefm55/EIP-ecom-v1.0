@@ -6,7 +6,7 @@ export const dashboardSurface = {
     type: "UserShell",
     props: {
       brand: "EIP Core",
-      nav: ["Dashboard", "Product Studio", "Content Studio", "Orders & Payments", "Tasks", "Reports", "Settings"],
+      nav: ["Dashboard", "Product Studio", "Content Studio", "Orders & Payments", "Tasks", "Reports", "Security", "Settings"],
       menu: [
         { code: "dashboard", label: "Dashboard", icon: "LayoutGrid" },
         { code: "catalog", label: "Product Studio", icon: "Package" },
@@ -14,6 +14,7 @@ export const dashboardSurface = {
         { code: "commerce", label: "Orders & Payments", icon: "CreditCard" },
         { code: "tasks", label: "Tasks", icon: "Activity" },
         { code: "reports", label: "Reports", icon: "BarChart3" },
+        { code: "security", label: "Security", icon: "Shield" },
         { code: "settings", label: "Settings", icon: "Settings" },
       ],
       helper: "Workspace overview, catalog operations, and tenant tasks.",
@@ -264,6 +265,17 @@ export const dashboardSurface = {
               title: "Reports",
               subtitle: "Download activity reports and exports here.",
             },
+          },
+        ],
+      },
+      {
+        id: "user-security-panel",
+        type: "UserPanel",
+        props: { tab: "security" },
+        children: [
+          {
+            id: "user-security",
+            type: "UserSecurityPanel",
           },
         ],
       },

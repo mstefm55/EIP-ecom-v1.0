@@ -78,9 +78,25 @@ async function revokePasskey(passkeyId) {
   });
 }
 
+async function listUserPasskeys(tenantId, identityId) {
+  return apiFetch(`/api/eip/admin/tenants/${tenantId}/users/${identityId}/passkeys`);
+}
+
+async function adminRevokeUserPasskey(tenantId, identityId, passkeyId) {
+  return apiFetch(
+    `/api/eip/admin/tenants/${tenantId}/users/${identityId}/passkeys/${passkeyId}/revoke`,
+    {
+      method: "POST",
+      body: {},
+    }
+  );
+}
+
 export {
+  adminRevokeUserPasskey,
   browserSupportsPasskeys,
   listPasskeys,
+  listUserPasskeys,
   loginWithPasskey,
   platformPasskeyAvailable,
   registerPasskey,

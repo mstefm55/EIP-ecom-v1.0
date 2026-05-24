@@ -32,6 +32,7 @@ import UserShell from "../components/user/UserShell";
 import UserDashboardPanel from "../components/user/UserDashboardPanel";
 import UserPanel from "../components/user/UserPanel";
 import TenantAdminAccessPanel from "../components/user/TenantAdminAccessPanel";
+import UserSecurityPanel from "../components/user/UserSecurityPanel";
 import UserPlaceholderPanel from "../components/user/UserPlaceholderPanel";
 import EcomProductWorkspace from "../components/ecom/EcomProductWorkspace";
 import EcomOrderManagementPanel from "../components/ecom/EcomOrderManagementPanel";
@@ -81,6 +82,7 @@ export const registry = {
   UserDashboardPanel,
   UserPanel,
   TenantAdminAccessPanel,
+  UserSecurityPanel,
   UserPlaceholderPanel,
   EcomProductWorkspace,
   EcomOrderManagementPanel,

@@ -50,7 +50,11 @@ function formatError(error, fallback) {
   return message || fallback;
 }
 
-export default function AdminPasskeysPanel() {
+export default function AdminPasskeysPanel({
+  title = "Passkeys",
+  description = "Enroll and test phishing-resistant sign-in before enabling passkey-required privileged actions.",
+  className = "mt-8 rounded-3xl border border-white/70 bg-white/75 p-5 shadow-soft",
+}) {
   const [passkeys, setPasskeys] = useState([]);
   const [label, setLabel] = useState("");
   const [loading, setLoading] = useState(false);
@@ -137,16 +141,16 @@ export default function AdminPasskeysPanel() {
   const busy = Boolean(action);
 
   return (
-    <div className="mt-8 rounded-3xl border border-white/70 bg-white/75 p-5 shadow-soft">
+    <div className={className}>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-start gap-3">
           <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-ink-900 text-white">
             <Fingerprint className="h-5 w-5" />
           </div>
           <div>
-            <h3 className="text-lg font-semibold text-ink-900">Passkeys</h3>
+            <h3 className="text-lg font-semibold text-ink-900">{title}</h3>
             <p className="mt-1 max-w-2xl text-sm text-ink-500">
-              Enroll and test phishing-resistant sign-in before enabling passkey-required privileged actions.
+              {description}
             </p>
             <div className="mt-2 flex flex-wrap gap-2 text-[0.65rem] font-semibold uppercase tracking-[0.2em]">
               <span className={`rounded-full px-2 py-1 ${supported ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-600"}`}>
