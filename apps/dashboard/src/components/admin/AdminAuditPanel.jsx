@@ -10,6 +10,14 @@ const DEFAULT_FILTERS = {
   outcome: "",
   severity: "",
 };
+const FILTER_CONTROL_CLASS =
+  "mt-1 h-8 w-full rounded-lg border border-ink-100 bg-white/80 px-2.5 text-xs text-ink-700 outline-none focus:border-indigo-300";
+const FILTER_BUTTON_CLASS =
+  "mt-5 flex h-8 items-center justify-center gap-1.5 rounded-lg px-3 text-[11px] font-semibold uppercase tracking-[0.14em]";
+const PAGER_CONTROL_CLASS =
+  "h-8 rounded-full border border-ink-200 bg-white/80 px-2.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-500 outline-none hover:bg-white";
+const PAGER_BUTTON_CLASS =
+  "flex h-8 items-center gap-1.5 rounded-full border border-ink-200 bg-white/80 px-2.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-500 hover:bg-white disabled:opacity-50";
 
 function formatDate(value) {
   if (!value) return "-";
@@ -241,7 +249,7 @@ export default function AdminAuditPanel() {
             <input
               value={draftFilters.event_type}
               onChange={(event) => updateDraftFilter("event_type", event.target.value)}
-              className="mt-1 w-full rounded-xl border border-ink-100 bg-white/80 px-3 py-2 text-sm text-ink-700 outline-none focus:border-indigo-300"
+              className={FILTER_CONTROL_CLASS}
               placeholder="gateway.verification_failed"
             />
           </label>
@@ -250,7 +258,7 @@ export default function AdminAuditPanel() {
             <input
               value={draftFilters.tenant}
               onChange={(event) => updateDraftFilter("tenant", event.target.value)}
-              className="mt-1 w-full rounded-xl border border-ink-100 bg-white/80 px-3 py-2 text-sm text-ink-700 outline-none focus:border-indigo-300"
+              className={FILTER_CONTROL_CLASS}
               placeholder="tenant code or id"
             />
           </label>
@@ -259,7 +267,7 @@ export default function AdminAuditPanel() {
             <select
               value={draftFilters.outcome}
               onChange={(event) => updateDraftFilter("outcome", event.target.value)}
-              className="mt-1 w-full rounded-xl border border-ink-100 bg-white/80 px-3 py-2 text-sm text-ink-700 outline-none focus:border-indigo-300"
+              className={FILTER_CONTROL_CLASS}
             >
               <option value="">All</option>
               <option value="success">Success</option>
@@ -276,7 +284,7 @@ export default function AdminAuditPanel() {
             <select
               value={draftFilters.severity}
               onChange={(event) => updateDraftFilter("severity", event.target.value)}
-              className="mt-1 w-full rounded-xl border border-ink-100 bg-white/80 px-3 py-2 text-sm text-ink-700 outline-none focus:border-indigo-300"
+              className={FILTER_CONTROL_CLASS}
             >
               <option value="">All</option>
               <option value="debug">Debug</option>
@@ -288,15 +296,15 @@ export default function AdminAuditPanel() {
           </label>
           <button
             type="submit"
-            className="mt-5 flex items-center justify-center gap-2 rounded-xl bg-ink-900 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-white hover:bg-ink-800"
+            className={`${FILTER_BUTTON_CLASS} bg-ink-900 text-white hover:bg-ink-800`}
           >
-            <Filter className="h-4 w-4" />
+            <Filter className="h-3.5 w-3.5" />
             Apply
           </button>
           <button
             type="button"
             onClick={clearFilters}
-            className="mt-5 rounded-xl border border-ink-200 bg-white/70 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-ink-500 hover:bg-white"
+            className={`${FILTER_BUTTON_CLASS} border border-ink-200 bg-white/70 text-ink-500 hover:bg-white`}
           >
             Clear
           </button>
@@ -340,7 +348,7 @@ export default function AdminAuditPanel() {
                 setPageSize(Number(event.target.value));
                 setPage(1);
               }}
-              className="rounded-full border border-ink-200 bg-white/80 px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-ink-500 outline-none hover:bg-white"
+              className={PAGER_CONTROL_CLASS}
             >
               {PAGE_SIZE_OPTIONS.map((option) => (
                 <option key={option} value={option}>{option} / page</option>
@@ -350,19 +358,19 @@ export default function AdminAuditPanel() {
               type="button"
               onClick={() => setPage(Math.max(1, pagination.page - 1))}
               disabled={!canGoPrevious}
-              className="flex items-center gap-2 rounded-full border border-ink-200 bg-white/80 px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-ink-500 hover:bg-white disabled:opacity-50"
+              className={PAGER_BUTTON_CLASS}
             >
-              <ChevronLeft className="h-4 w-4" />
+              <ChevronLeft className="h-3.5 w-3.5" />
               Previous
             </button>
             <button
               type="button"
               onClick={() => setPage(pagination.page + 1)}
               disabled={!canGoNext}
-              className="flex items-center gap-2 rounded-full border border-ink-200 bg-white/80 px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-ink-500 hover:bg-white disabled:opacity-50"
+              className={PAGER_BUTTON_CLASS}
             >
               Next
-              <ChevronRight className="h-4 w-4" />
+              <ChevronRight className="h-3.5 w-3.5" />
             </button>
           </div>
         </div>
