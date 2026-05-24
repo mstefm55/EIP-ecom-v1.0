@@ -90,6 +90,9 @@ Gateway intake audit payloads redact raw request bodies by default and store onl
 
 - `connection.profile_saved`
 - `connection.profile_save_failed`
+- `connection.api_key_created`
+- `connection.api_key_rotated`
+- `connection.api_key_revoked`
 - `connection.secret_rotated`
 - `connection.secret_revoked`
 - `connection.secret_revoke_failed`

@@ -1,6 +1,7 @@
 // services/api/src/routes/gateway.js
 import crypto from "node:crypto";
 import { buildBootstrapPayload } from "../services/gateway/bootstrap.js";
+import { sha256Hex } from "../auth/crypto.js";
 import { hasPermission } from "../auth/perm.js";
 import { fetchWithTimeout, buildOutboundAuth } from "../services/gateway/outbound.js";
 import {
@@ -873,6 +874,24 @@ export default async function gatewayRoutes(app) {
       );
     }
 
+    await emitSecurityEvent(app, "connection.api_key_created", {
+      category: "connection",
+      source: "gateway_admin",
+      severity: "warning",
+      outcome: "success",
+      actorTenantId: s.session.tenant_id,
+      actorIdentityId: s.session.identity_id,
+      targetTenantId: tenantId,
+      ip: req.ip,
+      userAgent: req.headers["user-agent"] || null,
+      metadata: {
+        key_id: r.rows[0].id,
+        label,
+        set_primary: setPrimary,
+        expires_at: expiresAt.toISOString()
+      }
+    });
+
     return reply.send({ ok: true, api_key: r.rows[0], raw_key: rawKey });
   });
 
@@ -925,6 +944,21 @@ export default async function gatewayRoutes(app) {
       `,
       [tenantId]
     );
+
+    await emitSecurityEvent(app, "connection.api_key_revoked", {
+      category: "connection",
+      source: "gateway_admin",
+      severity: "warning",
+      outcome: "success",
+      actorTenantId: s.session.tenant_id,
+      actorIdentityId: s.session.identity_id,
+      targetTenantId: tenantId,
+      ip: req.ip,
+      userAgent: req.headers["user-agent"] || null,
+      metadata: {
+        key_id: keyId
+      }
+    });
 
     return reply.send({ ok: true });
   });
@@ -1000,6 +1034,24 @@ export default async function gatewayRoutes(app) {
       `,
       [tenantId, r.rows[0].id]
     );
+
+    await emitSecurityEvent(app, "connection.api_key_rotated", {
+      category: "connection",
+      source: "gateway_admin",
+      severity: "warning",
+      outcome: "success",
+      actorTenantId: s.session.tenant_id,
+      actorIdentityId: s.session.identity_id,
+      targetTenantId: tenantId,
+      ip: req.ip,
+      userAgent: req.headers["user-agent"] || null,
+      metadata: {
+        rotated_from_key_id: keyId,
+        new_key_id: r.rows[0].id,
+        label,
+        expires_at: expiresAt.toISOString()
+      }
+    });
 
     return reply.send({ ok: true, api_key: r.rows[0], raw_key: rawKey });
   });
