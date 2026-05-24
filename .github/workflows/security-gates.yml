@@ -1,0 +1,85 @@
+name: security-gates
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lockfile-integrity:
+    name: Lockfile integrity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: |
+            package-lock.json
+            apps/samara-web/my-vite-react-app/package-lock.json
+
+      - name: Verify root workspace lockfile
+        run: npm ci --ignore-scripts
+
+      - name: Verify Samara app lockfile
+        run: npm ci --ignore-scripts --prefix apps/samara-web/my-vite-react-app
+
+  dependency-audit:
+    name: Dependency audit gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Block new high or critical production advisories
+        run: node tools/security/npm_audit_gate.mjs
+
+  security-regression:
+    name: Security regression tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Install root workspace
+        run: npm ci --ignore-scripts
+
+      - name: Secret scan
+        run: npm run security:secrets
+
+      - name: Security static checks
+        run: npm run security:static
+
+      - name: API security regression suite
+        run: npm --workspace @eip/core-api run test:security
+
+  dashboard-build:
+    name: Dashboard build smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Install root workspace
+        run: npm ci --ignore-scripts
+
+      - name: Build dashboard
+        run: npm --workspace dashboard run build

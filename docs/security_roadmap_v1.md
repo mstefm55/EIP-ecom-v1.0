@@ -101,6 +101,7 @@ This roadmap turns the security gap matrix into practical fix waves. It assumes 
    - Secret scanning.
    - SAST/lint rules for query-string secrets, unsafe fetch targets, and unguarded admin routes.
    - Focused integration tests for the P0 controls.
+   - V1 baseline added in `docs/security_ci_gates_v1.md`: lockfile integrity checks, no-new-high/critical dependency audit gate, secret scanning, focused static checks, API security regression suite, and dashboard build smoke.
 
 3. Add operational monitoring and alerting.
    - Alert on repeated auth failures, recovery events, sensitive DB access, gateway verification failures, upload rejection spikes, and API key rotations.

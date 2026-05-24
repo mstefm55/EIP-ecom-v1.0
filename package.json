@@ -26,6 +26,10 @@
   "devDependencies": {},
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
+    "security:audit": "node tools/security/npm_audit_gate.mjs",
+    "security:secrets": "node tools/security/scan_secrets.mjs",
+    "security:static": "node tools/security/static_security_checks.mjs",
+    "security:ci": "npm run security:secrets && npm run security:static && npm run security:audit && npm --workspace @eip/core-api run test:security",
     "validate:process": "node tools/validate_process_alignment.mjs",
     "smoke:ecom:ci": "powershell -ExecutionPolicy Bypass -File ./scripts/run_ecom_process_regression_ci.ps1",
     "smoke:ecom:ci:auto-admin": "powershell -ExecutionPolicy Bypass -File ./scripts/run_ecom_process_regression_ci.ps1 -AutoAdminSession",
