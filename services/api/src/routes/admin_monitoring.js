@@ -1,5 +1,6 @@
 // services/api/src/routes/admin_monitoring.js
 import { hasPermission } from "../auth/perm.js";
+import { resolveEipSurfaceAccess } from "../lib/surfaceAccess.js";
 
 const RANGE_PRESETS = {
   "24h": { hours: 24, bucketHours: 3, label: "24h" },
@@ -52,7 +53,184 @@ function timeAgo(from, to = new Date()) {
   return `${Math.round(delta / 86_400_000)}d ago`;
 }
 
+async function securityEventTableExists(app) {
+  const r = await app.db.query("SELECT to_regclass('eip_core.security_event') AS name");
+  return Boolean(r.rows[0]?.name);
+}
+
+async function canReadSecurityOps(app, session) {
+  const checks = await Promise.all([
+    hasPermission(app, session.tenant_id, session.identity_id, "security.ops.read"),
+    hasPermission(app, session.tenant_id, session.identity_id, "privacy.audit.view"),
+    hasPermission(app, session.tenant_id, session.identity_id, "tenant.connection.log")
+  ]);
+  return checks.some(Boolean);
+}
+
+async function buildSecurityScope(app, session) {
+  const access = await resolveEipSurfaceAccess(app, session);
+  if (access.is_owner_admin_session === true) {
+    return { where: "", params: [], ownerAdmin: true };
+  }
+  return {
+    where: `
+      AND (
+        se.tenant_id = $2::uuid
+        OR se.actor_tenant_id = $2::uuid
+        OR se.target_tenant_id = $2::uuid
+      )
+    `,
+    params: [session.tenant_id],
+    ownerAdmin: false
+  };
+}
+
 export default async function adminMonitoringRoutes(app) {
+  app.get("/admin/security/ops", async (req, reply) => {
+    const session = await app.requireSession(req, { realm: "EIP" });
+    if (!session.ok) return reply.code(session.status).send({ ok: false, error: session.error });
+
+    const allowed = await canReadSecurityOps(app, session.session);
+    if (!allowed) return reply.code(403).send({ ok: false, error: "FORBIDDEN" });
+
+    const exists = await securityEventTableExists(app);
+    if (!exists) {
+      return reply.send({
+        ok: true,
+        generatedAt: new Date().toISOString(),
+        warning: "SECURITY_EVENT_TABLE_MISSING",
+        summary: {},
+        connection_health: [],
+        top_failures: [],
+        recent_events: []
+      });
+    }
+
+    const windowKey = String(req.query?.window || req.query?.range || "24h").toLowerCase();
+    const preset = RANGE_PRESETS[windowKey] || RANGE_PRESETS["24h"];
+    const now = new Date();
+    const from = new Date(now.getTime() - preset.hours * 60 * 60 * 1000);
+    const scope = await buildSecurityScope(app, session.session);
+    const params = [from, ...scope.params];
+
+    const summaryRes = await app.db.query(
+      `
+      SELECT
+        count(*)::int AS total_events,
+        count(*) FILTER (WHERE outcome IN ('failure','denied','rejected','blocked','error'))::int AS total_failures,
+        count(*) FILTER (WHERE severity IN ('error','critical'))::int AS high_severity,
+        count(*) FILTER (WHERE category = 'auth' AND outcome IN ('failure','denied','rejected','blocked','error'))::int AS auth_failures,
+        count(*) FILTER (WHERE category IN ('gateway','public_commerce') AND outcome IN ('failure','denied','rejected','blocked','error'))::int AS gateway_failures,
+        count(*) FILTER (WHERE category = 'upload' AND outcome IN ('failure','denied','rejected','blocked','error'))::int AS upload_rejections,
+        count(*) FILTER (WHERE event_type IN ('connection.secret_rotated','connection.secret_revoked'))::int AS secret_changes,
+        max(occurred_at) AS last_event_at
+      FROM eip_core.security_event se
+      WHERE se.occurred_at >= $1
+      ${scope.where}
+      `,
+      params
+    );
+
+    const topFailuresRes = await app.db.query(
+      `
+      SELECT
+        se.event_type,
+        se.category,
+        se.reason,
+        se.severity,
+        count(*)::int AS count,
+        max(se.occurred_at) AS last_seen_at
+      FROM eip_core.security_event se
+      WHERE se.occurred_at >= $1
+        AND se.outcome IN ('failure','denied','rejected','blocked','error')
+      ${scope.where}
+      GROUP BY se.event_type, se.category, se.reason, se.severity
+      ORDER BY count DESC, last_seen_at DESC
+      LIMIT 12
+      `,
+      params
+    );
+
+    const connectionHealthRes = await app.db.query(
+      `
+      SELECT
+        se.tenant_id,
+        t.code AS tenant_code,
+        t.name AS tenant_name,
+        se.connection_code,
+        se.suffix,
+        count(*)::int AS total_events,
+        count(*) FILTER (WHERE se.outcome = 'success')::int AS success_events,
+        count(*) FILTER (WHERE se.outcome IN ('failure','denied','rejected','blocked','error'))::int AS failure_events,
+        count(*) FILTER (WHERE se.event_type = 'gateway.origin_rejected')::int AS origin_rejections,
+        count(*) FILTER (WHERE se.event_type = 'gateway.idempotency_rejected')::int AS idempotency_rejections,
+        count(*) FILTER (WHERE se.event_type = 'gateway.verification_failed')::int AS verification_failures,
+        max(se.occurred_at) AS last_seen_at
+      FROM eip_core.security_event se
+      LEFT JOIN eip_core.tenant t ON t.id = se.tenant_id
+      WHERE se.occurred_at >= $1
+        AND se.category IN ('gateway','public_commerce','connection')
+        AND (se.connection_code IS NOT NULL OR se.suffix IS NOT NULL)
+      ${scope.where}
+      GROUP BY se.tenant_id, t.code, t.name, se.connection_code, se.suffix
+      ORDER BY failure_events DESC, total_events DESC, last_seen_at DESC
+      LIMIT 25
+      `,
+      params
+    );
+
+    const recentEventsRes = await app.db.query(
+      `
+      SELECT
+        se.id,
+        se.occurred_at,
+        se.event_type,
+        se.category,
+        se.severity,
+        se.outcome,
+        se.reason,
+        se.tenant_id,
+        t.code AS tenant_code,
+        se.actor_tenant_id,
+        se.actor_identity_id,
+        se.target_tenant_id,
+        se.target_identity_id,
+        se.connection_code,
+        se.suffix,
+        se.event_id,
+        se.ip,
+        se.source,
+        se.metadata
+      FROM eip_core.security_event se
+      LEFT JOIN eip_core.tenant t ON t.id = se.tenant_id
+      WHERE se.occurred_at >= $1
+      ${scope.where}
+      ORDER BY se.occurred_at DESC
+      LIMIT 50
+      `,
+      params
+    );
+
+    const summary = summaryRes.rows[0] || {};
+    return reply.send({
+      ok: true,
+      generatedAt: now.toISOString(),
+      range: { label: preset.label, from: from.toISOString(), to: now.toISOString() },
+      scope: { owner_admin: scope.ownerAdmin },
+      summary,
+      connection_health: connectionHealthRes.rows || [],
+      top_failures: topFailuresRes.rows || [],
+      recent_events: recentEventsRes.rows || [],
+      alert_thresholds: {
+        auth_failures_15m: 10,
+        gateway_verification_failures_15m: 10,
+        origin_rejections_15m: 10,
+        upload_rejections_15m: 5,
+        critical_events: 1
+      }
+    });
+  });
+
   app.get("/admin/monitoring", async (req, reply) => {
     const session = await app.requireSession(req, { realm: "EIP" });
     if (!session.ok) return reply.code(session.status).send({ ok: false, error: session.error });

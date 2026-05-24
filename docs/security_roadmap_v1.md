@@ -105,6 +105,7 @@ This roadmap turns the security gap matrix into practical fix waves. It assumes 
 3. Add operational monitoring and alerting.
    - Alert on repeated auth failures, recovery events, sensitive DB access, gateway verification failures, upload rejection spikes, and API key rotations.
    - Make audit redaction testable.
+   - V1 baseline added in `docs/security_operations_v1.md`: structured `eip_core.security_event` records, Admin > Audit summaries, gateway/auth/connection/recovery/bootstrap/upload event emission, and default redaction.
 
 4. Run periodic access reviews.
    - Review admin roles and direct identity permissions.

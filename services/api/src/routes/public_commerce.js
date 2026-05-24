@@ -17,6 +17,7 @@ import { isTenantAssetPath, toLocalAssetPath } from "../services/assets/url_poli
 import { sendEmail } from "../lib/email.js";
 import { safeUploadTarget, uploadPartToBuffer, validateImageUpload } from "../lib/uploadSecurity.js";
 import { resolveMarketplaceFxContext } from "../services/fx/marketFxSync.js";
+import { auditSecurityEvent } from "../lib/securityAudit.js";
 
 const RATE_LIMIT = { max: 120, timeWindow: "1 minute" };
 const MAX_BODY = 512 * 1024;
@@ -1757,16 +1758,45 @@ export default async function publicCommerceRoutes(app) {
   async function resolveConnection(appInstance, req, reply, allowedChannels) {
     const suffix = normalizeText(req.params?.suffix);
     if (!suffix) {
+      auditSecurityEvent(appInstance, "commerce.connection_suffix_missing", {
+        category: "public_commerce",
+        source: "public_commerce.resolveConnection",
+        severity: "warning",
+        outcome: "rejected",
+        reason: "CONNECTION_SUFFIX_REQUIRED",
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || null
+      });
       reply.code(400).send({ ok: false, error: "CONNECTION_SUFFIX_REQUIRED" });
       return null;
     }
 
     const resolved = await resolveTenantBySuffix(appInstance, suffix);
     if (!resolved) {
+      auditSecurityEvent(appInstance, "commerce.routing_not_found", {
+        category: "public_commerce",
+        source: "public_commerce.resolveConnection",
+        severity: "warning",
+        outcome: "rejected",
+        suffix,
+        reason: "ROUTING_NOT_FOUND",
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || null
+      });
       reply.code(404).send({ ok: false, error: "ROUTING_NOT_FOUND" });
       return null;
     }
     if (resolved.error) {
+      auditSecurityEvent(appInstance, "commerce.duplicate_suffix", {
+        category: "public_commerce",
+        source: "public_commerce.resolveConnection",
+        severity: "warning",
+        outcome: "rejected",
+        suffix,
+        reason: resolved.error,
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || null
+      });
       reply.code(409).send({ ok: false, error: resolved.error });
       return null;
     }
@@ -1774,14 +1804,49 @@ export default async function publicCommerceRoutes(app) {
     const { tenant } = resolved;
     let { profile } = resolved;
     if (!profile) {
+      auditSecurityEvent(appInstance, "commerce.connection_not_found", {
+        category: "public_commerce",
+        source: "public_commerce.resolveConnection",
+        severity: "warning",
+        outcome: "rejected",
+        tenantId: tenant.id,
+        suffix,
+        reason: "CONNECTION_NOT_FOUND",
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || null
+      });
       reply.code(404).send({ ok: false, error: "CONNECTION_NOT_FOUND" });
       return null;
     }
     if (!profile.identity?.is_enabled) {
+      auditSecurityEvent(appInstance, "commerce.connection_disabled", {
+        category: "public_commerce",
+        source: "public_commerce.resolveConnection",
+        severity: "warning",
+        outcome: "rejected",
+        tenantId: tenant.id,
+        connectionCode: profile.identity?.connection_code,
+        suffix,
+        reason: "CONNECTION_DISABLED",
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || null
+      });
       reply.code(403).send({ ok: false, error: "CONNECTION_DISABLED" });
       return null;
     }
     if (!requiresInbound(profile)) {
+      auditSecurityEvent(appInstance, "commerce.inbound_not_allowed", {
+        category: "public_commerce",
+        source: "public_commerce.resolveConnection",
+        severity: "warning",
+        outcome: "rejected",
+        tenantId: tenant.id,
+        connectionCode: profile.identity?.connection_code,
+        suffix,
+        reason: "INBOUND_NOT_ALLOWED",
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || null
+      });
       reply.code(403).send({ ok: false, error: "INBOUND_NOT_ALLOWED" });
       return null;
     }
@@ -1789,6 +1854,19 @@ export default async function publicCommerceRoutes(app) {
     if (Array.isArray(allowedChannels) && allowedChannels.length) {
       const channel = normalizeText(profile.routing?.channel);
       if (!allowedChannels.includes(channel)) {
+        auditSecurityEvent(appInstance, "commerce.channel_not_allowed", {
+          category: "public_commerce",
+          source: "public_commerce.resolveConnection",
+          severity: "warning",
+          outcome: "rejected",
+          tenantId: tenant.id,
+          connectionCode: profile.identity?.connection_code,
+          suffix,
+          reason: "CHANNEL_NOT_ALLOWED",
+          ip: req.ip,
+          userAgent: req.headers["user-agent"] || null,
+          metadata: { channel, allowed_channels: allowedChannels }
+        });
         reply.code(403).send({ ok: false, error: "CHANNEL_NOT_ALLOWED" });
         return null;
       }
@@ -1796,11 +1874,36 @@ export default async function publicCommerceRoutes(app) {
 
     const origin = req.headers.origin;
     if (!connectionAllowsOrigin(profile, origin)) {
+      auditSecurityEvent(appInstance, "commerce.origin_rejected", {
+        category: "public_commerce",
+        source: "public_commerce.resolveConnection",
+        severity: "warning",
+        outcome: "rejected",
+        tenantId: tenant.id,
+        connectionCode: profile.identity?.connection_code,
+        suffix,
+        reason: "ORIGIN_NOT_ALLOWED",
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || null,
+        metadata: { origin: origin || null }
+      });
       reply.code(403).send({ ok: false, error: "ORIGIN_NOT_ALLOWED" });
       return null;
     }
 
     if (!connectionAllowsIp(profile, req.ip)) {
+      auditSecurityEvent(appInstance, "commerce.ip_rejected", {
+        category: "public_commerce",
+        source: "public_commerce.resolveConnection",
+        severity: "warning",
+        outcome: "rejected",
+        tenantId: tenant.id,
+        connectionCode: profile.identity?.connection_code,
+        suffix,
+        reason: "IP_NOT_ALLOWED",
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || null
+      });
       reply.code(403).send({ ok: false, error: "IP_NOT_ALLOWED" });
       return null;
     }
@@ -1817,12 +1920,38 @@ export default async function publicCommerceRoutes(app) {
       profile = await hydrateConnectionProfileSecrets(appInstance, appInstance.db, tenant.id, profile);
     } catch (error) {
       appInstance.log.error({ event: "commerce_secret_hydrate_failed", tenantId: tenant.id, connectionCode: profile.identity?.connection_code, error: error.message });
+      auditSecurityEvent(appInstance, "commerce.secret_unavailable", {
+        category: "public_commerce",
+        source: "public_commerce.resolveConnection",
+        severity: "error",
+        outcome: "error",
+        tenantId: tenant.id,
+        connectionCode: profile.identity?.connection_code,
+        suffix,
+        reason: "CONNECTION_SECRET_UNAVAILABLE",
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || null,
+        metadata: { error: error.message }
+      });
       reply.code(500).send({ ok: false, error: "CONNECTION_SECRET_UNAVAILABLE" });
       return null;
     }
 
     const verify = await verifyConnectionRequest(req, profile, rawBody);
     if (!verify.ok) {
+      auditSecurityEvent(appInstance, "commerce.verification_failed", {
+        category: "public_commerce",
+        source: "public_commerce.resolveConnection",
+        severity: "warning",
+        outcome: "rejected",
+        tenantId: tenant.id,
+        connectionCode: profile.identity?.connection_code,
+        suffix,
+        reason: verify.error,
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || null,
+        metadata: { mode: profile.verification?.mode || null, origin: req.headers.origin || null }
+      });
       reply.code(401).send({ ok: false, error: verify.error });
       return null;
     }
@@ -2875,7 +3004,22 @@ export default async function publicCommerceRoutes(app) {
       const mimetype = normalizeText(filePart.mimetype || "").toLowerCase();
       const buffer = await uploadPartToBuffer(filePart);
       const validation = validateImageUpload({ buffer, filename, mimetype });
-      if (!validation.ok) return reply.code(415).send({ ok: false, error: validation.error });
+      if (!validation.ok) {
+        auditSecurityEvent(app, "upload.rejected", {
+          category: "upload",
+          source: "public_commerce.member_upload",
+          severity: "warning",
+          outcome: "rejected",
+          tenantId: access.tenant.id,
+          connectionCode: access.profile?.identity?.connection_code,
+          suffix: req.params?.suffix,
+          reason: validation.error,
+          ip: req.ip,
+          userAgent: req.headers["user-agent"] || null,
+          metadata: { filename, mimetype }
+        });
+        return reply.code(415).send({ ok: false, error: validation.error });
+      }
 
       const uploadDir = path.join(ASSET_ROOT, access.tenant.id, "blog");
       fs.mkdirSync(uploadDir, { recursive: true });

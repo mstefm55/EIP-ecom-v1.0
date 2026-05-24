@@ -994,6 +994,16 @@ export default async function authRoutes(app) {
         : `<p>Use this token to reset your password:</p><p><strong>${token}</strong></p><p>This token expires in 60 minutes.</p>`;
 
       await sendEmail(app, login, subject, text, html);
+      auditSecurityEvent(app, "recovery.token_requested", {
+        category: "recovery",
+        source: "auth.recovery",
+        severity: "warning",
+        outcome: "success",
+        tenantId,
+        identityId: identity.id,
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || null
+      });
 
       return reply.send({ ok: true });
     } catch (e) {
@@ -1101,6 +1111,16 @@ export default async function authRoutes(app) {
       );
 
       await client.query("COMMIT");
+      auditSecurityEvent(app, "recovery.request_created", {
+        category: "recovery",
+        source: "auth.recovery",
+        severity: "warning",
+        outcome: "success",
+        tenantId,
+        identityId: identity.id,
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || null
+      });
       return reply.send({ ok: true });
     } catch (e) {
       await client.query("ROLLBACK");
@@ -1359,12 +1379,32 @@ export default async function authRoutes(app) {
 
       if (r.rowCount === 0) {
         await client.query("ROLLBACK");
+        auditSecurityEvent(app, "recovery.consume_failed", {
+          category: "recovery",
+          source: "auth.recovery",
+          severity: "warning",
+          outcome: "failure",
+          reason: "RECOVERY_INVALID",
+          ip: req.ip,
+          userAgent: req.headers["user-agent"] || null
+        });
         return reply.code(401).send({ ok: false, error: "RECOVERY_INVALID" });
       }
 
       const row = r.rows[0];
       if (row.consumed_at || new Date(row.expires_at).getTime() <= Date.now()) {
         await client.query("ROLLBACK");
+        auditSecurityEvent(app, "recovery.consume_failed", {
+          category: "recovery",
+          source: "auth.recovery",
+          severity: "warning",
+          outcome: "failure",
+          tenantId: row.tenant_id,
+          identityId: row.identity_id,
+          reason: "RECOVERY_EXPIRED",
+          ip: req.ip,
+          userAgent: req.headers["user-agent"] || null
+        });
         return reply.code(401).send({ ok: false, error: "RECOVERY_EXPIRED" });
       }
 
@@ -1440,6 +1480,16 @@ export default async function authRoutes(app) {
       );
 
       await client.query("COMMIT");
+      auditSecurityEvent(app, "recovery.consumed", {
+        category: "recovery",
+        source: "auth.recovery",
+        severity: "warning",
+        outcome: "success",
+        tenantId: row.tenant_id,
+        identityId: row.identity_id,
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || null
+      });
 
       return reply.send({ ok: true });
     } catch (e) {
@@ -1588,6 +1638,19 @@ export default async function authRoutes(app) {
         : `<p>Your recovery request was approved. Use this token:</p><p><strong>${tokenPlain}</strong></p><p>This token expires in ${Math.max(ttlMin, 5)} minutes.</p>`;
 
       await sendEmail(app, row.login, subject, text, html);
+      auditSecurityEvent(app, "recovery.request_approved", {
+        category: "recovery",
+        source: "auth.recovery",
+        severity: "warning",
+        outcome: "success",
+        actorTenantId: tenant_id,
+        actorIdentityId: identity_id,
+        targetTenantId: row.tenant_id,
+        targetIdentityId: row.identity_id,
+        requestId: row.id,
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || null
+      });
 
       return reply.send({ ok: true });
     } catch (e) {
@@ -1630,6 +1693,18 @@ export default async function authRoutes(app) {
       [requestId, identity_id, reason || null]
     );
     if (r.rowCount === 0) return reply.code(404).send({ ok: false, error: "NOT_FOUND" });
+    auditSecurityEvent(app, "recovery.request_rejected", {
+      category: "recovery",
+      source: "auth.recovery",
+      severity: "warning",
+      outcome: "success",
+      actorTenantId: tenant_id,
+      actorIdentityId: identity_id,
+      requestId,
+      ip: req.ip,
+      userAgent: req.headers["user-agent"] || null,
+      metadata: { reason: reason || null }
+    });
 
     return reply.send({ ok: true });
   });
@@ -2447,6 +2522,18 @@ export default async function authRoutes(app) {
     const buffer = await uploadPartToBuffer(filePart);
     const validation = validateImageUpload({ buffer, filename, mimetype });
     if (!validation.ok) {
+      auditSecurityEvent(app, "upload.rejected", {
+        category: "upload",
+        source: "auth.profile_avatar",
+        severity: "warning",
+        outcome: "rejected",
+        tenantId: tenant_id,
+        identityId: identity_id,
+        reason: validation.error,
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || null,
+        metadata: { filename, mimetype }
+      });
       return reply.code(415).send({ ok: false, error: validation.error });
     }
 
@@ -2596,12 +2683,34 @@ export default async function authRoutes(app) {
       });
       if (!challenge) {
         await client.query("ROLLBACK");
+        auditSecurityEvent(app, "passkey.enrollment_failed", {
+          category: "auth",
+          source: "auth.passkeys",
+          severity: "warning",
+          outcome: "failure",
+          tenantId: tenant_id,
+          identityId: identity_id,
+          reason: "PASSKEY_CHALLENGE_INVALID",
+          ip: req.ip,
+          userAgent: req.headers["user-agent"] || null
+        });
         return reply.code(401).send({ ok: false, error: "PASSKEY_CHALLENGE_INVALID" });
       }
 
       const verification = await verifyPasskeyRegistration(app, credentialResponse, challenge.challenge);
       if (!verification.verified || !verification.registrationInfo?.credential) {
         await client.query("ROLLBACK");
+        auditSecurityEvent(app, "passkey.enrollment_failed", {
+          category: "auth",
+          source: "auth.passkeys",
+          severity: "warning",
+          outcome: "failure",
+          tenantId: tenant_id,
+          identityId: identity_id,
+          reason: "PASSKEY_VERIFICATION_FAILED",
+          ip: req.ip,
+          userAgent: req.headers["user-agent"] || null
+        });
         return reply.code(401).send({ ok: false, error: "PASSKEY_VERIFICATION_FAILED" });
       }
 
@@ -2640,11 +2749,33 @@ export default async function authRoutes(app) {
       );
       if (r.rowCount === 0) {
         await client.query("ROLLBACK");
+        auditSecurityEvent(app, "passkey.enrollment_failed", {
+          category: "auth",
+          source: "auth.passkeys",
+          severity: "warning",
+          outcome: "failure",
+          tenantId: tenant_id,
+          identityId: identity_id,
+          reason: "PASSKEY_ALREADY_REGISTERED",
+          ip: req.ip,
+          userAgent: req.headers["user-agent"] || null
+        });
         return reply.code(409).send({ ok: false, error: "PASSKEY_ALREADY_REGISTERED" });
       }
 
       await client.query("COMMIT");
       app.log.info({ event: "passkey_registered", tenantId: tenant_id, identityId: identity_id, passkeyId: r.rows[0].id, ip: req.ip });
+      auditSecurityEvent(app, "passkey.enrolled", {
+        category: "auth",
+        source: "auth.passkeys",
+        severity: "info",
+        outcome: "success",
+        tenantId: tenant_id,
+        identityId: identity_id,
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || null,
+        metadata: { passkey_id: r.rows[0].id }
+      });
       return reply.send({ ok: true, passkey: publicPasskey(r.rows[0]) });
     } catch (e) {
       await client.query("ROLLBACK");
@@ -2732,12 +2863,34 @@ export default async function authRoutes(app) {
       });
       if (!challenge) {
         await client.query("ROLLBACK");
+        auditSecurityEvent(app, "passkey.login_failed", {
+          category: "auth",
+          source: "auth.passkeys",
+          severity: "warning",
+          outcome: "failure",
+          tenantId: passkey.tenant_id,
+          identityId: passkey.identity_id,
+          reason: "PASSKEY_CHALLENGE_INVALID",
+          ip: req.ip,
+          userAgent: req.headers["user-agent"] || null
+        });
         return reply.code(401).send({ ok: false, error: "PASSKEY_CHALLENGE_INVALID" });
       }
 
       const verification = await verifyPasskeyAuthentication(app, credentialResponse, challenge.challenge, passkey);
       if (!verification.verified) {
         await client.query("ROLLBACK");
+        auditSecurityEvent(app, "passkey.login_failed", {
+          category: "auth",
+          source: "auth.passkeys",
+          severity: "warning",
+          outcome: "failure",
+          tenantId: passkey.tenant_id,
+          identityId: passkey.identity_id,
+          reason: "PASSKEY_VERIFICATION_FAILED",
+          ip: req.ip,
+          userAgent: req.headers["user-agent"] || null
+        });
         return reply.code(401).send({ ok: false, error: "PASSKEY_VERIFICATION_FAILED" });
       }
 
@@ -2793,6 +2946,16 @@ export default async function authRoutes(app) {
         identityId: passkey.identity_id,
         outcome: "success",
         ip: req.ip
+      });
+      auditSecurityEvent(app, "passkey.login_success", {
+        category: "auth",
+        source: "auth.passkeys",
+        severity: "info",
+        outcome: "success",
+        tenantId: passkey.tenant_id,
+        identityId: passkey.identity_id,
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || null
       });
       return reply.send({ ok: true, assurance: "phishing_resistant" });
     } catch (e) {
@@ -2862,6 +3025,17 @@ export default async function authRoutes(app) {
         String(passkey.identity_id) !== String(s.session.identity_id)
       ) {
         await client.query("ROLLBACK");
+        auditSecurityEvent(app, "passkey.step_up_failed", {
+          category: "auth",
+          source: "auth.passkeys",
+          severity: "warning",
+          outcome: "failure",
+          tenantId: s.session.tenant_id,
+          identityId: s.session.identity_id,
+          reason: "PASSKEY_NOT_FOUND",
+          ip: req.ip,
+          userAgent: req.headers["user-agent"] || null
+        });
         return reply.code(401).send({ ok: false, error: "PASSKEY_NOT_FOUND" });
       }
       const challenge = await loadAndConsumePasskeyChallenge(client, {
@@ -2873,11 +3047,33 @@ export default async function authRoutes(app) {
       });
       if (!challenge) {
         await client.query("ROLLBACK");
+        auditSecurityEvent(app, "passkey.step_up_failed", {
+          category: "auth",
+          source: "auth.passkeys",
+          severity: "warning",
+          outcome: "failure",
+          tenantId: s.session.tenant_id,
+          identityId: s.session.identity_id,
+          reason: "PASSKEY_CHALLENGE_INVALID",
+          ip: req.ip,
+          userAgent: req.headers["user-agent"] || null
+        });
         return reply.code(401).send({ ok: false, error: "PASSKEY_CHALLENGE_INVALID" });
       }
       const verification = await verifyPasskeyAuthentication(app, credentialResponse, challenge.challenge, passkey);
       if (!verification.verified) {
         await client.query("ROLLBACK");
+        auditSecurityEvent(app, "passkey.step_up_failed", {
+          category: "auth",
+          source: "auth.passkeys",
+          severity: "warning",
+          outcome: "failure",
+          tenantId: s.session.tenant_id,
+          identityId: s.session.identity_id,
+          reason: "PASSKEY_VERIFICATION_FAILED",
+          ip: req.ip,
+          userAgent: req.headers["user-agent"] || null
+        });
         return reply.code(401).send({ ok: false, error: "PASSKEY_VERIFICATION_FAILED" });
       }
 
@@ -2909,6 +3105,17 @@ export default async function authRoutes(app) {
 
       await client.query("COMMIT");
       app.log.info({ event: "passkey_step_up_success", tenantId: s.session.tenant_id, identityId: s.session.identity_id, sessionId: s.session.id, ip: req.ip });
+      auditSecurityEvent(app, "passkey.step_up_success", {
+        category: "auth",
+        source: "auth.passkeys",
+        severity: "info",
+        outcome: "success",
+        tenantId: s.session.tenant_id,
+        identityId: s.session.identity_id,
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || null,
+        metadata: { session_id: s.session.id }
+      });
       return reply.send({ ok: true, step_up: true, assurance: "phishing_resistant" });
     } catch (e) {
       await client.query("ROLLBACK");
@@ -2941,6 +3148,17 @@ export default async function authRoutes(app) {
       [req.params.passkeyId, s.session.tenant_id, s.session.identity_id, s.session.identity_id]
     );
     if (r.rowCount === 0) return reply.code(404).send({ ok: false, error: "NOT_FOUND" });
+    auditSecurityEvent(app, "passkey.revoked", {
+      category: "auth",
+      source: "auth.passkeys",
+      severity: "warning",
+      outcome: "success",
+      tenantId: s.session.tenant_id,
+      identityId: s.session.identity_id,
+      ip: req.ip,
+      userAgent: req.headers["user-agent"] || null,
+      metadata: { passkey_id: req.params.passkeyId }
+    });
     return reply.send({ ok: true });
   });
 

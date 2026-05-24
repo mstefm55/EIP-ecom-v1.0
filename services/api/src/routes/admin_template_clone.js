@@ -1,5 +1,6 @@
 // services/api/src/routes/admin_template_clone.js
 import { hasPermission } from "../auth/perm.js";
+import { auditSecurityEvent } from "../lib/securityAudit.js";
 
 function normalizeText(value) {
   return String(value || "").trim();
@@ -304,6 +305,21 @@ export default async function adminTemplateCloneRoutes(app) {
       summary.commercial_conditions = r.rowCount;
 
       await client.query("COMMIT");
+      auditSecurityEvent(app, "template.clone_completed", {
+        category: "template",
+        source: "admin_template_clone",
+        severity: "warning",
+        outcome: "success",
+        actorTenantId: session.tenant_id,
+        actorIdentityId: session.identity_id,
+        targetTenantId: targetId,
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || null,
+        metadata: {
+          source_tenant_id: sourceId,
+          summary
+        }
+      });
 
       return reply.send({
         ok: true,

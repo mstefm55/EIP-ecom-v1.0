@@ -11,6 +11,7 @@ import {
   sessionTtlMs
 } from "../lib/authCookies.js";
 import { evaluatePasswordStrength } from "../auth/password.js";
+import { auditSecurityEvent } from "../lib/securityAudit.js";
 
 const TOTP_WINDOW = 1;
 const TOTP_PERIOD_SEC = 30;
@@ -31,6 +32,20 @@ function normalizeOtp(value) {
     return value.trim();
   }
   return "";
+}
+
+function auditBootstrapEvent(app, action, session, req, metadata = {}) {
+  auditSecurityEvent(app, action, {
+    category: "bootstrap",
+    source: "bootstrap",
+    severity: "info",
+    outcome: "success",
+    tenantId: session?.tenant_id || null,
+    identityId: session?.identity_id || null,
+    ip: req.ip,
+    userAgent: req.headers?.["user-agent"] || null,
+    metadata
+  });
 }
 
 function normalizeAgreementEntry(entry) {
@@ -336,6 +351,10 @@ export default async function bootstrapRoutes(app) {
         setAuthCookie(reply, app, "sid", sessionId, { httpOnly: true, expires: sessionExpires });
         setAuthCookie(reply, app, "csrf", csrf, { httpOnly: true, expires: sessionExpires });
         setAuthCookie(reply, app, "did", deviceToken, { httpOnly: true, expires: deviceExpires });
+        auditBootstrapEvent(app, "bootstrap.consumed", {
+          tenant_id: row.tenant_id,
+          identity_id: row.admin_identity_id
+        }, req, { request_id: row.id });
 
         return reply.send({
           ok: true,
@@ -411,6 +430,7 @@ export default async function bootstrapRoutes(app) {
 
       await client.query("COMMIT");
       app.log.info({ event: "bootstrap_password_set", tenantId: session.tenant_id, identityId: session.identity_id, ip: req.ip });
+      auditBootstrapEvent(app, "bootstrap.password_set", session, req);
       return reply.send({ ok: true });
     } catch (e) {
       await client.query("ROLLBACK");
@@ -582,6 +602,7 @@ export default async function bootstrapRoutes(app) {
 
       await client.query("COMMIT");
       app.log.info({ event: "bootstrap_totp_enabled", tenantId: session.tenant_id, identityId: session.identity_id, ip: req.ip });
+      auditBootstrapEvent(app, "bootstrap.totp_enabled", session, req);
       return reply.send({ ok: true });
     } catch (e) {
       await client.query("ROLLBACK");
@@ -628,6 +649,7 @@ export default async function bootstrapRoutes(app) {
     );
 
     app.log.info({ event: "bootstrap_device_trusted", tenantId: session.tenant_id, identityId: session.identity_id, deviceId: session.device_id, ip: req.ip });
+    auditBootstrapEvent(app, "bootstrap.device_trusted", session, req, { device_id: session.device_id });
     return reply.send({ ok: true, device: r.rows[0] });
   });
 
@@ -732,6 +754,10 @@ export default async function bootstrapRoutes(app) {
 
         await client.query("COMMIT");
         app.log.info({ event: "bootstrap_agreements_accepted", tenantId: session.tenant_id, identityId: session.identity_id, count: normalized.length, ip: req.ip });
+        auditBootstrapEvent(app, "bootstrap.agreements_accepted", session, req, {
+          agreement_count: normalized.length,
+          agreement_codes: normalized.map((item) => item.code)
+        });
         return reply.send({ ok: true });
       } catch (e) {
         await client.query("ROLLBACK");
@@ -806,6 +832,7 @@ export default async function bootstrapRoutes(app) {
       clearAuthCookie(reply, app, "csrf");
 
       app.log.info({ event: "bootstrap_completed", tenantId: session.tenant_id, identityId: session.identity_id, ip: req.ip });
+      auditBootstrapEvent(app, "bootstrap.completed", session, req);
       return reply.code(204).send();
     } catch (e) {
       await client.query("ROLLBACK");

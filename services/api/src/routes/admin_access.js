@@ -629,6 +629,20 @@ export default async function adminAccessRoutes(app) {
     const buffer = await uploadPartToBuffer(filePart);
     const validation = validateImageUpload({ buffer, filename, mimetype });
     if (!validation.ok) {
+      auditSecurityEvent(app, "upload.rejected", {
+        category: "upload",
+        source: "admin.user_avatar",
+        severity: "warning",
+        outcome: "rejected",
+        actorTenantId: session.tenant_id,
+        actorIdentityId: session.identity_id,
+        targetTenantId: tenantId,
+        targetIdentityId: identityId,
+        reason: validation.error,
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || null,
+        metadata: { filename, mimetype }
+      });
       return reply.code(415).send({ ok: false, error: validation.error });
     }
 

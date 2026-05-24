@@ -45,6 +45,7 @@ import { sha256Hex, timingSafeEqual } from "./auth/crypto.js";
 import { evaluateStepUp } from "./auth/sessionPolicy.js";
 import { getAuthCookie } from "./lib/authCookies.js";
 import { resolveEipSurfaceAccess } from "./lib/surfaceAccess.js";
+import { auditSecurityEvent } from "./lib/securityAudit.js";
 import { advanceInstance, createInstance, findActiveInstance, updateTaskStatus } from "./core/core_process_engine.js";
 import { verifyAssetToken } from "./services/assets/signing.js";
 import { sessionCanAccessAssetTenant } from "./services/assets/access.js";
@@ -538,7 +539,24 @@ async function buildServer() {
       ttlMin,
       phishingResistant: opts.phishingResistant === true
     });
-    if (!check.ok) return check;
+    if (!check.ok) {
+      auditSecurityEvent(app, "auth.step_up_failed", {
+        category: "auth",
+        source: "server.requireStepUp",
+        severity: "warning",
+        outcome: "failure",
+        tenantId: s?.tenant_id || null,
+        identityId: s?.identity_id || null,
+        reason: check.error || "STEP_UP_FAILED",
+        ip: req.ip,
+        userAgent: req.headers?.["user-agent"] || null,
+        metadata: {
+          ttl_min: ttlMin,
+          phishing_resistant_required: opts.phishingResistant === true
+        }
+      });
+      return check;
+    }
 
     req.session = s;
     req.realm = s.realm;

@@ -17,6 +17,7 @@ import {
   translateTextsThroughProvider,
   normalizeProviderError
 } from "../services/translation/providerClient.js";
+import { auditSecurityEvent } from "../lib/securityAudit.js";
 
 const MAX_LIMIT = 200;
 const MATERIAL_TYPE = "PRODUCT";
@@ -2916,6 +2917,18 @@ export default async function ecomRoutes(app) {
         allowedDocumentMime: DOCUMENT_ALLOWED_MIME
       });
       if (!validation.ok) {
+        auditSecurityEvent(app, "upload.rejected", {
+          category: "upload",
+          source: "ecom.uploads",
+          severity: "warning",
+          outcome: "rejected",
+          tenantId: session.tenant_id,
+          identityId: session.identity_id,
+          reason: validation.error,
+          ip: req.ip,
+          userAgent: req.headers["user-agent"] || null,
+          metadata: { filename, mimetype, asset_kind: assetKind }
+        });
         return reply.code(415).send({ ok: false, error: validation.error });
       }
       const uploadDir = path.join(

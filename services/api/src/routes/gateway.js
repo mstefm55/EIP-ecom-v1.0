@@ -18,6 +18,7 @@ import {
   vaultConnectionProfileSecrets
 } from "../services/gateway/secretStore.js";
 import { resolveEipSurfaceAccess } from "../lib/surfaceAccess.js";
+import { emitSecurityEvent } from "../lib/securityAudit.js";
 
 function normalizeText(value) {
   return String(value || "").trim();
@@ -75,6 +76,25 @@ async function requireSessionWithCsrf(app, req, reply) {
   return s.session;
 }
 
+function getNested(obj, pathList) {
+  return pathList.reduce((acc, key) => (acc && typeof acc === "object" ? acc[key] : undefined), obj);
+}
+
+function collectSubmittedSecretUpdates(profiles) {
+  const updates = [];
+  for (const profile of Array.isArray(profiles) ? profiles : []) {
+    const connectionCode = normalizeText(profile?.identity?.connection_code);
+    if (!connectionCode) continue;
+    for (const spec of SECRET_FIELD_SPECS) {
+      const target = getNested(profile, spec.path);
+      if (target && typeof target === "object" && normalizeText(target[spec.key])) {
+        updates.push({ connection_code: connectionCode, secret_kind: spec.kind });
+      }
+    }
+  }
+  return updates;
+}
+
 async function requirePrivilegedStepUp(app, req, reply) {
   const step = await app.requireStepUp(req, {
     phishingResistant: app.config.REQUIRE_PASSKEY_FOR_PRIVILEGED_ACTIONS === true
@@ -95,7 +115,7 @@ async function resolveConnectionControlScope(app, session) {
   };
 }
 
-async function requireConnectionTargetAccess(app, session, targetTenantId, reply) {
+async function requireConnectionTargetAccess(app, session, targetTenantId, reply, req = null) {
   if (String(session.tenant_id) === String(targetTenantId)) {
     return { ok: true, ownerAdmin: false };
   }
@@ -103,6 +123,18 @@ async function requireConnectionTargetAccess(app, session, targetTenantId, reply
   const scope = await resolveConnectionControlScope(app, session);
   if (scope.ownerAdmin) return { ok: true, ownerAdmin: true };
 
+  await emitSecurityEvent(app, "tenant.connection_scope_forbidden", {
+    category: "tenant_isolation",
+    source: "gateway_admin",
+    severity: "warning",
+    outcome: "denied",
+    actorTenantId: session.tenant_id,
+    actorIdentityId: session.identity_id,
+    targetTenantId,
+    reason: "TENANT_SCOPE_FORBIDDEN",
+    ip: req?.ip || null,
+    userAgent: req?.headers?.["user-agent"] || null
+  });
   reply.code(403).send({ ok: false, error: "TENANT_SCOPE_FORBIDDEN" });
   return null;
 }
@@ -199,7 +231,7 @@ export default async function gatewayRoutes(app) {
     if (!allowed) return reply.code(403).send({ ok: false, error: "FORBIDDEN" });
 
     const tenantId = req.params.tenantId;
-    const target = await requireConnectionTargetAccess(app, s.session, tenantId, reply);
+    const target = await requireConnectionTargetAccess(app, s.session, tenantId, reply, req);
     if (!target) return;
 
     const tenantRes = await app.db.query(
@@ -279,10 +311,11 @@ export default async function gatewayRoutes(app) {
     if (!allowed) return reply.code(403).send({ ok: false, error: "FORBIDDEN" });
 
     const tenantId = req.params.tenantId;
-    const target = await requireConnectionTargetAccess(app, s.session, tenantId, reply);
+    const target = await requireConnectionTargetAccess(app, s.session, tenantId, reply, req);
     if (!target) return;
 
     const incomingConnections = Array.isArray(req.body?.connections) ? req.body.connections : [];
+    const submittedSecretUpdates = collectSubmittedSecretUpdates(incomingConnections);
 
     const client = await app.db.connect();
     try {
@@ -337,6 +370,19 @@ export default async function gatewayRoutes(app) {
         );
         if (dup.rowCount > 0) {
           await client.query("ROLLBACK");
+          await emitSecurityEvent(app, "connection.duplicate_suffix_rejected", {
+            category: "connection",
+            source: "gateway_admin",
+            severity: "warning",
+            outcome: "rejected",
+            actorTenantId: s.session.tenant_id,
+            actorIdentityId: s.session.identity_id,
+            targetTenantId: tenantId,
+            suffix,
+            reason: "DUPLICATE_SUFFIX",
+            ip: req.ip,
+            userAgent: req.headers["user-agent"] || null
+          });
           return reply.code(400).send({ ok: false, error: "DUPLICATE_SUFFIX", details: [suffix] });
         }
       }
@@ -369,10 +415,55 @@ export default async function gatewayRoutes(app) {
       const updatedTenant = r.rows[0];
       const updatedConnections = extractProfiles(updatedTenant?.attrs);
 
+      await emitSecurityEvent(app, "connection.profile_saved", {
+        category: "connection",
+        source: "gateway_admin",
+        severity: "info",
+        outcome: "success",
+        actorTenantId: s.session.tenant_id,
+        actorIdentityId: s.session.identity_id,
+        targetTenantId: tenantId,
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || null,
+        metadata: {
+          connection_count: updatedConnections.length,
+          connection_codes: updatedConnections.map((profile) => profile.identity?.connection_code).filter(Boolean)
+        }
+      });
+      if (submittedSecretUpdates.length) {
+        await emitSecurityEvent(app, "connection.secret_rotated", {
+          category: "connection",
+          source: "gateway_admin",
+          severity: "info",
+          outcome: "success",
+          actorTenantId: s.session.tenant_id,
+          actorIdentityId: s.session.identity_id,
+          targetTenantId: tenantId,
+          ip: req.ip,
+          userAgent: req.headers["user-agent"] || null,
+          metadata: {
+            rotated: submittedSecretUpdates
+          }
+        });
+      }
+
       return reply.send({ ok: true, connections: updatedConnections.map(maskSecrets) });
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
       app.log.error({ event: "connection_profile_save_failed", tenantId, error: error.message });
+      await emitSecurityEvent(app, "connection.profile_save_failed", {
+        category: "connection",
+        source: "gateway_admin",
+        severity: "error",
+        outcome: "error",
+        actorTenantId: s.session.tenant_id,
+        actorIdentityId: s.session.identity_id,
+        targetTenantId: tenantId,
+        reason: "CONNECTION_PROFILE_SAVE_FAILED",
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || null,
+        metadata: { error: error.message }
+      });
       return reply.code(500).send({ ok: false, error: "CONNECTION_PROFILE_SAVE_FAILED" });
     } finally {
       client.release();
@@ -393,7 +484,7 @@ export default async function gatewayRoutes(app) {
     if (!allowed) return reply.code(403).send({ ok: false, error: "FORBIDDEN" });
 
     const tenantId = req.params.tenantId;
-    const target = await requireConnectionTargetAccess(app, s.session, tenantId, reply);
+    const target = await requireConnectionTargetAccess(app, s.session, tenantId, reply, req);
     if (!target) return;
 
     const connectionCode = normalizeText(req.params.connectionCode);
@@ -443,6 +534,22 @@ export default async function gatewayRoutes(app) {
       );
 
       await client.query("COMMIT");
+      await emitSecurityEvent(app, "connection.secret_revoked", {
+        category: "connection",
+        source: "gateway_admin",
+        severity: "warning",
+        outcome: "success",
+        actorTenantId: s.session.tenant_id,
+        actorIdentityId: s.session.identity_id,
+        targetTenantId: tenantId,
+        connectionCode,
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || null,
+        metadata: {
+          secret_kinds: requestedKinds,
+          revoked_count: revoked.length
+        }
+      });
       return reply.send({
         ok: true,
         revoked: revoked.map((row) => ({
@@ -456,6 +563,20 @@ export default async function gatewayRoutes(app) {
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
       app.log.error({ event: "connection_secret_revoke_failed", tenantId, connectionCode, error: error.message });
+      await emitSecurityEvent(app, "connection.secret_revoke_failed", {
+        category: "connection",
+        source: "gateway_admin",
+        severity: "error",
+        outcome: "error",
+        actorTenantId: s.session.tenant_id,
+        actorIdentityId: s.session.identity_id,
+        targetTenantId: tenantId,
+        connectionCode,
+        reason: "CONNECTION_SECRET_REVOKE_FAILED",
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || null,
+        metadata: { error: error.message }
+      });
       return reply.code(500).send({ ok: false, error: "CONNECTION_SECRET_REVOKE_FAILED" });
     } finally {
       client.release();
@@ -476,7 +597,7 @@ export default async function gatewayRoutes(app) {
     if (!allowed) return reply.code(403).send({ ok: false, error: "FORBIDDEN" });
 
     const tenantId = req.params.tenantId;
-    const target = await requireConnectionTargetAccess(app, s.session, tenantId, reply);
+    const target = await requireConnectionTargetAccess(app, s.session, tenantId, reply, req);
     if (!target) return;
 
     const connectionCode = normalizeText(req.body?.connection_code);
@@ -626,7 +747,7 @@ export default async function gatewayRoutes(app) {
     if (!allowed) return reply.code(403).send({ ok: false, error: "FORBIDDEN" });
 
     const tenantId = req.params.tenantId;
-    const target = await requireConnectionTargetAccess(app, s.session, tenantId, reply);
+    const target = await requireConnectionTargetAccess(app, s.session, tenantId, reply, req);
     if (!target) return;
 
     const connectionCode = normalizeText(req.body?.connection_code);
@@ -707,7 +828,7 @@ export default async function gatewayRoutes(app) {
     if (!allowed) return reply.code(403).send({ ok: false, error: "FORBIDDEN" });
 
     const tenantId = req.params.tenantId;
-    const target = await requireConnectionTargetAccess(app, s.session, tenantId, reply);
+    const target = await requireConnectionTargetAccess(app, s.session, tenantId, reply, req);
     if (!target) return;
 
     const label = normalizeText(req.body?.label || "plug-play");
@@ -769,7 +890,7 @@ export default async function gatewayRoutes(app) {
     if (!allowed) return reply.code(403).send({ ok: false, error: "FORBIDDEN" });
 
     const tenantId = req.params.tenantId;
-    const target = await requireConnectionTargetAccess(app, s.session, tenantId, reply);
+    const target = await requireConnectionTargetAccess(app, s.session, tenantId, reply, req);
     if (!target) return;
 
     const keyId = req.params.keyId;
@@ -822,7 +943,7 @@ export default async function gatewayRoutes(app) {
     if (!allowed) return reply.code(403).send({ ok: false, error: "FORBIDDEN" });
 
     const tenantId = req.params.tenantId;
-    const target = await requireConnectionTargetAccess(app, s.session, tenantId, reply);
+    const target = await requireConnectionTargetAccess(app, s.session, tenantId, reply, req);
     if (!target) return;
 
     const keyId = req.params.keyId;

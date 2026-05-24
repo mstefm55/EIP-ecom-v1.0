@@ -64,7 +64,7 @@ Actions that were likely false-failing only because of CSRF:
 | `AdminSecurityPanel` | Refresh devices and recovery requests | `load` | `GET /api/eip/auth/devices`, `GET /api/eip/auth/recovery/requests` | EIP session, permissions | Implemented in `auth.js` | Works |
 | `AdminSecurityPanel` | Approve recovery | inline click handler | `POST /api/eip/auth/recovery/requests/:id/approve` | EIP session, CSRF, admin authority | Implemented in `auth.js` | Fixed by CSRF foundation |
 | `AdminSecurityPanel` | Reject recovery | inline click handler | `POST /api/eip/auth/recovery/requests/:id/reject` | EIP session, CSRF, admin authority | Implemented in `auth.js` | Fixed by CSRF foundation |
-| `AdminAuditPanel` | Live feed badge | no click handler | Sample data only | None | No live audit endpoint wired | Deferred |
+| `AdminAuditPanel` | Refresh/live security ops | `load` | `GET /api/eip/admin/security/ops` | EIP session, security audit permission | Implemented in `admin_monitoring.js` | Fixed by security operations wave |
 | `AdminDbExplorer` | Export schema/download selected | `downloadSchema`, `downloadSelected` | `GET /api/eip/admin/db/export`, local download blob | EIP session, DB read permission | Implemented in `admin_db_explorer.js` | Works by route/build check |
 | `AdminDbExplorer` | Refresh schema/table/tenant selection/pagination | `loadSchema`, `loadTable`, `loadTenants` | `GET /api/eip/admin/db/schema`, `/table`, `/tenants` | EIP session, DB read permission | Implemented in `admin_db_explorer.js` | Works |
 | `AdminDbExplorer` | Consume sensitive token | `consumeSensitiveToken` | `POST /api/eip/admin/db/sensitive/consume` | EIP session, CSRF, step-up/sensitive token rules | Implemented in `admin_db_explorer.js` | Fixed by CSRF foundation |
@@ -145,7 +145,6 @@ Actions that were likely false-failing only because of CSRF:
 ## Remaining Manual Or Deferred Items
 
 - Live browser testing after Railway redeploy is still required to confirm cookie, CORS, and permission variables in the deployed environment.
-- Admin audit feed is sample data only; no live audit endpoint is wired into `AdminAuditPanel`.
 - Admin `tasks`, `integrations`, and `reports` tabs are explicit placeholders.
 - User `dashboard`, `tasks`, and `reports` panels are placeholder/static surfaces.
 - `UserShell` profile menu opens a visual panel but has no profile edit controls; admin profile editing is implemented in `AdminShell`.

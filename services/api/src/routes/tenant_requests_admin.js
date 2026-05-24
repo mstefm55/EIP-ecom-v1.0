@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import { randomToken, sha256Hex } from "../auth/crypto.js";
 import { hasPermission } from "../auth/perm.js";
 import { sendEmail } from "../lib/email.js";
+import { auditSecurityEvent } from "../lib/securityAudit.js";
 
 const BOOTSTRAP_TOKEN_TTL_MS = 60 * 60 * 1000; // 60 minutes
 
@@ -361,6 +362,19 @@ If you did not request this, please ignore this email.
         await client.query("COMMIT");
 
         app.log.info({ event: "tenant_request_approved", requestId: row.id, tenantId, adminIdentityId, ip: req.ip });
+        auditSecurityEvent(app, "tenant_onboarding.approved", {
+          category: "onboarding",
+          source: "tenant_requests_admin",
+          severity: "warning",
+          outcome: "success",
+          actorTenantId: s.session.tenant_id,
+          actorIdentityId: s.session.identity_id,
+          targetTenantId: tenantId,
+          targetIdentityId: adminIdentityId,
+          requestId: row.id,
+          ip: req.ip,
+          userAgent: req.headers["user-agent"] || null
+        });
 
         return reply.send({
           ok: true,
@@ -439,6 +453,18 @@ If you did not request this, please ignore this email.
       }
 
       app.log.info({ event: "tenant_request_rejected", requestId, ip: req.ip });
+      auditSecurityEvent(app, "tenant_onboarding.rejected", {
+        category: "onboarding",
+        source: "tenant_requests_admin",
+        severity: "warning",
+        outcome: "success",
+        actorTenantId: s.session.tenant_id,
+        actorIdentityId: s.session.identity_id,
+        requestId,
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || null,
+        metadata: { reason: reason || null }
+      });
       return reply.send({ ok: true });
     }
   );

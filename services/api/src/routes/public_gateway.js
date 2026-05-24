@@ -8,6 +8,7 @@ import { buildRequestHash, ensureIdempotency, finalizeIdempotency } from "../ser
 import { extractProfiles } from "../services/gateway/connectionProfile.js";
 import { hydrateConnectionProfileSecrets } from "../services/gateway/secretStore.js";
 import { connectionAllowsOrigin, extractEventId, verifyConnectionRequest } from "../services/gateway/verification.js";
+import { emitSecurityEvent, redactSecurityDetails } from "../lib/securityAudit.js";
 import { LRUCache } from "lru-cache";
 
 const INTAKE_RATE_LIMIT = { max: 30, timeWindow: "1 minute" };
@@ -44,10 +45,11 @@ function isUuid(value) {
 }
 
 function applyRedaction(payload, policy) {
-  if (!policy || !payload) return payload;
+  if (!payload) return payload;
+  const clone = redactSecurityDetails(payload);
+  if (!policy) return clone;
   const redactPaths = Array.isArray(policy.paths) ? policy.paths : [];
-  if (!redactPaths.length) return payload;
-  const clone = JSON.parse(JSON.stringify(payload));
+  if (!redactPaths.length) return clone;
   for (const path of redactPaths) {
     const parts = path.split(".");
     const last = parts.pop();
@@ -57,6 +59,26 @@ function applyRedaction(payload, policy) {
     }
   }
   return clone;
+}
+
+async function recordGatewaySecurityEvent(app, eventType, details = {}) {
+  return emitSecurityEvent(app, eventType, {
+    category: "gateway",
+    source: "public_gateway",
+    severity: details.severity || "warning",
+    outcome: details.outcome || "rejected",
+    ...details
+  });
+}
+
+async function denyGateway(app, reply, status, error, details = {}) {
+  await recordGatewaySecurityEvent(app, details.eventType || `gateway.${String(error || "denied").toLowerCase()}`, {
+    ...details,
+    outcome: details.outcome || (status >= 500 ? "error" : "rejected"),
+    severity: details.severity || (status >= 500 ? "error" : "warning"),
+    reason: error
+  });
+  return reply.code(status).send({ ok: false, error });
 }
 
 function connectionAllowsIp(profile, ip) {
@@ -187,58 +209,172 @@ async function resolveTenantBySuffix(app, suffix) {
 async function handleInbound(app, req, reply, opts) {
   const { suffix, channel } = opts;
   const resolved = await resolveTenantBySuffix(app, suffix);
-  if (!resolved) return reply.code(404).send({ ok: false, error: "ROUTING_NOT_FOUND" });
-  if (resolved.error) return reply.code(409).send({ ok: false, error: resolved.error });
+  if (!resolved) {
+    return denyGateway(app, reply, 404, "ROUTING_NOT_FOUND", {
+      eventType: "gateway.routing_not_found",
+      suffix,
+      ip: req.ip,
+      userAgent: req.headers["user-agent"] || null,
+      metadata: { channel }
+    });
+  }
+  if (resolved.error) {
+    return denyGateway(app, reply, 409, resolved.error, {
+      eventType: "gateway.duplicate_suffix",
+      suffix,
+      ip: req.ip,
+      userAgent: req.headers["user-agent"] || null,
+      metadata: { channel }
+    });
+  }
 
   const { tenant } = resolved;
   let { profile } = resolved;
-  if (!profile) return reply.code(404).send({ ok: false, error: "ROUTING_NOT_FOUND" });
-  if (!profile.identity?.is_enabled) return reply.code(403).send({ ok: false, error: "CONNECTION_DISABLED" });
-  if (!requiresInbound(profile)) return reply.code(403).send({ ok: false, error: "INBOUND_NOT_ALLOWED" });
+  if (!profile) {
+    return denyGateway(app, reply, 404, "ROUTING_NOT_FOUND", {
+      eventType: "gateway.routing_not_found",
+      tenantId: tenant.id,
+      suffix,
+      ip: req.ip,
+      userAgent: req.headers["user-agent"] || null,
+      metadata: { channel }
+    });
+  }
+  if (!profile.identity?.is_enabled) {
+    return denyGateway(app, reply, 403, "CONNECTION_DISABLED", {
+      eventType: "gateway.connection_disabled",
+      tenantId: tenant.id,
+      connectionCode: profile.identity?.connection_code,
+      suffix,
+      ip: req.ip,
+      userAgent: req.headers["user-agent"] || null
+    });
+  }
+  if (!requiresInbound(profile)) {
+    return denyGateway(app, reply, 403, "INBOUND_NOT_ALLOWED", {
+      eventType: "gateway.inbound_not_allowed",
+      tenantId: tenant.id,
+      connectionCode: profile.identity?.connection_code,
+      suffix,
+      ip: req.ip,
+      userAgent: req.headers["user-agent"] || null
+    });
+  }
 
   const rateKey = `${suffix}:${req.ip || "unknown"}`;
   const rate = checkInboundRateLimit(app, rateKey, profile);
   if (!rate.ok) {
     const retry = Math.ceil((rate.retryAfterMs || 0) / 1000);
     reply.header("Retry-After", String(retry));
-    return reply.code(429).send({ ok: false, error: "RATE_LIMIT" });
+    return denyGateway(app, reply, 429, "RATE_LIMIT", {
+      eventType: "gateway.rate_limited",
+      tenantId: tenant.id,
+      connectionCode: profile.identity?.connection_code,
+      suffix,
+      ip: req.ip,
+      userAgent: req.headers["user-agent"] || null,
+      metadata: { retry_after_sec: retry, rate_limit: resolveInboundRateLimit(app, profile) }
+    });
   }
 
   if (channel === "edi" && profile.routing?.channel !== "edi") {
-    return reply.code(403).send({ ok: false, error: "CHANNEL_MISMATCH" });
+    return denyGateway(app, reply, 403, "CHANNEL_MISMATCH", {
+      eventType: "gateway.channel_mismatch",
+      tenantId: tenant.id,
+      connectionCode: profile.identity?.connection_code,
+      suffix,
+      ip: req.ip,
+      metadata: { requested_channel: channel, configured_channel: profile.routing?.channel }
+    });
   }
 
   if (profile.inbound?.http_method && req.method !== profile.inbound.http_method) {
-    return reply.code(405).send({ ok: false, error: "METHOD_NOT_ALLOWED" });
+    return denyGateway(app, reply, 405, "METHOD_NOT_ALLOWED", {
+      eventType: "gateway.method_not_allowed",
+      tenantId: tenant.id,
+      connectionCode: profile.identity?.connection_code,
+      suffix,
+      ip: req.ip,
+      metadata: { method: req.method, expected_method: profile.inbound?.http_method }
+    });
   }
 
   const contentType = String(req.headers["content-type"] || "");
   if (profile.inbound?.expected_content_type && !contentType.includes(profile.inbound.expected_content_type)) {
-    return reply.code(415).send({ ok: false, error: "UNSUPPORTED_CONTENT_TYPE" });
+    return denyGateway(app, reply, 415, "UNSUPPORTED_CONTENT_TYPE", {
+      eventType: "gateway.content_type_rejected",
+      tenantId: tenant.id,
+      connectionCode: profile.identity?.connection_code,
+      suffix,
+      ip: req.ip,
+      metadata: { content_type: contentType, expected_content_type: profile.inbound?.expected_content_type }
+    });
   }
 
   if (!connectionAllowsOrigin(profile, req.headers.origin)) {
-    return reply.code(403).send({ ok: false, error: "ORIGIN_NOT_ALLOWED" });
+    return denyGateway(app, reply, 403, "ORIGIN_NOT_ALLOWED", {
+      eventType: "gateway.origin_rejected",
+      tenantId: tenant.id,
+      connectionCode: profile.identity?.connection_code,
+      suffix,
+      ip: req.ip,
+      userAgent: req.headers["user-agent"] || null,
+      metadata: { origin: req.headers.origin || null }
+    });
   }
 
   if (!connectionAllowsIp(profile, req.ip)) {
-    return reply.code(403).send({ ok: false, error: "IP_NOT_ALLOWED" });
+    return denyGateway(app, reply, 403, "IP_NOT_ALLOWED", {
+      eventType: "gateway.ip_rejected",
+      tenantId: tenant.id,
+      connectionCode: profile.identity?.connection_code,
+      suffix,
+      ip: req.ip,
+      userAgent: req.headers["user-agent"] || null
+    });
   }
 
   const rawBody = Buffer.isBuffer(req.rawBody) ? req.rawBody : Buffer.from(req.rawBody || "");
   if (rawBody.length > Number(profile.audit?.max_body_size || 262144)) {
-    return reply.code(413).send({ ok: false, error: "PAYLOAD_TOO_LARGE" });
+    return denyGateway(app, reply, 413, "PAYLOAD_TOO_LARGE", {
+      eventType: "gateway.payload_too_large",
+      tenantId: tenant.id,
+      connectionCode: profile.identity?.connection_code,
+      suffix,
+      ip: req.ip,
+      metadata: { bytes: rawBody.length, max_body_size: Number(profile.audit?.max_body_size || 262144) }
+    });
   }
 
   try {
     profile = await hydrateConnectionProfileSecrets(app, app.db, tenant.id, profile);
   } catch (error) {
     app.log.error({ event: "gateway_secret_hydrate_failed", tenantId: tenant.id, connectionCode: profile.identity?.connection_code, error: error.message });
-    return reply.code(500).send({ ok: false, error: "CONNECTION_SECRET_UNAVAILABLE" });
+    return denyGateway(app, reply, 500, "CONNECTION_SECRET_UNAVAILABLE", {
+      eventType: "gateway.secret_unavailable",
+      tenantId: tenant.id,
+      connectionCode: profile.identity?.connection_code,
+      suffix,
+      ip: req.ip,
+      metadata: { error: error.message }
+    });
   }
 
   const verify = await verifyConnectionRequest(req, profile, rawBody);
-  if (!verify.ok) return reply.code(401).send({ ok: false, error: verify.error });
+  if (!verify.ok) {
+    return denyGateway(app, reply, 401, verify.error, {
+      eventType: "gateway.verification_failed",
+      tenantId: tenant.id,
+      connectionCode: profile.identity?.connection_code,
+      suffix,
+      ip: req.ip,
+      userAgent: req.headers["user-agent"] || null,
+      metadata: {
+        mode: profile.verification?.mode || null,
+        origin: req.headers.origin || null
+      }
+    });
+  }
 
   let body = {};
   try {
@@ -246,11 +382,26 @@ async function handleInbound(app, req, reply, opts) {
       body = parseJsonBody(req);
     }
   } catch {
-    return reply.code(400).send({ ok: false, error: "INVALID_JSON" });
+    return denyGateway(app, reply, 400, "INVALID_JSON", {
+      eventType: "gateway.invalid_json",
+      tenantId: tenant.id,
+      connectionCode: profile.identity?.connection_code,
+      suffix,
+      ip: req.ip
+    });
   }
 
   const eventId = extractEventId(req, body, profile);
-  if (!eventId) return reply.code(400).send({ ok: false, error: "IDEMPOTENCY_REQUIRED" });
+  if (!eventId) {
+    return denyGateway(app, reply, 400, "IDEMPOTENCY_REQUIRED", {
+      eventType: "gateway.idempotency_missing",
+      tenantId: tenant.id,
+      connectionCode: profile.identity?.connection_code,
+      suffix,
+      ip: req.ip,
+      metadata: { mode: profile.idempotency?.event_id_location || null }
+    });
+  }
 
   const scope = profile.idempotency?.idempotency_scope || `gateway.${profile.identity.connection_code}`;
   const requestHash = buildRequestHash(rawBody);
@@ -260,8 +411,28 @@ async function handleInbound(app, req, reply, opts) {
     key: eventId,
     requestHash
   });
-  if (!idem.ok) return reply.code(409).send({ ok: false, error: idem.error });
+  if (!idem.ok) {
+    return denyGateway(app, reply, 409, idem.error, {
+      eventType: "gateway.idempotency_rejected",
+      tenantId: tenant.id,
+      connectionCode: profile.identity?.connection_code,
+      suffix,
+      eventId,
+      ip: req.ip,
+      metadata: { scope, request_hash: requestHash }
+    });
+  }
   if (idem.replay) {
+    await recordGatewaySecurityEvent(app, "gateway.idempotency_replay", {
+      tenantId: tenant.id,
+      connectionCode: profile.identity?.connection_code,
+      suffix,
+      eventId,
+      outcome: "success",
+      severity: "info",
+      ip: req.ip,
+      metadata: { scope }
+    });
     return reply.send(idem.response || { ok: true, replay: true });
   }
 
@@ -270,7 +441,9 @@ async function handleInbound(app, req, reply, opts) {
       headers: req.headers,
       query: req.query,
       body,
-      raw_body: rawBody.toString("utf8")
+      raw_body: profile.audit?.include_raw_body === true
+        ? rawBody.toString("utf8")
+        : `[REDACTED_RAW_BODY ${rawBody.length} bytes]`
     },
     profile.audit?.redaction_policy
   );
@@ -294,6 +467,22 @@ async function handleInbound(app, req, reply, opts) {
   });
 
   const response = { ok: true, accepted: true, intake_ref: auditId, event_id: eventId };
+  await recordGatewaySecurityEvent(app, "gateway.intake_accepted", {
+    tenantId: tenant.id,
+    connectionCode: profile.identity?.connection_code,
+    suffix,
+    eventId,
+    outcome: "success",
+    severity: "info",
+    ip: req.ip,
+    userAgent: req.headers["user-agent"] || null,
+    metadata: {
+      channel: profile.routing?.channel,
+      method: req.method,
+      content_type: contentType,
+      audit_id: auditId
+    }
+  });
   await finalizeIdempotency(app.db, {
     tenantId: tenant.id,
     scope,
@@ -331,6 +520,23 @@ async function logGatewayDenied(app, payload) {
   } catch (error) {
     app.log.warn({ event: "handshake_denied_log_failed", error: error.message });
   }
+  await recordGatewaySecurityEvent(app, "gateway.handshake_denied", {
+    tenantId: payload.tenantId,
+    connectionCode: payload.connectionCode || null,
+    suffix: payload.suffix || null,
+    reason: payload.reason,
+    outcome: "denied",
+    severity: "warning",
+    ip: payload.ip || null,
+    userAgent: payload.userAgent || null,
+    metadata: {
+      event_type: payload.eventType,
+      template_code: payload.templateCode || null,
+      object_ref: payload.objectRef || null,
+      origin: payload.origin || null,
+      attrs: payload.attrs || {}
+    }
+  });
 }
 
 async function logHandshake(app, payload) {
@@ -415,14 +621,24 @@ export default async function publicGatewayRoutes(app) {
       const apiKey = extractApiKey(req);
       const resolved = await resolveTenantByApiKey(app, apiKey);
       if (!resolved) {
-        return reply.code(401).send({ ok: false, error: "INVALID_API_KEY" });
+        return denyGateway(app, reply, 401, "INVALID_API_KEY", {
+          eventType: "gateway.legacy_intake_invalid_api_key",
+          ip: req.ip,
+          userAgent: req.headers["user-agent"] || null
+        });
       }
 
       const headerCode = normalizeText(req.headers["x-tenant-code"]);
       const tenantCode = headerCode || normalizeText(body.tenant_code);
 
       if (tenantCode && normalizeText(tenantCode) !== normalizeText(resolved.tenant.code)) {
-        return reply.code(403).send({ ok: false, error: "TENANT_MISMATCH" });
+        return denyGateway(app, reply, 403, "TENANT_MISMATCH", {
+          eventType: "gateway.legacy_intake_tenant_mismatch",
+          tenantId: resolved.tenant.id,
+          ip: req.ip,
+          userAgent: req.headers["user-agent"] || null,
+          metadata: { requested_tenant_code: tenantCode }
+        });
       }
 
       const tenant = resolved.tenant;
@@ -466,7 +682,13 @@ export default async function publicGatewayRoutes(app) {
     async (req, reply) => {
       const apiKey = extractApiKey(req);
       const resolved = await resolveTenantByApiKey(app, apiKey);
-      if (!resolved) return reply.code(401).send({ ok: false, error: "INVALID_API_KEY" });
+      if (!resolved) {
+        return denyGateway(app, reply, 401, "INVALID_API_KEY", {
+          eventType: "gateway.bootstrap_invalid_api_key",
+          ip: req.ip,
+          userAgent: req.headers["user-agent"] || null
+        });
+      }
 
       const origin = req.headers.origin;
       const connectionCode = normalizeText(req.query?.connection_code || req.query?.connectionCode);
@@ -475,11 +697,30 @@ export default async function publicGatewayRoutes(app) {
         ? profiles.find((item) => item.identity?.connection_code === connectionCode)
         : selectConnection(profiles, (item) => item.identity?.is_enabled && requiresInbound(item));
 
-      if (!selected) return reply.code(404).send({ ok: false, error: "CONNECTION_NOT_FOUND" });
-      if (!selected.identity?.is_enabled) return reply.code(403).send({ ok: false, error: "CONNECTION_DISABLED" });
+      if (!selected) {
+        return denyGateway(app, reply, 404, "CONNECTION_NOT_FOUND", {
+          eventType: "gateway.bootstrap_connection_not_found",
+          tenantId: resolved.tenant.id,
+          connectionCode,
+          ip: req.ip,
+          userAgent: req.headers["user-agent"] || null
+        });
+      }
+      if (!selected.identity?.is_enabled) {
+        return denyGateway(app, reply, 403, "CONNECTION_DISABLED", {
+          eventType: "gateway.bootstrap_connection_disabled",
+          tenantId: resolved.tenant.id,
+          connectionCode: selected.identity?.connection_code,
+          suffix: selected.inbound?.inbound_path_suffix || null,
+          ip: req.ip,
+          userAgent: req.headers["user-agent"] || null
+        });
+      }
       if (!connectionAllowsOrigin(selected, origin)) {
         await logGatewayDenied(app, {
           tenantId: resolved.tenant.id,
+          connectionCode: selected.identity?.connection_code,
+          suffix: selected.inbound?.inbound_path_suffix || null,
           eventType: "bootstrap",
           origin,
           ip: req.ip,
@@ -490,7 +731,14 @@ export default async function publicGatewayRoutes(app) {
       }
 
       if (!connectionAllowsIp(selected, req.ip)) {
-        return reply.code(403).send({ ok: false, error: "IP_NOT_ALLOWED" });
+        return denyGateway(app, reply, 403, "IP_NOT_ALLOWED", {
+          eventType: "gateway.bootstrap_ip_rejected",
+          tenantId: resolved.tenant.id,
+          connectionCode: selected.identity?.connection_code,
+          suffix: selected.inbound?.inbound_path_suffix || null,
+          ip: req.ip,
+          userAgent: req.headers["user-agent"] || null
+        });
       }
 
       applyCors(reply, origin);
@@ -542,7 +790,13 @@ export default async function publicGatewayRoutes(app) {
     async (req, reply) => {
       const apiKey = extractApiKey(req);
       const resolved = await resolveTenantByApiKey(app, apiKey);
-      if (!resolved) return reply.code(401).send({ ok: false, error: "INVALID_API_KEY" });
+      if (!resolved) {
+        return denyGateway(app, reply, 401, "INVALID_API_KEY", {
+          eventType: "gateway.manifest_invalid_api_key",
+          ip: req.ip,
+          userAgent: req.headers["user-agent"] || null
+        });
+      }
 
       const origin = req.headers.origin;
       const connectionCode = normalizeText(req.query?.connection_code || req.query?.connectionCode);
@@ -551,11 +805,30 @@ export default async function publicGatewayRoutes(app) {
         ? profiles.find((item) => item.identity?.connection_code === connectionCode)
         : selectConnection(profiles, (item) => item.identity?.is_enabled && requiresInbound(item));
 
-      if (!selected) return reply.code(404).send({ ok: false, error: "CONNECTION_NOT_FOUND" });
-      if (!selected.identity?.is_enabled) return reply.code(403).send({ ok: false, error: "CONNECTION_DISABLED" });
+      if (!selected) {
+        return denyGateway(app, reply, 404, "CONNECTION_NOT_FOUND", {
+          eventType: "gateway.manifest_connection_not_found",
+          tenantId: resolved.tenant.id,
+          connectionCode,
+          ip: req.ip,
+          userAgent: req.headers["user-agent"] || null
+        });
+      }
+      if (!selected.identity?.is_enabled) {
+        return denyGateway(app, reply, 403, "CONNECTION_DISABLED", {
+          eventType: "gateway.manifest_connection_disabled",
+          tenantId: resolved.tenant.id,
+          connectionCode: selected.identity?.connection_code,
+          suffix: selected.inbound?.inbound_path_suffix || null,
+          ip: req.ip,
+          userAgent: req.headers["user-agent"] || null
+        });
+      }
       if (!connectionAllowsOrigin(selected, origin)) {
         await logGatewayDenied(app, {
           tenantId: resolved.tenant.id,
+          connectionCode: selected.identity?.connection_code,
+          suffix: selected.inbound?.inbound_path_suffix || null,
           eventType: "manifest",
           origin,
           ip: req.ip,
@@ -566,7 +839,14 @@ export default async function publicGatewayRoutes(app) {
       }
 
       if (!connectionAllowsIp(selected, req.ip)) {
-        return reply.code(403).send({ ok: false, error: "IP_NOT_ALLOWED" });
+        return denyGateway(app, reply, 403, "IP_NOT_ALLOWED", {
+          eventType: "gateway.manifest_ip_rejected",
+          tenantId: resolved.tenant.id,
+          connectionCode: selected.identity?.connection_code,
+          suffix: selected.inbound?.inbound_path_suffix || null,
+          ip: req.ip,
+          userAgent: req.headers["user-agent"] || null
+        });
       }
 
       applyCors(reply, origin);
@@ -589,7 +869,15 @@ export default async function publicGatewayRoutes(app) {
       );
 
       if (surfaceRes.rowCount === 0) {
-        return reply.code(404).send({ ok: false, error: "TEMPLATE_NOT_FOUND" });
+        return denyGateway(app, reply, 404, "TEMPLATE_NOT_FOUND", {
+          eventType: "gateway.manifest_template_not_found",
+          tenantId: resolved.tenant.id,
+          connectionCode: selected.identity?.connection_code,
+          suffix: selected.inbound?.inbound_path_suffix || null,
+          ip: req.ip,
+          userAgent: req.headers["user-agent"] || null,
+          metadata: { template_code: templateCode }
+        });
       }
 
       let serviceObject = null;
