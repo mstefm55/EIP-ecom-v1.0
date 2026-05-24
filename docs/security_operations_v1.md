@@ -146,6 +146,8 @@ Recent event pagination and lightweight filters:
 | `outcome` | One of `success`, `failure`, `denied`, `rejected`, `blocked`, `error`, `observed` |
 | `severity` | One of `debug`, `info`, `warning`, `error`, `critical` |
 
+The dashboard renders `event_type` and `tenant` as dropdown filters populated from scoped `recent_event_filter_options` returned by the same route.
+
 The route returns:
 
 - summary counts
@@ -153,6 +155,7 @@ The route returns:
 - per-tenant/per-connection health
 - recent events
 - recent event pagination metadata
+- recent event filter options
 - recommended alert thresholds
 
 Recent event response shape:
@@ -171,6 +174,14 @@ Recent event response shape:
     "tenant": "",
     "outcome": "",
     "severity": ""
+  },
+  "recent_event_filter_options": {
+    "event_types": [
+      { "value": "gateway.verification_failed", "label": "gateway.verification_failed", "count": 12 }
+    ],
+    "tenants": [
+      { "value": "tenant-uuid", "label": "tenant_a", "code": "tenant_a", "name": "Tenant A", "count": 8 }
+    ]
   }
 }
 ```

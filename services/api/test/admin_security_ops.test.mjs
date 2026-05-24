@@ -83,6 +83,25 @@ function buildDb() {
         return { rowCount: 0, rows: [] };
       }
 
+      if (text.includes("GROUP BY se.event_type") && text.includes("ORDER BY count DESC, se.event_type")) {
+        return {
+          rowCount: 1,
+          rows: [{ event_type: "gateway.verification_failed", count: recentEvents.length }]
+        };
+      }
+
+      if (text.includes("GROUP BY se.tenant_id, t.code, t.name") && text.includes("ORDER BY count DESC, t.code")) {
+        return {
+          rowCount: 1,
+          rows: [{
+            tenant_id: TENANT_ID,
+            tenant_code: "tenant_a",
+            tenant_name: "Tenant A",
+            count: recentEvents.length
+          }]
+        };
+      }
+
       if (text.includes("SELECT count(*)::int AS total") && text.includes("FROM eip_core.security_event se")) {
         return { rowCount: 1, rows: [{ total: recentEvents.length }] };
       }
@@ -146,6 +165,20 @@ test("admin security ops paginates and filters recent events server-side", async
     tenant: "tenant_a",
     outcome: "rejected",
     severity: "warning"
+  });
+  assert.deepEqual(body.recent_event_filter_options, {
+    event_types: [{
+      value: "gateway.verification_failed",
+      label: "gateway.verification_failed",
+      count: 5
+    }],
+    tenants: [{
+      value: TENANT_ID,
+      label: "tenant_a",
+      code: "tenant_a",
+      name: "Tenant A",
+      count: 5
+    }]
   });
 
   const recentSql = db.calls.find((call) => call.sql.includes("ORDER BY se.occurred_at DESC"));

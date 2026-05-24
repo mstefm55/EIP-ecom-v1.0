@@ -102,6 +102,13 @@ export default function AdminAuditPanel() {
   const topFailures = Array.isArray(data?.top_failures) ? data.top_failures : [];
   const recentEvents = Array.isArray(data?.recent_events) ? data.recent_events : [];
   const connectionHealth = Array.isArray(data?.connection_health) ? data.connection_health : [];
+  const filterOptions = data?.recent_event_filter_options || {};
+  const eventTypeOptions = Array.isArray(filterOptions.event_types) ? filterOptions.event_types : [];
+  const tenantOptions = Array.isArray(filterOptions.tenants) ? filterOptions.tenants : [];
+  const hasDraftEventTypeOption = !draftFilters.event_type
+    || eventTypeOptions.some((option) => option.value === draftFilters.event_type);
+  const hasDraftTenantOption = !draftFilters.tenant
+    || tenantOptions.some((option) => option.value === draftFilters.tenant);
   const pagination = data?.recent_events_pagination || {
     page,
     page_size: pageSize,
@@ -246,21 +253,39 @@ export default function AdminAuditPanel() {
         <form onSubmit={applyFilters} className="mt-4 grid gap-3 lg:grid-cols-[1.1fr_1fr_0.8fr_0.8fr_auto_auto]">
           <label className="block">
             <span className="text-xs font-semibold uppercase tracking-[0.16em] text-ink-400">Event type</span>
-            <input
+            <select
               value={draftFilters.event_type}
               onChange={(event) => updateDraftFilter("event_type", event.target.value)}
               className={FILTER_CONTROL_CLASS}
-              placeholder="gateway.verification_failed"
-            />
+            >
+              <option value="">All</option>
+              {!hasDraftEventTypeOption ? (
+                <option value={draftFilters.event_type}>{formatEventLabel(draftFilters.event_type)}</option>
+              ) : null}
+              {eventTypeOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {formatEventLabel(option.label || option.value)} ({option.count ?? 0})
+                </option>
+              ))}
+            </select>
           </label>
           <label className="block">
             <span className="text-xs font-semibold uppercase tracking-[0.16em] text-ink-400">Tenant</span>
-            <input
+            <select
               value={draftFilters.tenant}
               onChange={(event) => updateDraftFilter("tenant", event.target.value)}
               className={FILTER_CONTROL_CLASS}
-              placeholder="tenant code or id"
-            />
+            >
+              <option value="">All</option>
+              {!hasDraftTenantOption ? (
+                <option value={draftFilters.tenant}>{draftFilters.tenant}</option>
+              ) : null}
+              {tenantOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label || option.value} ({option.count ?? 0})
+                </option>
+              ))}
+            </select>
           </label>
           <label className="block">
             <span className="text-xs font-semibold uppercase tracking-[0.16em] text-ink-400">Outcome</span>

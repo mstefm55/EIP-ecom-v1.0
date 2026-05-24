@@ -180,7 +180,11 @@ export default async function adminMonitoringRoutes(app) {
           total: 0,
           total_pages: 0
         },
-        recent_event_filters: recentEventFilters
+        recent_event_filters: recentEventFilters,
+        recent_event_filter_options: {
+          event_types: [],
+          tenants: []
+        }
       });
     }
 
@@ -255,6 +259,41 @@ export default async function adminMonitoringRoutes(app) {
       params
     );
 
+    const eventTypeOptionsRes = await app.db.query(
+      `
+      SELECT
+        se.event_type,
+        count(*)::int AS count
+      FROM eip_core.security_event se
+      WHERE se.occurred_at >= $1
+        AND se.event_type IS NOT NULL
+      ${scope.where}
+      GROUP BY se.event_type
+      ORDER BY count DESC, se.event_type
+      LIMIT 200
+      `,
+      params
+    );
+
+    const tenantOptionsRes = await app.db.query(
+      `
+      SELECT
+        se.tenant_id,
+        t.code AS tenant_code,
+        t.name AS tenant_name,
+        count(*)::int AS count
+      FROM eip_core.security_event se
+      LEFT JOIN eip_core.tenant t ON t.id = se.tenant_id
+      WHERE se.occurred_at >= $1
+        AND se.tenant_id IS NOT NULL
+      ${scope.where}
+      GROUP BY se.tenant_id, t.code, t.name
+      ORDER BY count DESC, t.code, t.name, se.tenant_id
+      LIMIT 200
+      `,
+      params
+    );
+
     const recentEventParams = [from, ...scope.params];
     const recentEventFilterSql = buildRecentEventFilterSql(recentEventFilters, recentEventParams);
     const recentEventsCountRes = await app.db.query(
@@ -325,6 +364,20 @@ export default async function adminMonitoringRoutes(app) {
         total_pages: recentEventsTotalPages
       },
       recent_event_filters: recentEventFilters,
+      recent_event_filter_options: {
+        event_types: (eventTypeOptionsRes.rows || []).map((row) => ({
+          value: row.event_type,
+          label: row.event_type,
+          count: row.count || 0
+        })),
+        tenants: (tenantOptionsRes.rows || []).map((row) => ({
+          value: row.tenant_id,
+          label: row.tenant_code || row.tenant_name || row.tenant_id,
+          code: row.tenant_code || null,
+          name: row.tenant_name || null,
+          count: row.count || 0
+        }))
+      },
       alert_thresholds: {
         auth_failures_15m: 10,
         gateway_verification_failures_15m: 10,
