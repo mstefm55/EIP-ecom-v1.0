@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ChevronLeft, ChevronRight, FileClock, Filter, RefreshCw, ShieldAlert, ShieldCheck } from "lucide-react";
 import { apiFetch } from "../../services/apiClient";
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE_OPTIONS = [12, 25, 50];
+const DEFAULT_PAGE_SIZE = 25;
 const DEFAULT_FILTERS = {
   event_type: "",
   tenant: "",
@@ -27,6 +28,7 @@ export default function AdminAuditPanel() {
   const [error, setError] = useState(null);
   const [windowKey, setWindowKey] = useState("24h");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [draftFilters, setDraftFilters] = useState(DEFAULT_FILTERS);
 
@@ -37,7 +39,7 @@ export default function AdminAuditPanel() {
       const params = new URLSearchParams({
         window: windowKey,
         page: String(page),
-        page_size: String(PAGE_SIZE),
+        page_size: String(pageSize),
       });
       Object.entries(filters).forEach(([key, value]) => {
         const text = String(value || "").trim();
@@ -50,7 +52,7 @@ export default function AdminAuditPanel() {
     } finally {
       setLoading(false);
     }
-  }, [filters, page, windowKey]);
+  }, [filters, page, pageSize, windowKey]);
 
   useEffect(() => {
     load();
@@ -94,7 +96,7 @@ export default function AdminAuditPanel() {
   const connectionHealth = Array.isArray(data?.connection_health) ? data.connection_health : [];
   const pagination = data?.recent_events_pagination || {
     page,
-    page_size: PAGE_SIZE,
+    page_size: pageSize,
     total: recentEvents.length,
     total_pages: recentEvents.length > 0 ? 1 : 0,
   };
@@ -332,6 +334,18 @@ export default function AdminAuditPanel() {
               : "No pages"}
           </p>
           <div className="flex items-center gap-2">
+            <select
+              value={pageSize}
+              onChange={(event) => {
+                setPageSize(Number(event.target.value));
+                setPage(1);
+              }}
+              className="rounded-full border border-ink-200 bg-white/80 px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-ink-500 outline-none hover:bg-white"
+            >
+              {PAGE_SIZE_OPTIONS.map((option) => (
+                <option key={option} value={option}>{option} / page</option>
+              ))}
+            </select>
             <button
               type="button"
               onClick={() => setPage(Math.max(1, pagination.page - 1))}

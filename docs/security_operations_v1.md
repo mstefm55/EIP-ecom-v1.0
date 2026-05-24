@@ -140,7 +140,7 @@ Recent event pagination and lightweight filters:
 | Query param | Purpose |
 | --- | --- |
 | `page` | 1-based page for `recent_events`; defaults to `1` |
-| `page_size` | Recent events per page; defaults to `25`, max `100` |
+| `page_size` | Recent events per page; defaults to `25`, max `100`; dashboard offers `12`, `25`, and `50` |
 | `event_type` | Exact event type filter for recent events |
 | `tenant` | Tenant id/code/name search for recent events |
 | `outcome` | One of `success`, `failure`, `denied`, `rejected`, `blocked`, `error`, `observed` |
