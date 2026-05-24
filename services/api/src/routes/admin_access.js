@@ -20,6 +20,77 @@ const DEFAULT_TRANSLATION_BILLING = {
   currency: "USD"
 };
 
+const TENANT_USER_ROLE_BASELINE = [
+  { code: "ECOM_ADMIN", label: "ECOM Admin", surface_code: "ERP", is_system: true },
+  { code: "ECOM_USER", label: "ECOM User", surface_code: "ECOM", is_system: true },
+  { code: "ERP_USER", label: "ERP User", surface_code: "ERP", is_system: true },
+  { code: "PARTNER_USER", label: "Partner User", surface_code: "PARTNER", is_system: true },
+  { code: "CRM_ADMIN", label: "CRM Admin", surface_code: "ERP", is_system: true },
+  { code: "CRM_USER", label: "CRM User", surface_code: "ERP", is_system: true }
+];
+
+const TENANT_USER_ROLE_PERMISSION_BUNDLES = [
+  ["ECOM_ADMIN", "ECOM_PRODUCT_READ"],
+  ["ECOM_ADMIN", "ECOM_PRODUCT_WRITE"],
+  ["ECOM_ADMIN", "ECOM_REVIEW_READ"],
+  ["ECOM_ADMIN", "ECOM_REVIEW_MODERATE"],
+  ["ECOM_ADMIN", "ECOM_ORDER_READ"],
+  ["ECOM_ADMIN", "ECOM_ORDER_WRITE"],
+  ["ECOM_ADMIN", "ECOM_RETURN_READ"],
+  ["ECOM_ADMIN", "ECOM_RETURN_WRITE"],
+  ["ECOM_ADMIN", "ECOM_REFUND_READ"],
+  ["ECOM_ADMIN", "ECOM_REFUND_WRITE"],
+  ["ECOM_ADMIN", "ECOM_SETTINGS_WRITE"],
+  ["ECOM_ADMIN", "tenant.admin_access.read"],
+  ["ECOM_ADMIN", "tenant.admin_access.write"],
+  ["ECOM_USER", "ECOM_PRODUCT_READ"],
+  ["ECOM_USER", "ECOM_ORDER_READ"],
+  ["ECOM_USER", "ECOM_RETURN_READ"],
+  ["ECOM_USER", "ECOM_REFUND_READ"],
+  ["ERP_USER", "authz.bootstrap.read"],
+  ["ERP_USER", "core.home.read"],
+  ["ERP_USER", "core.agent.read"],
+  ["ERP_USER", "core.material.read"],
+  ["ERP_USER", "core.task.read"],
+  ["ERP_USER", "core.process.read"],
+  ["ERP_USER", "ECOM_PRODUCT_READ"],
+  ["ERP_USER", "ECOM_PRODUCT_WRITE"],
+  ["ERP_USER", "ECOM_ORDER_READ"],
+  ["ERP_USER", "ECOM_ORDER_WRITE"],
+  ["ERP_USER", "ECOM_RETURN_READ"],
+  ["ERP_USER", "ECOM_RETURN_WRITE"],
+  ["ERP_USER", "ECOM_REFUND_READ"],
+  ["ERP_USER", "ECOM_REFUND_WRITE"],
+  ["PARTNER_USER", "authz.bootstrap.read"],
+  ["PARTNER_USER", "core.home.read"],
+  ["CRM_ADMIN", "CRM_AGENT_READ"],
+  ["CRM_ADMIN", "CRM_AGENT_WRITE"],
+  ["CRM_ADMIN", "CRM_INTERACTION_READ"],
+  ["CRM_ADMIN", "CRM_INTERACTION_WRITE"],
+  ["CRM_ADMIN", "CRM_CASE_READ"],
+  ["CRM_ADMIN", "CRM_CASE_WRITE"],
+  ["CRM_ADMIN", "CRM_OPPORTUNITY_READ"],
+  ["CRM_ADMIN", "CRM_OPPORTUNITY_WRITE"],
+  ["CRM_ADMIN", "CRM_TASK_READ"],
+  ["CRM_ADMIN", "CRM_TASK_WRITE"],
+  ["CRM_ADMIN", "CRM_DASHBOARD_READ"],
+  ["CRM_ADMIN", "PROCESS_DEF_READ"],
+  ["CRM_ADMIN", "PROCESS_DEF_WRITE"],
+  ["CRM_ADMIN", "PROCESS_INSTANCE_READ"],
+  ["CRM_ADMIN", "PROCESS_INSTANCE_WRITE"],
+  ["CRM_USER", "CRM_AGENT_READ"],
+  ["CRM_USER", "CRM_INTERACTION_READ"],
+  ["CRM_USER", "CRM_INTERACTION_WRITE"],
+  ["CRM_USER", "CRM_CASE_READ"],
+  ["CRM_USER", "CRM_CASE_WRITE"],
+  ["CRM_USER", "CRM_OPPORTUNITY_READ"],
+  ["CRM_USER", "CRM_TASK_READ"],
+  ["CRM_USER", "CRM_TASK_WRITE"],
+  ["CRM_USER", "CRM_DASHBOARD_READ"],
+  ["CRM_USER", "PROCESS_DEF_READ"],
+  ["CRM_USER", "PROCESS_INSTANCE_READ"]
+].map(([role_code, permission_code]) => ({ role_code, permission_code }));
+
 function normalizeText(value) {
   return String(value || "").trim();
 }
@@ -82,6 +153,55 @@ function mergeTranslationBillingIntoAttrs(attrs, billingPatch) {
 
 async function hashPassword(password) {
   return argon2.hash(password, { type: argon2.argon2id });
+}
+
+async function ensureTenantUserRoleBaseline(client, tenantId) {
+  await client.query(
+    `
+    INSERT INTO eip_authz.surface(code, label, sort_order) VALUES
+      ('ADMIN','Admin',10),
+      ('ERP','ERP',20),
+      ('PARTNER','Partner Portal',30),
+      ('ECOM','E-Commerce',40)
+    ON CONFLICT (code) DO NOTHING
+    `
+  );
+
+  await client.query(
+    `
+    WITH role_defs AS (
+      SELECT *
+      FROM jsonb_to_recordset($2::jsonb) AS r(
+        code text,
+        label text,
+        surface_code text,
+        is_system boolean
+      )
+    )
+    INSERT INTO eip_authz.role(tenant_id, code, label, surface_code, is_system, is_active)
+    SELECT $1::uuid, code, label, surface_code, is_system, true
+    FROM role_defs
+    ON CONFLICT (tenant_id, code) DO NOTHING
+    `,
+    [tenantId, JSON.stringify(TENANT_USER_ROLE_BASELINE)]
+  );
+
+  await client.query(
+    `
+    WITH bundles AS (
+      SELECT *
+      FROM jsonb_to_recordset($2::jsonb) AS b(role_code text, permission_code text)
+    )
+    INSERT INTO eip_authz.role_permission(role_id, permission_code)
+    SELECT r.id, p.code
+    FROM eip_authz.role r
+    JOIN bundles b ON b.role_code = r.code
+    JOIN eip_authz.permission p ON p.code = b.permission_code
+    WHERE r.tenant_id = $1::uuid
+    ON CONFLICT DO NOTHING
+    `,
+    [tenantId, JSON.stringify(TENANT_USER_ROLE_PERMISSION_BUNDLES)]
+  );
 }
 
 async function requireAdminPerm(app, req, reply, permCode, opts = {}) {
@@ -259,12 +379,14 @@ export default async function adminAccessRoutes(app) {
       return reply.code(404).send({ ok: false, error: "TENANT_NOT_FOUND" });
     }
 
+    await ensureTenantUserRoleBaseline(app.db, tenantId);
+
     const r = await app.db.query(
       `
       SELECT id, code, label, surface_code, is_system, is_active
       FROM eip_authz.role
       WHERE tenant_id = $1::uuid
-      ORDER BY code
+      ORDER BY is_system DESC, surface_code, code
       `,
       [tenantId]
     );
