@@ -4,6 +4,7 @@ const ACTION_MAP = {
   "request-otp": (ctx) => ctx?.auth?.requestOtp?.(),
   "verify-otp": (ctx) => ctx?.otp?.verify?.(),
   "verify-totp": (ctx) => ctx?.auth?.verifyTotp?.(),
+  "passkey-login": (ctx) => ctx?.auth?.passkeyLogin?.(),
   "password-login": (ctx) => ctx?.auth?.passwordLogin?.(),
   "enroll-totp": (ctx) => ctx?.totp?.enroll?.(),
   "confirm-totp": (ctx) => ctx?.totp?.confirm?.(),

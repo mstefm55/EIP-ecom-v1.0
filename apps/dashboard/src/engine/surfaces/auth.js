@@ -49,6 +49,8 @@
               secondaryEvent: "password-login",
               totpLoginAction: "Verify TOTP",
               totpLoginEvent: "verify-totp",
+              passkeyLoginAction: "Use passkey",
+              passkeyLoginEvent: "passkey-login",
               totpAction: "Set up TOTP",
               totpEvent: "open-modal:totp-modal",
               showTotp: true,

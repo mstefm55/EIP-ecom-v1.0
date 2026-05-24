@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ShieldCheck, Monitor, RefreshCw, UserCheck, XCircle } from "lucide-react";
 import { apiFetch } from "../../services/apiClient";
+import AdminPasskeysPanel from "./AdminPasskeysPanel";
 
 export default function AdminSecurityPanel({ node }) {
   const { endpoint = "/api/eip/auth/devices" } = node.props || {};
@@ -169,6 +170,8 @@ export default function AdminSecurityPanel({ node }) {
         <ShieldCheck className="h-4 w-4" />
         Step-up required for approving tenant onboarding and device trust changes.
       </div>
+
+      <AdminPasskeysPanel />
     </section>
   );
 }

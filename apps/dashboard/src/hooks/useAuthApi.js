@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { apiFetch } from "../services/apiClient";
+import { loginWithPasskey } from "../services/passkeys";
 
 function buildMessage(type, message) {
   return { type, message };
@@ -46,6 +47,11 @@ function friendlyErrorMessage(error) {
     TOTP_REQUIRED: "TOTP is required for recovery.",
     RECOVERY_INVALID: "Recovery link is invalid.",
     RECOVERY_EXPIRED: "Recovery link has expired.",
+    PASSKEY_NOT_FOUND: "No passkey is enrolled for this account.",
+    PASSKEY_CHALLENGE_INVALID: "The passkey challenge expired. Try again.",
+    PASSKEY_VERIFICATION_FAILED: "Passkey verification failed.",
+    PASSKEY_LOGIN_FAILED: "Passkey login failed.",
+    PASSKEY_OPTIONS_FAILED: "Passkey setup is temporarily unavailable.",
   };
   return map[code] || error?.message || "Request failed.";
 }
@@ -142,6 +148,19 @@ export function useAuthApi() {
           body: { ...tenantPayload, email, password, token: cleanTotp },
         }),
       "TOTP verified. Session established."
+    );
+  }
+
+  async function passkeyLogin({ tenantId, organisation, email }) {
+    const tenantPayload = buildTenantPayload(tenantId || organisation);
+    const login = String(email || "").trim().toLowerCase();
+    if (!login) return fail("Enter your email address.");
+    if (!tenantPayload.tenantId && !tenantPayload.tenantCode) {
+      return fail("Enter your organisation name or code.");
+    }
+    return run(
+      () => loginWithPasskey({ ...tenantPayload, email: login }),
+      "Passkey verified. Session established."
     );
   }
 
@@ -354,6 +373,7 @@ export function useAuthApi() {
     requestOtp,
     verifyOtp,
     passwordLogin,
+    passkeyLogin,
     enrollTotp,
     confirmTotp,
     requestAccess,

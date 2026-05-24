@@ -286,6 +286,14 @@ export default function App() {
           if (result?.ok) await redirectAfterAuth();
           return result;
         },
+        passkeyLogin: async () => {
+          const result = await authApi.passkeyLogin({
+            organisation: form.organisation,
+            email: form.email,
+          });
+          if (result?.ok) await redirectAfterAuth();
+          return result;
+        },
         requestPasswordReset: () =>
           authApi.requestPasswordReset({
             organisation: form.organisation,

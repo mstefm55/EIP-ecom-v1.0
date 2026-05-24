@@ -33,6 +33,8 @@ export default function AuthLoginCard({ node, ctx }) {
     totpEvent,
     totpLoginAction,
     totpLoginEvent,
+    passkeyLoginAction,
+    passkeyLoginEvent,
     showTotp,
     footnote,
     modalLabel,
@@ -208,6 +210,21 @@ export default function AuthLoginCard({ node, ctx }) {
             className="w-full rounded-2xl border border-ink-200/70 bg-white/70 px-5 py-3 text-sm font-semibold text-ink-600 hover:bg-white"
           >
             {totpLoginAction}
+          </button>
+        ) : null}
+        {passkeyLoginAction ? (
+          <button
+            type="button"
+            onClick={() => {
+              if (passkeyLoginEvent) {
+                runAction(passkeyLoginEvent, ctx);
+              } else {
+                ctx?.auth?.passkeyLogin?.();
+              }
+            }}
+            className="w-full rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-3 text-sm font-semibold text-emerald-700 hover:bg-emerald-100"
+          >
+            {passkeyLoginAction}
           </button>
         ) : null}
       </div>
