@@ -6,6 +6,7 @@ import { registerRawBody, parseJsonBody } from "../services/gateway/rawBody.js";
 import { insertGatewayAudit } from "../services/gateway/audit.js";
 import { buildRequestHash, ensureIdempotency, finalizeIdempotency } from "../services/gateway/idempotency.js";
 import { extractProfiles } from "../services/gateway/connectionProfile.js";
+import { hydrateConnectionProfileSecrets } from "../services/gateway/secretStore.js";
 import { connectionAllowsOrigin, extractEventId, verifyConnectionRequest } from "../services/gateway/verification.js";
 import { LRUCache } from "lru-cache";
 
@@ -189,7 +190,8 @@ async function handleInbound(app, req, reply, opts) {
   if (!resolved) return reply.code(404).send({ ok: false, error: "ROUTING_NOT_FOUND" });
   if (resolved.error) return reply.code(409).send({ ok: false, error: resolved.error });
 
-  const { tenant, profile } = resolved;
+  const { tenant } = resolved;
+  let { profile } = resolved;
   if (!profile) return reply.code(404).send({ ok: false, error: "ROUTING_NOT_FOUND" });
   if (!profile.identity?.is_enabled) return reply.code(403).send({ ok: false, error: "CONNECTION_DISABLED" });
   if (!requiresInbound(profile)) return reply.code(403).send({ ok: false, error: "INBOUND_NOT_ALLOWED" });
@@ -226,6 +228,13 @@ async function handleInbound(app, req, reply, opts) {
   const rawBody = Buffer.isBuffer(req.rawBody) ? req.rawBody : Buffer.from(req.rawBody || "");
   if (rawBody.length > Number(profile.audit?.max_body_size || 262144)) {
     return reply.code(413).send({ ok: false, error: "PAYLOAD_TOO_LARGE" });
+  }
+
+  try {
+    profile = await hydrateConnectionProfileSecrets(app, app.db, tenant.id, profile);
+  } catch (error) {
+    app.log.error({ event: "gateway_secret_hydrate_failed", tenantId: tenant.id, connectionCode: profile.identity?.connection_code, error: error.message });
+    return reply.code(500).send({ ok: false, error: "CONNECTION_SECRET_UNAVAILABLE" });
   }
 
   const verify = await verifyConnectionRequest(req, profile, rawBody);

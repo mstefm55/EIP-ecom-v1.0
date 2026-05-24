@@ -83,6 +83,10 @@ function makeDb(profile) {
         };
       }
 
+      if (text.includes("FROM eip_core.connection_secret")) {
+        return { rowCount: 0, rows: [] };
+      }
+
       if (text.includes("INSERT INTO eip_core.idempotency_key")) {
         const key = `${params[0]}:${params[1]}:${params[2]}`;
         if (idempotency.has(key)) throw new Error("duplicate idempotency key");

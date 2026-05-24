@@ -10,6 +10,13 @@ import {
   mergeSecrets,
   validateProfiles
 } from "../services/gateway/connectionProfile.js";
+import {
+  SECRET_FIELD_SPECS,
+  clearProfileSecretRefs,
+  hydrateConnectionProfileSecrets,
+  revokeConnectionSecrets,
+  vaultConnectionProfileSecrets
+} from "../services/gateway/secretStore.js";
 
 function normalizeText(value) {
   return String(value || "").trim();
@@ -233,73 +240,179 @@ export default async function gatewayRoutes(app) {
     const tenantId = req.params.tenantId;
     const incomingConnections = Array.isArray(req.body?.connections) ? req.body.connections : [];
 
-    const existingRes = await app.db.query(
-      "SELECT attrs FROM eip_core.tenant WHERE id = $1::uuid",
-      [tenantId]
-    );
-    const existingProfiles = extractProfiles(existingRes.rows[0]?.attrs || {});
+    const client = await app.db.connect();
+    try {
+      await client.query("BEGIN");
 
-    const normalizedConnections = incomingConnections.map((item, index) => {
-      const normalized = normalizeProfile(item, item?.id || `conn-${index + 1}`);
-      const existing = existingProfiles.find(
-        (profile) => profile.identity?.connection_code === normalized.identity.connection_code
+      const existingRes = await client.query(
+        "SELECT attrs FROM eip_core.tenant WHERE id = $1::uuid FOR UPDATE",
+        [tenantId]
       );
-      return mergeSecrets(existing, normalized);
-    });
-
-    const errors = validateProfiles(normalizedConnections);
-    if (errors.length) {
-      return reply.code(400).send({ ok: false, error: "VALIDATION_ERROR", details: errors });
-    }
-
-    for (const profile of normalizedConnections) {
-      const suffix = profile.inbound?.inbound_path_suffix;
-      if (!suffix) continue;
-      const dup = await app.db.query(
-        `
-        SELECT id
-        FROM eip_core.tenant
-        WHERE id <> $1::uuid
-          AND EXISTS (
-            SELECT 1
-            FROM jsonb_array_elements(
-              CASE
-                WHEN jsonb_typeof(attrs->'connection_profiles') = 'array'
-                THEN attrs->'connection_profiles'
-                ELSE '[]'::jsonb
-              END
-            ) AS profile
-            WHERE profile->'inbound'->>'inbound_path_suffix' = $2
-          )
-        LIMIT 1
-        `,
-        [tenantId, suffix]
-      );
-      if (dup.rowCount > 0) {
-        return reply.code(400).send({ ok: false, error: "DUPLICATE_SUFFIX", details: [suffix] });
+      if (existingRes.rowCount === 0) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ ok: false, error: "TENANT_NOT_FOUND" });
       }
+      const existingProfiles = extractProfiles(existingRes.rows[0]?.attrs || {});
+
+      const normalizedConnections = incomingConnections.map((item, index) => {
+        const normalized = normalizeProfile(item, item?.id || `conn-${index + 1}`);
+        const existing = existingProfiles.find(
+          (profile) => profile.identity?.connection_code === normalized.identity.connection_code
+        );
+        return mergeSecrets(existing, normalized);
+      });
+
+      const errors = validateProfiles(normalizedConnections);
+      if (errors.length) {
+        await client.query("ROLLBACK");
+        return reply.code(400).send({ ok: false, error: "VALIDATION_ERROR", details: errors });
+      }
+
+      for (const profile of normalizedConnections) {
+        const suffix = profile.inbound?.inbound_path_suffix;
+        if (!suffix) continue;
+        const dup = await client.query(
+          `
+          SELECT id
+          FROM eip_core.tenant
+          WHERE id <> $1::uuid
+            AND EXISTS (
+              SELECT 1
+              FROM jsonb_array_elements(
+                CASE
+                  WHEN jsonb_typeof(attrs->'connection_profiles') = 'array'
+                  THEN attrs->'connection_profiles'
+                  ELSE '[]'::jsonb
+                END
+              ) AS profile
+              WHERE profile->'inbound'->>'inbound_path_suffix' = $2
+            )
+          LIMIT 1
+          `,
+          [tenantId, suffix]
+        );
+        if (dup.rowCount > 0) {
+          await client.query("ROLLBACK");
+          return reply.code(400).send({ ok: false, error: "DUPLICATE_SUFFIX", details: [suffix] });
+        }
+      }
+
+      const vaultedConnections = await vaultConnectionProfileSecrets(
+        app,
+        client,
+        tenantId,
+        normalizedConnections,
+        s.session.identity_id
+      );
+
+      const r = await client.query(
+        `
+        UPDATE eip_core.tenant
+        SET attrs = jsonb_set(
+          COALESCE(attrs,'{}'::jsonb),
+          '{connection_profiles}',
+          $2::jsonb,
+          true
+        ),
+        updated_at = now()
+        WHERE id = $1::uuid
+        RETURNING id, code, name, is_active, attrs
+        `,
+        [tenantId, JSON.stringify(vaultedConnections)]
+      );
+
+      await client.query("COMMIT");
+      const updatedTenant = r.rows[0];
+      const updatedConnections = extractProfiles(updatedTenant?.attrs);
+
+      return reply.send({ ok: true, connections: updatedConnections.map(maskSecrets) });
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      app.log.error({ event: "connection_profile_save_failed", tenantId, error: error.message });
+      return reply.code(500).send({ ok: false, error: "CONNECTION_PROFILE_SAVE_FAILED" });
+    } finally {
+      client.release();
+    }
+  });
+
+  app.post("/gateway/connections/:tenantId/profile/:connectionCode/secrets/revoke", async (req, reply) => {
+    const s = await app.requireSession(req, { realm: "EIP" });
+    if (!s.ok) return reply.code(s.status).send({ ok: false, error: s.error });
+
+    const c = await app.requireCsrf(req);
+    if (!c.ok) return reply.code(c.status).send({ ok: false, error: c.error });
+
+    const step = await app.requireStepUp(req);
+    if (!step.ok) return reply.code(step.status).send({ ok: false, error: step.error });
+
+    const allowed = await hasPermission(app, s.session.tenant_id, s.session.identity_id, "tenant.connection.write");
+    if (!allowed) return reply.code(403).send({ ok: false, error: "FORBIDDEN" });
+
+    const tenantId = req.params.tenantId;
+    const connectionCode = normalizeText(req.params.connectionCode);
+    const requestedKinds = Array.isArray(req.body?.secret_kinds)
+      ? req.body.secret_kinds.map(normalizeText).filter(Boolean)
+      : normalizeText(req.body?.secret_kind)
+        ? [normalizeText(req.body.secret_kind)]
+        : SECRET_FIELD_SPECS.map((spec) => spec.kind);
+    const validKinds = new Set(SECRET_FIELD_SPECS.map((spec) => spec.kind));
+    if (!connectionCode || requestedKinds.some((kind) => !validKinds.has(kind))) {
+      return reply.code(400).send({ ok: false, error: "INVALID_SECRET_KIND" });
     }
 
-    const r = await app.db.query(
-      `
-      UPDATE eip_core.tenant
-      SET attrs = jsonb_set(
-        COALESCE(attrs,'{}'::jsonb),
-        '{connection_profiles}',
-        $2::jsonb,
-        true
-      ),
-      updated_at = now()
-      WHERE id = $1::uuid
-      RETURNING id, code, name, is_active, attrs
-      `,
-      [tenantId, JSON.stringify(normalizedConnections)]
-    );
+    const client = await app.db.connect();
+    try {
+      await client.query("BEGIN");
+      const tenantRes = await client.query(
+        "SELECT attrs FROM eip_core.tenant WHERE id = $1::uuid FOR UPDATE",
+        [tenantId]
+      );
+      if (tenantRes.rowCount === 0) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ ok: false, error: "TENANT_NOT_FOUND" });
+      }
+      const profiles = extractProfiles(tenantRes.rows[0].attrs || {});
+      if (!profiles.some((profile) => profile.identity?.connection_code === connectionCode)) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ ok: false, error: "CONNECTION_NOT_FOUND" });
+      }
 
-    const updatedTenant = r.rows[0];
-    const updatedConnections = extractProfiles(updatedTenant?.attrs);
+      const revoked = await revokeConnectionSecrets(client, {
+        tenantId,
+        connectionCode,
+        kinds: requestedKinds,
+        actorIdentityId: s.session.identity_id
+      });
+      const nextProfiles = clearProfileSecretRefs(profiles, connectionCode, requestedKinds);
+      const r = await client.query(
+        `
+        UPDATE eip_core.tenant
+        SET attrs = jsonb_set(COALESCE(attrs,'{}'::jsonb), '{connection_profiles}', $2::jsonb, true),
+            updated_at = now()
+        WHERE id = $1::uuid
+        RETURNING attrs
+        `,
+        [tenantId, JSON.stringify(nextProfiles)]
+      );
 
-    return reply.send({ ok: true, connections: updatedConnections.map(maskSecrets) });
+      await client.query("COMMIT");
+      return reply.send({
+        ok: true,
+        revoked: revoked.map((row) => ({
+          id: row.id,
+          secret_kind: row.secret_kind,
+          version: row.version,
+          revoked_at: row.revoked_at
+        })),
+        connections: extractProfiles(r.rows[0]?.attrs || {}).map(maskSecrets)
+      });
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      app.log.error({ event: "connection_secret_revoke_failed", tenantId, connectionCode, error: error.message });
+      return reply.code(500).send({ ok: false, error: "CONNECTION_SECRET_REVOKE_FAILED" });
+    } finally {
+      client.release();
+    }
   });
 
   app.post("/gateway/connections/:tenantId/test/inbound", async (req, reply) => {
@@ -325,8 +438,9 @@ export default async function gatewayRoutes(app) {
     );
     if (tenantRes.rowCount === 0) return reply.code(404).send({ ok: false, error: "TENANT_NOT_FOUND" });
     const profiles = extractProfiles(tenantRes.rows[0].attrs || {});
-    const profile = profiles.find((item) => item.identity?.connection_code === connectionCode);
+    let profile = profiles.find((item) => item.identity?.connection_code === connectionCode);
     if (!profile) return reply.code(404).send({ ok: false, error: "CONNECTION_NOT_FOUND" });
+    profile = await hydrateConnectionProfileSecrets(app, app.db, tenantId, profile);
 
     const suffix = profile.inbound?.inbound_path_suffix;
     const channel = profile.routing?.channel === "edi" ? "edi" : "public";
@@ -426,7 +540,7 @@ export default async function gatewayRoutes(app) {
     }
 
     try {
-      const response = await fetchWithTimeout(testUrl, {
+      const response = await fetchWithTimeout(url, {
         method: profile.inbound?.http_method || "POST",
         headers,
         body: rawBody,
@@ -471,8 +585,9 @@ export default async function gatewayRoutes(app) {
     );
     if (tenantRes.rowCount === 0) return reply.code(404).send({ ok: false, error: "TENANT_NOT_FOUND" });
     const profiles = extractProfiles(tenantRes.rows[0].attrs || {});
-    const profile = profiles.find((item) => item.identity?.connection_code === connectionCode);
+    let profile = profiles.find((item) => item.identity?.connection_code === connectionCode);
     if (!profile) return reply.code(404).send({ ok: false, error: "CONNECTION_NOT_FOUND" });
+    profile = await hydrateConnectionProfileSecrets(app, app.db, tenantId, profile);
 
     if (!profile.outbound?.base_url) {
       return reply.code(400).send({ ok: false, error: "OUTBOUND_NOT_CONFIGURED" });
@@ -552,7 +667,13 @@ export default async function gatewayRoutes(app) {
       INSERT INTO eip_auth.auth_api_key
         (tenant_id, key_hash, label, is_active, expires_at, scopes, attrs)
       VALUES
-        ($1::uuid, $2, $3, true, $4, '{}'::jsonb, jsonb_build_object('created_by', $5::uuid))
+        ($1::uuid, $2, $3, true, $4, '{}'::jsonb,
+         jsonb_build_object(
+           'created_by', $5::uuid,
+           'rotated_by', $5::uuid,
+           'last_rotated_at', now(),
+           'status', 'active'
+         ))
       RETURNING id, label, is_active, expires_at, created_at
       `,
       [tenantId, keyHash, label, expiresAt, s.session.identity_id]
@@ -597,10 +718,17 @@ export default async function gatewayRoutes(app) {
     await app.db.query(
       `
       UPDATE eip_auth.auth_api_key
-      SET is_active = false, expires_at = now(), updated_at = now()
+      SET is_active = false,
+          expires_at = now(),
+          attrs = COALESCE(attrs,'{}'::jsonb) || jsonb_build_object(
+            'revoked_by', $3::uuid,
+            'revoked_at', now(),
+            'status', 'revoked'
+          ),
+          updated_at = now()
       WHERE tenant_id = $1::uuid AND id = $2::uuid
       `,
-      [tenantId, keyId]
+      [tenantId, keyId, s.session.identity_id]
     );
 
     await app.db.query(
@@ -641,10 +769,17 @@ export default async function gatewayRoutes(app) {
     await app.db.query(
       `
       UPDATE eip_auth.auth_api_key
-      SET is_active = false, expires_at = now(), updated_at = now()
+      SET is_active = false,
+          expires_at = now(),
+          attrs = COALESCE(attrs,'{}'::jsonb) || jsonb_build_object(
+            'rotated_by', $3::uuid,
+            'rotated_at', now(),
+            'status', 'superseded'
+          ),
+          updated_at = now()
       WHERE tenant_id = $1::uuid AND id = $2::uuid
       `,
-      [tenantId, keyId]
+      [tenantId, keyId, s.session.identity_id]
     );
 
     const rawKey = buildApiKey();
@@ -656,10 +791,16 @@ export default async function gatewayRoutes(app) {
       INSERT INTO eip_auth.auth_api_key
         (tenant_id, key_hash, label, is_active, expires_at, scopes, attrs)
       VALUES
-        ($1::uuid, $2, $3, true, $4, '{}'::jsonb, jsonb_build_object('rotated_from', $5::uuid))
+        ($1::uuid, $2, $3, true, $4, '{}'::jsonb,
+         jsonb_build_object(
+           'rotated_from', $5::uuid,
+           'rotated_by', $6::uuid,
+           'last_rotated_at', now(),
+           'status', 'active'
+         ))
       RETURNING id, label, is_active, expires_at, created_at
       `,
-      [tenantId, keyHash, label, expiresAt, keyId]
+      [tenantId, keyHash, label, expiresAt, keyId, s.session.identity_id]
     );
 
     await app.db.query(

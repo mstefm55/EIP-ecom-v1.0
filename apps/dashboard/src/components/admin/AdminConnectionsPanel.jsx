@@ -102,6 +102,10 @@ function normalizeJson(text) {
   }
 }
 
+function hasStoredSecret(container, key) {
+  return Boolean(container?.[key] || container?.[`${key}_set`]);
+}
+
 function buildProfile(id, overrides = {}) {
   return {
     id: id || `conn-${Date.now()}`,
@@ -164,11 +168,15 @@ function buildProfile(id, overrides = {}) {
         header_name: "",
         query_param_name: "",
         secret: "",
+        secret_set: false,
         token: "",
+        token_set: false,
         username: "",
         password: "",
+        password_set: false,
         client_id: "",
         client_secret: "",
+        client_secret_set: false,
         token_url: "",
         scope: ""
       },
@@ -265,11 +273,15 @@ function fromApiProfile(profile) {
         header_name: profile.outbound?.auth?.header_name || "",
         query_param_name: profile.outbound?.auth?.query_param_name || "",
         secret: "",
+        secret_set: Boolean(profile.outbound?.auth?.secret_set),
         token: "",
+        token_set: Boolean(profile.outbound?.auth?.token_set),
         username: profile.outbound?.auth?.username || "",
         password: "",
+        password_set: Boolean(profile.outbound?.auth?.password_set),
         client_id: profile.outbound?.auth?.client_id || "",
         client_secret: "",
+        client_secret_set: Boolean(profile.outbound?.auth?.client_secret_set),
         token_url: profile.outbound?.auth?.token_url || "",
         scope: profile.outbound?.auth?.scope || ""
       },
@@ -443,22 +455,22 @@ function validateProfile(profile) {
     if (!profile.outbound.path_prefix) errors.push("Outbound path prefix is required");
     if (profile.outbound.auth_mode === "api_key_header") {
       if (!profile.outbound.auth.header_name) errors.push("Outbound API key header name is required");
-      if (!profile.outbound.auth.secret) errors.push("Outbound API key secret is required");
+      if (!hasStoredSecret(profile.outbound.auth, "secret")) errors.push("Outbound API key secret is required");
     }
     if (profile.outbound.auth_mode === "api_key_query") {
       if (!profile.outbound.auth.query_param_name) errors.push("Outbound API key query parameter is required");
-      if (!profile.outbound.auth.secret) errors.push("Outbound API key secret is required");
+      if (!hasStoredSecret(profile.outbound.auth, "secret")) errors.push("Outbound API key secret is required");
     }
-    if (profile.outbound.auth_mode === "bearer_token" && !profile.outbound.auth.token) {
+    if (profile.outbound.auth_mode === "bearer_token" && !hasStoredSecret(profile.outbound.auth, "token")) {
       errors.push("Outbound bearer token is required");
     }
     if (profile.outbound.auth_mode === "basic") {
       if (!profile.outbound.auth.username) errors.push("Outbound basic auth username is required");
-      if (!profile.outbound.auth.password) errors.push("Outbound basic auth password is required");
+      if (!hasStoredSecret(profile.outbound.auth, "password")) errors.push("Outbound basic auth password is required");
     }
     if (profile.outbound.auth_mode === "oauth2_client_credentials") {
       if (!profile.outbound.auth.client_id) errors.push("Outbound OAuth client ID is required");
-      if (!profile.outbound.auth.client_secret) errors.push("Outbound OAuth client secret is required");
+      if (!hasStoredSecret(profile.outbound.auth, "client_secret")) errors.push("Outbound OAuth client secret is required");
       if (!profile.outbound.auth.token_url) errors.push("Outbound OAuth token URL is required");
     }
   }
@@ -484,6 +496,9 @@ function validateProfile(profile) {
     if (!profile.verification.oauth2_jwt.header_name) errors.push("JWT header name is required");
     if (!profile.verification.oauth2_jwt.issuer) errors.push("JWT issuer is required");
     if (!profile.verification.oauth2_jwt.audience) errors.push("JWT audience is required");
+    if (!profile.verification.oauth2_jwt.jwks_url && !hasStoredSecret(profile.verification.oauth2_jwt, "secret")) {
+      errors.push("JWT JWKS URL or shared secret is required");
+    }
     const jwtSkew = Number(profile.verification.oauth2_jwt.max_skew_sec);
     if (!Number.isFinite(jwtSkew) || jwtSkew < 0) errors.push("JWT max skew (sec) must be a positive number");
     const maxAge = profile.verification.oauth2_jwt.max_age_sec;

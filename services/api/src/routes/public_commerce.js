@@ -11,6 +11,7 @@ import { randomToken, sha256Hex, timingSafeEqual } from "../auth/crypto.js";
 import { buildRequestHash, ensureIdempotency, finalizeIdempotency } from "../services/gateway/idempotency.js";
 import { extractProfiles } from "../services/gateway/connectionProfile.js";
 import { registerRawBody, parseJsonBody } from "../services/gateway/rawBody.js";
+import { hydrateConnectionProfileSecrets } from "../services/gateway/secretStore.js";
 import { connectionAllowsOrigin, extractEventId, verifyConnectionRequest } from "../services/gateway/verification.js";
 import { isTenantAssetPath, toLocalAssetPath } from "../services/assets/url_policy.js";
 import { sendEmail } from "../lib/email.js";
@@ -1770,7 +1771,8 @@ export default async function publicCommerceRoutes(app) {
       return null;
     }
 
-    const { tenant, profile } = resolved;
+    const { tenant } = resolved;
+    let { profile } = resolved;
     if (!profile) {
       reply.code(404).send({ ok: false, error: "CONNECTION_NOT_FOUND" });
       return null;
@@ -1810,6 +1812,14 @@ export default async function publicCommerceRoutes(app) {
     // and multipart uploads) that are already validated per route + auth checks.
     // A profile-wide method gate caused valid member actions (e.g. blog delete) to fail
     // with METHOD_NOT_ALLOWED expected POST.
+
+    try {
+      profile = await hydrateConnectionProfileSecrets(appInstance, appInstance.db, tenant.id, profile);
+    } catch (error) {
+      appInstance.log.error({ event: "commerce_secret_hydrate_failed", tenantId: tenant.id, connectionCode: profile.identity?.connection_code, error: error.message });
+      reply.code(500).send({ ok: false, error: "CONNECTION_SECRET_UNAVAILABLE" });
+      return null;
+    }
 
     const verify = await verifyConnectionRequest(req, profile, rawBody);
     if (!verify.ok) {

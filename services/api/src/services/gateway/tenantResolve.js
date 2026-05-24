@@ -1,3 +1,5 @@
+import { resolveConnectionSecretValue } from "./secretStore.js";
+
 async function resolveTenantByCode(client, code) {
   const r = await client.query(
     `
@@ -11,7 +13,16 @@ async function resolveTenantByCode(client, code) {
   return r.rows[0] || null;
 }
 
-async function resolveProviderSecret(client, tenantId, provider, keyId) {
+async function resolveProviderSecret(source, client, tenantId, provider, keyId) {
+  const vaultedCodes = [provider, `provider:${provider}`].filter(Boolean);
+  const vaultedKinds = ["provider.hmac_secret", "webhook.hmac_secret", "verification.hmac_signature.secret"];
+  for (const connectionCode of vaultedCodes) {
+    for (const kind of vaultedKinds) {
+      const secret = await resolveConnectionSecretValue(source, client, { tenantId, connectionCode, kind });
+      if (secret) return secret;
+    }
+  }
+
   const params = [tenantId, provider];
   const filters = [
     "tenant_id=$1",

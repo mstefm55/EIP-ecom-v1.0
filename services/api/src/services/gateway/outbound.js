@@ -1,4 +1,5 @@
 import { extractProfiles } from "./connectionProfile.js";
+import { hydrateConnectionProfileSecrets } from "./secretStore.js";
 
 function normalizeText(value) {
   return String(value || "").trim();
@@ -159,6 +160,7 @@ async function executeGatewayOutboundRequest(client, ctx, request = {}) {
   }
 
   profile = await resolveOutboundProfile(client, ctx.tenantId, connectionCode);
+  profile = await hydrateConnectionProfileSecrets(ctx?.secretSource || {}, client, ctx.tenantId, profile);
   if ((endpoint && isAbsoluteUrl(endpoint)) || (urlValue && isAbsoluteUrl(urlValue))) {
     throw new Error("GATEWAY_ENDPOINT_RELATIVE_REQUIRED");
   }

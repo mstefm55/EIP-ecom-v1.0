@@ -149,7 +149,7 @@ export default async function ediGatewayRoutes(app) {
       }
 
       const keyId = normalizeText(req.headers["x-key-id"]);
-      const secret = await resolveProviderSecret(app.db, tenant.id, provider, keyId);
+      const secret = await resolveProviderSecret(app, app.db, tenant.id, provider, keyId);
       if (!secret) {
         return reply.code(401).send({ ok: false, error: "PROVIDER_SECRET_MISSING" });
       }
@@ -201,7 +201,7 @@ export default async function ediGatewayRoutes(app) {
       }
 
       const keyId = normalizeText(req.headers["x-key-id"]);
-      const secret = await resolveProviderSecret(app.db, tenant.id, provider, keyId);
+      const secret = await resolveProviderSecret(app, app.db, tenant.id, provider, keyId);
       if (!secret) {
         return reply.code(401).send({ ok: false, error: "PROVIDER_SECRET_MISSING" });
       }
@@ -253,7 +253,7 @@ export default async function ediGatewayRoutes(app) {
       }
 
       const keyId = normalizeText(req.headers["x-key-id"]);
-      const secret = await resolveProviderSecret(app.db, tenant.id, provider, keyId);
+      const secret = await resolveProviderSecret(app, app.db, tenant.id, provider, keyId);
       if (!secret) {
         return reply.code(401).send({ ok: false, error: "PROVIDER_SECRET_MISSING" });
       }

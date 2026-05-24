@@ -23,6 +23,15 @@ const CHANNELS = [
 const MAPPING_MODES = ["passthrough", "mapped"];
 const LOG_LEVELS = ["error", "warn", "info", "debug"];
 const HTTP_METHODS = ["POST", "PUT", "PATCH"];
+const SECRET_FIELD_SPECS = [
+  { kind: "verification.api_key.secret", path: ["verification", "api_key"], key: "secret" },
+  { kind: "verification.hmac_signature.secret", path: ["verification", "hmac_signature"], key: "secret" },
+  { kind: "verification.oauth2_jwt.secret", path: ["verification", "oauth2_jwt"], key: "secret" },
+  { kind: "outbound.auth.secret", path: ["outbound", "auth"], key: "secret" },
+  { kind: "outbound.auth.token", path: ["outbound", "auth"], key: "token" },
+  { kind: "outbound.auth.password", path: ["outbound", "auth"], key: "password" },
+  { kind: "outbound.auth.client_secret", path: ["outbound", "auth"], key: "client_secret" }
+];
 
 function normalizeText(value) {
   return String(value || "").trim();
@@ -60,6 +69,43 @@ function normalizeNumber(value, fallback = null) {
   if (value === null || value === undefined || value === "") return fallback;
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function getNested(obj, path) {
+  return path.reduce((acc, key) => (acc && typeof acc === "object" ? acc[key] : undefined), obj);
+}
+
+function setKeyName(key) {
+  return `${key}_set`;
+}
+
+function refKeyName(key) {
+  return `${key}_ref`;
+}
+
+function versionKeyName(key) {
+  return `${key}_version`;
+}
+
+function rotatedAtKeyName(key) {
+  return `${key}_last_rotated_at`;
+}
+
+function rotatedByKeyName(key) {
+  return `${key}_rotated_by`;
+}
+
+function statusKeyName(key) {
+  return `${key}_status`;
+}
+
+function hasSecretConfigured(container, key) {
+  if (!container || typeof container !== "object") return false;
+  return Boolean(
+    normalizeText(container[key]) ||
+    normalizeText(container[refKeyName(key)]) ||
+    container[setKeyName(key)] === true
+  );
 }
 
 function slugifyCode(value) {
@@ -202,33 +248,13 @@ function extractProfiles(attrs) {
 
 function maskSecrets(profile) {
   const masked = JSON.parse(JSON.stringify(profile));
-  if (masked.verification?.api_key?.secret) {
-    masked.verification.api_key.secret = null;
-    masked.verification.api_key.secret_set = true;
-  }
-  if (masked.verification?.hmac_signature?.secret) {
-    masked.verification.hmac_signature.secret = null;
-    masked.verification.hmac_signature.secret_set = true;
-  }
-  if (masked.verification?.oauth2_jwt?.secret) {
-    masked.verification.oauth2_jwt.secret = null;
-    masked.verification.oauth2_jwt.secret_set = true;
-  }
-  if (masked.outbound?.auth?.secret) {
-    masked.outbound.auth.secret = null;
-    masked.outbound.auth.secret_set = true;
-  }
-  if (masked.outbound?.auth?.token) {
-    masked.outbound.auth.token = null;
-    masked.outbound.auth.token_set = true;
-  }
-  if (masked.outbound?.auth?.password) {
-    masked.outbound.auth.password = null;
-    masked.outbound.auth.password_set = true;
-  }
-  if (masked.outbound?.auth?.client_secret) {
-    masked.outbound.auth.client_secret = null;
-    masked.outbound.auth.client_secret_set = true;
+  for (const spec of SECRET_FIELD_SPECS) {
+    const target = getNested(masked, spec.path);
+    if (!target || typeof target !== "object") continue;
+    if (!hasSecretConfigured(target, spec.key)) continue;
+    target[spec.key] = null;
+    target[setKeyName(spec.key)] = true;
+    delete target[refKeyName(spec.key)];
   }
   return masked;
 }
@@ -237,8 +263,8 @@ function mergeSecrets(existing, incoming) {
   const merged = JSON.parse(JSON.stringify(incoming));
   const existingSafe = existing || {};
 
-  const applySecret = (path, key) => {
-    const parts = path.split(".");
+  const applySecret = (spec) => {
+    const parts = [...spec.path];
     let target = merged;
     let source = existingSafe;
     for (const part of parts) {
@@ -246,18 +272,25 @@ function mergeSecrets(existing, incoming) {
       target = target[part];
       source = source?.[part] || {};
     }
+    const key = spec.key;
     if (!normalizeText(target[key])) {
       if (source?.[key]) target[key] = source[key];
+      for (const metaKey of [
+        refKeyName(key),
+        setKeyName(key),
+        versionKeyName(key),
+        rotatedAtKeyName(key),
+        rotatedByKeyName(key),
+        statusKeyName(key)
+      ]) {
+        if (source?.[metaKey] !== undefined && target[metaKey] === undefined) {
+          target[metaKey] = source[metaKey];
+        }
+      }
     }
   };
 
-  applySecret("verification.api_key", "secret");
-  applySecret("verification.hmac_signature", "secret");
-  applySecret("verification.oauth2_jwt", "secret");
-  applySecret("outbound.auth", "secret");
-  applySecret("outbound.auth", "token");
-  applySecret("outbound.auth", "password");
-  applySecret("outbound.auth", "client_secret");
+  SECRET_FIELD_SPECS.forEach(applySecret);
 
   return merged;
 }
@@ -317,7 +350,7 @@ function validateProfile(profile) {
       if (!normalizeText(verification.api_key?.header_name)) {
         errors.push(`${id}: api_key header_name required`);
       }
-      if (!normalizeText(verification.api_key?.secret)) {
+      if (!hasSecretConfigured(verification.api_key, "secret")) {
         errors.push(`${id}: api_key secret required`);
       }
     }
@@ -334,7 +367,7 @@ function validateProfile(profile) {
       if (!normalizeText(verification.hmac_signature?.encoding)) {
         errors.push(`${id}: hmac encoding required`);
       }
-      if (!normalizeText(verification.hmac_signature?.secret)) {
+      if (!hasSecretConfigured(verification.hmac_signature, "secret")) {
         errors.push(`${id}: hmac secret required`);
       }
       const skew = Number(verification.hmac_signature?.max_skew_sec);
@@ -352,7 +385,7 @@ function validateProfile(profile) {
       if (!normalizeText(verification.oauth2_jwt?.audience)) {
         errors.push(`${id}: jwt audience required`);
       }
-      if (!normalizeText(verification.oauth2_jwt?.jwks_url) && !normalizeText(verification.oauth2_jwt?.secret)) {
+      if (!normalizeText(verification.oauth2_jwt?.jwks_url) && !hasSecretConfigured(verification.oauth2_jwt, "secret")) {
         errors.push(`${id}: jwt requires jwks_url or shared secret`);
       }
       const jwtSkew = Number(verification.oauth2_jwt?.max_skew_sec);
@@ -392,22 +425,22 @@ function validateProfile(profile) {
     if (!AUTH_MODES.includes(outbound.auth_mode)) errors.push(`${id}: auth_mode invalid`);
     if (outbound.auth_mode === "api_key_header") {
       if (!normalizeText(outbound.auth?.header_name)) errors.push(`${id}: api key header_name required`);
-      if (!normalizeText(outbound.auth?.secret)) errors.push(`${id}: api key secret required`);
+      if (!hasSecretConfigured(outbound.auth, "secret")) errors.push(`${id}: api key secret required`);
     }
     if (outbound.auth_mode === "api_key_query") {
       if (!normalizeText(outbound.auth?.query_param_name)) errors.push(`${id}: api key query_param_name required`);
-      if (!normalizeText(outbound.auth?.secret)) errors.push(`${id}: api key secret required`);
+      if (!hasSecretConfigured(outbound.auth, "secret")) errors.push(`${id}: api key secret required`);
     }
     if (outbound.auth_mode === "bearer_token") {
-      if (!normalizeText(outbound.auth?.token)) errors.push(`${id}: bearer token required`);
+      if (!hasSecretConfigured(outbound.auth, "token")) errors.push(`${id}: bearer token required`);
     }
     if (outbound.auth_mode === "basic") {
       if (!normalizeText(outbound.auth?.username)) errors.push(`${id}: basic username required`);
-      if (!normalizeText(outbound.auth?.password)) errors.push(`${id}: basic password required`);
+      if (!hasSecretConfigured(outbound.auth, "password")) errors.push(`${id}: basic password required`);
     }
     if (outbound.auth_mode === "oauth2_client_credentials") {
       if (!normalizeText(outbound.auth?.client_id)) errors.push(`${id}: oauth client_id required`);
-      if (!normalizeText(outbound.auth?.client_secret)) errors.push(`${id}: oauth client_secret required`);
+      if (!hasSecretConfigured(outbound.auth, "client_secret")) errors.push(`${id}: oauth client_secret required`);
       if (!normalizeText(outbound.auth?.token_url)) errors.push(`${id}: oauth token_url required`);
     }
   }
@@ -447,6 +480,8 @@ export {
   maskSecrets,
   mergeSecrets,
   validateProfiles,
+  SECRET_FIELD_SPECS,
+  hasSecretConfigured,
   normalizeArray,
   normalizeJson
 };

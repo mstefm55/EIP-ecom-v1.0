@@ -32,6 +32,8 @@ export const envSchema = {
     EIP_ORIGIN_REQUIRED: { type: "boolean", default: false },
     EIP_FETCH_METADATA_GUARD: { type: "boolean", default: true },
     OWNER_TENANT_CODE: { type: "string", default: "" },
+    SECRET_ENCRYPTION_KEY: { type: "string", default: "" },
+    SECRET_ENCRYPTION_KEY_ID: { type: "string", default: "default" },
     API_KEY_PEPPER: { type: "string", minLength: 1 },
     ACCESS_GRANT_PEPPER: { type: "string" },
     CSRF_PEPPER: { type: "string", minLength: 1 },
