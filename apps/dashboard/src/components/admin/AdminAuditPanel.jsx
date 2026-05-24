@@ -1,6 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, FileClock, RefreshCw, ShieldAlert, ShieldCheck } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { AlertTriangle, ChevronLeft, ChevronRight, FileClock, Filter, RefreshCw, ShieldAlert, ShieldCheck } from "lucide-react";
 import { apiFetch } from "../../services/apiClient";
+
+const PAGE_SIZE = 25;
+const DEFAULT_FILTERS = {
+  event_type: "",
+  tenant: "",
+  outcome: "",
+  severity: "",
+};
 
 function formatDate(value) {
   if (!value) return "-";
@@ -17,23 +25,57 @@ export default function AdminAuditPanel() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [windowKey, setWindowKey] = useState("24h");
+  const [page, setPage] = useState(1);
+  const [filters, setFilters] = useState(DEFAULT_FILTERS);
+  const [draftFilters, setDraftFilters] = useState(DEFAULT_FILTERS);
 
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const result = await apiFetch("/api/eip/admin/security/ops?window=24h");
+      const params = new URLSearchParams({
+        window: windowKey,
+        page: String(page),
+        page_size: String(PAGE_SIZE),
+      });
+      Object.entries(filters).forEach(([key, value]) => {
+        const text = String(value || "").trim();
+        if (text) params.set(key, text);
+      });
+      const result = await apiFetch(`/api/eip/admin/security/ops?${params.toString()}`);
       setData(result);
     } catch (err) {
       setError(err);
     } finally {
       setLoading(false);
     }
-  }
+  }, [filters, page, windowKey]);
 
   useEffect(() => {
     load();
-  }, []);
+  }, [load]);
+
+  function updateDraftFilter(key, value) {
+    setDraftFilters((current) => ({ ...current, [key]: value }));
+  }
+
+  function applyFilters(event) {
+    event.preventDefault();
+    setPage(1);
+    setFilters({
+      event_type: draftFilters.event_type.trim(),
+      tenant: draftFilters.tenant.trim(),
+      outcome: draftFilters.outcome,
+      severity: draftFilters.severity,
+    });
+  }
+
+  function clearFilters() {
+    setPage(1);
+    setDraftFilters(DEFAULT_FILTERS);
+    setFilters(DEFAULT_FILTERS);
+  }
 
   const metrics = useMemo(() => {
     const summary = data?.summary || {};
@@ -50,6 +92,15 @@ export default function AdminAuditPanel() {
   const topFailures = Array.isArray(data?.top_failures) ? data.top_failures : [];
   const recentEvents = Array.isArray(data?.recent_events) ? data.recent_events : [];
   const connectionHealth = Array.isArray(data?.connection_health) ? data.connection_health : [];
+  const pagination = data?.recent_events_pagination || {
+    page,
+    page_size: PAGE_SIZE,
+    total: recentEvents.length,
+    total_pages: recentEvents.length > 0 ? 1 : 0,
+  };
+  const activeFilterCount = Object.values(filters).filter(Boolean).length;
+  const canGoPrevious = pagination.page > 1 && !loading;
+  const canGoNext = pagination.total_pages > pagination.page && !loading;
 
   return (
     <section className="glass-panel p-6">
@@ -60,15 +111,29 @@ export default function AdminAuditPanel() {
             Security operations, connection health, and recent anomalies.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={load}
-          disabled={loading}
-          className="flex items-center gap-2 rounded-full border border-ink-200/70 bg-white/70 px-4 py-2 text-xs font-semibold uppercase tracking-[0.25em] text-ink-500 hover:bg-white disabled:opacity-60"
-        >
-          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-          Refresh
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={windowKey}
+            onChange={(event) => {
+              setWindowKey(event.target.value);
+              setPage(1);
+            }}
+            className="rounded-full border border-ink-200/70 bg-white/70 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-ink-500 outline-none hover:bg-white"
+          >
+            <option value="24h">24h</option>
+            <option value="7d">7d</option>
+            <option value="30d">30d</option>
+          </select>
+          <button
+            type="button"
+            onClick={load}
+            disabled={loading}
+            className="flex items-center gap-2 rounded-full border border-ink-200/70 bg-white/70 px-4 py-2 text-xs font-semibold uppercase tracking-[0.25em] text-ink-500 hover:bg-white disabled:opacity-60"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {error ? (
@@ -153,13 +218,95 @@ export default function AdminAuditPanel() {
       </div>
 
       <div className="mt-6 rounded-2xl border border-white/70 bg-white/80 p-4 shadow-soft">
-        <div className="flex items-center gap-2 text-sm font-semibold text-ink-900">
-          <FileClock className="h-4 w-4 text-ink-500" />
-          Recent events
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-sm font-semibold text-ink-900">
+            <FileClock className="h-4 w-4 text-ink-500" />
+            Recent events
+            {activeFilterCount > 0 ? (
+              <span className="rounded-full bg-indigo-50 px-2 py-1 text-xs font-semibold text-indigo-700">
+                {activeFilterCount} filtered
+              </span>
+            ) : null}
+          </div>
+          <div className="text-xs font-semibold uppercase tracking-[0.16em] text-ink-400">
+            {pagination.total ?? 0} events
+          </div>
         </div>
+
+        <form onSubmit={applyFilters} className="mt-4 grid gap-3 lg:grid-cols-[1.1fr_1fr_0.8fr_0.8fr_auto_auto]">
+          <label className="block">
+            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-ink-400">Event type</span>
+            <input
+              value={draftFilters.event_type}
+              onChange={(event) => updateDraftFilter("event_type", event.target.value)}
+              className="mt-1 w-full rounded-xl border border-ink-100 bg-white/80 px-3 py-2 text-sm text-ink-700 outline-none focus:border-indigo-300"
+              placeholder="gateway.verification_failed"
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-ink-400">Tenant</span>
+            <input
+              value={draftFilters.tenant}
+              onChange={(event) => updateDraftFilter("tenant", event.target.value)}
+              className="mt-1 w-full rounded-xl border border-ink-100 bg-white/80 px-3 py-2 text-sm text-ink-700 outline-none focus:border-indigo-300"
+              placeholder="tenant code or id"
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-ink-400">Outcome</span>
+            <select
+              value={draftFilters.outcome}
+              onChange={(event) => updateDraftFilter("outcome", event.target.value)}
+              className="mt-1 w-full rounded-xl border border-ink-100 bg-white/80 px-3 py-2 text-sm text-ink-700 outline-none focus:border-indigo-300"
+            >
+              <option value="">All</option>
+              <option value="success">Success</option>
+              <option value="failure">Failure</option>
+              <option value="denied">Denied</option>
+              <option value="rejected">Rejected</option>
+              <option value="blocked">Blocked</option>
+              <option value="error">Error</option>
+              <option value="observed">Observed</option>
+            </select>
+          </label>
+          <label className="block">
+            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-ink-400">Severity</span>
+            <select
+              value={draftFilters.severity}
+              onChange={(event) => updateDraftFilter("severity", event.target.value)}
+              className="mt-1 w-full rounded-xl border border-ink-100 bg-white/80 px-3 py-2 text-sm text-ink-700 outline-none focus:border-indigo-300"
+            >
+              <option value="">All</option>
+              <option value="debug">Debug</option>
+              <option value="info">Info</option>
+              <option value="warning">Warning</option>
+              <option value="error">Error</option>
+              <option value="critical">Critical</option>
+            </select>
+          </label>
+          <button
+            type="submit"
+            className="mt-5 flex items-center justify-center gap-2 rounded-xl bg-ink-900 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-white hover:bg-ink-800"
+          >
+            <Filter className="h-4 w-4" />
+            Apply
+          </button>
+          <button
+            type="button"
+            onClick={clearFilters}
+            className="mt-5 rounded-xl border border-ink-200 bg-white/70 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-ink-500 hover:bg-white"
+          >
+            Clear
+          </button>
+        </form>
+
         <div className="mt-4 space-y-3">
           {recentEvents.length === 0 && !loading ? (
-            <p className="text-sm text-ink-500">No security events recorded in the selected window.</p>
+            <p className="text-sm text-ink-500">
+              {activeFilterCount > 0
+                ? "No security events match the selected filters."
+                : "No security events recorded in the selected window."}
+            </p>
           ) : null}
           {recentEvents.map((event) => (
             <div key={event.id} className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-ink-100 bg-white/70 px-3 py-3">
@@ -176,6 +323,34 @@ export default function AdminAuditPanel() {
               </div>
             </div>
           ))}
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-ink-100 pt-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-ink-400">
+            {pagination.total_pages > 0
+              ? `Page ${pagination.page} of ${pagination.total_pages}`
+              : "No pages"}
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setPage(Math.max(1, pagination.page - 1))}
+              disabled={!canGoPrevious}
+              className="flex items-center gap-2 rounded-full border border-ink-200 bg-white/80 px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-ink-500 hover:bg-white disabled:opacity-50"
+            >
+              <ChevronLeft className="h-4 w-4" />
+              Previous
+            </button>
+            <button
+              type="button"
+              onClick={() => setPage(pagination.page + 1)}
+              disabled={!canGoNext}
+              className="flex items-center gap-2 rounded-full border border-ink-200 bg-white/80 px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-ink-500 hover:bg-white disabled:opacity-50"
+            >
+              Next
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       </div>
     </section>

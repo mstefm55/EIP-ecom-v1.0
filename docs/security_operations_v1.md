@@ -135,13 +135,45 @@ Supported windows:
 - `7d`
 - `30d`
 
+Recent event pagination and lightweight filters:
+
+| Query param | Purpose |
+| --- | --- |
+| `page` | 1-based page for `recent_events`; defaults to `1` |
+| `page_size` | Recent events per page; defaults to `25`, max `100` |
+| `event_type` | Exact event type filter for recent events |
+| `tenant` | Tenant id/code/name search for recent events |
+| `outcome` | One of `success`, `failure`, `denied`, `rejected`, `blocked`, `error`, `observed` |
+| `severity` | One of `debug`, `info`, `warning`, `error`, `critical` |
+
 The route returns:
 
 - summary counts
 - top security failures
 - per-tenant/per-connection health
 - recent events
+- recent event pagination metadata
 - recommended alert thresholds
+
+Recent event response shape:
+
+```json
+{
+  "recent_events": [],
+  "recent_events_pagination": {
+    "page": 1,
+    "page_size": 25,
+    "total": 0,
+    "total_pages": 0
+  },
+  "recent_event_filters": {
+    "event_type": "",
+    "tenant": "",
+    "outcome": "",
+    "severity": ""
+  }
+}
+```
 
 Dashboard location:
 

@@ -8,6 +8,67 @@ const RANGE_PRESETS = {
   "30d": { hours: 24 * 30, bucketHours: 72, label: "30d" },
 };
 
+const RECENT_EVENT_PAGE_SIZE_DEFAULT = 25;
+const RECENT_EVENT_PAGE_SIZE_MAX = 100;
+const SECURITY_EVENT_OUTCOMES = new Set(["success", "failure", "denied", "rejected", "blocked", "error", "observed"]);
+const SECURITY_EVENT_SEVERITIES = new Set(["debug", "info", "warning", "error", "critical"]);
+
+function normalizeQueryText(value, maxLength = 120) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  return text.slice(0, maxLength);
+}
+
+function normalizeSetValue(value, allowedValues) {
+  const text = normalizeQueryText(value, 40).toLowerCase();
+  return allowedValues.has(text) ? text : "";
+}
+
+function parsePositiveInt(value, { fallback, min = 1, max = Number.MAX_SAFE_INTEGER }) {
+  const parsed = Number.parseInt(String(value || ""), 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+}
+
+function appendQueryParam(params, value) {
+  params.push(value);
+  return `$${params.length}`;
+}
+
+function normalizeRecentEventFilters(query = {}) {
+  return {
+    event_type: normalizeQueryText(query.event_type),
+    tenant: normalizeQueryText(query.tenant),
+    outcome: normalizeSetValue(query.outcome, SECURITY_EVENT_OUTCOMES),
+    severity: normalizeSetValue(query.severity, SECURITY_EVENT_SEVERITIES)
+  };
+}
+
+function buildRecentEventFilterSql(filters, params) {
+  const clauses = [];
+
+  if (filters.event_type) {
+    clauses.push(`se.event_type = ${appendQueryParam(params, filters.event_type)}`);
+  }
+
+  if (filters.tenant) {
+    const exact = appendQueryParam(params, filters.tenant);
+    const pattern = appendQueryParam(params, `%${filters.tenant}%`);
+    clauses.push(`(se.tenant_id::text = ${exact} OR t.code ILIKE ${pattern} OR t.name ILIKE ${pattern})`);
+  }
+
+  if (filters.outcome) {
+    clauses.push(`se.outcome = ${appendQueryParam(params, filters.outcome)}`);
+  }
+
+  if (filters.severity) {
+    clauses.push(`se.severity = ${appendQueryParam(params, filters.severity)}`);
+  }
+
+  if (clauses.length === 0) return "";
+  return `AND ${clauses.join("\n        AND ")}`;
+}
+
 function formatCompact(value) {
   const n = Number(value || 0);
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -93,6 +154,16 @@ export default async function adminMonitoringRoutes(app) {
     const allowed = await canReadSecurityOps(app, session.session);
     if (!allowed) return reply.code(403).send({ ok: false, error: "FORBIDDEN" });
 
+    const windowKey = String(req.query?.window || req.query?.range || "24h").toLowerCase();
+    const preset = RANGE_PRESETS[windowKey] || RANGE_PRESETS["24h"];
+    const requestedPage = parsePositiveInt(req.query?.page, { fallback: 1, min: 1 });
+    const pageSize = parsePositiveInt(req.query?.page_size, {
+      fallback: RECENT_EVENT_PAGE_SIZE_DEFAULT,
+      min: 1,
+      max: RECENT_EVENT_PAGE_SIZE_MAX
+    });
+    const recentEventFilters = normalizeRecentEventFilters(req.query || {});
+
     const exists = await securityEventTableExists(app);
     if (!exists) {
       return reply.send({
@@ -102,12 +173,17 @@ export default async function adminMonitoringRoutes(app) {
         summary: {},
         connection_health: [],
         top_failures: [],
-        recent_events: []
+        recent_events: [],
+        recent_events_pagination: {
+          page: requestedPage,
+          page_size: pageSize,
+          total: 0,
+          total_pages: 0
+        },
+        recent_event_filters: recentEventFilters
       });
     }
 
-    const windowKey = String(req.query?.window || req.query?.range || "24h").toLowerCase();
-    const preset = RANGE_PRESETS[windowKey] || RANGE_PRESETS["24h"];
     const now = new Date();
     const from = new Date(now.getTime() - preset.hours * 60 * 60 * 1000);
     const scope = await buildSecurityScope(app, session.session);
@@ -179,6 +255,25 @@ export default async function adminMonitoringRoutes(app) {
       params
     );
 
+    const recentEventParams = [from, ...scope.params];
+    const recentEventFilterSql = buildRecentEventFilterSql(recentEventFilters, recentEventParams);
+    const recentEventsCountRes = await app.db.query(
+      `
+      SELECT count(*)::int AS total
+      FROM eip_core.security_event se
+      LEFT JOIN eip_core.tenant t ON t.id = se.tenant_id
+      WHERE se.occurred_at >= $1
+      ${scope.where}
+      ${recentEventFilterSql}
+      `,
+      recentEventParams
+    );
+    const recentEventsTotal = Number(recentEventsCountRes.rows[0]?.total || 0);
+    const recentEventsTotalPages = recentEventsTotal > 0 ? Math.ceil(recentEventsTotal / pageSize) : 0;
+    const page = recentEventsTotalPages > 0 ? Math.min(requestedPage, recentEventsTotalPages) : 1;
+    const offset = (page - 1) * pageSize;
+    const limitPlaceholder = appendQueryParam(recentEventParams, pageSize);
+    const offsetPlaceholder = appendQueryParam(recentEventParams, offset);
     const recentEventsRes = await app.db.query(
       `
       SELECT
@@ -205,10 +300,12 @@ export default async function adminMonitoringRoutes(app) {
       LEFT JOIN eip_core.tenant t ON t.id = se.tenant_id
       WHERE se.occurred_at >= $1
       ${scope.where}
+      ${recentEventFilterSql}
       ORDER BY se.occurred_at DESC
-      LIMIT 50
+      LIMIT ${limitPlaceholder}
+      OFFSET ${offsetPlaceholder}
       `,
-      params
+      recentEventParams
     );
 
     const summary = summaryRes.rows[0] || {};
@@ -221,6 +318,13 @@ export default async function adminMonitoringRoutes(app) {
       connection_health: connectionHealthRes.rows || [],
       top_failures: topFailuresRes.rows || [],
       recent_events: recentEventsRes.rows || [],
+      recent_events_pagination: {
+        page,
+        page_size: pageSize,
+        total: recentEventsTotal,
+        total_pages: recentEventsTotalPages
+      },
+      recent_event_filters: recentEventFilters,
       alert_thresholds: {
         auth_failures_15m: 10,
         gateway_verification_failures_15m: 10,
