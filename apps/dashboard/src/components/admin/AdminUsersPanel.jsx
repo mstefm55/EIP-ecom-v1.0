@@ -135,8 +135,8 @@ export default function AdminUsersPanel({ node }) {
 
   const profileRoles = useMemo(() => roles.filter((role) => role.is_system), [roles]);
   const accessRoles = useMemo(() => roles.filter((role) => !role.is_system), [roles]);
-  const profileRoleOptions = profileRoles.length ? profileRoles : roles;
-  const accessRoleOptions = accessRoles.length ? accessRoles : roles;
+  const profileRoleOptions = profileRoles;
+  const accessRoleOptions = accessRoles;
   const permissionOptions = permissions || [];
 
   const loadTenants = async (query) => {
@@ -668,7 +668,7 @@ export default function AdminUsersPanel({ node }) {
                 />
               </label>
               <label className="text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-ink-400">
-                Profile (optional)
+                Profile Type (optional)
                 <select
                   value={createForm.profileRoleId}
                   onChange={(event) =>
@@ -685,7 +685,7 @@ export default function AdminUsersPanel({ node }) {
                 </select>
               </label>
               <label className="text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-ink-400">
-                Access type (optional)
+                Access Type (optional)
                 <select
                   value={createForm.accessRoleId}
                   onChange={(event) =>
@@ -762,7 +762,7 @@ export default function AdminUsersPanel({ node }) {
               </label>
 
               <label className="text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-ink-400">
-                Profile
+                Profile Type
                 <select
                   value={assignForm.profileRoleId}
                   onChange={(event) =>
@@ -780,7 +780,7 @@ export default function AdminUsersPanel({ node }) {
               </label>
 
               <label className="text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-ink-400">
-                Access type
+                Access Type
                 <select
                   value={assignForm.accessRoleId}
                   onChange={(event) =>
