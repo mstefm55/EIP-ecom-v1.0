@@ -33,8 +33,9 @@ export default function AuthLoginCard({ node, ctx }) {
     totpEvent,
     totpLoginAction,
     totpLoginEvent,
-    passkeyLoginAction,
-    passkeyLoginEvent,
+    passkeyLoginAction = "Use passkey",
+    passkeyLoginEvent = "passkey-login",
+    hidePasskeyLogin = false,
     showTotp,
     footnote,
     modalLabel,
@@ -52,6 +53,10 @@ export default function AuthLoginCard({ node, ctx }) {
   const orgStatus = ctx?.auth?.orgStatus;
   const primarySuccessModal = node.props?.primarySuccessModal;
   const organisationValue = ctx?.auth?.form?.organisation ?? "";
+  const showPasskeyLogin =
+    hidePasskeyLogin !== true &&
+    typeof ctx?.auth?.passkeyLogin === "function" &&
+    Boolean(passkeyLoginAction);
 
   useEffect(() => {
     if (!organisationValue && orgOptions.length) {
@@ -212,7 +217,7 @@ export default function AuthLoginCard({ node, ctx }) {
             {totpLoginAction}
           </button>
         ) : null}
-        {passkeyLoginAction ? (
+        {showPasskeyLogin ? (
           <button
             type="button"
             onClick={() => {
