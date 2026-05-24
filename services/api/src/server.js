@@ -44,8 +44,10 @@ import uiSurfaceRoutes from "./routes/ui_surface.js";
 import { sha256Hex, timingSafeEqual } from "./auth/crypto.js";
 import { evaluateStepUp } from "./auth/sessionPolicy.js";
 import { getAuthCookie } from "./lib/authCookies.js";
+import { resolveEipSurfaceAccess } from "./lib/surfaceAccess.js";
 import { advanceInstance, createInstance, findActiveInstance, updateTaskStatus } from "./core/core_process_engine.js";
 import { verifyAssetToken } from "./services/assets/signing.js";
+import { sessionCanAccessAssetTenant } from "./services/assets/access.js";
 import { syncAllTenantMarketplaceFx } from "./services/fx/marketFxSync.js";
 
 const DEFAULT_BODY_LIMIT = 1024 * 1024; // 1 MiB
@@ -424,9 +426,21 @@ async function buildServer() {
 
     const s = req.session || (await app.loadSession(req));
     if (s && String(s.realm || REALMS.EIP) === REALMS.EIP) {
-      req.session = s;
-      req.realm = s.realm;
-      return;
+      const assetTenantId = match[1];
+      let access = null;
+      if (!sessionCanAccessAssetTenant(s, assetTenantId)) {
+        try {
+          access = await resolveEipSurfaceAccess(app, s);
+        } catch (error) {
+          app.log.warn({ event: "asset_surface_access_check_failed", sessionId: s.id, error: error.message });
+        }
+      }
+      if (sessionCanAccessAssetTenant(s, assetTenantId, access)) {
+        req.session = s;
+        req.realm = s.realm;
+        return;
+      }
+      return reply.code(403).send({ ok: false, error: "ASSET_TENANT_FORBIDDEN" });
     }
 
     reply.code(403).send({ ok: false, error: hasToken ? "ASSET_TOKEN_INVALID" : "ASSET_TOKEN_REQUIRED" });

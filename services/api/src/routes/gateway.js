@@ -17,6 +17,7 @@ import {
   revokeConnectionSecrets,
   vaultConnectionProfileSecrets
 } from "../services/gateway/secretStore.js";
+import { resolveEipSurfaceAccess } from "../lib/surfaceAccess.js";
 
 function normalizeText(value) {
   return String(value || "").trim();
@@ -85,6 +86,27 @@ async function requirePrivilegedStepUp(app, req, reply) {
   return step;
 }
 
+async function resolveConnectionControlScope(app, session) {
+  const access = await resolveEipSurfaceAccess(app, session);
+  return {
+    ownerAdmin: access.is_owner_admin_session === true,
+    defaultSurface: access.default_surface,
+    allowedSurfaces: access.allowed_surfaces || []
+  };
+}
+
+async function requireConnectionTargetAccess(app, session, targetTenantId, reply) {
+  if (String(session.tenant_id) === String(targetTenantId)) {
+    return { ok: true, ownerAdmin: false };
+  }
+
+  const scope = await resolveConnectionControlScope(app, session);
+  if (scope.ownerAdmin) return { ok: true, ownerAdmin: true };
+
+  reply.code(403).send({ ok: false, error: "TENANT_SCOPE_FORBIDDEN" });
+  return null;
+}
+
 export default async function gatewayRoutes(app) {
   app.get("/gateway/bootstrap", async (req, reply) => {
     const session = await requireSessionWithCsrf(app, req, reply);
@@ -104,6 +126,10 @@ export default async function gatewayRoutes(app) {
     const allowed = await hasPermission(app, s.session.tenant_id, s.session.identity_id, "tenant.connection.read");
     if (!allowed) return reply.code(403).send({ ok: false, error: "FORBIDDEN" });
 
+    const scope = await resolveConnectionControlScope(app, s.session);
+    const params = scope.ownerAdmin ? [] : [s.session.tenant_id];
+    const tenantFilter = scope.ownerAdmin ? "" : "WHERE t.id = $1::uuid";
+
     const r = await app.db.query(
       `
       SELECT
@@ -118,9 +144,11 @@ export default async function gatewayRoutes(app) {
       LEFT JOIN eip_core.info_record ir
         ON ir.tenant_id = t.id
        AND ir.record_type = 'gateway_handshake'
+      ${tenantFilter}
       GROUP BY t.id
       ORDER BY t.created_at DESC
-      `
+      `,
+      params
     );
 
     const items = r.rows.map((row) => {
@@ -171,6 +199,8 @@ export default async function gatewayRoutes(app) {
     if (!allowed) return reply.code(403).send({ ok: false, error: "FORBIDDEN" });
 
     const tenantId = req.params.tenantId;
+    const target = await requireConnectionTargetAccess(app, s.session, tenantId, reply);
+    if (!target) return;
 
     const tenantRes = await app.db.query(
       `
@@ -249,6 +279,9 @@ export default async function gatewayRoutes(app) {
     if (!allowed) return reply.code(403).send({ ok: false, error: "FORBIDDEN" });
 
     const tenantId = req.params.tenantId;
+    const target = await requireConnectionTargetAccess(app, s.session, tenantId, reply);
+    if (!target) return;
+
     const incomingConnections = Array.isArray(req.body?.connections) ? req.body.connections : [];
 
     const client = await app.db.connect();
@@ -360,6 +393,9 @@ export default async function gatewayRoutes(app) {
     if (!allowed) return reply.code(403).send({ ok: false, error: "FORBIDDEN" });
 
     const tenantId = req.params.tenantId;
+    const target = await requireConnectionTargetAccess(app, s.session, tenantId, reply);
+    if (!target) return;
+
     const connectionCode = normalizeText(req.params.connectionCode);
     const requestedKinds = Array.isArray(req.body?.secret_kinds)
       ? req.body.secret_kinds.map(normalizeText).filter(Boolean)
@@ -440,6 +476,9 @@ export default async function gatewayRoutes(app) {
     if (!allowed) return reply.code(403).send({ ok: false, error: "FORBIDDEN" });
 
     const tenantId = req.params.tenantId;
+    const target = await requireConnectionTargetAccess(app, s.session, tenantId, reply);
+    if (!target) return;
+
     const connectionCode = normalizeText(req.body?.connection_code);
     if (!connectionCode) return reply.code(400).send({ ok: false, error: "MISSING_CONNECTION_CODE" });
 
@@ -587,6 +626,9 @@ export default async function gatewayRoutes(app) {
     if (!allowed) return reply.code(403).send({ ok: false, error: "FORBIDDEN" });
 
     const tenantId = req.params.tenantId;
+    const target = await requireConnectionTargetAccess(app, s.session, tenantId, reply);
+    if (!target) return;
+
     const connectionCode = normalizeText(req.body?.connection_code);
     if (!connectionCode) return reply.code(400).send({ ok: false, error: "MISSING_CONNECTION_CODE" });
 
@@ -665,6 +707,9 @@ export default async function gatewayRoutes(app) {
     if (!allowed) return reply.code(403).send({ ok: false, error: "FORBIDDEN" });
 
     const tenantId = req.params.tenantId;
+    const target = await requireConnectionTargetAccess(app, s.session, tenantId, reply);
+    if (!target) return;
+
     const label = normalizeText(req.body?.label || "plug-play");
     const expiresInDays = Number(req.body?.expires_in_days || 365);
     const setPrimary = Boolean(req.body?.set_primary ?? true);
@@ -724,6 +769,9 @@ export default async function gatewayRoutes(app) {
     if (!allowed) return reply.code(403).send({ ok: false, error: "FORBIDDEN" });
 
     const tenantId = req.params.tenantId;
+    const target = await requireConnectionTargetAccess(app, s.session, tenantId, reply);
+    if (!target) return;
+
     const keyId = req.params.keyId;
 
     await app.db.query(
@@ -774,6 +822,9 @@ export default async function gatewayRoutes(app) {
     if (!allowed) return reply.code(403).send({ ok: false, error: "FORBIDDEN" });
 
     const tenantId = req.params.tenantId;
+    const target = await requireConnectionTargetAccess(app, s.session, tenantId, reply);
+    if (!target) return;
+
     const keyId = req.params.keyId;
     const label = normalizeText(req.body?.label || "plug-play");
 
