@@ -7,8 +7,8 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "test": "node --test",
-    "test:gateway-verification": "node --test test/gateway_verification.test.mjs test/public_gateway_runtime.test.mjs",
-    "test:security": "node --test test/auth_cookie_policy.test.mjs test/session_policy.test.mjs test/passkey_config.test.mjs test/surface_access.test.mjs test/gateway_verification.test.mjs test/public_gateway_runtime.test.mjs test/tenant_isolation.test.mjs test/secret_store.test.mjs test/security_audit.test.mjs test/gateway_api_keys.test.mjs test/admin_security_ops.test.mjs",
+    "test:gateway-verification": "node --test test/gateway_verification.test.mjs test/public_gateway_runtime.test.mjs test/public_commerce_hardening.test.mjs",
+    "test:security": "node --test test/auth_cookie_policy.test.mjs test/session_policy.test.mjs test/passkey_config.test.mjs test/surface_access.test.mjs test/gateway_verification.test.mjs test/public_gateway_runtime.test.mjs test/public_commerce_hardening.test.mjs test/tenant_isolation.test.mjs test/secret_store.test.mjs test/security_audit.test.mjs test/gateway_api_keys.test.mjs test/admin_security_ops.test.mjs test/admin_db_explorer_security.test.mjs",
     "migrate": "node scripts/migrate.mjs",
     "secrets:migrate": "node scripts/migrate_connection_secrets.mjs",
     "reseed:post-migration": "node scripts/reseed_post_migration.mjs",

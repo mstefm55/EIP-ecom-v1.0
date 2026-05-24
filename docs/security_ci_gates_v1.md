@@ -48,6 +48,8 @@ npm --workspace dashboard run build
 - passkey RP/origin serialization safety
 - owner/admin versus tenant surface partitioning
 - public gateway verification modes and negative paths
+- public commerce production verification/origin/JWT hardening
+- public gateway and public commerce query-string API key rejection
 - raw body HMAC validation
 - timestamp, origin, replay/idempotency, suffix/profile rejection
 - tenant and connection isolation/BOLA checks
@@ -56,6 +58,8 @@ npm --workspace dashboard run build
 - security audit event redaction and persistence
 - connection API key create/rotate/revoke leakage checks
 - Admin > Audit pagination/filter regressions
+- Admin > Audit production origin/Fetch Metadata guard
+- Admin DB explorer production feature flag, owner/admin guard, origin guard, and table/export step-up requirement
 
 ## Dependency Audit Baseline
 

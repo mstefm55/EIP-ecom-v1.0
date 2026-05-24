@@ -325,6 +325,16 @@ test("public gateway API key cannot select another tenant's connection and rejec
   const app = await buildPublicGatewayApp();
   t.after(() => app.close());
 
+  const queryKey = await app.inject({
+    method: "GET",
+    url: "/api/public/gateway/bootstrap?connection_code=tenant-a-store&api_key=tenant-a-key",
+    headers: {
+      origin: "https://tenant-a.test"
+    }
+  });
+  assert.equal(queryKey.statusCode, 401);
+  assert.equal(queryKey.json().error, "QUERY_API_KEY_REJECTED");
+
   const badKey = await app.inject({
     method: "GET",
     url: "/api/public/gateway/bootstrap?connection_code=tenant-a-store",

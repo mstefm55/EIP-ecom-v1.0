@@ -1,6 +1,7 @@
 // services/api/src/routes/admin_monitoring.js
 import { hasPermission } from "../auth/perm.js";
 import { resolveEipSurfaceAccess } from "../lib/surfaceAccess.js";
+import { auditSecurityEvent } from "../lib/securityAudit.js";
 
 const RANGE_PRESETS = {
   "24h": { hours: 24, bucketHours: 3, label: "24h" },
@@ -17,6 +18,52 @@ function normalizeQueryText(value, maxLength = 120) {
   const text = String(value || "").trim();
   if (!text) return "";
   return text.slice(0, maxLength);
+}
+
+function normalizeOrigin(value) {
+  const raw = normalizeQueryText(value, 512);
+  if (!raw) return "";
+  try {
+    return new URL(raw).origin.toLowerCase();
+  } catch {
+    return raw.toLowerCase().replace(/\/$/, "");
+  }
+}
+
+function allowedEipOrigins(app) {
+  if (Array.isArray(app.EIP_ORIGINS)) {
+    return app.EIP_ORIGINS.map(normalizeOrigin).filter(Boolean);
+  }
+  return normalizeQueryText(app.config?.CORS_ORIGIN, 2048)
+    .split(",")
+    .map(normalizeOrigin)
+    .filter(Boolean);
+}
+
+function requestOrigin(req) {
+  const origin = normalizeOrigin(req.headers.origin);
+  if (origin) return origin;
+  return normalizeOrigin(req.headers.referer || req.headers.referrer);
+}
+
+function validateSensitiveReadGuard(app, req) {
+  const origin = requestOrigin(req);
+  const allowed = allowedEipOrigins(app);
+  const fetchSite = normalizeQueryText(req.headers["sec-fetch-site"]).toLowerCase();
+  const fetchMode = normalizeQueryText(req.headers["sec-fetch-mode"]).toLowerCase();
+  const requiresOrigin =
+    String(app.config?.NODE_ENV || "").toLowerCase() === "production" ||
+    app.config?.EIP_ORIGIN_REQUIRED === true;
+
+  if (fetchSite === "cross-site") return { ok: false, status: 403, error: "ORIGIN_NOT_ALLOWED" };
+  if (fetchMode === "navigate") return { ok: false, status: 403, error: "BROWSER_NAVIGATION_BLOCKED" };
+  if (!origin) {
+    return requiresOrigin
+      ? { ok: false, status: 403, error: "ORIGIN_REQUIRED" }
+      : { ok: true };
+  }
+  if (!allowed.includes(origin)) return { ok: false, status: 403, error: "ORIGIN_NOT_ALLOWED" };
+  return { ok: true };
 }
 
 function normalizeSetValue(value, allowedValues) {
@@ -148,6 +195,26 @@ async function buildSecurityScope(app, session) {
 
 export default async function adminMonitoringRoutes(app) {
   app.get("/admin/security/ops", async (req, reply) => {
+    const readGuard = validateSensitiveReadGuard(app, req);
+    if (!readGuard.ok) {
+      auditSecurityEvent(app, "admin_security_ops.browser_guard_rejected", {
+        category: "admin",
+        source: "admin_monitoring",
+        severity: "warning",
+        outcome: "rejected",
+        reason: readGuard.error,
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || null,
+        metadata: {
+          sec_fetch_site: req.headers["sec-fetch-site"] || null,
+          sec_fetch_mode: req.headers["sec-fetch-mode"] || null,
+          origin: req.headers.origin || null,
+          referer: req.headers.referer || req.headers.referrer || null
+        }
+      });
+      return reply.code(readGuard.status).send({ ok: false, error: readGuard.error });
+    }
+
     const session = await app.requireSession(req, { realm: "EIP" });
     if (!session.ok) return reply.code(session.status).send({ ok: false, error: session.error });
 

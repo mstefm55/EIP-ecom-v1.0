@@ -29,17 +29,17 @@ Risk vocabulary:
 | Browser origin and Fetch Metadata guard for EIP state-changing requests | OWASP ASVS 5.0 CSRF/session; OWASP API8:2023 | implemented | `services/api/src/server.js` | low | P2 maturity hardening |
 | Cross-origin session cookie policy for hosted dashboard/API | OWASP ASVS 5.0 session management; NIST SP 800-63B session binding | implemented | `services/api/src/lib/authCookies.js`, `services/api/src/routes/auth.js`, `apps/dashboard/src/services/apiClient.js` | medium | P1 short-term |
 | CSRF token validation for EIP state-changing session routes | OWASP ASVS 5.0 CSRF; OWASP API5:2023 | implemented | `services/api/src/server.js`, `apps/dashboard/src/services/apiClient.js` | medium | P1 short-term |
-| Sensitive read/export operations protected against browser-initiated cross-site GETs | OWASP ASVS 5.0 CSRF/data protection; OWASP API3/API5:2023 | partial | `services/api/src/server.js`, `services/api/src/routes/admin_db_explorer.js` | critical | P0 before production |
-| Admin DB explorer production exposure | OWASP ASVS 5.0 access control/data protection; OWASP API3/API5/API8:2023 | partial | `services/api/src/server.js`, `services/api/src/routes/admin_db_explorer.js`, `apps/dashboard/src/components/admin/AdminDbExplorer.jsx` | critical | P0 before production |
+| Sensitive read/export operations protected against browser-initiated cross-site GETs | OWASP ASVS 5.0 CSRF/data protection; OWASP API3/API5:2023 | implemented | `services/api/src/routes/admin_db_explorer.js`, `services/api/src/routes/admin_monitoring.js` | low | P0 closed in Prompt 8 |
+| Admin DB explorer production exposure | OWASP ASVS 5.0 access control/data protection; OWASP API3/API5/API8:2023 | implemented | `services/api/src/config.js`, `services/api/src/routes/admin_db_explorer.js`, `apps/dashboard/src/components/admin/AdminDbExplorer.jsx` | low | P0 closed in Prompt 8 |
 | Admin DB explorer sensitive table masking and sensitive-token gate | OWASP ASVS 5.0 sensitive data protection; OWASP API3:2023 | partial | `services/api/src/routes/admin_db_explorer.js` | high | P1 short-term |
 | Tenant-scoped permission checks for admin control plane | OWASP ASVS 5.0 access control; OWASP API1/API5:2023 | partial | `services/api/src/auth/perm.js`, `services/api/src/routes/admin_access.js`, `services/api/src/routes/gateway.js`, `services/api/src/routes/admin_template_clone.js` | high | P1 short-term |
 | Surface partitioning between owner admin and tenant dashboard sessions | OWASP ASVS 5.0 access control; OWASP API5:2023 | implemented | `services/api/src/lib/surfaceAccess.js`, `services/api/src/routes/auth.js`, `services/api/src/routes/ui_surface.js`, `apps/dashboard/src/App.jsx` | medium | P1 short-term |
 | API key storage for EIP integration keys | OWASP ASVS 5.0 secret storage; OWASP API2:2023 | implemented | `services/api/src/server.js`, `services/api/src/routes/gateway.js` | low | P2 maturity hardening |
-| Public gateway API key accepted in URL query string | OWASP ASVS 5.0 secret handling; OWASP API2/API8:2023 | partial | `services/api/src/routes/public_gateway.js` | high | P0 before production |
+| Public gateway API key accepted in URL query string | OWASP ASVS 5.0 secret handling; OWASP API2/API8:2023 | implemented | `services/api/src/routes/public_gateway.js`, `services/api/test/tenant_isolation.test.mjs` | low | P0 closed in Prompt 8 |
 | Public gateway inbound verification, origin rules, HMAC timestamp, JWT lifetime checks, idempotency | OWASP ASVS 5.0 API/web service; OWASP API2/API4/API8:2023 | implemented | `services/api/src/routes/public_gateway.js`, `services/api/src/services/gateway/idempotency.js`, `services/api/src/services/gateway/connectionProfile.js` | medium | P1 short-term |
-| Public commerce origin allowlist enforcement | OWASP ASVS 5.0 CORS/API; OWASP API8:2023 | partial | `services/api/src/routes/public_commerce.js`, `services/api/src/services/gateway/connectionProfile.js` | critical | P0 before production |
-| Public commerce verification mode restrictions | OWASP ASVS 5.0 API authentication; OWASP API2/API5/API8:2023 | missing | `services/api/src/routes/public_commerce.js`, `services/api/src/services/gateway/connectionProfile.js` | critical | P0 before production |
-| Public commerce JWT expiry, not-before, issued-at, and max-age validation | OWASP ASVS 5.0 token validation; OWASP API2:2023; NIST SP 800-63B authenticator/session freshness | partial | `services/api/src/routes/public_commerce.js`, `services/api/src/routes/public_gateway.js` | high | P0 before production |
+| Public commerce origin allowlist enforcement | OWASP ASVS 5.0 CORS/API; OWASP API8:2023 | implemented | `services/api/src/routes/public_commerce.js`, `services/api/src/services/gateway/connectionProfile.js`, `services/api/test/public_commerce_hardening.test.mjs` | low | P0 closed in Prompt 8 |
+| Public commerce verification mode restrictions | OWASP ASVS 5.0 API authentication; OWASP API2/API5/API8:2023 | implemented | `services/api/src/routes/public_commerce.js`, `services/api/src/services/gateway/verification.js`, `services/api/test/public_commerce_hardening.test.mjs` | low | P0 closed in Prompt 8 |
+| Public commerce JWT expiry, not-before, issued-at, and max-age validation | OWASP ASVS 5.0 token validation; OWASP API2:2023; NIST SP 800-63B authenticator/session freshness | implemented | `services/api/src/routes/public_commerce.js`, `services/api/src/services/gateway/verification.js`, `services/api/test/public_commerce_hardening.test.mjs` | low | P0 closed in Prompt 8 |
 | Public commerce order/payment/member write idempotency | OWASP API4/API6:2023 | partial | `services/api/src/routes/public_commerce.js`, `services/api/src/services/gateway/idempotency.js` | high | P1 short-term |
 | Public tenant request abuse resistance | OWASP API4/API6:2023 | partial | `services/api/src/routes/tenant_requests_public.js` | medium | P1 short-term |
 | Per-tenant quotas beyond in-memory route rate limits | OWASP API4/API6:2023 | partial | `services/api/src/server.js`, `services/api/src/routes/public_gateway.js`, `services/api/src/routes/public_commerce.js` | high | P1 short-term |
@@ -56,24 +56,26 @@ Risk vocabulary:
 | Malware scanning or content disarm for uploaded tenant assets | OWASP ASVS 5.0 file upload; OWASP API8:2023 | missing | `services/api/src/lib/uploadSecurity.js`, `services/api/src/server.js` | high | P1 short-term |
 | Signed asset access for tenant upload paths | OWASP ASVS 5.0 access control/data protection | implemented | `services/api/src/server.js`, `services/api/src/services/assets/signing.js`, `services/api/src/services/assets/url_policy.js` | medium | P1 short-term |
 | Production debug route disablement | OWASP ASVS 5.0 security configuration; OWASP API8:2023 | implemented | `services/api/src/server.js`, `services/api/src/config.js` | low | P2 maturity hardening |
-| Feature flags for high-risk operational tools | OWASP ASVS 5.0 security configuration; OWASP API8:2023 | partial | `services/api/src/server.js`, `services/api/src/routes/admin_db_explorer.js` | critical | P0 before production |
+| Feature flags for high-risk operational tools | OWASP ASVS 5.0 security configuration; OWASP API8:2023 | implemented | `services/api/src/config.js`, `services/api/src/routes/admin_db_explorer.js` | low | P0 closed in Prompt 8 |
 | Public/API inventory and machine-readable contract | OWASP API9:2023 | partial | `services/api/src/routes/*`, `docs/DEVELOPER_MANUAL.md` | medium | P2 maturity hardening |
-| Security regression tests for auth, CORS, CSRF, tenant isolation, gateway verification, and uploads | OWASP ASVS 5.0 verification; OWASP API1/API2/API5/API8:2023 | missing | `services/api/src/routes/*`, `apps/dashboard/src/services/apiClient.js` | high | P1 short-term |
+| Security regression tests for auth, CORS, CSRF, tenant isolation, gateway verification, and uploads | OWASP ASVS 5.0 verification; OWASP API1/API2/API5/API8:2023 | implemented | `services/api/test/*.mjs`, `tools/security/static_security_checks.mjs`, `.github/workflows/security-gates.yml` | low | P1 baseline added in Prompts 7-8 |
 | Secret generation quality for generated passwords | NIST SP 800-63B random secret quality | partial | `services/api/src/auth/password.js` | medium | P1 short-term |
 | Consent/version capture for tenant onboarding | NIST SP 800-63B privacy references; OWASP ASVS 5.0 privacy/data handling | implemented | `services/api/src/config.js`, `services/api/src/routes/tenant_requests_public.js`, `services/api/src/routes/privacy.js` | medium | P1 short-term |
 
 ## Highest-Risk Gaps
 
-1. Public commerce allows `verification.mode = none` without the production guard used by the public gateway.
-2. Public commerce accepts empty or wildcard origin allowlists more broadly than the hardened public gateway path.
-3. Public commerce JWT verification does not apply the expiry/not-before/issued-at/max-age checks present in the public gateway.
-4. Public gateway accepts API keys in query string parameters.
-5. Admin DB explorer is registered in production code without a feature flag or default-off guard.
-6. Sensitive DB table/export reads use GET routes while hosted EIP cookies are cross-site capable.
-7. Gateway audit payloads can include request headers, query values, and raw body unless redaction policy is configured.
-8. Outbound gateway testing/execution accepts tenant-configured URLs without explicit SSRF/egress denylisting.
-9. Password reuse prevention compares hashes directly and is ineffective for salted Argon2 hashes.
-10. Upload handling validates type/signature/path but does not perform malware scanning or content disarm.
+Prompt 8 closed the original P0 public commerce, query-string API key, DB explorer, and sensitive admin-read browser-trigger gaps. Remaining highest-risk gaps are:
+
+1. Gateway audit payloads can include request headers, query values, and raw body unless redaction policy is configured.
+2. Outbound gateway testing/execution accepts tenant-configured URLs without explicit SSRF/egress denylisting.
+3. Password reuse prevention compares hashes directly and is ineffective for salted Argon2 hashes.
+4. Upload handling validates type/signature/path but does not perform malware scanning or content disarm.
+5. Failed-login throttling and lockout behavior still need durable DB-backed enforcement across all auth paths.
+6. Owner/admin MFA policy remains staged and should move to phishing-resistant enforcement after passkey rollout verification.
+7. Per-tenant and per-connection quotas beyond route-local rate limits are still needed for production abuse control.
+8. Outbound provider credential use needs continued egress and audit review.
+9. Public/API machine-readable route inventory is not yet generated.
+10. Incident response runbooks are not yet tracked for API key compromise, admin compromise, gateway abuse, malicious upload, and tenant data exposure.
 
 ## Notes
 

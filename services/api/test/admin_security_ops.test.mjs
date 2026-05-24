@@ -118,10 +118,14 @@ function buildDb() {
   };
 }
 
-async function buildApp(db) {
+async function buildApp(db, config = {}) {
   const app = Fastify({ logger: false });
+  app.decorate("EIP_ORIGINS", ["https://dashboard.test"]);
   app.decorate("config", {
-    OWNER_TENANT_CODE: "owner"
+    OWNER_TENANT_CODE: "owner",
+    NODE_ENV: config.NODE_ENV || "test",
+    CORS_ORIGIN: "https://dashboard.test",
+    EIP_ORIGIN_REQUIRED: config.EIP_ORIGIN_REQUIRED === true
   });
   app.decorate("db", db);
   app.decorate("requireSession", async () => ({
@@ -188,4 +192,23 @@ test("admin security ops paginates and filters recent events server-side", async
   assert.ok(recentSql.sql.includes("se.severity = $7"));
   assert.ok(recentSql.sql.includes("LIMIT $8"));
   assert.ok(recentSql.sql.includes("OFFSET $9"));
+});
+
+test("admin security ops rejects cross-site browser-triggered reads in production", async (t) => {
+  const db = buildDb();
+  const app = await buildApp(db, { NODE_ENV: "production" });
+  t.after(() => app.close());
+
+  const res = await app.inject({
+    method: "GET",
+    url: "/api/eip/admin/security/ops?window=24h",
+    headers: {
+      origin: "https://evil.test",
+      "sec-fetch-site": "cross-site",
+      "sec-fetch-mode": "cors"
+    }
+  });
+
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.json().error, "ORIGIN_NOT_ALLOWED");
 });

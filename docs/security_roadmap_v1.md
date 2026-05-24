@@ -8,6 +8,8 @@ This roadmap turns the security gap matrix into practical fix waves. It assumes 
 
 ## P0 Before Production
 
+Prompt 8 status: items 1-4 are closed in code and covered by focused API security tests. Public commerce now fails closed for production profiles without verification, empty production origin allowlists, wildcard production origins, and invalid JWT lifetime claims. Public gateway and public commerce reject query-string API keys. Admin DB explorer is default-off in production via `ENABLE_ADMIN_DB_EXPLORER`, requires owner/admin classification plus explicit DB permissions, applies origin/Fetch Metadata protections, and requires recent step-up for table reads and exports. Admin > Audit security operations reads also apply production origin/Fetch Metadata protection.
+
 1. Harden public commerce ingress to match the stricter public gateway model.
    - Disallow `verification.mode = none` for production connections unless the profile is explicitly sandbox-only and non-production.
    - Require non-empty production origin allowlists.

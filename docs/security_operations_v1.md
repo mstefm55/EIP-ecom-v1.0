@@ -71,6 +71,10 @@ Gateway intake audit payloads redact raw request bodies by default and store onl
 ### Gateway And Public Commerce
 
 - `gateway.intake_accepted`
+- `gateway.query_api_key_rejected`
+- `gateway.legacy_intake_query_api_key_rejected`
+- `gateway.bootstrap_query_api_key_rejected`
+- `gateway.manifest_query_api_key_rejected`
 - `gateway.verification_failed`
 - `gateway.origin_rejected`
 - `gateway.ip_rejected`
@@ -80,11 +84,21 @@ Gateway intake audit payloads redact raw request bodies by default and store onl
 - `gateway.rate_limited`
 - `gateway.payload_too_large`
 - `gateway.handshake_denied`
+- `commerce.query_api_key_rejected`
+- `commerce.production_policy_rejected`
 - `commerce.verification_failed`
 - `commerce.origin_rejected`
 - `commerce.ip_rejected`
 - `commerce.routing_not_found`
 - `commerce.channel_not_allowed`
+
+### Admin DB Explorer
+
+- `admin_db_explorer.disabled`
+- `admin_db_explorer.browser_guard_rejected`
+- `admin_db_explorer.owner_admin_required`
+- `admin_db_explorer.step_up_missing`
+- `admin_security_ops.browser_guard_rejected`
 
 ### Connections And Secrets
 

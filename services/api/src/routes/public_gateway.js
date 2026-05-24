@@ -35,9 +35,19 @@ function extractApiKey(req) {
   const auth = String(req.headers.authorization || "");
   const match = auth.match(/^Bearer\s+(.+)$/i);
   if (match) return match[1];
-  const queryKey = req.query?.api_key || req.query?.apiKey;
-  if (queryKey) return String(queryKey);
   return "";
+}
+
+function hasQueryApiKey(req) {
+  return Boolean(req.query?.api_key || req.query?.apiKey);
+}
+
+async function rejectQueryApiKey(app, req, reply, eventType) {
+  return denyGateway(app, reply, 401, "QUERY_API_KEY_REJECTED", {
+    eventType,
+    ip: req.ip,
+    userAgent: req.headers["user-agent"] || null
+  });
 }
 
 function isUuid(value) {
@@ -208,6 +218,10 @@ async function resolveTenantBySuffix(app, suffix) {
 
 async function handleInbound(app, req, reply, opts) {
   const { suffix, channel } = opts;
+  if (hasQueryApiKey(req)) {
+    return rejectQueryApiKey(app, req, reply, "gateway.query_api_key_rejected");
+  }
+
   const resolved = await resolveTenantBySuffix(app, suffix);
   if (!resolved) {
     return denyGateway(app, reply, 404, "ROUTING_NOT_FOUND", {
@@ -618,6 +632,10 @@ export default async function publicGatewayRoutes(app) {
     },
     async (req, reply) => {
       const body = req.body || {};
+      if (hasQueryApiKey(req)) {
+        return rejectQueryApiKey(app, req, reply, "gateway.legacy_intake_query_api_key_rejected");
+      }
+
       const apiKey = extractApiKey(req);
       const resolved = await resolveTenantByApiKey(app, apiKey);
       if (!resolved) {
@@ -680,6 +698,10 @@ export default async function publicGatewayRoutes(app) {
       bodyLimit: BOOTSTRAP_BODY_LIMIT
     },
     async (req, reply) => {
+      if (hasQueryApiKey(req)) {
+        return rejectQueryApiKey(app, req, reply, "gateway.bootstrap_query_api_key_rejected");
+      }
+
       const apiKey = extractApiKey(req);
       const resolved = await resolveTenantByApiKey(app, apiKey);
       if (!resolved) {
@@ -788,6 +810,10 @@ export default async function publicGatewayRoutes(app) {
       bodyLimit: BOOTSTRAP_BODY_LIMIT
     },
     async (req, reply) => {
+      if (hasQueryApiKey(req)) {
+        return rejectQueryApiKey(app, req, reply, "gateway.manifest_query_api_key_rejected");
+      }
+
       const apiKey = extractApiKey(req);
       const resolved = await resolveTenantByApiKey(app, apiKey);
       if (!resolved) {

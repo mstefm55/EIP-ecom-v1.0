@@ -1,6 +1,8 @@
 // services/api/src/routes/admin_db_explorer.js
 import { hasPermission } from "../auth/perm.js";
 import { sha256Hex, timingSafeEqual } from "../auth/crypto.js";
+import { resolveEipSurfaceAccess } from "../lib/surfaceAccess.js";
+import { auditSecurityEvent } from "../lib/securityAudit.js";
 
 const MAX_LIMIT = 200;
 const SAFE_SCHEMAS = new Set(["eip_core", "eip_auth", "eip_authz"]);
@@ -15,6 +17,10 @@ const SENSITIVE_TABLES = new Set([
 const SENSITIVE_COLUMN_PATTERN = /(password|token|secret|hash|pepper|salt|key)/i;
 const SENSITIVE_TOKEN_COOKIE = "eip_sensitive_token";
 
+function normalizeText(value) {
+  return String(value || "").trim();
+}
+
 function clampLimit(value) {
   const n = Number(value || 50);
   if (!Number.isFinite(n)) return 50;
@@ -25,16 +31,136 @@ function isSafeIdent(value) {
   return /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(value || "");
 }
 
-async function requireAdminDb(app, req, reply, permCode) {
+function normalizeOrigin(value) {
+  const raw = normalizeText(value);
+  if (!raw) return "";
+  try {
+    return new URL(raw).origin.toLowerCase();
+  } catch {
+    return raw.toLowerCase().replace(/\/$/, "");
+  }
+}
+
+function allowedEipOrigins(app) {
+  if (Array.isArray(app.EIP_ORIGINS)) {
+    return app.EIP_ORIGINS.map(normalizeOrigin).filter(Boolean);
+  }
+  return normalizeText(app.config?.CORS_ORIGIN)
+    .split(",")
+    .map(normalizeOrigin)
+    .filter(Boolean);
+}
+
+function requestOrigin(req) {
+  const origin = normalizeOrigin(req.headers.origin);
+  if (origin) return origin;
+  const referer = normalizeText(req.headers.referer || req.headers.referrer);
+  if (!referer) return "";
+  return normalizeOrigin(referer);
+}
+
+function dbExplorerEnabled(app) {
+  if (String(app.config?.NODE_ENV || "").toLowerCase() !== "production") return true;
+  return app.config?.ENABLE_ADMIN_DB_EXPLORER === true;
+}
+
+function validateBrowserReadGuard(app, req) {
+  const allowed = allowedEipOrigins(app);
+  const origin = requestOrigin(req);
+  const fetchSite = normalizeText(req.headers["sec-fetch-site"]).toLowerCase();
+  const fetchMode = normalizeText(req.headers["sec-fetch-mode"]).toLowerCase();
+  const requiresOrigin =
+    String(app.config?.NODE_ENV || "").toLowerCase() === "production" ||
+    app.config?.EIP_ORIGIN_REQUIRED === true;
+
+  if (fetchSite === "cross-site") {
+    return { ok: false, status: 403, error: "ORIGIN_NOT_ALLOWED" };
+  }
+  if (fetchMode === "navigate") {
+    return { ok: false, status: 403, error: "BROWSER_NAVIGATION_BLOCKED" };
+  }
+  if (!origin) {
+    return requiresOrigin
+      ? { ok: false, status: 403, error: "ORIGIN_REQUIRED" }
+      : { ok: true };
+  }
+  if (!allowed.includes(origin)) {
+    return { ok: false, status: 403, error: "ORIGIN_NOT_ALLOWED" };
+  }
+  return { ok: true };
+}
+
+async function denyAdminDb(app, req, reply, status, error, details = {}) {
+  auditSecurityEvent(app, details.eventType || `admin_db_explorer.${String(error || "denied").toLowerCase()}`, {
+    category: "admin",
+    source: "admin_db_explorer",
+    severity: status >= 500 ? "error" : "warning",
+    outcome: status >= 500 ? "error" : "rejected",
+    reason: error,
+    ip: req.ip,
+    userAgent: req.headers["user-agent"] || null,
+    ...details
+  });
+  reply.code(status).send({ ok: false, error });
+  return null;
+}
+
+async function requireAdminDb(app, req, reply, permCode, opts = {}) {
+  if (!dbExplorerEnabled(app)) {
+    return denyAdminDb(app, req, reply, 404, "DB_EXPLORER_DISABLED", {
+      eventType: "admin_db_explorer.disabled"
+    });
+  }
+
+  const browserGuard = validateBrowserReadGuard(app, req);
+  if (!browserGuard.ok) {
+    return denyAdminDb(app, req, reply, browserGuard.status, browserGuard.error, {
+      eventType: "admin_db_explorer.browser_guard_rejected",
+      metadata: {
+        sec_fetch_site: req.headers["sec-fetch-site"] || null,
+        sec_fetch_mode: req.headers["sec-fetch-mode"] || null,
+        origin: req.headers.origin || null,
+        referer: req.headers.referer || req.headers.referrer || null
+      }
+    });
+  }
+
   const session = await app.requireSession(req, { realm: "EIP" });
   if (!session.ok) {
     reply.code(session.status).send({ ok: false, error: session.error });
     return null;
   }
+  const surfaceAccess = await resolveEipSurfaceAccess(app, session.session);
+  if (!surfaceAccess?.is_owner_admin_session) {
+    return denyAdminDb(app, req, reply, 403, "OWNER_ADMIN_REQUIRED", {
+      eventType: "admin_db_explorer.owner_admin_required",
+      tenantId: session.session.tenant_id,
+      identityId: session.session.identity_id,
+      metadata: {
+        tenant_code: surfaceAccess?.tenant_code || null,
+        classification: surfaceAccess?.surface_classification || null
+      }
+    });
+  }
+
   const allowed = await hasPermission(app, session.session.tenant_id, session.session.identity_id, permCode);
   if (!allowed) {
     reply.code(403).send({ ok: false, error: "FORBIDDEN" });
     return null;
+  }
+  if (opts.stepUp === true) {
+    if (typeof app.requireStepUp !== "function") {
+      return denyAdminDb(app, req, reply, 403, "STEP_UP_REQUIRED", {
+        eventType: "admin_db_explorer.step_up_missing",
+        tenantId: session.session.tenant_id,
+        identityId: session.session.identity_id
+      });
+    }
+    const stepUp = await app.requireStepUp(req);
+    if (!stepUp.ok) {
+      reply.code(stepUp.status).send({ ok: false, error: stepUp.error });
+      return null;
+    }
   }
   return session.session;
 }
@@ -270,7 +396,7 @@ export default async function adminDbExplorerRoutes(app) {
   });
 
   app.get("/admin/db/table", async (req, reply) => {
-    const session = await requireAdminDb(app, req, reply, "admin.db.read");
+    const session = await requireAdminDb(app, req, reply, "admin.db.read", { stepUp: true });
     if (!session) return;
 
     const schema = String(req.query?.schema || "");
@@ -401,7 +527,7 @@ export default async function adminDbExplorerRoutes(app) {
   });
 
   app.get("/admin/db/export", async (req, reply) => {
-    const session = await requireAdminDb(app, req, reply, "admin.db.export");
+    const session = await requireAdminDb(app, req, reply, "admin.db.export", { stepUp: true });
     if (!session) return;
 
     const schema = String(req.query?.schema || "");

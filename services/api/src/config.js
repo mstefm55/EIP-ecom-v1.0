@@ -43,6 +43,7 @@ export const envSchema = {
     ELECTRON_DEVICE_REQUIRE_TRUSTED: { type: "boolean", default: true },
     AUTH_AUTO_TRUST_ON_STEP_UP: { type: "boolean", default: true },
     ENABLE_DEBUG_ROUTES: { type: "boolean", default: false },
+    ENABLE_ADMIN_DB_EXPLORER: { type: "boolean", default: false },
     ENABLE_PUBLIC_DB_HEALTH: { type: "boolean", default: false },
     LOG_DEV_OTP: { type: "boolean", default: false },
     PUBLIC_TENANT_GUARD: { type: "boolean", default: true },

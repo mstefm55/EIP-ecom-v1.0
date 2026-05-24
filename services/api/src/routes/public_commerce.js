@@ -424,6 +424,33 @@ function requiresInbound(profile) {
   return profile?.identity?.direction === "inbound" || profile?.identity?.direction === "both";
 }
 
+function isSandboxConnection(profile) {
+  return normalizeText(profile?.identity?.environment).toLowerCase() === "sandbox";
+}
+
+function hasQueryApiKey(req) {
+  return Boolean(req.query?.api_key || req.query?.apiKey);
+}
+
+function validateProductionConnectionPolicy(profile) {
+  if (isSandboxConnection(profile)) return { ok: true };
+  const verificationMode = normalizeText(profile?.verification?.mode || "none").toLowerCase();
+  const originAllowlist = Array.isArray(profile?.inbound?.origin_allowlist)
+    ? profile.inbound.origin_allowlist.map((item) => normalizeText(item)).filter(Boolean)
+    : [];
+
+  if (verificationMode === "none") {
+    return { ok: false, error: "VERIFICATION_REQUIRED" };
+  }
+  if (!originAllowlist.length) {
+    return { ok: false, error: "ORIGIN_ALLOWLIST_REQUIRED" };
+  }
+  if (originAllowlist.some((item) => item === "*")) {
+    return { ok: false, error: "WILDCARD_ORIGIN_FORBIDDEN" };
+  }
+  return { ok: true };
+}
+
 async function resolveProcessBinding(client, tenantId, objectType) {
   const r = await client.query(
     `
@@ -1756,6 +1783,20 @@ export default async function publicCommerceRoutes(app) {
   });
 
   async function resolveConnection(appInstance, req, reply, allowedChannels) {
+    if (hasQueryApiKey(req)) {
+      auditSecurityEvent(appInstance, "commerce.query_api_key_rejected", {
+        category: "public_commerce",
+        source: "public_commerce.resolveConnection",
+        severity: "warning",
+        outcome: "rejected",
+        reason: "QUERY_API_KEY_REJECTED",
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || null
+      });
+      reply.code(401).send({ ok: false, error: "QUERY_API_KEY_REJECTED" });
+      return null;
+    }
+
     const suffix = normalizeText(req.params?.suffix);
     if (!suffix) {
       auditSecurityEvent(appInstance, "commerce.connection_suffix_missing", {
@@ -1870,6 +1911,28 @@ export default async function publicCommerceRoutes(app) {
         reply.code(403).send({ ok: false, error: "CHANNEL_NOT_ALLOWED" });
         return null;
       }
+    }
+
+    const policy = validateProductionConnectionPolicy(profile);
+    if (!policy.ok) {
+      auditSecurityEvent(appInstance, "commerce.production_policy_rejected", {
+        category: "public_commerce",
+        source: "public_commerce.resolveConnection",
+        severity: "warning",
+        outcome: "rejected",
+        tenantId: tenant.id,
+        connectionCode: profile.identity?.connection_code,
+        suffix,
+        reason: policy.error,
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || null,
+        metadata: {
+          environment: profile.identity?.environment || null,
+          verification_mode: profile.verification?.mode || null
+        }
+      });
+      reply.code(403).send({ ok: false, error: policy.error });
+      return null;
     }
 
     const origin = req.headers.origin;
