@@ -64,9 +64,11 @@ function signJwt(payload, secret) {
 
 function makeDb(profile) {
   const idempotency = new Map();
+  const audits = [];
   let auditCount = 0;
 
   return {
+    audits,
     async query(sql, params = []) {
       const text = String(sql);
 
@@ -116,6 +118,10 @@ function makeDb(profile) {
 
       if (text.includes("INSERT INTO eip_core.info_record")) {
         auditCount += 1;
+        audits.push({
+          payload: JSON.parse(params[2] || "{}"),
+          attrs: JSON.parse(params[3] || "{}")
+        });
         return { rowCount: 1, rows: [{ id: `audit-${auditCount}` }] };
       }
 
@@ -281,4 +287,56 @@ test("public gateway rejects wrong suffix/profile routing", async (t) => {
   const res = await app.inject(signedRequestOptions({ suffix: "missing-storefront" }));
   assert.equal(res.statusCode, 404);
   assert.equal(res.json().error, "ROUTING_NOT_FOUND");
+});
+
+test("public gateway audit payload redacts headers, query values, body secrets, and raw body by default", async (t) => {
+  const profile = baseProfile();
+  profile.verification = {
+    mode: "api_key",
+    api_key: { header_name: "X-API-Key", secret: "key-123" }
+  };
+  profile.audit.include_raw_body = true;
+  const app = await buildApp(profile);
+  t.after(() => app.close());
+
+  const body = {
+    ok: true,
+    password: "body-password",
+    nested: {
+      api_key: "nested-key",
+      visible: "body-visible"
+    }
+  };
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/public/gateway/intake/runtime-storefront?customer=alice&token=query-secret",
+    headers: {
+      "content-type": "application/json",
+      origin: "https://store.test",
+      "x-event-id": "evt-audit-redaction",
+      "x-api-key": "key-123",
+      authorization: "Bearer bearer-secret",
+      cookie: "sid=session-secret"
+    },
+    payload: JSON.stringify(body)
+  });
+  assert.equal(res.statusCode, 200);
+
+  const auditPayload = app.db.audits[0].payload;
+  const serialized = JSON.stringify(auditPayload);
+  assert.equal(auditPayload.headers["x-api-key"], "[REDACTED]");
+  assert.equal(auditPayload.headers.authorization, "[REDACTED]");
+  assert.equal(auditPayload.headers.cookie, "[REDACTED]");
+  assert.equal(auditPayload.query.customer, "[REDACTED]");
+  assert.equal(auditPayload.query.token, "[REDACTED]");
+  assert.equal(auditPayload.body.password, "[REDACTED]");
+  assert.equal(auditPayload.body.nested.api_key, "[REDACTED]");
+  assert.equal(auditPayload.body.nested.visible, "body-visible");
+  assert.match(auditPayload.raw_body, /^\[REDACTED_RAW_BODY \d+ bytes\]$/);
+  assert.equal(serialized.includes("key-123"), false);
+  assert.equal(serialized.includes("bearer-secret"), false);
+  assert.equal(serialized.includes("session-secret"), false);
+  assert.equal(serialized.includes("query-secret"), false);
+  assert.equal(serialized.includes("body-password"), false);
+  assert.equal(serialized.includes("nested-key"), false);
 });

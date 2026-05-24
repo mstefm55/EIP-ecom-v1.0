@@ -43,8 +43,8 @@ Risk vocabulary:
 | Public commerce order/payment/member write idempotency | OWASP API4/API6:2023 | partial | `services/api/src/routes/public_commerce.js`, `services/api/src/services/gateway/idempotency.js` | high | P1 short-term |
 | Public tenant request abuse resistance | OWASP API4/API6:2023 | partial | `services/api/src/routes/tenant_requests_public.js` | medium | P1 short-term |
 | Per-tenant quotas beyond in-memory route rate limits | OWASP API4/API6:2023 | partial | `services/api/src/server.js`, `services/api/src/routes/public_gateway.js`, `services/api/src/routes/public_commerce.js` | high | P1 short-term |
-| Outbound gateway SSRF and egress controls | OWASP API7/API10:2023; OWASP ASVS 5.0 SSRF/unsafe API consumption | partial | `services/api/src/routes/gateway.js`, `services/api/src/services/gateway/outbound.js`, `services/api/src/services/gateway/connectionProfile.js` | high | P1 short-term |
-| Gateway audit redaction defaults for headers/query/raw body | OWASP ASVS 5.0 logging/privacy; OWASP API10:2023 | partial | `services/api/src/routes/public_gateway.js`, `services/api/src/services/gateway/audit.js`, `services/api/src/lib/securityAudit.js` | high | P1 short-term |
+| Outbound gateway SSRF and egress controls | OWASP API7/API10:2023; OWASP ASVS 5.0 SSRF/unsafe API consumption | implemented | `services/api/src/routes/gateway.js`, `services/api/src/services/gateway/outbound.js`, `services/api/test/gateway_outbound_security.test.mjs` | low | Closed in gateway/control-plane hardening wave |
+| Gateway audit redaction defaults for headers/query/raw body | OWASP ASVS 5.0 logging/privacy; OWASP API10:2023 | implemented | `services/api/src/routes/public_gateway.js`, `services/api/src/services/gateway/audit.js`, `services/api/src/lib/securityAudit.js`, `services/api/test/public_gateway_runtime.test.mjs` | low | Closed in gateway/control-plane hardening wave |
 | Password hashing for EIP auth credentials | NIST SP 800-63B memorized secrets; OWASP ASVS 5.0 password storage | implemented | `services/api/src/routes/auth.js` | low | P2 maturity hardening |
 | Password policy alignment with NIST guidance | NIST SP 800-63B memorized secrets | partial | `services/api/src/auth/password.js`, `services/api/src/routes/auth.js` | medium | P1 short-term |
 | Password reuse prevention | NIST SP 800-63B; OWASP ASVS 5.0 credential lifecycle | partial | `services/api/src/auth/password.js`, `services/api/src/routes/auth.js` | high | P1 short-term |
@@ -64,18 +64,18 @@ Risk vocabulary:
 
 ## Highest-Risk Gaps
 
-Prompt 8 closed the original P0 public commerce, query-string API key, DB explorer, and sensitive admin-read browser-trigger gaps. Remaining highest-risk gaps are:
+Prompt 8 closed the original P0 public commerce, query-string API key, DB explorer, and sensitive admin-read browser-trigger gaps. The gateway/control-plane hardening wave closed the gateway audit redaction and outbound SSRF/egress gaps. Remaining highest-risk gaps are:
 
-1. Gateway audit payloads can include request headers, query values, and raw body unless redaction policy is configured.
-2. Outbound gateway testing/execution accepts tenant-configured URLs without explicit SSRF/egress denylisting.
-3. Password reuse prevention compares hashes directly and is ineffective for salted Argon2 hashes.
-4. Upload handling validates type/signature/path but does not perform malware scanning or content disarm.
-5. Failed-login throttling and lockout behavior still need durable DB-backed enforcement across all auth paths.
-6. Owner/admin MFA policy remains staged and should move to phishing-resistant enforcement after passkey rollout verification.
-7. Per-tenant and per-connection quotas beyond route-local rate limits are still needed for production abuse control.
-8. Outbound provider credential use needs continued egress and audit review.
-9. Public/API machine-readable route inventory is not yet generated.
-10. Incident response runbooks are not yet tracked for API key compromise, admin compromise, gateway abuse, malicious upload, and tenant data exposure.
+1. Password reuse prevention compares hashes directly and is ineffective for salted Argon2 hashes.
+2. Upload handling validates type/signature/path but does not perform malware scanning or content disarm.
+3. Failed-login throttling and lockout behavior still need durable DB-backed enforcement across all auth paths.
+4. Owner/admin MFA policy remains staged and should move to phishing-resistant enforcement after passkey rollout verification.
+5. Per-tenant and per-connection quotas beyond route-local rate limits are still needed for production abuse control.
+6. Public commerce order/payment/member write idempotency remains uneven outside the gateway intake idempotency path.
+7. Admin DB explorer sensitive-token governance can be further tightened with stronger workflow and alerting.
+8. Public/API machine-readable route inventory is not yet generated.
+9. Incident response runbooks are not yet tracked for API key compromise, admin compromise, gateway abuse, malicious upload, and tenant data exposure.
+10. Outbound provider allowlists and per-provider egress policy can be matured beyond the baseline SSRF denylist.
 
 ## Notes
 

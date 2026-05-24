@@ -1,5 +1,7 @@
 import { extractProfiles } from "./connectionProfile.js";
 import { hydrateConnectionProfileSecrets } from "./secretStore.js";
+import dns from "node:dns/promises";
+import net from "node:net";
 
 function normalizeText(value) {
   return String(value || "").trim();
@@ -23,6 +25,131 @@ function normalizeHeaders(input) {
 
 function isAbsoluteUrl(value) {
   return /^https?:\/\//i.test(String(value || ""));
+}
+
+function isSandboxProfile(profile) {
+  return normalizeText(profile?.identity?.environment).toLowerCase() === "sandbox";
+}
+
+function stripIpv6Brackets(value) {
+  return String(value || "").replace(/^\[/, "").replace(/\]$/, "");
+}
+
+function parseIpv4(value) {
+  const parts = String(value || "").split(".");
+  if (parts.length !== 4) return null;
+  const bytes = parts.map((part) => Number(part));
+  if (bytes.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return null;
+  return bytes;
+}
+
+function isForbiddenIpv4(address) {
+  const bytes = parseIpv4(address);
+  if (!bytes) return false;
+  const [a, b] = bytes;
+  if (a === 0) return true;
+  if (a === 10) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true;
+  if (a === 127) return true;
+  if (a === 169 && b === 254) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 198 && (b === 18 || b === 19)) return true;
+  if (a >= 224) return true;
+  return false;
+}
+
+function firstHextet(address) {
+  const first = String(address || "").toLowerCase().split(":")[0];
+  const value = Number.parseInt(first || "0", 16);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function isForbiddenIpv6(address) {
+  const lower = String(address || "").toLowerCase();
+  const mapped = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (mapped) return isForbiddenIpv4(mapped[1]);
+  if (lower === "::" || lower === "::1") return true;
+  const first = firstHextet(lower);
+  if (first >= 0xfc00 && first <= 0xfdff) return true;
+  if (first >= 0xfe80 && first <= 0xfebf) return true;
+  return false;
+}
+
+function isForbiddenAddress(address) {
+  const normalized = stripIpv6Brackets(address);
+  const family = net.isIP(normalized);
+  if (family === 4) return isForbiddenIpv4(normalized);
+  if (family === 6) return isForbiddenIpv6(normalized);
+  return false;
+}
+
+function isInternalHostname(hostname) {
+  const host = normalizeText(hostname).toLowerCase().replace(/\.$/, "");
+  if (!host) return true;
+  return (
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host.endsWith(".local") ||
+    host.endsWith(".internal") ||
+    host.endsWith(".home.arpa") ||
+    host === "metadata.google.internal"
+  );
+}
+
+function insecureHttpAllowed(profile) {
+  return isSandboxProfile(profile) && profile?.outbound?.allow_insecure_http === true;
+}
+
+async function assertOutboundUrlAllowed(rawUrl, profile, opts = {}) {
+  let parsed;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new Error("OUTBOUND_URL_INVALID");
+  }
+
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    throw new Error("OUTBOUND_SCHEME_FORBIDDEN");
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error("OUTBOUND_URL_CREDENTIALS_FORBIDDEN");
+  }
+  if (parsed.protocol !== "https:" && !insecureHttpAllowed(profile)) {
+    throw new Error("OUTBOUND_HTTPS_REQUIRED");
+  }
+
+  const hostname = stripIpv6Brackets(parsed.hostname);
+  if (isInternalHostname(hostname)) {
+    throw new Error("OUTBOUND_TARGET_HOST_FORBIDDEN");
+  }
+
+  if (net.isIP(hostname)) {
+    if (isForbiddenAddress(hostname)) {
+      throw new Error("OUTBOUND_TARGET_IP_FORBIDDEN");
+    }
+    return { ok: true, url: parsed.toString(), addresses: [hostname], purpose: opts.purpose || "request" };
+  }
+
+  let records;
+  try {
+    records = await dns.lookup(hostname, { all: true, verbatim: true });
+  } catch {
+    throw new Error("OUTBOUND_DNS_LOOKUP_FAILED");
+  }
+  if (!Array.isArray(records) || records.length === 0) {
+    throw new Error("OUTBOUND_DNS_LOOKUP_FAILED");
+  }
+  const forbidden = records.find((record) => isForbiddenAddress(record.address));
+  if (forbidden) {
+    throw new Error("OUTBOUND_TARGET_IP_FORBIDDEN");
+  }
+  return {
+    ok: true,
+    url: parsed.toString(),
+    addresses: records.map((record) => record.address),
+    purpose: opts.purpose || "request"
+  };
 }
 
 function buildUrlWithQuery(rawUrl, query) {
@@ -94,6 +221,7 @@ async function buildOutboundAuth(profile) {
     if (!auth.client_id || !auth.client_secret || !auth.token_url) {
       throw new Error("OAUTH_CLIENT_CONFIG_REQUIRED");
     }
+    await assertOutboundUrlAllowed(auth.token_url, profile, { purpose: "oauth_token" });
     const params = new URLSearchParams();
     params.set("grant_type", "client_credentials");
     params.set("client_id", auth.client_id);
@@ -177,6 +305,7 @@ async function executeGatewayOutboundRequest(client, ctx, request = {}) {
   if (!url) throw new Error("HTTP_REQUEST_URL_REQUIRED");
 
   const requestUrl = buildUrlWithQuery(url, { ...(query || {}), ...authQuery });
+  await assertOutboundUrlAllowed(requestUrl, profile, { purpose: "gateway_outbound" });
   const methodRaw = normalizeText(request.method || "");
   const method = methodRaw ? methodRaw.toUpperCase() : request.body ? "POST" : "GET";
 
@@ -221,5 +350,7 @@ export {
   fetchWithTimeout,
   buildOutboundHeaders,
   buildOutboundAuth,
-  executeGatewayOutboundRequest
+  executeGatewayOutboundRequest,
+  assertOutboundUrlAllowed,
+  isForbiddenAddress
 };

@@ -50,7 +50,7 @@ The security audit helper redacts sensitive keys recursively before logging or s
 
 Long strings are truncated and buffers are summarized as byte counts.
 
-Gateway intake audit payloads redact raw request bodies by default and store only a byte-count marker unless a connection explicitly opts into `audit.include_raw_body = true`.
+Gateway intake audit payloads redact raw request bodies by default and store only a byte-count marker unless a connection explicitly opts into both `audit.include_raw_body = true` and `audit.raw_body_safe = true`. Query parameter values are redacted by default before gateway audit persistence.
 
 ## Emitted Events
 

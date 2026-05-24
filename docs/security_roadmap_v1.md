@@ -42,6 +42,8 @@ Prompt 8 status: items 1-4 are closed in code and covered by focused API securit
 
 ## P1 Short-Term
 
+Gateway/control-plane hardening status: gateway audit payloads now redact sensitive headers, all query values, body secrets, and raw bodies by default; raw body capture requires both `audit.include_raw_body=true` and `audit.raw_body_safe=true`. Gateway outbound execution and Admin > Connections outbound tests now deny private, loopback, link-local, metadata, and internal targets, validate DNS answers, block URL credentials, and require HTTPS for production profiles. Sandbox profiles may use plain HTTP only when `outbound.allow_insecure_http=true` and the target is still public.
+
 1. Fix password lifecycle controls.
    - Compare a proposed password against historic Argon2 hashes with verifier calls instead of hash equality.
    - Replace generated password randomness with cryptographic random selection.
@@ -131,10 +133,10 @@ Prompt 8 status: items 1-4 are closed in code and covered by focused API securit
 1. Public commerce verification/origin/JWT hardening.
 2. Query-string API key removal.
 3. Admin DB explorer production gate and sensitive GET/export hardening.
-4. Gateway audit redaction defaults.
+4. Gateway audit redaction defaults. Completed in gateway/control-plane hardening wave.
 5. Password history, failed-login throttling, and generated-secret randomness.
 6. Admin MFA enforcement policy.
-7. SSRF/egress controls for outbound gateway.
+7. SSRF/egress controls for outbound gateway. Completed in gateway/control-plane hardening wave.
 8. Upload malware scanning/quarantine.
 9. Security regression test suite.
 10. Machine-readable API inventory and CI security checks.

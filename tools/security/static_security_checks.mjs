@@ -16,6 +16,7 @@ const REQUIRED_SECURITY_TESTS = [
   "services/api/test/admin_security_ops.test.mjs",
   "services/api/test/auth_cookie_policy.test.mjs",
   "services/api/test/gateway_api_keys.test.mjs",
+  "services/api/test/gateway_outbound_security.test.mjs",
   "services/api/test/gateway_verification.test.mjs",
   "services/api/test/passkey_config.test.mjs",
   "services/api/test/public_commerce_hardening.test.mjs",

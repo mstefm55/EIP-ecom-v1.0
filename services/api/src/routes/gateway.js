@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import { buildBootstrapPayload } from "../services/gateway/bootstrap.js";
 import { sha256Hex } from "../auth/crypto.js";
 import { hasPermission } from "../auth/perm.js";
-import { fetchWithTimeout, buildOutboundAuth } from "../services/gateway/outbound.js";
+import { fetchWithTimeout, buildOutboundAuth, assertOutboundUrlAllowed } from "../services/gateway/outbound.js";
 import {
   extractProfiles,
   normalizeProfile,
@@ -793,6 +793,11 @@ export default async function gatewayRoutes(app) {
         }
         return urlObj.toString();
       })();
+      try {
+        await assertOutboundUrlAllowed(testUrl, profile, { purpose: "gateway_outbound_test" });
+      } catch (err) {
+        return reply.code(400).send({ ok: false, error: err.message });
+      }
       const response = await fetchWithTimeout(testUrl, {
         method,
         headers,

@@ -16,6 +16,10 @@ Public gateway:
 7. Event id extraction and idempotency ledger
 8. Gateway audit insert and response finalization
 
+Gateway audit payloads are default-safe. Request headers pass through the shared security redactor, query values are redacted by default, sensitive body fields are redacted recursively, and raw body capture remains disabled unless the connection explicitly sets both `audit.include_raw_body = true` and `audit.raw_body_safe = true`.
+
+Gateway outbound execution uses the shared egress guard before any fetch, including OAuth client-credentials token requests. The guard rejects private, loopback, link-local, metadata, and internal targets; blocks URL-embedded credentials; validates DNS answers for hostnames; and requires HTTPS for production profiles. Sandbox profiles may opt into plain HTTP only with `outbound.allow_insecure_http = true`, and private/internal targets are still denied.
+
 Public commerce:
 1. Route entry: `services/api/src/routes/public_commerce.js`
 2. Raw body capture: `services/api/src/services/gateway/rawBody.js`
@@ -70,6 +74,7 @@ Public commerce keeps route-specific idempotency for operations that create exte
 Automated coverage is in:
 - `services/api/test/gateway_verification.test.mjs`
 - `services/api/test/public_gateway_runtime.test.mjs`
+- `services/api/test/gateway_outbound_security.test.mjs`
 
 The tests cover:
 - valid `api_key`, `hmac_signature`, and `oauth2_jwt` decisions
@@ -78,6 +83,8 @@ The tests cover:
 - expired timestamp
 - wrong origin
 - replayed event id with different raw body
+- default gateway audit redaction behavior
+- outbound SSRF/egress denylist and HTTPS enforcement
 - wrong suffix/profile routing
 
 Run:

@@ -71,6 +71,46 @@ function applyRedaction(payload, policy) {
   return clone;
 }
 
+function redactQueryValues(input) {
+  if (!input || typeof input !== "object") return {};
+  const output = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (Array.isArray(value)) {
+      output[key] = value.map(() => "[REDACTED]");
+    } else if (value && typeof value === "object") {
+      output[key] = redactQueryValues(value);
+    } else {
+      output[key] = "[REDACTED]";
+    }
+  }
+  return output;
+}
+
+function redactGatewayAuditDetails(value) {
+  const redacted = redactSecurityDetails(value || {});
+  if (redacted && typeof redacted === "object" && redacted.query && typeof redacted.query === "object") {
+    redacted.query = redactQueryValues(redacted.query);
+  }
+  return redacted;
+}
+
+function buildGatewayAuditPayload(req, body, rawBody, profile) {
+  const includeRawBody =
+    profile.audit?.include_raw_body === true &&
+    profile.audit?.raw_body_safe === true;
+  return applyRedaction(
+    {
+      headers: req.headers,
+      query: redactQueryValues(req.query || {}),
+      body,
+      raw_body: includeRawBody
+        ? rawBody.toString("utf8")
+        : `[REDACTED_RAW_BODY ${rawBody.length} bytes]`
+    },
+    profile.audit?.redaction_policy
+  );
+}
+
 async function recordGatewaySecurityEvent(app, eventType, details = {}) {
   return emitSecurityEvent(app, eventType, {
     category: "gateway",
@@ -450,17 +490,7 @@ async function handleInbound(app, req, reply, opts) {
     return reply.send(idem.response || { ok: true, replay: true });
   }
 
-  const safePayload = applyRedaction(
-    {
-      headers: req.headers,
-      query: req.query,
-      body,
-      raw_body: profile.audit?.include_raw_body === true
-        ? rawBody.toString("utf8")
-        : `[REDACTED_RAW_BODY ${rawBody.length} bytes]`
-    },
-    profile.audit?.redaction_policy
-  );
+  const safePayload = buildGatewayAuditPayload(req, body, rawBody, profile);
 
   const auditId = await insertGatewayAudit(app.db, {
     tenantId: tenant.id,
@@ -527,7 +557,7 @@ async function logGatewayDenied(app, payload) {
           origin: payload.origin || null,
           ip: payload.ip || null,
           user_agent: payload.userAgent || null,
-          attrs: payload.attrs || {}
+          attrs: redactGatewayAuditDetails(payload.attrs || {})
         }
       ]
     );
@@ -548,7 +578,7 @@ async function logGatewayDenied(app, payload) {
       template_code: payload.templateCode || null,
       object_ref: payload.objectRef || null,
       origin: payload.origin || null,
-      attrs: payload.attrs || {}
+      attrs: redactGatewayAuditDetails(payload.attrs || {})
     }
   });
 }
@@ -571,7 +601,7 @@ async function logHandshake(app, payload) {
           origin: payload.origin || null,
           ip: payload.ip || null,
           user_agent: payload.userAgent || null,
-          attrs: payload.attrs || {}
+          attrs: redactGatewayAuditDetails(payload.attrs || {})
         }
       ]
     );

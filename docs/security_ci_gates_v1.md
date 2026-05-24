@@ -51,6 +51,8 @@ npm --workspace dashboard run build
 - public commerce production verification/origin/JWT hardening
 - public gateway and public commerce query-string API key rejection
 - raw body HMAC validation
+- gateway audit default redaction for sensitive headers, query values, body secrets, and raw body capture
+- gateway outbound SSRF/egress denylist and production HTTPS enforcement
 - timestamp, origin, replay/idempotency, suffix/profile rejection
 - tenant and connection isolation/BOLA checks
 - signed asset tenant boundaries
