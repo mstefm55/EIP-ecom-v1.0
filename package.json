@@ -30,6 +30,8 @@
     "security:secrets": "node tools/security/scan_secrets.mjs",
     "security:static": "node tools/security/static_security_checks.mjs",
     "security:ci": "npm run security:secrets && npm run security:static && npm run security:audit && npm --workspace @eip/core-api run test:security",
+    "synthetic:v1:plan": "node tools/synthetic/v1_validation_bot.mjs --mode=plan",
+    "synthetic:v1:run": "node tools/synthetic/v1_validation_bot.mjs --mode=run",
     "validate:process": "node tools/validate_process_alignment.mjs",
     "smoke:ecom:ci": "powershell -ExecutionPolicy Bypass -File ./scripts/run_ecom_process_regression_ci.ps1",
     "smoke:ecom:ci:auto-admin": "powershell -ExecutionPolicy Bypass -File ./scripts/run_ecom_process_regression_ci.ps1 -AutoAdminSession",

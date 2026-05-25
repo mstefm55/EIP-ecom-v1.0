@@ -18,12 +18,15 @@ const REQUIRED_SECURITY_TESTS = [
   "services/api/test/gateway_api_keys.test.mjs",
   "services/api/test/gateway_outbound_security.test.mjs",
   "services/api/test/gateway_verification.test.mjs",
+  "services/api/test/profile_avatar_persistence.test.mjs",
   "services/api/test/passkey_config.test.mjs",
   "services/api/test/public_commerce_hardening.test.mjs",
   "services/api/test/public_gateway_runtime.test.mjs",
   "services/api/test/secret_store.test.mjs",
   "services/api/test/security_audit.test.mjs",
   "services/api/test/session_policy.test.mjs",
+  "services/api/test/synthetic_validation_bot.test.mjs",
+  "services/api/test/dashboard_csrf_client.test.mjs",
   "services/api/test/surface_access.test.mjs",
   "services/api/test/tenant_isolation.test.mjs"
 ];

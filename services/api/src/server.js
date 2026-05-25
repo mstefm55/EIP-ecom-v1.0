@@ -49,6 +49,7 @@ import { auditSecurityEvent } from "./lib/securityAudit.js";
 import { advanceInstance, createInstance, findActiveInstance, updateTaskStatus } from "./core/core_process_engine.js";
 import { verifyAssetToken } from "./services/assets/signing.js";
 import { sessionCanAccessAssetTenant } from "./services/assets/access.js";
+import { resolveAssetRoot } from "./services/assets/root.js";
 import { syncAllTenantMarketplaceFx } from "./services/fx/marketFxSync.js";
 
 const DEFAULT_BODY_LIMIT = 1024 * 1024; // 1 MiB
@@ -208,7 +209,8 @@ async function buildServer() {
   });
 
   // ---- static file serving for local uploads (dev/local) ----
-  const assetsRoot = path.join(__dirname, "../assets");
+  const assetsRoot = resolveAssetRoot(app.config);
+  app.decorate("ASSET_ROOT", assetsRoot);
   fs.mkdirSync(assetsRoot, { recursive: true });
   await app.register(staticPlugin, {
     root: assetsRoot,

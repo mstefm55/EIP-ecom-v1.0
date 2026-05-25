@@ -91,6 +91,14 @@ test("password policy blocks common passwords while allowing long passphrases", 
   assert.equal(blocked.ok, false);
   assert.equal(blocked.feedback.some((item) => /common|dictionary|pattern/i.test(item)), true);
 
+  const leetBlocked = evaluatePasswordStrength("P@ssw0rd2026!!");
+  assert.equal(leetBlocked.ok, false);
+  assert.equal(leetBlocked.feedback.some((item) => /common|pattern/i.test(item)), true);
+
+  const seasonalBlocked = evaluatePasswordStrength("Winter2026!Admin");
+  assert.equal(seasonalBlocked.ok, false);
+  assert.equal(seasonalBlocked.feedback.some((item) => /common|dictionary|pattern/i.test(item)), true);
+
   const passphrase = evaluatePasswordStrength("correct horse battery staple 2026");
   assert.equal(passphrase.ok, true);
 });

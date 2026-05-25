@@ -105,6 +105,11 @@ Gateway intake audit payloads redact raw request bodies by default and store onl
 - `admin_db_explorer.sensitive_grant_cleared`
 - `admin_db_explorer.sensitive_table_read`
 - `admin_db_explorer.sensitive_export`
+- `admin_db_explorer.break_glass_issued`
+- `admin_db_explorer.break_glass_used`
+- `admin_db_explorer.break_glass_rejected`
+- `admin_db_explorer.break_glass_expired`
+- `admin_db_explorer.break_glass_cleared`
 - `admin_security_ops.browser_guard_rejected`
 
 ### Connections And Secrets
@@ -155,6 +160,14 @@ Upload scan modes:
 | `UPLOAD_SCAN_ENDPOINT` | Optional external AV/CDR scanner endpoint used when external-required mode is enabled. |
 | `UPLOAD_SCAN_API_KEY` | Optional bearer token for the scanner endpoint. |
 | `UPLOAD_SCAN_TIMEOUT_MS` | Scanner call timeout; defaults to 5000 ms. |
+
+When `UPLOAD_SCAN_MODE=external_required`, accepted files are first written under an unserved quarantine directory with a sidecar JSON metadata file containing status, tenant, category, MIME, SHA-256, target path, and quarantine path. Files are promoted to `/assets/...` only after a clean scanner verdict.
+
+Asset persistence:
+
+| Setting | Purpose |
+| --- | --- |
+| `ASSET_ROOT` | Optional filesystem root for served tenant assets. Defaults to `services/api/assets`. On Railway, point this at a mounted persistent volume so profile avatars and tenant uploads survive redeploy/restart. |
 
 ## Admin Usage
 
@@ -235,6 +248,16 @@ security.ops.read
 
 For compatibility, the route also permits existing high-trust audit roles with `privacy.audit.view` or `tenant.connection.log`.
 
+Admin DB Explorer break-glass:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /api/eip/admin/db/break-glass/status` | Returns the active short-lived investigation grant for the current session, if any. |
+| `POST /api/eip/admin/db/break-glass/issue` | Issues a 10-15 minute grant after owner/admin classification, DB permission, CSRF, and phishing-resistant step-up. Requires reason and ticket/case reference. |
+| `POST /api/eip/admin/db/break-glass/clear` | Clears the current session grant. |
+
+Table previews, exports, and sensitive-token consumption require an active break-glass grant. Sensitive tables still require the separate tenant sensitive-token grant where applicable.
+
 ## Recommended Alert Thresholds
 
 Start with these hosted-production thresholds and tune after real traffic:
@@ -255,6 +278,15 @@ Owner/admin privileged action policy:
 | `OWNER_ADMIN_PASSKEY_STEP_UP_REQUIRED` | `true` | In production, owner/admin privileged actions require phishing-resistant passkey step-up even if the global staged rollout flag is still false |
 
 Upload handling now emits `upload.rejected` before write/publish when the inline V1 scanner detects the EICAR test signature or active content in text-like uploads. External AV/CDR remains an optional maturity control for accepted file types.
+
+Synthetic validation:
+
+| Command | Purpose |
+| --- | --- |
+| `npm run synthetic:v1:plan` | Shows the synthetic validation plan without sending traffic. |
+| `npm run synthetic:v1:run` | Runs explicitly scoped synthetic scenarios. Hosted Railway targets require `SYNTHETIC_ALLOW_HOSTED=true` and a test tenant/suffix. |
+
+See `docs/synthetic_validation_bot_v1.md` for safe usage and scenario controls.
 
 | Signal | Initial threshold | Response |
 | --- | ---: | --- |
@@ -281,6 +313,4 @@ Upload handling now emits `upload.rejected` before write/publish when the inline
 ## Deferred
 
 - External alert delivery to email/Slack/PagerDuty.
-- Durable per-tenant quotas.
-- Malware scanning/quarantine events.
 - Long-term security event retention policy.

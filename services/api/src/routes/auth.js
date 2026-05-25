@@ -3,7 +3,6 @@ import { hasPermission } from "../auth/perm.js";
 
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import crypto from "node:crypto";
 import { promisify } from "node:util";
 import argon2 from "argon2";
@@ -49,6 +48,7 @@ import {
 } from "../auth/passkeys.js";
 import { buildSignedAssetUrl } from "../services/assets/signing.js";
 import { isTenantAssetPath, sanitizeAssetUrlForStorage, toLocalAssetPath } from "../services/assets/url_policy.js";
+import { resolveAssetRoot } from "../services/assets/root.js";
 
 const OTP_REQUEST_LIMIT_MAX = 5;
 const OTP_REQUEST_LIMIT_WINDOW_MIN = 10;
@@ -65,10 +65,6 @@ const RECOVERY_LOST_RATE_LIMIT = { max: 10, timeWindow: "1 minute" };
 const OTP_TTL_MS = 10 * 60 * 1000;
 const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000;
 const RECOVERY_TOKEN_DEFAULT_TTL_MIN = 30;
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const ASSET_ROOT = path.join(__dirname, "../../assets");
-
 function getRecoveryPepper(app) {
   const raw = String(app?.config?.RECOVERY_TOKEN_PEPPER || "").trim();
   if (raw) return raw;
@@ -2655,7 +2651,7 @@ export default async function authRoutes(app) {
       return reply.code(415).send({ ok: false, error: validation.error });
     }
 
-    const uploadDir = path.join(ASSET_ROOT, tenant_id, "avatars");
+    const uploadDir = path.join(resolveAssetRoot(app.config), tenant_id, "avatars");
     fs.mkdirSync(uploadDir, { recursive: true });
 
     const storedName = `${identity_id}-${crypto.randomUUID()}${validation.safeExt}`;
@@ -3676,3 +3672,8 @@ export default async function authRoutes(app) {
 
 
 }
+
+export {
+  serializeUserProfile,
+  signProfileAvatarUrl
+};

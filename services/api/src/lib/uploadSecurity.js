@@ -72,6 +72,18 @@ function uploadScanEndpoint(app) {
   return String(app?.config?.UPLOAD_SCAN_ENDPOINT || "").trim();
 }
 
+function quarantineMetadataPath(quarantinePath) {
+  return `${quarantinePath}.json`;
+}
+
+function writeQuarantineMetadata(quarantinePath, metadata) {
+  fs.writeFileSync(
+    quarantineMetadataPath(quarantinePath),
+    `${JSON.stringify(metadata, null, 2)}\n`,
+    { flag: "w" }
+  );
+}
+
 async function requestExternalScan(app, { buffer, filename, mimetype, assetKind, tenantId }) {
   const endpoint = uploadScanEndpoint(app);
   if (!endpoint) return { ok: false, status: "pending", error: "UPLOAD_SCAN_PENDING" };
@@ -142,20 +154,50 @@ export async function writeVerifiedUpload({
   fs.mkdirSync(quarantineDir, { recursive: true });
   const quarantineName = `${crypto.randomUUID()}-${storedName || path.basename(targetPath)}`;
   const quarantinePath = safeUploadTarget(quarantineDir, quarantineName);
+  const sha256 = crypto.createHash("sha256").update(buffer).digest("hex");
   fs.writeFileSync(quarantinePath, buffer);
+  writeQuarantineMetadata(quarantinePath, {
+    status: "pending",
+    tenant_id: String(tenantId || ""),
+    asset_kind: String(assetKind || ""),
+    category: String(category || ""),
+    filename: String(filename || ""),
+    mimetype: String(mimetype || ""),
+    stored_name: String(storedName || ""),
+    target_path: path.resolve(targetPath),
+    quarantine_path: quarantinePath,
+    sha256,
+    created_at: new Date().toISOString()
+  });
 
   const scan = await requestExternalScan(app, { buffer, filename, mimetype, assetKind, tenantId });
   if (!scan.ok) {
+    writeQuarantineMetadata(quarantinePath, {
+      status: scan.status || "pending",
+      error: scan.error || "UPLOAD_SCAN_PENDING",
+      tenant_id: String(tenantId || ""),
+      asset_kind: String(assetKind || ""),
+      category: String(category || ""),
+      filename: String(filename || ""),
+      mimetype: String(mimetype || ""),
+      stored_name: String(storedName || ""),
+      target_path: path.resolve(targetPath),
+      quarantine_path: quarantinePath,
+      sha256,
+      updated_at: new Date().toISOString()
+    });
     return {
       ok: false,
       error: scan.error || "UPLOAD_SCAN_PENDING",
       status: scan.status || "pending",
       scan_status: scan.status || "pending",
-      quarantine_path: quarantinePath
+      quarantine_path: quarantinePath,
+      quarantine_metadata_path: quarantineMetadataPath(quarantinePath)
     };
   }
 
   fs.renameSync(quarantinePath, targetPath);
+  fs.rmSync(quarantineMetadataPath(quarantinePath), { force: true });
   return scan;
 }
 
@@ -236,3 +278,7 @@ export function validateEcomUpload({ buffer, filename, mimetype, assetKind, allo
   if (TEXT_EXT.has(extension) && !isProbablyText(buffer)) return { ok: false, error: "FILE_SIGNATURE_MISMATCH" };
   return { ok: true, safeExt: extension, scan_status: scan.scan_status };
 }
+
+export {
+  quarantineMetadataPath
+};

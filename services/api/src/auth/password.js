@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import { promisify } from "node:util";
 import argon2 from "argon2";
 import { timingSafeEqual } from "./crypto.js";
+import { isCommonPasswordCandidate } from "./passwordBlocklist.js";
 
 /**
  * Password strength evaluation and policy enforcement
@@ -25,34 +26,6 @@ const PASSWORD_POLICIES = {
 
 const SCRYPT_MAX_MEM = 64 * 1024 * 1024;
 const scryptAsync = promisify(crypto.scrypt);
-const COMMON_PASSWORD_BLOCKLIST = new Set([
-  "password",
-  "password1",
-  "password12",
-  "password123",
-  "password1234",
-  "admin",
-  "admin123",
-  "administrator",
-  "welcome",
-  "welcome1",
-  "welcome123",
-  "letmein",
-  "qwerty",
-  "qwerty123",
-  "123456",
-  "12345678",
-  "123456789",
-  "111111",
-  "iloveyou",
-  "monkey",
-  "dragon",
-  "football",
-  "baseball",
-  "eip",
-  "eipadmin",
-  "changeme"
-]);
 const COMMON_PASSWORD_PATTERNS = [
   /password/i,
   /qwerty/i,
@@ -199,8 +172,7 @@ function evaluatePasswordStrength(password) {
     feedback.push("Password must contain at least one special character");
   }
 
-  const normalized = password.toLowerCase().replace(/\s+/g, "");
-  if (COMMON_PASSWORD_BLOCKLIST.has(normalized)) {
+  if (isCommonPasswordCandidate(password)) {
     feedback.push("Password appears on the common-password blocklist");
     score = 0;
   }

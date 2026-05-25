@@ -212,3 +212,22 @@ test("admin security ops rejects cross-site browser-triggered reads in productio
   assert.equal(res.statusCode, 403);
   assert.equal(res.json().error, "ORIGIN_NOT_ALLOWED");
 });
+
+test("admin security ops allows configured hosted dashboard origin even when fetch metadata is cross-site", async (t) => {
+  const db = buildDb();
+  const app = await buildApp(db, { NODE_ENV: "production" });
+  t.after(() => app.close());
+
+  const res = await app.inject({
+    method: "GET",
+    url: "/api/eip/admin/security/ops?window=24h&page_size=2",
+    headers: {
+      origin: "https://dashboard.test",
+      "sec-fetch-site": "cross-site",
+      "sec-fetch-mode": "cors"
+    }
+  });
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.json().ok, true);
+});

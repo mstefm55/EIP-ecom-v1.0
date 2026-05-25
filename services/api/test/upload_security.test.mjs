@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  quarantineMetadataPath,
   scanUploadBuffer,
   validateEcomUpload,
   validateImageUpload,
@@ -86,4 +87,12 @@ test("external-required upload mode quarantines until a scanner returns clean", 
   assert.equal(result.error, "UPLOAD_SCAN_PENDING");
   assert.equal(fs.existsSync(targetPath), false);
   assert.equal(fs.existsSync(result.quarantine_path), true);
+  assert.equal(fs.existsSync(result.quarantine_metadata_path), true);
+  assert.equal(result.quarantine_metadata_path, quarantineMetadataPath(result.quarantine_path));
+
+  const metadata = JSON.parse(fs.readFileSync(result.quarantine_metadata_path, "utf8"));
+  assert.equal(metadata.status, "pending");
+  assert.equal(metadata.tenant_id, "tenant-a");
+  assert.equal(metadata.filename, "avatar.png");
+  assert.equal(metadata.target_path, path.resolve(targetPath));
 });

@@ -1,6 +1,15 @@
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
+const BASE_URL = import.meta.env?.VITE_API_BASE_URL || "http://localhost:4000";
 const CSRF_ENDPOINT = "/api/eip/auth/csrf";
 const CSRF_ERROR_CODES = new Set(["CSRF_MISSING", "CSRF_MISMATCH", "CSRF_INVALID"]);
+const SESSION_MUTATING_PATHS = new Set([
+  "/api/eip/auth/login",
+  "/api/eip/auth/verify-otp",
+  "/api/eip/auth/totp/login",
+  "/api/eip/auth/passkeys/login/verify",
+  "/api/eip/auth/password/reset",
+  "/api/eip/auth/recovery/consume",
+  "/api/eip/auth/logout",
+]);
 
 let cachedCsrfToken = null;
 let csrfTokenPromise = null;
@@ -22,6 +31,11 @@ function parseErrorPayload(errorText) {
   } catch {
     return null;
   }
+}
+
+function shouldResetCsrfAfterSuccess(path, method) {
+  if (method === "GET" || method === "HEAD") return false;
+  return SESSION_MUTATING_PATHS.has(path);
 }
 
 export function resetCsrfToken() {
@@ -99,6 +113,7 @@ export async function apiFetchWithMeta(path, options = {}) {
       response = await performRequest({ refreshCsrf: true });
       if (response.ok) {
         const data = await response.json();
+        if (shouldResetCsrfAfterSuccess(path, method)) resetCsrfToken();
         return { status: response.status, headers: response.headers, data };
       }
       resetCsrfToken();
@@ -112,6 +127,7 @@ export async function apiFetchWithMeta(path, options = {}) {
   }
 
   const data = await response.json();
+  if (shouldResetCsrfAfterSuccess(path, method)) resetCsrfToken();
   return { status: response.status, headers: response.headers, data };
 }
 

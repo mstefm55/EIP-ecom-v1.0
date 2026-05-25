@@ -3,10 +3,10 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import argon2 from "argon2";
 import { buildSignedAssetUrl } from "../services/assets/signing.js";
+import { resolveAssetRoot } from "../services/assets/root.js";
 import { randomToken, sha256Hex, timingSafeEqual } from "../auth/crypto.js";
 import { buildRequestHash, ensureIdempotency, finalizeIdempotency } from "../services/gateway/idempotency.js";
 import { extractProfiles } from "../services/gateway/connectionProfile.js";
@@ -49,9 +49,6 @@ const STOREFRONT_CTA_ACTIONS = new Set([
   "navigate_external",
   "scroll_to"
 ]);
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const ASSET_ROOT = path.join(__dirname, "../../assets");
 const COMMERCE_SETTINGS_MODULE = "ecom";
 const COMMERCE_SETTINGS_CODE = "commerce";
 const DEFAULT_PAYMENT_SETTINGS = {
@@ -3193,7 +3190,7 @@ export default async function publicCommerceRoutes(app) {
       });
       if (!idem || idem.replay) return;
 
-      const uploadDir = path.join(ASSET_ROOT, access.tenant.id, "blog");
+      const uploadDir = path.join(resolveAssetRoot(app.config), access.tenant.id, "blog");
       fs.mkdirSync(uploadDir, { recursive: true });
 
       const storedName = `${crypto.randomUUID()}${validation.safeExt}`;

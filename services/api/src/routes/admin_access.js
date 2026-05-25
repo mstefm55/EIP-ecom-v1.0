@@ -1,7 +1,6 @@
 // services/api/src/routes/admin_access.js
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import argon2 from "argon2";
 import { hasPermission } from "../auth/perm.js";
@@ -10,10 +9,8 @@ import { evaluatePasswordStrength } from "../auth/password.js";
 import { loadActivePasskeys, publicPasskey } from "../auth/passkeys.js";
 import { auditSecurityEvent } from "../lib/securityAudit.js";
 import { safeUploadTarget, uploadPartToBuffer, validateImageUpload, writeVerifiedUpload } from "../lib/uploadSecurity.js";
+import { resolveAssetRoot } from "../services/assets/root.js";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const ASSET_ROOT = path.join(__dirname, "../../assets");
 const DEFAULT_TRANSLATION_BILLING = {
   charge_mode: "pass_through",
   markup_percent: 0,
@@ -732,7 +729,7 @@ export default async function adminAccessRoutes(app) {
       return reply.code(415).send({ ok: false, error: validation.error });
     }
 
-    const uploadDir = path.join(ASSET_ROOT, tenantId, "avatars");
+    const uploadDir = path.join(resolveAssetRoot(app.config), tenantId, "avatars");
     fs.mkdirSync(uploadDir, { recursive: true });
 
     const storedName = `${identityId}-${randomUUID()}${validation.safeExt}`;

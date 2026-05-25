@@ -37,6 +37,15 @@ const DEFAULT_LAYOUT = {
     consume: "Consume token",
     clear: "Clear token",
     hint: "Required for sensitive tables. Requires step-up verification."
+  },
+  breakGlass: {
+    title: "Investigation grant",
+    hint: "Required before table reads or exports. Grants are short-lived and audited.",
+    reasonPlaceholder: "Reason for access",
+    ticketPlaceholder: "Ticket / case reference",
+    targetPlaceholder: "Target tenant id (optional)",
+    issue: "Open grant",
+    clear: "Clear grant"
   }
 };
 
@@ -91,6 +100,10 @@ export default function AdminDbExplorer({ node }) {
   const [sensitiveTenant, setSensitiveTenant] = useState("");
   const [sensitiveToken, setSensitiveToken] = useState("");
   const [sensitiveStatus, setSensitiveStatus] = useState(null);
+  const [breakGlassReason, setBreakGlassReason] = useState("");
+  const [breakGlassTicket, setBreakGlassTicket] = useState("");
+  const [breakGlassTarget, setBreakGlassTarget] = useState("");
+  const [breakGlassStatus, setBreakGlassStatus] = useState(null);
 
   const tableList = useMemo(() => {
     const entries = [];
@@ -305,6 +318,68 @@ export default function AdminDbExplorer({ node }) {
     }
   };
 
+  const loadBreakGlassStatus = async () => {
+    try {
+      const result = await apiFetch("/api/eip/admin/db/break-glass/status");
+      setBreakGlassStatus({
+        type: result.active ? "success" : "info",
+        grant: result.grant || null,
+        message: result.active
+          ? `Grant active until ${new Date(result.grant.expires_at).toLocaleString()}`
+          : "No active investigation grant.",
+      });
+    } catch (err) {
+      setBreakGlassStatus({
+        type: "error",
+        message: err.message || "Unable to load investigation grant.",
+      });
+    }
+  };
+
+  const issueBreakGlass = async () => {
+    setBreakGlassStatus(null);
+    try {
+      const result = await apiFetch("/api/eip/admin/db/break-glass/issue", {
+        method: "POST",
+        body: {
+          reason: breakGlassReason,
+          ticket: breakGlassTicket,
+          target_tenant_id: breakGlassTarget || tenantFilter || undefined,
+        },
+      });
+      setBreakGlassStatus({
+        type: "success",
+        grant: result.grant || null,
+        message: `Grant active until ${new Date(result.grant_expires_at).toLocaleString()}`,
+      });
+      setBreakGlassReason("");
+      setBreakGlassTicket("");
+      setBreakGlassTarget("");
+      loadTable();
+    } catch (err) {
+      setBreakGlassStatus({
+        type: "error",
+        message: err.message || "Grant failed.",
+      });
+    }
+  };
+
+  const clearBreakGlass = async () => {
+    setBreakGlassStatus(null);
+    try {
+      await apiFetch("/api/eip/admin/db/break-glass/clear", { method: "POST", body: {} });
+      setBreakGlassStatus({
+        type: "info",
+        message: "Investigation grant cleared.",
+      });
+    } catch (err) {
+      setBreakGlassStatus({
+        type: "error",
+        message: err.message || "Clear failed.",
+      });
+    }
+  };
+
   const handleTenantSelect = (tenant) => {
     if (!tenant) return;
     setTenantFilter(tenant.id);
@@ -341,7 +416,7 @@ export default function AdminDbExplorer({ node }) {
       });
       setSensitiveStatus({
         type: "success",
-        message: `Token active until ${new Date(result.token_expires_at).toLocaleString()}`,
+        message: `Token active until ${new Date(result.grant_expires_at).toLocaleString()}`,
       });
     } catch (err) {
       setSensitiveStatus({
@@ -369,6 +444,7 @@ export default function AdminDbExplorer({ node }) {
 
   useEffect(() => {
     loadSchema();
+    loadBreakGlassStatus();
   }, []);
 
   useEffect(() => {
@@ -446,6 +522,71 @@ export default function AdminDbExplorer({ node }) {
           {notice}
         </div>
       ) : null}
+
+      <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/80 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-xs uppercase tracking-[0.3em] text-amber-700">
+              {layout.breakGlass.title}
+            </p>
+            <p className="mt-1 text-[0.7rem] text-amber-700/80">{layout.breakGlass.hint}</p>
+            {breakGlassStatus?.grant?.ticket ? (
+              <p className="mt-1 text-[0.7rem] font-semibold text-amber-800">
+                Ticket {breakGlassStatus.grant.ticket}
+              </p>
+            ) : null}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={issueBreakGlass}
+              className="inline-flex items-center gap-2 rounded-full bg-amber-800 px-4 py-2 text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-white shadow-soft"
+            >
+              {layout.breakGlass.issue}
+            </button>
+            <button
+              type="button"
+              onClick={clearBreakGlass}
+              className="inline-flex items-center gap-2 rounded-full border border-amber-300 bg-white px-4 py-2 text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-amber-800"
+            >
+              {layout.breakGlass.clear}
+            </button>
+          </div>
+        </div>
+        <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)]">
+          <input
+            value={breakGlassReason}
+            onChange={(event) => setBreakGlassReason(event.target.value)}
+            placeholder={layout.breakGlass.reasonPlaceholder}
+            className="w-full rounded-xl border border-amber-200 bg-white px-3 py-2 text-xs text-ink-700"
+          />
+          <input
+            value={breakGlassTicket}
+            onChange={(event) => setBreakGlassTicket(event.target.value)}
+            placeholder={layout.breakGlass.ticketPlaceholder}
+            className="w-full rounded-xl border border-amber-200 bg-white px-3 py-2 text-xs text-ink-700"
+          />
+          <input
+            value={breakGlassTarget}
+            onChange={(event) => setBreakGlassTarget(event.target.value)}
+            placeholder={layout.breakGlass.targetPlaceholder}
+            className="w-full rounded-xl border border-amber-200 bg-white px-3 py-2 text-xs text-ink-700"
+          />
+        </div>
+        {breakGlassStatus?.message ? (
+          <div
+            className={`mt-3 rounded-xl border px-3 py-2 text-xs ${
+              breakGlassStatus.type === "error"
+                ? "border-rose-200 bg-rose-50 text-rose-600"
+                : breakGlassStatus.type === "success"
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                  : "border-amber-200 bg-white text-amber-800"
+            }`}
+          >
+            {breakGlassStatus.message}
+          </div>
+        ) : null}
+      </div>
 
       <div className="mt-4 rounded-2xl border border-ink-100 bg-white/90 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">

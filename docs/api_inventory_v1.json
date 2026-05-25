@@ -56,10 +56,15 @@
           ],
           "routes": [
             "GET /admin/security/ops",
-            "GET /admin/db/tables",
-            "GET /admin/db/table/:schema/:table",
-            "GET /admin/db/table/:schema/:table/export",
+            "GET /admin/db/schema",
+            "GET /admin/db/tenants",
+            "GET /admin/db/break-glass/status",
+            "POST /admin/db/break-glass/issue",
+            "POST /admin/db/break-glass/clear",
+            "GET /admin/db/table?schema=:schema&table=:table",
+            "GET /admin/db/export?schema=:schema&table=:table",
             "POST /admin/db/sensitive/consume",
+            "POST /admin/db/sensitive/clear",
             "POST /admin/template-clone",
             "POST /admin/tenant-requests/:id/approve",
             "POST /admin/tenant-requests/:id/reject",
@@ -67,7 +72,7 @@
             "POST /admin/tenants/:tenantId/users",
             "POST /admin/tenants/:tenantId/users/:identityId/passkeys/:passkeyId/revoke"
           ],
-          "security_notes": ["DB explorer is disabled by default in production", "sensitive reads enforce browser-origin guard and step-up", "tenant access is explicitly scoped"]
+          "security_notes": ["DB explorer is disabled by default in production", "table reads/exports require browser-origin guard, step-up, and break-glass grant", "sensitive reads additionally require tenant sensitive-token grant", "tenant access is explicitly scoped"]
         }
       ]
     },

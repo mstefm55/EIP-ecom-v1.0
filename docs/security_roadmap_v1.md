@@ -46,13 +46,13 @@ Gateway/control-plane hardening status: gateway audit payloads now redact sensit
 
 Residual hardening sweep status: password reuse now verifies the proposed plaintext against historic Argon2/scrypt hashes, generated passwords use cryptographic randomness, failed-login locks persist through `auth_failed_attempt` plus `auth_identity.attrs.auth_lock_expires_at`, owner/admin privileged production actions require phishing-resistant step-up, public gateway/commerce enforce security-event-backed tenant/connection quotas, and upload validation runs an inline V1 safety scan before assets are written.
 
-Final V1 security closure status: all remaining gap-matrix `partial` controls have been closed for V1. Admin DB explorer sensitive access now uses server-side session grants rather than a raw sensitive-token cookie, masks broader credential/session/recovery fields, and emits sensitive-read/export/grant audit events. Admin control-plane tenant access is explicitly checked across users/modules/template-clone paths. Public commerce order/payment/member writes use consistent idempotency keys and finalize replay records on success and known errors. Public tenant requests now emit observable security events and durable IP/email-hash quota checks. Password policy is aligned to NIST-style length/blocklist/no-forced-rotation behavior. Recovery administration is owner/admin scoped and step-up protected. Uploads support inline blocking plus an external-required scanner/quarantine hook before publication.
+Final V1 security closure status: all remaining gap-matrix `partial` controls have been closed for V1. Admin DB explorer sensitive access now uses server-side session grants rather than a raw sensitive-token cookie, masks broader credential/session/recovery fields, and emits sensitive-read/export/grant audit events. The final hardening sweep adds a short-lived break-glass investigation grant before table reads, exports, and sensitive-token consumption. Admin control-plane tenant access is explicitly checked across users/modules/template-clone paths. Public commerce order/payment/member writes use consistent idempotency keys and finalize replay records on success and known errors. Public tenant requests now emit observable security events and durable IP/email-hash quota checks. Password policy is aligned to NIST-style length/blocklist/no-forced-rotation behavior and now loads a larger local denylist with leetspeak normalization plus optional external blocklist support. Recovery administration is owner/admin scoped and step-up protected. Uploads support inline blocking plus an external-required scanner/quarantine hook before publication, including sidecar quarantine metadata for scanner operations.
 
 1. Fix password lifecycle controls.
    - Compare a proposed password against historic Argon2 hashes with verifier calls instead of hash equality.
    - Replace generated password randomness with cryptographic random selection.
    - Status: verifier-based reuse prevention and cryptographic generation are implemented in the residual hardening sweep.
-   - Status: implemented. Password policy now uses longer minimum length, common-password/pattern screening, no composition requirement, max length, verifier-based reuse checks, and no arbitrary forced rotation by default.
+   - Status: implemented. Password policy now uses longer minimum length, common-password/pattern screening backed by `common_passwords_v1.txt`, leetspeak normalization, no composition requirement, max length, verifier-based reuse checks, and no arbitrary forced rotation by default.
    - Evidence: `services/api/src/auth/password.js`, `services/api/src/routes/auth.js`.
 
 2. Make failed-login throttling durable and consistently wired.
@@ -79,7 +79,7 @@ Final V1 security closure status: all remaining gap-matrix `partial` controls ha
    - Keep current extension/MIME/signature/path controls.
    - Add asynchronous malware scanning and quarantine state for tenant assets.
    - Do not publish assets until scan passes where the file type is user supplied.
-   - Status: implemented for V1. Inline scanning blocks EICAR and active-content payloads before write/publish. `UPLOAD_SCAN_MODE=external_required` quarantines uploads and only promotes them after a clean external scanner verdict.
+   - Status: implemented for V1. Inline scanning blocks EICAR and active-content payloads before write/publish. `UPLOAD_SCAN_MODE=external_required` quarantines uploads, records sidecar scan metadata, and only promotes files after a clean external scanner verdict.
    - Evidence: `services/api/src/lib/uploadSecurity.js`, `services/api/src/server.js`.
 
 6. Add security regression tests.
@@ -154,4 +154,4 @@ Final V1 security closure status: all remaining gap-matrix `partial` controls ha
 
 ## Production Gate
 
-EIP V1 has no remaining `partial` rows in the tracked security gap matrix after Prompts 1-8, the residual hardening sweep, and the final V1 closure sweep. Before broad public tenant traffic, retest the live Railway deployment, tune quota thresholds from real traffic, and set `UPLOAD_SCAN_MODE=external_required` plus `UPLOAD_SCAN_ENDPOINT` if the production policy requires third-party AV/CDR for accepted asset types.
+EIP V1 has no remaining `partial` rows in the tracked security gap matrix after Prompts 1-8, the residual hardening sweep, and the final V1 closure sweep. Before broad public tenant traffic, retest the live Railway deployment, tune quota thresholds from real traffic, mount a persistent `ASSET_ROOT` volume for uploaded assets, and set `UPLOAD_SCAN_MODE=external_required` plus `UPLOAD_SCAN_ENDPOINT` if the production policy requires third-party AV/CDR for accepted asset types. Use `npm run synthetic:v1:plan` and then scoped `npm run synthetic:v1:run` checks against a disposable test tenant/connection for quota and abuse validation.

@@ -55,9 +55,9 @@ function validateSensitiveReadGuard(app, req) {
     String(app.config?.NODE_ENV || "").toLowerCase() === "production" ||
     app.config?.EIP_ORIGIN_REQUIRED === true;
 
-  if (fetchSite === "cross-site") return { ok: false, status: 403, error: "ORIGIN_NOT_ALLOWED" };
   if (fetchMode === "navigate") return { ok: false, status: 403, error: "BROWSER_NAVIGATION_BLOCKED" };
   if (!origin) {
+    if (fetchSite === "cross-site") return { ok: false, status: 403, error: "ORIGIN_NOT_ALLOWED" };
     return requiresOrigin
       ? { ok: false, status: 403, error: "ORIGIN_REQUIRED" }
       : { ok: true };

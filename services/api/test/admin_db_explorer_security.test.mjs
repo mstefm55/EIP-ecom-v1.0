@@ -3,6 +3,7 @@ import test from "node:test";
 import Fastify from "fastify";
 import adminDbExplorerRoutes, {
   sanitizeRow,
+  verifyBreakGlassGrant,
   verifySensitiveGrant
 } from "../src/routes/admin_db_explorer.js";
 
@@ -33,8 +34,33 @@ function makeDb({ tenantCode = "owner", tenantKind = "owner_admin", permission =
         return { rowCount: permission ? 1 : 0, rows: permission ? [{ "?column?": 1 }] : [] };
       }
 
+      if (text.includes("FROM eip_authz.identity_role ir") && text.includes("r.code IN ('ADMIN_EXEC','ADMIN_SUPER')")) {
+        return { rowCount: 1, rows: [{ "?column?": 1 }] };
+      }
+
+      if (text.includes("FROM information_schema.tables")) {
+        return {
+          rowCount: 1,
+          rows: [{ table_schema: "eip_core", table_name: "tenant" }]
+        };
+      }
+
+      if (text.includes("FROM information_schema.columns")) {
+        return {
+          rowCount: 2,
+          rows: [
+            { table_schema: "eip_core", table_name: "tenant", column_name: "id", data_type: "uuid", is_nullable: "NO", ordinal_position: 1 },
+            { table_schema: "eip_core", table_name: "tenant", column_name: "name", data_type: "text", is_nullable: "YES", ordinal_position: 2 }
+          ]
+        };
+      }
+
       if (text.includes("INSERT INTO eip_core.security_event")) {
         return { rowCount: 1, rows: [{ id: "security-event" }] };
+      }
+
+      if (text.includes("UPDATE eip_auth.auth_session")) {
+        return { rowCount: 1, rows: [] };
       }
 
       throw new Error(`Unexpected SQL in admin DB explorer security test: ${text}`);
@@ -114,6 +140,22 @@ test("admin DB explorer rejects cross-site browser-triggered reads", async (t) =
   assert.equal(res.json().error, "ORIGIN_NOT_ALLOWED");
 });
 
+test("admin DB explorer allows configured hosted dashboard origin with cross-site fetch metadata", async (t) => {
+  const app = await buildApp();
+  t.after(() => app.close());
+
+  const res = await app.inject({
+    method: "GET",
+    url: "/api/eip/admin/db/schema",
+    headers: headers({
+      origin: "https://dashboard.test",
+      "sec-fetch-site": "cross-site"
+    })
+  });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.json().ok, true);
+});
+
 test("admin DB explorer requires owner/admin session classification", async (t) => {
   const app = await buildApp({ tenantCode: "tenant_a", tenantKind: "customer" });
   t.after(() => app.close());
@@ -189,4 +231,45 @@ test("admin DB explorer sensitive access uses session grants instead of raw toke
   };
   const valid = verifySensitiveGrant(app, session, tenantAccess, "tenant-a");
   assert.equal(valid.ok, true);
+});
+
+test("admin DB explorer issues audited short-lived break-glass grants after step-up", async (t) => {
+  const app = await buildApp();
+  t.after(() => app.close());
+
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/eip/admin/db/break-glass/issue",
+    headers: headers(),
+    payload: {
+      reason: "Investigate synthetic support case",
+      ticket: "CASE-123"
+    }
+  });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.json().ok, true);
+  assert.equal(res.json().grant.ticket, "CASE-123");
+  assert.match(res.json().grant_expires_at, /^\d{4}-/);
+});
+
+test("admin DB explorer break-glass grants expire and remain tenant scoped", () => {
+  const session = {
+    attrs: {
+      admin_db_break_glass: {
+        id: "grant-1",
+        target_tenant_id: "tenant-a",
+        expires_at: new Date(Date.now() + 60_000).toISOString()
+      }
+    }
+  };
+
+  assert.equal(verifyBreakGlassGrant(session, { targetTenantId: "tenant-a" }).ok, true);
+  const wrongTenant = verifyBreakGlassGrant(session, { targetTenantId: "tenant-b" });
+  assert.equal(wrongTenant.ok, false);
+  assert.equal(wrongTenant.error, "BREAK_GLASS_SCOPE_MISMATCH");
+
+  session.attrs.admin_db_break_glass.expires_at = new Date(Date.now() - 1000).toISOString();
+  const expired = verifyBreakGlassGrant(session, { targetTenantId: "tenant-a" });
+  assert.equal(expired.ok, false);
+  assert.equal(expired.error, "BREAK_GLASS_EXPIRED");
 });

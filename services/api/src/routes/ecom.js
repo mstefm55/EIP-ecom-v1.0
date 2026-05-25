@@ -1,12 +1,12 @@
 // services/api/src/routes/ecom.js
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { hasPermission } from "../auth/perm.js";
 import { sha256Hex } from "../auth/crypto.js";
 import { buildSignedAssetUrl } from "../services/assets/signing.js";
+import { resolveAssetRoot } from "../services/assets/root.js";
 import { sanitizeMediaForStorage } from "../services/assets/url_policy.js";
 import { safeUploadTarget, uploadPartToBuffer, validateEcomUpload, writeVerifiedUpload } from "../lib/uploadSecurity.js";
 import { extractProfiles } from "../services/gateway/connectionProfile.js";
@@ -48,9 +48,6 @@ const PRODUCT_REVIEW_OBJECT_TYPE = "product_review";
 const BLOG_POST_OBJECT_TYPE = "blog_post";
 const REVIEW_STATUS_VALUES = new Set(["approved", "pending_review", "rejected", "hidden", "published", "visible"]);
 const STOREFRONT_CONTENT_ACTIONS = new Set(["INTAKE", "DRAFT_READY", "APPROVE", "PUBLISH", "REJECT", "CANCEL"]);
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const ASSET_ROOT = path.join(__dirname, "../../assets");
 const DOCUMENT_ALLOWED_MIME = new Set([
   "application/pdf",
   "application/zip",
@@ -2932,7 +2929,7 @@ export default async function ecomRoutes(app) {
         return reply.code(415).send({ ok: false, error: validation.error });
       }
       const uploadDir = path.join(
-        ASSET_ROOT,
+        resolveAssetRoot(app.config),
         session.tenant_id,
         "products",
         assetKind === "document" ? "documents" : ""

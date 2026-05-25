@@ -1,5 +1,6 @@
 // services/api/src/routes/admin_db_explorer.js
 import { hasPermission } from "../auth/perm.js";
+import { randomUUID } from "node:crypto";
 import { sha256Hex, timingSafeEqual } from "../auth/crypto.js";
 import { requirePrivilegedStepUp } from "../auth/privilegedStepUp.js";
 import { resolveEipSurfaceAccess } from "../lib/surfaceAccess.js";
@@ -25,6 +26,11 @@ const SENSITIVE_COLUMN_PATTERN =
   /(password|token|secret|hash|pepper|salt|key|credential|session|csrf|refresh|otp|totp|recovery|signature|cookie|api|private)/i;
 const SENSITIVE_TOKEN_COOKIE = "eip_sensitive_token";
 const SENSITIVE_GRANT_DEFAULT_TTL_MIN = 15;
+const BREAK_GLASS_DEFAULT_TTL_MIN = 15;
+const BREAK_GLASS_REASON_MIN_LENGTH = 8;
+const BREAK_GLASS_REASON_MAX_LENGTH = 500;
+const BREAK_GLASS_TICKET_MIN_LENGTH = 3;
+const BREAK_GLASS_TICKET_MAX_LENGTH = 120;
 
 function normalizeText(value) {
   return String(value || "").trim();
@@ -82,13 +88,13 @@ function validateBrowserReadGuard(app, req) {
     String(app.config?.NODE_ENV || "").toLowerCase() === "production" ||
     app.config?.EIP_ORIGIN_REQUIRED === true;
 
-  if (fetchSite === "cross-site") {
-    return { ok: false, status: 403, error: "ORIGIN_NOT_ALLOWED" };
-  }
   if (fetchMode === "navigate") {
     return { ok: false, status: 403, error: "BROWSER_NAVIGATION_BLOCKED" };
   }
   if (!origin) {
+    if (fetchSite === "cross-site") {
+      return { ok: false, status: 403, error: "ORIGIN_NOT_ALLOWED" };
+    }
     return requiresOrigin
       ? { ok: false, status: 403, error: "ORIGIN_REQUIRED" }
       : { ok: true };
@@ -336,6 +342,160 @@ async function clearSensitiveAccessGrant(app, session, tenantId = null) {
   delete session.attrs.admin_db_sensitive_grants;
 }
 
+function breakGlassTtlMs(app) {
+  const configuredMin = Number(app.config?.ADMIN_DB_BREAK_GLASS_TTL_MIN || BREAK_GLASS_DEFAULT_TTL_MIN);
+  const clampedMin = Math.max(1, Math.min(60, Number.isFinite(configuredMin) ? configuredMin : BREAK_GLASS_DEFAULT_TTL_MIN));
+  return clampedMin * 60 * 1000;
+}
+
+function publicBreakGlassGrant(grant) {
+  if (!grant || typeof grant !== "object") return null;
+  return {
+    id: grant.id || null,
+    reason: grant.reason || null,
+    ticket: grant.ticket || null,
+    target_tenant_id: grant.target_tenant_id || null,
+    issued_at: grant.issued_at || null,
+    expires_at: grant.expires_at || null
+  };
+}
+
+function verifyBreakGlassGrant(session, { targetTenantId = null } = {}) {
+  const grant = session?.attrs?.admin_db_break_glass;
+  if (!grant?.id || !grant?.expires_at) {
+    return { ok: false, error: "BREAK_GLASS_REQUIRED" };
+  }
+  const expiresAt = new Date(grant.expires_at).getTime();
+  if (!Number.isFinite(expiresAt) || Date.now() > expiresAt) {
+    return { ok: false, error: "BREAK_GLASS_EXPIRED", expired: true, grant };
+  }
+  if (
+    grant.target_tenant_id &&
+    targetTenantId &&
+    String(grant.target_tenant_id) !== String(targetTenantId)
+  ) {
+    return { ok: false, error: "BREAK_GLASS_SCOPE_MISMATCH", grant };
+  }
+  return { ok: true, grant };
+}
+
+async function clearBreakGlassGrant(app, session) {
+  if (!session?.id) return;
+  await app.db.query(
+    `
+    UPDATE eip_auth.auth_session
+    SET attrs = COALESCE(attrs,'{}'::jsonb) - 'admin_db_break_glass'
+    WHERE id = $1::uuid
+    `,
+    [session.id]
+  );
+  session.attrs = { ...(session.attrs || {}) };
+  delete session.attrs.admin_db_break_glass;
+}
+
+async function grantBreakGlassAccess(app, session, { reason, ticket, targetTenantId = null } = {}) {
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + breakGlassTtlMs(app));
+  const grant = {
+    id: randomUUID(),
+    reason,
+    ticket,
+    target_tenant_id: targetTenantId || null,
+    issued_at: now.toISOString(),
+    expires_at: expiresAt.toISOString()
+  };
+
+  await app.db.query(
+    `
+    UPDATE eip_auth.auth_session
+    SET attrs = jsonb_set(
+      COALESCE(attrs,'{}'::jsonb),
+      '{admin_db_break_glass}',
+      $2::jsonb,
+      true
+    )
+    WHERE id = $1::uuid
+    `,
+    [session.id, JSON.stringify(grant)]
+  );
+
+  session.attrs = {
+    ...(session.attrs || {}),
+    admin_db_break_glass: grant
+  };
+
+  return { ok: true, grant, expiresAt };
+}
+
+async function ensureBreakGlassGrant(app, req, reply, session, {
+  targetTenantId = null,
+  tableKey = null,
+  operation = "read"
+} = {}) {
+  const grantCheck = verifyBreakGlassGrant(session, { targetTenantId });
+  if (grantCheck.ok) {
+    auditSecurityEvent(app, "admin_db_explorer.break_glass_used", {
+      category: "admin",
+      source: "admin_db_explorer",
+      severity: "warning",
+      outcome: "success",
+      actorTenantId: session.tenant_id,
+      actorIdentityId: session.identity_id,
+      targetTenantId,
+      ip: req.ip,
+      userAgent: req.headers["user-agent"] || null,
+      metadata: {
+        grant_id: grantCheck.grant.id,
+        ticket: grantCheck.grant.ticket || null,
+        operation,
+        table: tableKey
+      }
+    });
+    return grantCheck;
+  }
+
+  if (grantCheck.expired) {
+    await clearBreakGlassGrant(app, session);
+    auditSecurityEvent(app, "admin_db_explorer.break_glass_expired", {
+      category: "admin",
+      source: "admin_db_explorer",
+      severity: "warning",
+      outcome: "rejected",
+      actorTenantId: session.tenant_id,
+      actorIdentityId: session.identity_id,
+      targetTenantId,
+      reason: grantCheck.error,
+      ip: req.ip,
+      userAgent: req.headers["user-agent"] || null,
+      metadata: {
+        grant_id: grantCheck.grant?.id || null,
+        operation,
+        table: tableKey
+      }
+    });
+  } else {
+    auditSecurityEvent(app, "admin_db_explorer.break_glass_rejected", {
+      category: "admin",
+      source: "admin_db_explorer",
+      severity: "warning",
+      outcome: "rejected",
+      actorTenantId: session.tenant_id,
+      actorIdentityId: session.identity_id,
+      targetTenantId,
+      reason: grantCheck.error,
+      ip: req.ip,
+      userAgent: req.headers["user-agent"] || null,
+      metadata: {
+        operation,
+        table: tableKey
+      }
+    });
+  }
+
+  reply.code(403).send({ ok: false, error: grantCheck.error });
+  return null;
+}
+
 function verifySensitiveGrant(app, session, tenantAccess, tenantId) {
   if (!tenantAccess?.sensitive_allowed) {
     return { ok: false, error: "TENANT_SENSITIVE_DENIED" };
@@ -440,6 +600,26 @@ function auditSensitiveDbAccess(app, req, {
       offset
     }
   });
+}
+
+function normalizeBreakGlassPayload(body = {}) {
+  const reason = normalizeText(body.reason).slice(0, BREAK_GLASS_REASON_MAX_LENGTH);
+  const ticket = normalizeText(body.ticket || body.case_ref || body.caseReference).slice(0, BREAK_GLASS_TICKET_MAX_LENGTH);
+  const targetTenantId = normalizeText(body.target_tenant_id || body.targetTenantId) || null;
+  if (reason.length < BREAK_GLASS_REASON_MIN_LENGTH) {
+    return { ok: false, error: "REASON_REQUIRED" };
+  }
+  if (ticket.length < BREAK_GLASS_TICKET_MIN_LENGTH) {
+    return { ok: false, error: "TICKET_REQUIRED" };
+  }
+  return { ok: true, reason, ticket, targetTenantId };
+}
+
+async function canAccessBreakGlassTarget(app, session, targetTenantId) {
+  if (!targetTenantId || String(targetTenantId) === String(session.tenant_id)) return true;
+  if (await isAdminExec(app, session.tenant_id, session.identity_id)) return true;
+  if (await hasPortfolioAccess(app, session.identity_id, targetTenantId)) return true;
+  return Boolean(await loadTenantAccess(app, session.identity_id, targetTenantId));
 }
 
 export default async function adminDbExplorerRoutes(app) {
@@ -560,6 +740,119 @@ export default async function adminDbExplorerRoutes(app) {
     return reply.send({ ok: true, tenants: r.rows || [] });
   });
 
+  app.get("/admin/db/break-glass/status", async (req, reply) => {
+    const session = await requireAdminDb(app, req, reply, "admin.db.read");
+    if (!session) return;
+
+    const grantCheck = verifyBreakGlassGrant(session);
+    if (grantCheck.expired) {
+      await clearBreakGlassGrant(app, session);
+      auditSecurityEvent(app, "admin_db_explorer.break_glass_expired", {
+        category: "admin",
+        source: "admin_db_explorer",
+        severity: "warning",
+        outcome: "rejected",
+        actorTenantId: session.tenant_id,
+        actorIdentityId: session.identity_id,
+        reason: "BREAK_GLASS_EXPIRED",
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || null,
+        metadata: { grant_id: grantCheck.grant?.id || null }
+      });
+      return reply.send({ ok: true, active: false, error: "BREAK_GLASS_EXPIRED" });
+    }
+
+    return reply.send({
+      ok: true,
+      active: grantCheck.ok,
+      grant: grantCheck.ok ? publicBreakGlassGrant(grantCheck.grant) : null,
+      ttl_minutes: Math.round(breakGlassTtlMs(app) / 60_000)
+    });
+  });
+
+  app.post("/admin/db/break-glass/issue", async (req, reply) => {
+    const csrf = await app.requireCsrf(req);
+    if (!csrf.ok) {
+      return reply.code(csrf.status).send({ ok: false, error: csrf.error });
+    }
+
+    const session = await requireAdminDb(app, req, reply, "admin.db.read", { stepUp: true });
+    if (!session) return;
+
+    const payload = normalizeBreakGlassPayload(req.body || {});
+    if (!payload.ok) {
+      return reply.code(400).send({ ok: false, error: payload.error });
+    }
+
+    const targetAllowed = await canAccessBreakGlassTarget(app, session, payload.targetTenantId);
+    if (!targetAllowed) {
+      auditSecurityEvent(app, "admin_db_explorer.break_glass_rejected", {
+        category: "admin",
+        source: "admin_db_explorer",
+        severity: "warning",
+        outcome: "rejected",
+        actorTenantId: session.tenant_id,
+        actorIdentityId: session.identity_id,
+        targetTenantId: payload.targetTenantId,
+        reason: "TENANT_ACCESS_REQUIRED",
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || null,
+        metadata: { ticket: payload.ticket }
+      });
+      return reply.code(403).send({ ok: false, error: "TENANT_ACCESS_REQUIRED" });
+    }
+
+    const issued = await grantBreakGlassAccess(app, session, payload);
+    auditSecurityEvent(app, "admin_db_explorer.break_glass_issued", {
+      category: "admin",
+      source: "admin_db_explorer",
+      severity: "warning",
+      outcome: "success",
+      actorTenantId: session.tenant_id,
+      actorIdentityId: session.identity_id,
+      targetTenantId: payload.targetTenantId,
+      ip: req.ip,
+      userAgent: req.headers["user-agent"] || null,
+      metadata: {
+        grant_id: issued.grant.id,
+        reason: payload.reason,
+        ticket: payload.ticket,
+        expires_at: issued.expiresAt.toISOString()
+      }
+    });
+
+    return reply.send({
+      ok: true,
+      grant: publicBreakGlassGrant(issued.grant),
+      grant_expires_at: issued.expiresAt.toISOString()
+    });
+  });
+
+  app.post("/admin/db/break-glass/clear", async (req, reply) => {
+    const csrf = await app.requireCsrf(req);
+    if (!csrf.ok) {
+      return reply.code(csrf.status).send({ ok: false, error: csrf.error });
+    }
+
+    const session = await requireAdminDb(app, req, reply, "admin.db.read");
+    if (!session) return;
+
+    const existing = session.attrs?.admin_db_break_glass || null;
+    await clearBreakGlassGrant(app, session);
+    auditSecurityEvent(app, "admin_db_explorer.break_glass_cleared", {
+      category: "admin",
+      source: "admin_db_explorer",
+      severity: "info",
+      outcome: "success",
+      actorTenantId: session.tenant_id,
+      actorIdentityId: session.identity_id,
+      ip: req.ip,
+      userAgent: req.headers["user-agent"] || null,
+      metadata: { grant_id: existing?.id || null }
+    });
+    return reply.send({ ok: true });
+  });
+
   app.get("/admin/db/table", async (req, reply) => {
     const session = await requireAdminDb(app, req, reply, "admin.db.read", { stepUp: true });
     if (!session) return;
@@ -633,6 +926,13 @@ export default async function adminDbExplorerRoutes(app) {
         }
       }
     }
+
+    const breakGlass = await ensureBreakGlassGrant(app, req, reply, session, {
+      targetTenantId: tenantFilter,
+      tableKey,
+      operation: "table_read"
+    });
+    if (!breakGlass) return;
 
     if (SENSITIVE_TABLES.has(tableKey) && !exec) {
       if (!tenantFilter) {
@@ -769,6 +1069,13 @@ export default async function adminDbExplorerRoutes(app) {
       }
     }
 
+    const breakGlass = await ensureBreakGlassGrant(app, req, reply, session, {
+      targetTenantId: tenantFilter,
+      tableKey,
+      operation: "export"
+    });
+    if (!breakGlass) return;
+
     if (SENSITIVE_TABLES.has(tableKey) && !exec) {
       if (!tenantFilter) {
         return reply.code(400).send({ ok: false, error: "TENANT_REQUIRED" });
@@ -868,6 +1175,12 @@ export default async function adminDbExplorerRoutes(app) {
       return reply.code(403).send({ ok: false, error: "TENANT_ACCESS_REQUIRED" });
     }
 
+    const breakGlass = await ensureBreakGlassGrant(app, req, reply, session, {
+      targetTenantId: tenantId,
+      operation: "sensitive_grant"
+    });
+    if (!breakGlass) return;
+
     const tokenCheck = await verifySensitiveToken(app, tenantAccess, token);
     if (!tokenCheck.ok) {
       return reply.code(403).send({ ok: false, error: tokenCheck.error });
@@ -934,5 +1247,8 @@ export {
   sanitizeRow,
   verifySensitiveGrant,
   grantSensitiveAccess,
-  clearSensitiveAccessGrant
+  clearSensitiveAccessGrant,
+  verifyBreakGlassGrant,
+  grantBreakGlassAccess,
+  clearBreakGlassGrant
 };
