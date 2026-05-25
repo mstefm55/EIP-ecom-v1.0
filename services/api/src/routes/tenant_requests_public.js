@@ -1,11 +1,14 @@
 // services/api/src/routes/tenant_requests_public.js
 import { randomToken, sha256Hex } from "../auth/crypto.js";
+import { auditSecurityEvent } from "../lib/securityAudit.js";
 
 const REQUEST_RATE_LIMIT = { max: 5, timeWindow: "10 minute" };
 const STATUS_RATE_LIMIT = { max: 30, timeWindow: "1 minute" };
 const REQUEST_BODY_LIMIT = 16 * 1024; // 16 KiB
 const EMAIL_WINDOW_MIN = 60;
 const EMAIL_MAX_REQUESTS = 3;
+const IP_WINDOW_MIN = 60;
+const IP_MAX_REQUESTS = 20;
 
 function normalizeEmail(value) {
   return String(value || "").trim().toLowerCase();
@@ -17,6 +20,25 @@ function normalizeText(value) {
 
 function buildRefCode() {
   return randomToken(12);
+}
+
+async function countRecentTenantRequestEvents(app, { ip, emailHash }) {
+  const r = await app.db.query(
+    `
+    SELECT count(*)::int AS event_count
+    FROM eip_core.security_event
+    WHERE category = 'onboarding'
+      AND source = 'tenant_requests_public'
+      AND occurred_at > now() - ($1 * interval '1 minute')
+      AND event_type IN ('tenant_request.submitted','tenant_request.rate_limited')
+      AND (
+        ($2::inet IS NOT NULL AND ip = $2::inet)
+        OR ($3::text IS NOT NULL AND metadata->>'email_hash' = $3::text)
+      )
+    `,
+    [IP_WINDOW_MIN, ip || null, emailHash || null]
+  );
+  return Number(r.rows[0]?.event_count || 0);
 }
 
 export default async function tenantRequestsPublic(app) {
@@ -69,6 +91,7 @@ export default async function tenantRequestsPublic(app) {
       const phone = body.phone ? normalizeText(body.phone) : null;
       const country = normalizeText(body.country);
       const timezone = normalizeText(body.timezone);
+      const emailHash = email ? sha256Hex(email) : null;
 
       const businessRegNo = body.businessRegNo ? normalizeText(body.businessRegNo) : null;
       const personalIdNo = body.personalIdNo ? normalizeText(body.personalIdNo) : null;
@@ -84,6 +107,27 @@ export default async function tenantRequestsPublic(app) {
         return reply.code(400).send({ ok: false, error: "PERSONAL_ID_REQUIRED" });
       }
 
+      let durableEventCount = 0;
+      try {
+        durableEventCount = await countRecentTenantRequestEvents(app, { ip: req.ip, emailHash });
+      } catch (error) {
+        app.log.warn({ event: "tenant_request_quota_check_failed", ip: req.ip, error: error.message });
+      }
+      if (durableEventCount >= IP_MAX_REQUESTS) {
+        app.log.warn({ event: "tenant_request_rate_limited", reason: "durable_quota", ip: req.ip });
+        auditSecurityEvent(app, "tenant_request.rate_limited", {
+          category: "onboarding",
+          source: "tenant_requests_public",
+          severity: "warning",
+          outcome: "rejected",
+          reason: "DURABLE_QUOTA_EXCEEDED",
+          ip: req.ip,
+          userAgent: req.headers["user-agent"] || null,
+          metadata: { email_hash: emailHash, window_min: IP_WINDOW_MIN, max: IP_MAX_REQUESTS }
+        });
+        return reply.code(202).send({ ok: true });
+      }
+
       const recent = await app.db.query(
         `
         SELECT count(*)::int AS recent_count
@@ -95,6 +139,16 @@ export default async function tenantRequestsPublic(app) {
       );
       if (recent.rows[0].recent_count >= EMAIL_MAX_REQUESTS) {
         app.log.warn({ event: "tenant_request_rate_limited", email: email.substring(0, 3) + "...", ip: req.ip });
+        auditSecurityEvent(app, "tenant_request.rate_limited", {
+          category: "onboarding",
+          source: "tenant_requests_public",
+          severity: "warning",
+          outcome: "rejected",
+          reason: "EMAIL_QUOTA_EXCEEDED",
+          ip: req.ip,
+          userAgent: req.headers["user-agent"] || null,
+          metadata: { email_hash: emailHash, window_min: EMAIL_WINDOW_MIN, max: EMAIL_MAX_REQUESTS }
+        });
         return reply.code(202).send({ ok: true });
       }
 
@@ -141,6 +195,20 @@ export default async function tenantRequestsPublic(app) {
       );
 
       app.log.info({ event: "tenant_request_submitted", ref: refCode, ip: req.ip });
+      auditSecurityEvent(app, "tenant_request.submitted", {
+        category: "onboarding",
+        source: "tenant_requests_public",
+        severity: "info",
+        outcome: "success",
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || null,
+        metadata: {
+          ref_code: refCode,
+          email_hash: emailHash,
+          applicant_type: applicantType,
+          country
+        }
+      });
 
       return reply.code(202).send({ ok: true, ref: refCode });
     }
@@ -188,3 +256,5 @@ export default async function tenantRequestsPublic(app) {
     }
   );
 }
+
+export { countRecentTenantRequestEvents };

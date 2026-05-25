@@ -1,4 +1,6 @@
 import path from "node:path";
+import fs from "node:fs";
+import crypto from "node:crypto";
 
 const IMAGE_EXT = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp"]);
 const VIDEO_EXT = new Set([".mp4", ".m4v", ".mov", ".webm"]);
@@ -6,6 +8,7 @@ const ZIP_EXT = new Set([".zip", ".docx", ".xlsx", ".pptx", ".zprj", ".zpac"]);
 const TEXT_EXT = new Set([".txt", ".csv", ".json", ".dxf"]);
 const EICAR = "X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*";
 const ACTIVE_CONTENT_PATTERN = /<\s*(script|iframe|object|embed|svg|link|meta)\b|javascript\s*:|on[a-z]+\s*=/i;
+const DEFAULT_SCAN_TIMEOUT_MS = 5000;
 
 function startsWith(buffer, bytes) {
   if (!Buffer.isBuffer(buffer) || buffer.length < bytes.length) return false;
@@ -59,6 +62,101 @@ function isProbablyText(buffer) {
   const sample = buffer.subarray(0, Math.min(buffer.length, 4096));
   if (sample.includes(0)) return false;
   return true;
+}
+
+function normalizeScanMode(app) {
+  return String(app?.config?.UPLOAD_SCAN_MODE || "inline_blocking").trim().toLowerCase();
+}
+
+function uploadScanEndpoint(app) {
+  return String(app?.config?.UPLOAD_SCAN_ENDPOINT || "").trim();
+}
+
+async function requestExternalScan(app, { buffer, filename, mimetype, assetKind, tenantId }) {
+  const endpoint = uploadScanEndpoint(app);
+  if (!endpoint) return { ok: false, status: "pending", error: "UPLOAD_SCAN_PENDING" };
+
+  const timeoutMs = Math.max(1000, Number(app?.config?.UPLOAD_SCAN_TIMEOUT_MS || DEFAULT_SCAN_TIMEOUT_MS));
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(app?.config?.UPLOAD_SCAN_API_KEY ? { authorization: `Bearer ${app.config.UPLOAD_SCAN_API_KEY}` } : {})
+      },
+      body: JSON.stringify({
+        filename: String(filename || ""),
+        mimetype: String(mimetype || ""),
+        asset_kind: String(assetKind || ""),
+        tenant_id: String(tenantId || ""),
+        sha256: crypto.createHash("sha256").update(buffer).digest("hex"),
+        content_base64: buffer.toString("base64")
+      }),
+      signal: controller.signal
+    });
+    if (!response.ok) return { ok: false, status: "pending", error: "UPLOAD_SCAN_PENDING" };
+    const payload = await response.json().catch(() => ({}));
+    const verdict = String(payload.verdict || payload.status || "").toLowerCase();
+    if (payload.ok === true || verdict === "clean" || verdict === "allow") {
+      return { ok: true, scan_status: "clean", scanner: payload.scanner || "external" };
+    }
+    if (verdict === "malicious" || verdict === "blocked" || payload.ok === false) {
+      return { ok: false, status: "blocked", error: payload.error || "MALWARE_SIGNATURE_DETECTED" };
+    }
+    return { ok: false, status: "pending", error: "UPLOAD_SCAN_PENDING" };
+  } catch {
+    return { ok: false, status: "pending", error: "UPLOAD_SCAN_PENDING" };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function writeVerifiedUpload({
+  app,
+  targetPath,
+  buffer,
+  tenantId,
+  storedName,
+  assetKind = "media",
+  category = "uploads",
+  filename,
+  mimetype
+}) {
+  const finalDir = path.dirname(targetPath);
+  fs.mkdirSync(finalDir, { recursive: true });
+  const mode = normalizeScanMode(app);
+  if (mode !== "external_required") {
+    fs.writeFileSync(targetPath, buffer);
+    return { ok: true, scan_status: "clean", scanner: "inline_v1" };
+  }
+
+  const marker = `${path.sep}${tenantId}${path.sep}`;
+  const markerIndex = path.resolve(targetPath).indexOf(marker);
+  const assetsRoot =
+    markerIndex >= 0
+      ? path.resolve(targetPath).slice(0, markerIndex)
+      : path.resolve(finalDir, "..", "..");
+  const quarantineDir = path.resolve(assetsRoot, "..", "upload-quarantine", String(tenantId || "unknown"), category);
+  fs.mkdirSync(quarantineDir, { recursive: true });
+  const quarantineName = `${crypto.randomUUID()}-${storedName || path.basename(targetPath)}`;
+  const quarantinePath = safeUploadTarget(quarantineDir, quarantineName);
+  fs.writeFileSync(quarantinePath, buffer);
+
+  const scan = await requestExternalScan(app, { buffer, filename, mimetype, assetKind, tenantId });
+  if (!scan.ok) {
+    return {
+      ok: false,
+      error: scan.error || "UPLOAD_SCAN_PENDING",
+      status: scan.status || "pending",
+      scan_status: scan.status || "pending",
+      quarantine_path: quarantinePath
+    };
+  }
+
+  fs.renameSync(quarantinePath, targetPath);
+  return scan;
 }
 
 export function scanUploadBuffer({ buffer, filename, mimetype, assetKind } = {}) {

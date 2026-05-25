@@ -10,13 +10,14 @@ import { timingSafeEqual } from "./crypto.js";
  */
 
 const PASSWORD_POLICIES = {
-  minLength: 12,
-  requireUppercase: true,
-  requireLowercase: true,
-  requireNumbers: true,
-  requireSymbols: true,
+  minLength: 15,
+  maxLength: 128,
+  requireUppercase: false,
+  requireLowercase: false,
+  requireNumbers: false,
+  requireSymbols: false,
   preventReuse: 5, // Last N passwords
-  maxAge: 90, // Days
+  maxAge: 0, // NIST-aligned default: no arbitrary rotation without compromise
   lockoutAfter: 5, // Failed attempts
   lockoutDuration: 30, // Minutes
   warnBeforeExpiry: 7 // Days
@@ -24,6 +25,44 @@ const PASSWORD_POLICIES = {
 
 const SCRYPT_MAX_MEM = 64 * 1024 * 1024;
 const scryptAsync = promisify(crypto.scrypt);
+const COMMON_PASSWORD_BLOCKLIST = new Set([
+  "password",
+  "password1",
+  "password12",
+  "password123",
+  "password1234",
+  "admin",
+  "admin123",
+  "administrator",
+  "welcome",
+  "welcome1",
+  "welcome123",
+  "letmein",
+  "qwerty",
+  "qwerty123",
+  "123456",
+  "12345678",
+  "123456789",
+  "111111",
+  "iloveyou",
+  "monkey",
+  "dragon",
+  "football",
+  "baseball",
+  "eip",
+  "eipadmin",
+  "changeme"
+]);
+const COMMON_PASSWORD_PATTERNS = [
+  /password/i,
+  /qwerty/i,
+  /letmein/i,
+  /welcome/i,
+  /admin/i,
+  /123456/,
+  /000000/,
+  /111111/
+];
 
 function parseScryptHash(value) {
   const parts = String(value || "").split("$");
@@ -126,8 +165,13 @@ function evaluatePasswordStrength(password) {
   // Length check
   if (password.length >= 8) score += 1;
   if (password.length >= 12) score += 1;
+  if (password.length >= PASSWORD_POLICIES.minLength) score += 1;
+  if (password.length >= 20) score += 1;
   if (password.length < PASSWORD_POLICIES.minLength) {
     feedback.push(`Password must be at least ${PASSWORD_POLICIES.minLength} characters long`);
+  }
+  if (password.length > PASSWORD_POLICIES.maxLength) {
+    feedback.push(`Password must be no more than ${PASSWORD_POLICIES.maxLength} characters long`);
   }
 
   // Character variety
@@ -155,16 +199,13 @@ function evaluatePasswordStrength(password) {
     feedback.push("Password must contain at least one special character");
   }
 
-  // Common patterns to avoid
-  const commonPatterns = [
-    /^password/i,
-    /^123456/,
-    /^qwerty/i,
-    /^admin/i,
-    /^user/i
-  ];
+  const normalized = password.toLowerCase().replace(/\s+/g, "");
+  if (COMMON_PASSWORD_BLOCKLIST.has(normalized)) {
+    feedback.push("Password appears on the common-password blocklist");
+    score = 0;
+  }
 
-  for (const pattern of commonPatterns) {
+  for (const pattern of COMMON_PASSWORD_PATTERNS) {
     if (pattern.test(password)) {
       feedback.push("Password contains common patterns that are easily guessed");
       score = Math.max(0, score - 2);
@@ -189,7 +230,7 @@ function evaluatePasswordStrength(password) {
     }
   }
 
-  const ok = feedback.length === 0 && score >= 4;
+  const ok = feedback.length === 0;
 
   return {
     ok,

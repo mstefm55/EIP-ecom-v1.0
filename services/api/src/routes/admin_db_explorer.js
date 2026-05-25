@@ -14,9 +14,17 @@ const SENSITIVE_TABLES = new Set([
   "eip_auth.auth_otp_challenge",
   "eip_auth.auth_device",
   "eip_auth.auth_api_key",
+  "eip_auth.auth_password_reset",
+  "eip_auth.auth_recovery_token",
+  "eip_auth.auth_recovery_request",
+  "eip_auth.auth_passkey",
+  "eip_core.connection_secret",
+  "eip_core.security_event",
 ]);
-const SENSITIVE_COLUMN_PATTERN = /(password|token|secret|hash|pepper|salt|key)/i;
+const SENSITIVE_COLUMN_PATTERN =
+  /(password|token|secret|hash|pepper|salt|key|credential|session|csrf|refresh|otp|totp|recovery|signature|cookie|api|private)/i;
 const SENSITIVE_TOKEN_COOKIE = "eip_sensitive_token";
+const SENSITIVE_GRANT_DEFAULT_TTL_MIN = 15;
 
 function normalizeText(value) {
   return String(value || "").trim();
@@ -238,6 +246,129 @@ function buildTokenHash(app, rawToken) {
   return sha256Hex(`${rawToken}:${app.config.API_KEY_PEPPER}`);
 }
 
+function sensitiveGrantTtlMs(app, tenantAccess) {
+  const configuredMin = Number(app.config?.ADMIN_DB_SENSITIVE_GRANT_TTL_MIN || SENSITIVE_GRANT_DEFAULT_TTL_MIN);
+  const ttlMs = Math.max(1, configuredMin) * 60 * 1000;
+  const tokenExpiresAt = tenantAccess?.sensitive_token_expires_at
+    ? new Date(tenantAccess.sensitive_token_expires_at).getTime()
+    : 0;
+  if (!Number.isFinite(tokenExpiresAt) || tokenExpiresAt <= 0) return ttlMs;
+  return Math.max(0, Math.min(ttlMs, tokenExpiresAt - Date.now()));
+}
+
+function buildSensitiveGrantHash(app, session, tenantId, tenantAccess) {
+  return sha256Hex(
+    [
+      String(session?.id || ""),
+      String(tenantId || ""),
+      String(tenantAccess?.sensitive_token_hash || ""),
+      String(app.config?.API_KEY_PEPPER || "")
+    ].join(":")
+  );
+}
+
+async function grantSensitiveAccess(app, session, tenantId, tenantAccess) {
+  const ttlMs = sensitiveGrantTtlMs(app, tenantAccess);
+  if (!ttlMs) return { ok: false, error: "SENSITIVE_TOKEN_EXPIRED" };
+  const expiresAt = new Date(Date.now() + ttlMs);
+  const grant = {
+    hash: buildSensitiveGrantHash(app, session, tenantId, tenantAccess),
+    expires_at: expiresAt.toISOString(),
+    granted_at: new Date().toISOString()
+  };
+
+  await app.db.query(
+    `
+    UPDATE eip_auth.auth_session
+    SET attrs = jsonb_set(
+      COALESCE(attrs,'{}'::jsonb),
+      '{admin_db_sensitive_grants}',
+      COALESCE(attrs->'admin_db_sensitive_grants','{}'::jsonb)
+        || jsonb_build_object($2::text, $3::jsonb),
+      true
+    )
+    WHERE id = $1::uuid
+    `,
+    [session.id, tenantId, JSON.stringify(grant)]
+  );
+
+  session.attrs = {
+    ...(session.attrs || {}),
+    admin_db_sensitive_grants: {
+      ...(session.attrs?.admin_db_sensitive_grants || {}),
+      [tenantId]: grant
+    }
+  };
+  return { ok: true, expiresAt };
+}
+
+async function clearSensitiveAccessGrant(app, session, tenantId = null) {
+  if (!session?.id) return;
+  if (tenantId) {
+    await app.db.query(
+      `
+      UPDATE eip_auth.auth_session
+      SET attrs = jsonb_set(
+        COALESCE(attrs,'{}'::jsonb),
+        '{admin_db_sensitive_grants}',
+        COALESCE(attrs->'admin_db_sensitive_grants','{}'::jsonb) - $2::text,
+        true
+      )
+      WHERE id = $1::uuid
+      `,
+      [session.id, tenantId]
+    );
+    if (session.attrs?.admin_db_sensitive_grants) {
+      delete session.attrs.admin_db_sensitive_grants[tenantId];
+    }
+    return;
+  }
+
+  await app.db.query(
+    `
+    UPDATE eip_auth.auth_session
+    SET attrs = COALESCE(attrs,'{}'::jsonb) - 'admin_db_sensitive_grants'
+    WHERE id = $1::uuid
+    `,
+    [session.id]
+  );
+  session.attrs = { ...(session.attrs || {}) };
+  delete session.attrs.admin_db_sensitive_grants;
+}
+
+function verifySensitiveGrant(app, session, tenantAccess, tenantId) {
+  if (!tenantAccess?.sensitive_allowed) {
+    return { ok: false, error: "TENANT_SENSITIVE_DENIED" };
+  }
+  if (!tenantAccess?.sensitive_token_hash) {
+    return { ok: false, error: "SENSITIVE_TOKEN_REQUIRED" };
+  }
+  const now = Date.now();
+  const tokenExpiresAt = tenantAccess.sensitive_token_expires_at
+    ? new Date(tenantAccess.sensitive_token_expires_at).getTime()
+    : 0;
+  if (tokenExpiresAt && now > tokenExpiresAt) {
+    return { ok: false, error: "SENSITIVE_TOKEN_EXPIRED" };
+  }
+  if (tenantAccess.sensitive_token_revoked_at) {
+    return { ok: false, error: "SENSITIVE_TOKEN_REVOKED" };
+  }
+
+  const grant = session?.attrs?.admin_db_sensitive_grants?.[tenantId];
+  if (!grant?.hash || !grant?.expires_at) {
+    return { ok: false, error: "SENSITIVE_GRANT_REQUIRED" };
+  }
+  const grantExpiresAt = new Date(grant.expires_at).getTime();
+  if (!Number.isFinite(grantExpiresAt) || now > grantExpiresAt) {
+    return { ok: false, error: "SENSITIVE_GRANT_EXPIRED" };
+  }
+  const expected = buildSensitiveGrantHash(app, session, tenantId, tenantAccess);
+  if (!timingSafeEqual(expected, String(grant.hash || ""))) {
+    return { ok: false, error: "SENSITIVE_GRANT_INVALID" };
+  }
+  return { ok: true };
+}
+
 async function verifySensitiveToken(app, tenantAccess, rawToken) {
   if (!tenantAccess?.sensitive_allowed) {
     return { ok: false, error: "TENANT_SENSITIVE_DENIED" };
@@ -279,6 +410,36 @@ function sanitizeRow(row, columns) {
     }
   });
   return output;
+}
+
+function auditSensitiveDbAccess(app, req, {
+  eventType,
+  session,
+  tableKey,
+  tenantId,
+  format = null,
+  rowCount = null,
+  limit = null,
+  offset = null
+}) {
+  auditSecurityEvent(app, eventType, {
+    category: "admin",
+    source: "admin_db_explorer",
+    severity: "warning",
+    outcome: "success",
+    actorTenantId: session?.tenant_id,
+    actorIdentityId: session?.identity_id,
+    targetTenantId: tenantId || null,
+    ip: req.ip,
+    userAgent: req.headers["user-agent"] || null,
+    metadata: {
+      table: tableKey,
+      format,
+      row_count: rowCount,
+      limit,
+      offset
+    }
+  });
 }
 
 export default async function adminDbExplorerRoutes(app) {
@@ -477,13 +638,22 @@ export default async function adminDbExplorerRoutes(app) {
       if (!tenantFilter) {
         return reply.code(400).send({ ok: false, error: "TENANT_REQUIRED" });
       }
-      const tokenCheck = await verifySensitiveToken(
-        app,
-        tenantAccess,
-        String(req.cookies?.[SENSITIVE_TOKEN_COOKIE] || "")
-      );
-      if (!tokenCheck.ok) {
-        return reply.code(403).send({ ok: false, error: tokenCheck.error });
+      const grantCheck = verifySensitiveGrant(app, session, tenantAccess, tenantFilter);
+      if (!grantCheck.ok) {
+        auditSecurityEvent(app, "admin_db_explorer.sensitive_grant_rejected", {
+          category: "admin",
+          source: "admin_db_explorer",
+          severity: "warning",
+          outcome: "rejected",
+          actorTenantId: session.tenant_id,
+          actorIdentityId: session.identity_id,
+          targetTenantId: tenantFilter,
+          reason: grantCheck.error,
+          ip: req.ip,
+          userAgent: req.headers["user-agent"] || null,
+          metadata: { table: tableKey }
+        });
+        return reply.code(403).send({ ok: false, error: grantCheck.error });
       }
     }
 
@@ -510,6 +680,17 @@ export default async function adminDbExplorerRoutes(app) {
 
     const dataRes = await app.db.query(query, params);
     const rows = dataRes.rows.map((row) => sanitizeRow(row, columns));
+    if (SENSITIVE_TABLES.has(tableKey)) {
+      auditSensitiveDbAccess(app, req, {
+        eventType: "admin_db_explorer.sensitive_table_read",
+        session,
+        tableKey,
+        tenantId: tenantFilter,
+        rowCount: rows.length,
+        limit,
+        offset
+      });
+    }
 
     const countParams = [];
     let countWhere = "";
@@ -592,13 +773,22 @@ export default async function adminDbExplorerRoutes(app) {
       if (!tenantFilter) {
         return reply.code(400).send({ ok: false, error: "TENANT_REQUIRED" });
       }
-      const tokenCheck = await verifySensitiveToken(
-        app,
-        tenantAccess,
-        String(req.cookies?.[SENSITIVE_TOKEN_COOKIE] || "")
-      );
-      if (!tokenCheck.ok) {
-        return reply.code(403).send({ ok: false, error: tokenCheck.error });
+      const grantCheck = verifySensitiveGrant(app, session, tenantAccess, tenantFilter);
+      if (!grantCheck.ok) {
+        auditSecurityEvent(app, "admin_db_explorer.sensitive_grant_rejected", {
+          category: "admin",
+          source: "admin_db_explorer",
+          severity: "warning",
+          outcome: "rejected",
+          actorTenantId: session.tenant_id,
+          actorIdentityId: session.identity_id,
+          targetTenantId: tenantFilter,
+          reason: grantCheck.error,
+          ip: req.ip,
+          userAgent: req.headers["user-agent"] || null,
+          metadata: { table: tableKey, export_format: format }
+        });
+        return reply.code(403).send({ ok: false, error: grantCheck.error });
       }
     }
 
@@ -619,6 +809,16 @@ export default async function adminDbExplorerRoutes(app) {
       params
     );
     const rows = dataRes.rows.map((row) => sanitizeRow(row, columns));
+    if (SENSITIVE_TABLES.has(tableKey)) {
+      auditSensitiveDbAccess(app, req, {
+        eventType: "admin_db_explorer.sensitive_export",
+        session,
+        tableKey,
+        tenantId: tenantFilter,
+        format,
+        rowCount: rows.length
+      });
+    }
 
     if (format === "csv") {
       const header = columns.join(",");
@@ -673,19 +873,11 @@ export default async function adminDbExplorerRoutes(app) {
       return reply.code(403).send({ ok: false, error: tokenCheck.error });
     }
 
-    const expiresAt = tenantAccess.sensitive_token_expires_at
-      ? new Date(tenantAccess.sensitive_token_expires_at)
-      : null;
-    const maxAgeMs = expiresAt ? Math.max(0, expiresAt.getTime() - Date.now()) : 0;
-    const maxAgeSec = Math.floor(maxAgeMs / 1000);
-
-    reply.setCookie(SENSITIVE_TOKEN_COOKIE, token, {
-      path: "/api/eip/admin/db",
-      httpOnly: true,
-      sameSite: "lax",
-      secure: app.config.NODE_ENV === "production",
-      maxAge: maxAgeSec,
-    });
+    const grant = await grantSensitiveAccess(app, session, tenantId, tenantAccess);
+    if (!grant.ok) {
+      return reply.code(403).send({ ok: false, error: grant.error });
+    }
+    reply.clearCookie(SENSITIVE_TOKEN_COOKIE, { path: "/api/eip/admin/db" });
 
     await app.db.query(
       `
@@ -697,7 +889,20 @@ export default async function adminDbExplorerRoutes(app) {
       [session.identity_id, tenantId]
     );
 
-    return reply.send({ ok: true, token_expires_at: expiresAt });
+    auditSecurityEvent(app, "admin_db_explorer.sensitive_grant_created", {
+      category: "admin",
+      source: "admin_db_explorer",
+      severity: "warning",
+      outcome: "success",
+      actorTenantId: session.tenant_id,
+      actorIdentityId: session.identity_id,
+      targetTenantId: tenantId,
+      ip: req.ip,
+      userAgent: req.headers["user-agent"] || null,
+      metadata: { expires_at: grant.expiresAt.toISOString() }
+    });
+
+    return reply.send({ ok: true, grant_expires_at: grant.expiresAt });
   });
 
   app.post("/admin/db/sensitive/clear", async (req, reply) => {
@@ -709,7 +914,25 @@ export default async function adminDbExplorerRoutes(app) {
     const session = await requireAdminDb(app, req, reply, "admin.db.read_sensitive");
     if (!session) return;
 
+    await clearSensitiveAccessGrant(app, session);
     reply.clearCookie(SENSITIVE_TOKEN_COOKIE, { path: "/api/eip/admin/db" });
+    auditSecurityEvent(app, "admin_db_explorer.sensitive_grant_cleared", {
+      category: "admin",
+      source: "admin_db_explorer",
+      severity: "info",
+      outcome: "success",
+      actorTenantId: session.tenant_id,
+      actorIdentityId: session.identity_id,
+      ip: req.ip,
+      userAgent: req.headers["user-agent"] || null
+    });
     return reply.send({ ok: true });
   });
 }
+
+export {
+  sanitizeRow,
+  verifySensitiveGrant,
+  grantSensitiveAccess,
+  clearSensitiveAccessGrant
+};

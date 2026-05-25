@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import {
   scanUploadBuffer,
   validateEcomUpload,
-  validateImageUpload
+  validateImageUpload,
+  writeVerifiedUpload
 } from "../src/lib/uploadSecurity.js";
 
 const PNG_1X1 = Buffer.from(
@@ -59,4 +63,27 @@ test("ecommerce document uploads retain signature checks after scan", () => {
 
   assert.equal(result.ok, true);
   assert.equal(result.safeExt, ".pdf");
+});
+
+test("external-required upload mode quarantines until a scanner returns clean", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "eip-upload-security-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const targetPath = path.join(root, "tenant-a", "avatars", "avatar.png");
+
+  const result = await writeVerifiedUpload({
+    app: { config: { UPLOAD_SCAN_MODE: "external_required" } },
+    targetPath,
+    buffer: PNG_1X1,
+    tenantId: "tenant-a",
+    storedName: "avatar.png",
+    assetKind: "media",
+    category: "avatars",
+    filename: "avatar.png",
+    mimetype: "image/png"
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error, "UPLOAD_SCAN_PENDING");
+  assert.equal(fs.existsSync(targetPath), false);
+  assert.equal(fs.existsSync(result.quarantine_path), true);
 });

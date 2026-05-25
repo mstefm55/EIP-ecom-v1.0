@@ -9,7 +9,7 @@ import { requirePrivilegedStepUp } from "../auth/privilegedStepUp.js";
 import { evaluatePasswordStrength } from "../auth/password.js";
 import { loadActivePasskeys, publicPasskey } from "../auth/passkeys.js";
 import { auditSecurityEvent } from "../lib/securityAudit.js";
-import { safeUploadTarget, uploadPartToBuffer, validateImageUpload } from "../lib/uploadSecurity.js";
+import { safeUploadTarget, uploadPartToBuffer, validateImageUpload, writeVerifiedUpload } from "../lib/uploadSecurity.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -147,7 +147,57 @@ async function requireAdminPerm(app, req, reply, permCode, opts = {}) {
     reply.code(403).send({ ok: false, error: "FORBIDDEN" });
     return null;
   }
+  req.adminSession = session;
+  req.session = session;
+  req.realm = session?.realm || "EIP";
   return session;
+}
+
+async function isAdminExec(app, session) {
+  const r = await app.db.query(
+    `
+    SELECT 1
+    FROM eip_authz.identity_role ir
+    JOIN eip_authz.role r
+      ON r.id = ir.role_id
+     AND r.tenant_id = ir.tenant_id
+     AND r.is_active = true
+    WHERE ir.tenant_id = $1
+      AND ir.identity_id = $2
+      AND r.code IN ('ADMIN_SUPER','ADMIN_EXEC')
+    LIMIT 1
+    `,
+    [session.tenant_id, session.identity_id]
+  );
+  return r.rowCount > 0;
+}
+
+async function hasTargetTenantAccess(app, session, targetTenantId) {
+  if (String(session.tenant_id) === String(targetTenantId)) return true;
+  if (await isAdminExec(app, session)) return true;
+  const r = await app.db.query(
+    `
+    SELECT 1
+    WHERE EXISTS (
+      SELECT 1
+      FROM eip_authz.admin_tenant_access ata
+      WHERE ata.admin_identity_id = $1
+        AND ata.tenant_id = $2::uuid
+        AND ata.is_active = true
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM eip_core.tenant t
+      JOIN eip_authz.admin_portfolio p ON p.id = t.admin_portfolio_id
+      WHERE t.id = $2::uuid
+        AND p.admin_identity_id = $1
+        AND p.is_active = true
+    )
+    LIMIT 1
+    `,
+    [session.identity_id, targetTenantId]
+  );
+  return r.rowCount > 0;
 }
 
 async function loadTenant(app, tenantId) {
@@ -161,6 +211,32 @@ async function loadTenant(app, tenantId) {
     [tenantId]
   );
   return r.rows[0] || null;
+}
+
+async function loadTenantForAdmin(app, req, reply, session, tenantId) {
+  const tenant = await loadTenant(app, tenantId);
+  if (!tenant) {
+    reply.code(404).send({ ok: false, error: "TENANT_NOT_FOUND" });
+    return null;
+  }
+  const allowed = await hasTargetTenantAccess(app, session, tenantId);
+  if (!allowed) {
+    auditSecurityEvent(app, "admin_control.tenant_scope_rejected", {
+      category: "admin",
+      source: "admin_access",
+      severity: "warning",
+      outcome: "rejected",
+      actorTenantId: session.tenant_id,
+      actorIdentityId: session.identity_id,
+      targetTenantId: tenantId,
+      reason: "TENANT_ACCESS_REQUIRED",
+      ip: req.ip,
+      userAgent: req.headers["user-agent"] || null
+    });
+    reply.code(403).send({ ok: false, error: "TENANT_ACCESS_REQUIRED" });
+    return null;
+  }
+  return tenant;
 }
 
 async function loadIdentity(app, tenantId, identityId) {
@@ -235,14 +311,37 @@ export default async function adminAccessRoutes(app) {
       params.push(`%${query}%`);
       const idx = params.length;
       where.push(
-        `(code ILIKE $${idx} OR name ILIKE $${idx} OR id::text ILIKE $${idx})`
+        `(t.code ILIKE $${idx} OR t.name ILIKE $${idx} OR t.id::text ILIKE $${idx})`
+      );
+    }
+    const exec = await isAdminExec(app, session);
+    if (!exec) {
+      params.push(session.tenant_id);
+      const tenantIdx = params.length;
+      params.push(session.identity_id);
+      const identityIdx = params.length;
+      where.push(
+        `(t.id = $${tenantIdx}::uuid
+          OR t.admin_portfolio_id IN (
+            SELECT p.id
+            FROM eip_authz.admin_portfolio p
+            WHERE p.admin_identity_id = $${identityIdx}::uuid
+              AND p.is_active = true
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM eip_authz.admin_tenant_access ata
+            WHERE ata.admin_identity_id = $${identityIdx}::uuid
+              AND ata.tenant_id = t.id
+              AND ata.is_active = true
+          ))`
       );
     }
 
     const r = await app.db.query(
       `
-      SELECT id, code, name, is_active
-      FROM eip_core.tenant
+      SELECT t.id, t.code, t.name, t.is_active
+      FROM eip_core.tenant t
       ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
       ORDER BY name
       LIMIT 200
@@ -258,10 +357,8 @@ export default async function adminAccessRoutes(app) {
     if (!session) return;
 
     const tenantId = normalizeText(req.params.tenantId);
-    const tenant = await loadTenant(app, tenantId);
-    if (!tenant) {
-      return reply.code(404).send({ ok: false, error: "TENANT_NOT_FOUND" });
-    }
+    const tenant = await loadTenantForAdmin(app, req, reply, session, tenantId);
+    if (!tenant) return;
 
     const r = await app.db.query(
       `
@@ -303,10 +400,8 @@ export default async function adminAccessRoutes(app) {
     if (!session) return;
 
     const tenantId = normalizeText(req.params.tenantId);
-    const tenant = await loadTenant(app, tenantId);
-    if (!tenant) {
-      return reply.code(404).send({ ok: false, error: "TENANT_NOT_FOUND" });
-    }
+    const tenant = await loadTenantForAdmin(app, req, reply, session, tenantId);
+    if (!tenant) return;
 
     await ensureTenantUserRoleBaseline(app.db, tenantId);
 
@@ -361,10 +456,8 @@ export default async function adminAccessRoutes(app) {
     if (!session) return;
 
     const tenantId = normalizeText(req.params.tenantId);
-    const tenant = await loadTenant(app, tenantId);
-    if (!tenant) {
-      return reply.code(404).send({ ok: false, error: "TENANT_NOT_FOUND" });
-    }
+    const tenant = await loadTenantForAdmin(app, req, reply, session, tenantId);
+    if (!tenant) return;
 
     const query = normalizeText(req.query?.query);
     const params = [];
@@ -393,10 +486,8 @@ export default async function adminAccessRoutes(app) {
     if (!session) return;
 
     const tenantId = normalizeText(req.params.tenantId);
-    const tenant = await loadTenant(app, tenantId);
-    if (!tenant) {
-      return reply.code(404).send({ ok: false, error: "TENANT_NOT_FOUND" });
-    }
+    const tenant = await loadTenantForAdmin(app, req, reply, session, tenantId);
+    if (!tenant) return;
 
     const email = normalizeText(req.body?.email).toLowerCase();
     const passwordValue = typeof req.body?.password === "string" ? req.body.password : String(req.body?.password || "");
@@ -542,10 +633,8 @@ export default async function adminAccessRoutes(app) {
 
     const tenantId = normalizeText(req.params.tenantId);
     const identityId = normalizeText(req.params.identityId);
-    const tenant = await loadTenant(app, tenantId);
-    if (!tenant) {
-      return reply.code(404).send({ ok: false, error: "TENANT_NOT_FOUND" });
-    }
+    const tenant = await loadTenantForAdmin(app, req, reply, session, tenantId);
+    if (!tenant) return;
     const identity = await loadIdentity(app, tenantId, identityId);
     if (!identity) {
       return reply.code(404).send({ ok: false, error: "IDENTITY_NOT_FOUND" });
@@ -567,10 +656,8 @@ export default async function adminAccessRoutes(app) {
 
     const tenantId = normalizeText(req.params.tenantId);
     const identityId = normalizeText(req.params.identityId);
-    const tenant = await loadTenant(app, tenantId);
-    if (!tenant) {
-      return reply.code(404).send({ ok: false, error: "TENANT_NOT_FOUND" });
-    }
+    const tenant = await loadTenantForAdmin(app, req, reply, session, tenantId);
+    if (!tenant) return;
     const identity = await loadIdentity(app, tenantId, identityId);
     if (!identity) {
       return reply.code(404).send({ ok: false, error: "IDENTITY_NOT_FOUND" });
@@ -608,10 +695,8 @@ export default async function adminAccessRoutes(app) {
 
     const tenantId = normalizeText(req.params.tenantId);
     const identityId = normalizeText(req.params.identityId);
-    const tenant = await loadTenant(app, tenantId);
-    if (!tenant) {
-      return reply.code(404).send({ ok: false, error: "TENANT_NOT_FOUND" });
-    }
+    const tenant = await loadTenantForAdmin(app, req, reply, session, tenantId);
+    if (!tenant) return;
     const identity = await loadIdentity(app, tenantId, identityId);
     if (!identity) {
       return reply.code(404).send({ ok: false, error: "IDENTITY_NOT_FOUND" });
@@ -654,7 +739,38 @@ export default async function adminAccessRoutes(app) {
     const targetPath = safeUploadTarget(uploadDir, storedName);
 
     try {
-      fs.writeFileSync(targetPath, buffer);
+      const stored = await writeVerifiedUpload({
+        app,
+        targetPath,
+        buffer,
+        tenantId,
+        storedName,
+        assetKind: "media",
+        category: "avatars",
+        filename,
+        mimetype
+      });
+      if (!stored.ok) {
+        auditSecurityEvent(app, "upload.scan_pending", {
+          category: "upload",
+          source: "admin.user_avatar",
+          severity: stored.status === "blocked" ? "warning" : "info",
+          outcome: "rejected",
+          actorTenantId: session.tenant_id,
+          actorIdentityId: session.identity_id,
+          targetTenantId: tenantId,
+          targetIdentityId: identityId,
+          reason: stored.error,
+          ip: req.ip,
+          userAgent: req.headers["user-agent"] || null,
+          metadata: { filename, mimetype, scan_status: stored.scan_status }
+        });
+        return reply.code(stored.status === "blocked" ? 415 : 202).send({
+          ok: false,
+          error: stored.error,
+          scan_status: stored.scan_status
+        });
+      }
     } catch (err) {
       app.log.error({ event: "profile_avatar_upload_error", error: err.message });
       return reply.code(500).send({ ok: false, error: "UPLOAD_FAILED" });
@@ -682,10 +798,8 @@ export default async function adminAccessRoutes(app) {
 
     const tenantId = normalizeText(req.params.tenantId);
     const identityId = normalizeText(req.params.identityId);
-    const tenant = await loadTenant(app, tenantId);
-    if (!tenant) {
-      return reply.code(404).send({ ok: false, error: "TENANT_NOT_FOUND" });
-    }
+    const tenant = await loadTenantForAdmin(app, req, reply, session, tenantId);
+    if (!tenant) return;
     const identity = await loadIdentity(app, tenantId, identityId);
     if (!identity) {
       return reply.code(404).send({ ok: false, error: "IDENTITY_NOT_FOUND" });
@@ -709,10 +823,8 @@ export default async function adminAccessRoutes(app) {
     const tenantId = normalizeText(req.params.tenantId);
     const identityId = normalizeText(req.params.identityId);
     const passkeyId = normalizeText(req.params.passkeyId);
-    const tenant = await loadTenant(app, tenantId);
-    if (!tenant) {
-      return reply.code(404).send({ ok: false, error: "TENANT_NOT_FOUND" });
-    }
+    const tenant = await loadTenantForAdmin(app, req, reply, session, tenantId);
+    if (!tenant) return;
     const identity = await loadIdentity(app, tenantId, identityId);
     if (!identity) {
       return reply.code(404).send({ ok: false, error: "IDENTITY_NOT_FOUND" });
@@ -759,6 +871,8 @@ export default async function adminAccessRoutes(app) {
     if (!roleId) {
       return reply.code(400).send({ ok: false, error: "ROLE_ID_REQUIRED" });
     }
+    const tenant = await loadTenantForAdmin(app, req, reply, session, tenantId);
+    if (!tenant) return;
 
     const identity = await app.db.query(
       `
@@ -806,6 +920,8 @@ export default async function adminAccessRoutes(app) {
       const tenantId = normalizeText(req.params.tenantId);
       const identityId = normalizeText(req.params.identityId);
       const roleId = normalizeText(req.params.roleId);
+      const tenant = await loadTenantForAdmin(app, req, reply, session, tenantId);
+      if (!tenant) return;
 
       await app.db.query(
         `
@@ -831,6 +947,8 @@ export default async function adminAccessRoutes(app) {
     if (!permissionCode) {
       return reply.code(400).send({ ok: false, error: "PERMISSION_REQUIRED" });
     }
+    const tenant = await loadTenantForAdmin(app, req, reply, session, tenantId);
+    if (!tenant) return;
 
     const identity = await app.db.query(
       `
@@ -878,6 +996,8 @@ export default async function adminAccessRoutes(app) {
       const tenantId = normalizeText(req.params.tenantId);
       const identityId = normalizeText(req.params.identityId);
       const permissionCode = normalizeText(req.params.permissionCode);
+      const tenant = await loadTenantForAdmin(app, req, reply, session, tenantId);
+      if (!tenant) return;
 
       await app.db.query(
         `
@@ -898,10 +1018,8 @@ export default async function adminAccessRoutes(app) {
     if (!session) return;
 
     const tenantId = normalizeText(req.params.tenantId);
-    const tenant = await loadTenant(app, tenantId);
-    if (!tenant) {
-      return reply.code(404).send({ ok: false, error: "TENANT_NOT_FOUND" });
-    }
+    const tenant = await loadTenantForAdmin(app, req, reply, session, tenantId);
+    if (!tenant) return;
 
     const bundleRes = await app.db.query(
       `
@@ -1045,10 +1163,8 @@ export default async function adminAccessRoutes(app) {
     if (!session) return;
 
     const tenantId = normalizeText(req.params.tenantId);
-    const tenant = await loadTenant(app, tenantId);
-    if (!tenant) {
-      return reply.code(404).send({ ok: false, error: "TENANT_NOT_FOUND" });
-    }
+    const tenant = await loadTenantForAdmin(app, req, reply, session, tenantId);
+    if (!tenant) return;
 
     const moduleCode = normalizeText(req.body?.module);
     if (!moduleCode) {
@@ -1109,10 +1225,8 @@ export default async function adminAccessRoutes(app) {
     if (!session) return;
 
     const tenantId = normalizeText(req.params.tenantId);
-    const tenant = await loadTenant(app, tenantId);
-    if (!tenant) {
-      return reply.code(404).send({ ok: false, error: "TENANT_NOT_FOUND" });
-    }
+    const tenant = await loadTenantForAdmin(app, req, reply, session, tenantId);
+    if (!tenant) return;
 
     const r = await app.db.query(
       `
@@ -1157,10 +1271,8 @@ export default async function adminAccessRoutes(app) {
       if (!session) return;
 
       const tenantId = normalizeText(req.params.tenantId);
-      const tenant = await loadTenant(app, tenantId);
-      if (!tenant) {
-        return reply.code(404).send({ ok: false, error: "TENANT_NOT_FOUND" });
-      }
+      const tenant = await loadTenantForAdmin(app, req, reply, session, tenantId);
+      if (!tenant) return;
 
       const r = await app.db.query(
         `

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { enforceConnectionQuota, resolveQuota } from "../src/lib/abuseQuota.js";
 import { shouldRequirePhishingResistantStepUp } from "../src/auth/privilegedStepUp.js";
+import { countRecentTenantRequestEvents } from "../src/routes/tenant_requests_public.js";
 
 const TENANT_ID = "00000000-0000-4000-8000-000000000001";
 
@@ -66,4 +67,23 @@ test("owner admin privileged actions require phishing-resistant step-up in produ
     ),
     true
   );
+});
+
+test("tenant request durable quota counts onboarding security events by ip or email hash", async () => {
+  const app = {
+    db: {
+      async query(sql, params) {
+        assert.match(sql, /FROM eip_core\.security_event/);
+        assert.equal(params[1], "127.0.0.1");
+        assert.equal(params[2], "email-hash");
+        return { rows: [{ event_count: 21 }] };
+      }
+    }
+  };
+
+  const count = await countRecentTenantRequestEvents(app, {
+    ip: "127.0.0.1",
+    emailHash: "email-hash"
+  });
+  assert.equal(count, 21);
 });

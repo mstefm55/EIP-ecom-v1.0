@@ -100,6 +100,11 @@ Gateway intake audit payloads redact raw request bodies by default and store onl
 - `admin_db_explorer.browser_guard_rejected`
 - `admin_db_explorer.owner_admin_required`
 - `admin_db_explorer.step_up_missing`
+- `admin_db_explorer.sensitive_grant_created`
+- `admin_db_explorer.sensitive_grant_rejected`
+- `admin_db_explorer.sensitive_grant_cleared`
+- `admin_db_explorer.sensitive_table_read`
+- `admin_db_explorer.sensitive_export`
 - `admin_security_ops.browser_guard_rejected`
 
 ### Connections And Secrets
@@ -119,6 +124,8 @@ Gateway intake audit payloads redact raw request bodies by default and store onl
 
 - `tenant_onboarding.approved`
 - `tenant_onboarding.rejected`
+- `tenant_request.submitted`
+- `tenant_request.rate_limited`
 - `bootstrap.consumed`
 - `bootstrap.password_set`
 - `bootstrap.totp_enabled`
@@ -127,6 +134,7 @@ Gateway intake audit payloads redact raw request bodies by default and store onl
 - `bootstrap.completed`
 - `recovery.token_requested`
 - `recovery.request_created`
+- `recovery.admin_rejected`
 - `recovery.consume_failed`
 - `recovery.consumed`
 - `recovery.request_approved`
@@ -136,6 +144,17 @@ Gateway intake audit payloads redact raw request bodies by default and store onl
 ### Uploads
 
 - `upload.rejected`
+- `upload.scan_pending`
+
+Upload scan modes:
+
+| Setting | Purpose |
+| --- | --- |
+| `UPLOAD_SCAN_MODE=inline_blocking` | Default V1 behavior. Inline signature/active-content checks must pass before files are written to served asset paths. |
+| `UPLOAD_SCAN_MODE=external_required` | Writes accepted files to quarantine first and promotes them only after `UPLOAD_SCAN_ENDPOINT` returns a clean verdict. If no clean verdict is available, the upload remains unpublished and the route returns `UPLOAD_SCAN_PENDING`. |
+| `UPLOAD_SCAN_ENDPOINT` | Optional external AV/CDR scanner endpoint used when external-required mode is enabled. |
+| `UPLOAD_SCAN_API_KEY` | Optional bearer token for the scanner endpoint. |
+| `UPLOAD_SCAN_TIMEOUT_MS` | Scanner call timeout; defaults to 5000 ms. |
 
 ## Admin Usage
 

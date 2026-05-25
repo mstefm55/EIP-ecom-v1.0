@@ -8,7 +8,7 @@ import { hasPermission } from "../auth/perm.js";
 import { sha256Hex } from "../auth/crypto.js";
 import { buildSignedAssetUrl } from "../services/assets/signing.js";
 import { sanitizeMediaForStorage } from "../services/assets/url_policy.js";
-import { safeUploadTarget, uploadPartToBuffer, validateEcomUpload } from "../lib/uploadSecurity.js";
+import { safeUploadTarget, uploadPartToBuffer, validateEcomUpload, writeVerifiedUpload } from "../lib/uploadSecurity.js";
 import { extractProfiles } from "../services/gateway/connectionProfile.js";
 import { fetchWithTimeout } from "../services/gateway/outbound.js";
 import {
@@ -2943,7 +2943,36 @@ export default async function ecomRoutes(app) {
       const targetPath = safeUploadTarget(uploadDir, storedName);
 
       try {
-        fs.writeFileSync(targetPath, buffer);
+        const stored = await writeVerifiedUpload({
+          app,
+          targetPath,
+          buffer,
+          tenantId: session.tenant_id,
+          storedName,
+          assetKind,
+          category: assetKind === "document" ? "product_documents" : "products",
+          filename,
+          mimetype
+        });
+        if (!stored.ok) {
+          auditSecurityEvent(app, "upload.scan_pending", {
+            category: "upload",
+            source: "ecom.uploads",
+            severity: stored.status === "blocked" ? "warning" : "info",
+            outcome: "rejected",
+            tenantId: session.tenant_id,
+            identityId: session.identity_id,
+            reason: stored.error,
+            ip: req.ip,
+            userAgent: req.headers["user-agent"] || null,
+            metadata: { filename, mimetype, asset_kind: assetKind, scan_status: stored.scan_status }
+          });
+          return reply.code(stored.status === "blocked" ? 415 : 202).send({
+            ok: false,
+            error: stored.error,
+            scan_status: stored.scan_status
+          });
+        }
       } catch (err) {
         app.log.error({ event: "ecom_upload_error", error: err.message });
         return reply.code(500).send({ ok: false, error: "UPLOAD_FAILED" });

@@ -46,12 +46,13 @@ Gateway/control-plane hardening status: gateway audit payloads now redact sensit
 
 Residual hardening sweep status: password reuse now verifies the proposed plaintext against historic Argon2/scrypt hashes, generated passwords use cryptographic randomness, failed-login locks persist through `auth_failed_attempt` plus `auth_identity.attrs.auth_lock_expires_at`, owner/admin privileged production actions require phishing-resistant step-up, public gateway/commerce enforce security-event-backed tenant/connection quotas, and upload validation runs an inline V1 safety scan before assets are written.
 
+Final V1 security closure status: all remaining gap-matrix `partial` controls have been closed for V1. Admin DB explorer sensitive access now uses server-side session grants rather than a raw sensitive-token cookie, masks broader credential/session/recovery fields, and emits sensitive-read/export/grant audit events. Admin control-plane tenant access is explicitly checked across users/modules/template-clone paths. Public commerce order/payment/member writes use consistent idempotency keys and finalize replay records on success and known errors. Public tenant requests now emit observable security events and durable IP/email-hash quota checks. Password policy is aligned to NIST-style length/blocklist/no-forced-rotation behavior. Recovery administration is owner/admin scoped and step-up protected. Uploads support inline blocking plus an external-required scanner/quarantine hook before publication.
+
 1. Fix password lifecycle controls.
    - Compare a proposed password against historic Argon2 hashes with verifier calls instead of hash equality.
    - Replace generated password randomness with cryptographic random selection.
    - Status: verifier-based reuse prevention and cryptographic generation are implemented in the residual hardening sweep.
-   - Add breached/common password screening.
-   - Revisit NIST alignment for length, composition, and forced rotation.
+   - Status: implemented. Password policy now uses longer minimum length, common-password/pattern screening, no composition requirement, max length, verifier-based reuse checks, and no arbitrary forced rotation by default.
    - Evidence: `services/api/src/auth/password.js`, `services/api/src/routes/auth.js`.
 
 2. Make failed-login throttling durable and consistently wired.
@@ -78,7 +79,7 @@ Residual hardening sweep status: password reuse now verifies the proposed plaint
    - Keep current extension/MIME/signature/path controls.
    - Add asynchronous malware scanning and quarantine state for tenant assets.
    - Do not publish assets until scan passes where the file type is user supplied.
-   - Status: inline V1 scanning blocks EICAR and active-content payloads before write/publish; external AV/CDR remains a maturity item.
+   - Status: implemented for V1. Inline scanning blocks EICAR and active-content payloads before write/publish. `UPLOAD_SCAN_MODE=external_required` quarantines uploads and only promotes them after a clean external scanner verdict.
    - Evidence: `services/api/src/lib/uploadSecurity.js`, `services/api/src/server.js`.
 
 6. Add security regression tests.
@@ -92,13 +93,14 @@ Residual hardening sweep status: password reuse now verifies the proposed plaint
 7. Add per-tenant and per-connection quotas.
    - Keep route-level rate limits.
    - Add tenant and connection aware ceilings for commerce, gateway, tenant request, upload, and auth abuse.
-   - Status: implemented for public gateway and public commerce using the existing security event stream; tenant requests/uploads remain a later tuning pass.
+   - Status: implemented for public gateway, public commerce, and public tenant requests using the existing security event stream. Upload rejection spikes are visible through security events and should be tuned operationally.
    - Evidence: `services/api/src/routes/public_gateway.js`, `services/api/src/routes/public_commerce.js`, `services/api/src/routes/tenant_requests_public.js`.
 
 8. Improve recovery governance.
    - Document owner/admin recovery policy.
    - Add stronger audit trails for approvals, consumption, and device trust changes.
    - Require step-up for all recovery administration.
+   - Status: implemented. Recovery request listing/approval/rejection is owner/admin-scoped, step-up protected for decisions, and audited.
    - Evidence: `services/api/src/routes/auth.js`.
 
 ## P2 Maturity Hardening
@@ -146,10 +148,10 @@ Residual hardening sweep status: password reuse now verifies the proposed plaint
 5. Password history, failed-login throttling, and generated-secret randomness. Completed in residual hardening sweep.
 6. Admin MFA enforcement policy. Completed for owner/admin privileged production actions in residual hardening sweep.
 7. SSRF/egress controls for outbound gateway. Completed in gateway/control-plane hardening wave.
-8. Upload malware scanning/quarantine. Inline V1 scanner completed; external AV/CDR deferred.
+8. Upload malware scanning/quarantine. Inline V1 scanner plus external-required quarantine hook completed.
 9. Security regression test suite.
 10. Machine-readable API inventory and CI security checks. API inventory baseline completed; CI security suite updated.
 
 ## Production Gate
 
-EIP V1 is materially closer to a hosted-production baseline after Prompts 1-8 plus the residual hardening sweep. Before broad public tenant traffic, retest the live Railway deployment, tune quota thresholds from real traffic, and decide whether external AV/CDR is required for the accepted asset types.
+EIP V1 has no remaining `partial` rows in the tracked security gap matrix after Prompts 1-8, the residual hardening sweep, and the final V1 closure sweep. Before broad public tenant traffic, retest the live Railway deployment, tune quota thresholds from real traffic, and set `UPLOAD_SCAN_MODE=external_required` plus `UPLOAD_SCAN_ENDPOINT` if the production policy requires third-party AV/CDR for accepted asset types.

@@ -25,7 +25,7 @@ import {
 } from "../lib/authCookies.js";
 import { auditSecurityEvent } from "../lib/securityAudit.js";
 import { resolveEipSurfaceAccess } from "../lib/surfaceAccess.js";
-import { safeUploadTarget, uploadPartToBuffer, validateImageUpload } from "../lib/uploadSecurity.js";
+import { safeUploadTarget, uploadPartToBuffer, validateImageUpload, writeVerifiedUpload } from "../lib/uploadSecurity.js";
 import {
   clearFailedLoginAttempts,
   checkIdentityLoginLock,
@@ -262,7 +262,9 @@ async function isAdminIdentity(client, { tenantId, identityId }) {
       COUNT(*)::int AS role_count,
       bool_or(r.surface_code = 'ADMIN') AS is_admin
     FROM eip_authz.identity_role ir
-    JOIN eip_authz.role r ON r.id = ir.role_id
+    JOIN eip_authz.role r
+      ON r.id = ir.role_id
+     AND r.tenant_id = ir.tenant_id
     WHERE ir.tenant_id = $1
       AND ir.identity_id = $2
       AND r.is_active = true
@@ -401,6 +403,35 @@ async function upsertBrowserDevice(app, client, { tenantId, identityId, deviceTo
   );
 
   return r.rows[0];
+}
+
+async function requireRecoveryAdmin(app, req, reply, session) {
+  const { tenant_id, identity_id } = session;
+  const attrs = await loadIdentityAttrs(app.db, tenant_id, identity_id);
+  const isSystemAdmin = Boolean(attrs?.system_admin);
+  const adminCheck = await isAdminIdentity(app.db, { tenantId: tenant_id, identityId: identity_id });
+  const surfaceAccess = await resolveEipSurfaceAccess(app, session);
+  const allowed = Boolean(surfaceAccess?.is_owner_admin_session && (isSystemAdmin || adminCheck.roleCount > 0));
+  if (!allowed) {
+    auditSecurityEvent(app, "recovery.admin_rejected", {
+      category: "recovery",
+      source: "auth.recovery",
+      severity: "warning",
+      outcome: "rejected",
+      actorTenantId: tenant_id,
+      actorIdentityId: identity_id,
+      reason: "OWNER_ADMIN_REQUIRED",
+      ip: req.ip,
+      userAgent: req.headers["user-agent"] || null,
+      metadata: {
+        tenant_code: surfaceAccess?.tenant_code || null,
+        classification: surfaceAccess?.surface_classification || null
+      }
+    });
+    reply.code(403).send({ ok: false, error: "OWNER_ADMIN_REQUIRED" });
+    return null;
+  }
+  return { isSystemAdmin, isOwnerAdmin: true, adminCheck, surfaceAccess };
 }
 
 async function finalizeBrowserDeviceAfterStrongAuth(app, client, { tenantId, identityId, deviceRow, method, req }) {
@@ -1579,20 +1610,12 @@ export default async function authRoutes(app) {
     if (!s.ok) return reply.code(s.status).send({ ok: false, error: s.error });
 
     const { tenant_id, identity_id } = s.session;
-    const attrs = await loadIdentityAttrs(app.db, tenant_id, identity_id);
-    const isSystemAdmin = Boolean(attrs?.system_admin);
-    const adminCheck = await isAdminIdentity(app.db, { tenantId: tenant_id, identityId: identity_id });
-    if (!isSystemAdmin && adminCheck.roleCount === 0) {
-      return reply.code(403).send({ ok: false, error: "FORBIDDEN" });
-    }
+    const recoveryAdmin = await requireRecoveryAdmin(app, req, reply, s.session);
+    if (!recoveryAdmin) return;
 
     const status = String(req.query?.status || "PENDING").toUpperCase();
     const params = [];
     const filters = [];
-    if (!isSystemAdmin) {
-      params.push(tenant_id);
-      filters.push(`tenant_id = $${params.length}`);
-    }
     if (status && status !== "ALL") {
       params.push(status);
       filters.push(`status = $${params.length}`);
@@ -1630,12 +1653,8 @@ export default async function authRoutes(app) {
     if (!step.ok) return reply.code(step.status).send({ ok: false, error: step.error });
 
     const { tenant_id, identity_id } = s.session;
-    const attrs = await loadIdentityAttrs(app.db, tenant_id, identity_id);
-    const isSystemAdmin = Boolean(attrs?.system_admin);
-    const adminCheck = await isAdminIdentity(app.db, { tenantId: tenant_id, identityId: identity_id });
-    if (!isSystemAdmin && adminCheck.roleCount === 0) {
-      return reply.code(403).send({ ok: false, error: "FORBIDDEN" });
-    }
+    const recoveryAdmin = await requireRecoveryAdmin(app, req, reply, s.session);
+    if (!recoveryAdmin) return;
 
     const requestId = req.params.id;
     const client = await app.db.connect();
@@ -1655,10 +1674,6 @@ export default async function authRoutes(app) {
         return reply.code(404).send({ ok: false, error: "NOT_FOUND" });
       }
       const row = reqRes.rows[0];
-      if (!isSystemAdmin && String(row.tenant_id) !== String(tenant_id)) {
-        await client.query("ROLLBACK");
-        return reply.code(403).send({ ok: false, error: "FORBIDDEN" });
-      }
       if (row.status !== "PENDING") {
         await client.query("ROLLBACK");
         return reply.code(409).send({ ok: false, error: "INVALID_STATUS" });
@@ -1743,12 +1758,8 @@ export default async function authRoutes(app) {
     if (!step.ok) return reply.code(step.status).send({ ok: false, error: step.error });
 
     const { tenant_id, identity_id } = s.session;
-    const attrs = await loadIdentityAttrs(app.db, tenant_id, identity_id);
-    const isSystemAdmin = Boolean(attrs?.system_admin);
-    const adminCheck = await isAdminIdentity(app.db, { tenantId: tenant_id, identityId: identity_id });
-    if (!isSystemAdmin && adminCheck.roleCount === 0) {
-      return reply.code(403).send({ ok: false, error: "FORBIDDEN" });
-    }
+    const recoveryAdmin = await requireRecoveryAdmin(app, req, reply, s.session);
+    if (!recoveryAdmin) return;
 
     const requestId = req.params.id;
     const reason = String(req.body?.reason || "").slice(0, 500);
@@ -1760,7 +1771,7 @@ export default async function authRoutes(app) {
           decided_by=$2::uuid,
           decision_reason=$3
       WHERE id=$1::uuid
-      RETURNING id
+      RETURNING id, tenant_id, identity_id
       `,
       [requestId, identity_id, reason || null]
     );
@@ -1772,6 +1783,8 @@ export default async function authRoutes(app) {
       outcome: "success",
       actorTenantId: tenant_id,
       actorIdentityId: identity_id,
+      targetTenantId: r.rows[0]?.tenant_id || null,
+      targetIdentityId: r.rows[0]?.identity_id || null,
       requestId,
       ip: req.ip,
       userAgent: req.headers["user-agent"] || null,
@@ -2649,7 +2662,36 @@ export default async function authRoutes(app) {
     const targetPath = safeUploadTarget(uploadDir, storedName);
 
     try {
-      fs.writeFileSync(targetPath, buffer);
+      const stored = await writeVerifiedUpload({
+        app,
+        targetPath,
+        buffer,
+        tenantId: tenant_id,
+        storedName,
+        assetKind: "media",
+        category: "avatars",
+        filename,
+        mimetype
+      });
+      if (!stored.ok) {
+        auditSecurityEvent(app, "upload.scan_pending", {
+          category: "upload",
+          source: "auth.profile_avatar",
+          severity: stored.status === "blocked" ? "warning" : "info",
+          outcome: "rejected",
+          tenantId: tenant_id,
+          identityId: identity_id,
+          reason: stored.error,
+          ip: req.ip,
+          userAgent: req.headers["user-agent"] || null,
+          metadata: { filename, mimetype, scan_status: stored.scan_status }
+        });
+        return reply.code(stored.status === "blocked" ? 415 : 202).send({
+          ok: false,
+          error: stored.error,
+          scan_status: stored.scan_status
+        });
+      }
     } catch (err) {
       app.log.error({ event: "profile_avatar_upload_error", error: err.message });
       return reply.code(500).send({ ok: false, error: "UPLOAD_FAILED" });

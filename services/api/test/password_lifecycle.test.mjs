@@ -4,6 +4,7 @@ import argon2 from "argon2";
 import {
   checkIdentityLoginLock,
   checkPasswordHistory,
+  evaluatePasswordStrength,
   generateStrongPassword,
   recordFailedLoginAttempt
 } from "../src/auth/password.js";
@@ -83,4 +84,13 @@ test("generated passwords use secure random and satisfy configured composition",
   assert.match(password, /[A-Z]/);
   assert.match(password, /\d/);
   assert.match(password, /[!@#$%^&*()_+\-=[\]{}|;:,.<>?]/);
+});
+
+test("password policy blocks common passwords while allowing long passphrases", () => {
+  const blocked = evaluatePasswordStrength("Password123456789!");
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.feedback.some((item) => /common|dictionary|pattern/i.test(item)), true);
+
+  const passphrase = evaluatePasswordStrength("correct horse battery staple 2026");
+  assert.equal(passphrase.ok, true);
 });

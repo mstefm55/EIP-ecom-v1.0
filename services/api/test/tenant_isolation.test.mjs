@@ -5,6 +5,7 @@ import cookie from "@fastify/cookie";
 import gatewayRoutes from "../src/routes/gateway.js";
 import publicGatewayRoutes from "../src/routes/public_gateway.js";
 import publicCommerceRoutes from "../src/routes/public_commerce.js";
+import { hasPermission } from "../src/auth/perm.js";
 import { sha256Hex } from "../src/auth/crypto.js";
 import { sessionCanAccessAssetTenant } from "../src/services/assets/access.js";
 import { buildSignedAssetUrl, verifyAssetToken } from "../src/services/assets/signing.js";
@@ -15,6 +16,21 @@ const TENANT_A = "00000000-0000-4000-8000-0000000000a1";
 const TENANT_B = "00000000-0000-4000-8000-0000000000b2";
 const IDENTITY_A = "10000000-0000-4000-8000-0000000000a1";
 const OWNER_IDENTITY = "10000000-0000-4000-8000-0000000000aa";
+
+test("permission checks require assigned roles to belong to the same tenant", async () => {
+  const app = {
+    db: {
+      async query(sql, params) {
+        assert.match(sql, /r\.tenant_id = ir\.tenant_id/);
+        assert.deepEqual(params, [TENANT_A, IDENTITY_A, "tenant.connection.write"]);
+        return { rowCount: 0, rows: [] };
+      }
+    }
+  };
+
+  const allowed = await hasPermission(app, TENANT_A, IDENTITY_A, "tenant.connection.write");
+  assert.equal(allowed, false);
+});
 
 function profile({ code, suffix, origin, apiKey = "site-key", channel = "website_intake" }) {
   return {

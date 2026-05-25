@@ -33,6 +33,43 @@ async function requireAdminPerm(app, req, reply, permCode, opts = {}) {
   return session;
 }
 
+async function isAdminExec(app, session) {
+  const r = await app.db.query(
+    `
+    SELECT 1
+    FROM eip_authz.identity_role ir
+    JOIN eip_authz.role r
+      ON r.id = ir.role_id
+     AND r.tenant_id = ir.tenant_id
+     AND r.is_active = true
+    WHERE ir.tenant_id = $1
+      AND ir.identity_id = $2
+      AND r.code IN ('ADMIN_SUPER','ADMIN_EXEC')
+    LIMIT 1
+    `,
+    [session.tenant_id, session.identity_id]
+  );
+  return r.rowCount > 0;
+}
+
+async function requireAdminExec(app, req, reply, session, action) {
+  if (await isAdminExec(app, session)) return true;
+  auditSecurityEvent(app, "admin_control.tenant_scope_rejected", {
+    category: "admin",
+    source: "admin_template_clone",
+    severity: "warning",
+    outcome: "rejected",
+    actorTenantId: session.tenant_id,
+    actorIdentityId: session.identity_id,
+    reason: "ADMIN_EXEC_REQUIRED",
+    ip: req.ip,
+    userAgent: req.headers["user-agent"] || null,
+    metadata: { action }
+  });
+  reply.code(403).send({ ok: false, error: "ADMIN_EXEC_REQUIRED" });
+  return false;
+}
+
 function buildTenantSearch(query, { includeTemplates }) {
   const params = [];
   const where = ["is_active = true"];
@@ -55,6 +92,7 @@ export default async function adminTemplateCloneRoutes(app) {
   app.get("/admin/template-tenants", async (req, reply) => {
     const session = await requireAdminPerm(app, req, reply, "admin.template.read");
     if (!session) return;
+    if (!(await requireAdminExec(app, req, reply, session, "template_tenants"))) return;
 
     const query = normalizeText(req.query?.query);
     const { where, params } = buildTenantSearch(query, { includeTemplates: true });
@@ -75,6 +113,7 @@ export default async function adminTemplateCloneRoutes(app) {
   app.get("/admin/tenant-lookup", async (req, reply) => {
     const session = await requireAdminPerm(app, req, reply, "admin.template.read");
     if (!session) return;
+    if (!(await requireAdminExec(app, req, reply, session, "tenant_lookup"))) return;
 
     const query = normalizeText(req.query?.query);
     const { where, params } = buildTenantSearch(query, { includeTemplates: false });
@@ -98,6 +137,7 @@ export default async function adminTemplateCloneRoutes(app) {
       stepUp: true,
     });
     if (!session) return;
+    if (!(await requireAdminExec(app, req, reply, session, "template_clone"))) return;
 
     const sourceId = normalizeText(req.body?.source_tenant_id || req.body?.sourceTenantId);
     const targetId = normalizeText(req.body?.target_tenant_id || req.body?.targetTenantId);

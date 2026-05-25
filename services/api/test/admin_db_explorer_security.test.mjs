@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import Fastify from "fastify";
-import adminDbExplorerRoutes from "../src/routes/admin_db_explorer.js";
+import adminDbExplorerRoutes, {
+  sanitizeRow,
+  verifySensitiveGrant
+} from "../src/routes/admin_db_explorer.js";
 
 const OWNER_TENANT = "00000000-0000-4000-8000-0000000000aa";
 const IDENTITY_ID = "10000000-0000-4000-8000-0000000000aa";
@@ -145,4 +148,45 @@ test("admin DB explorer requires recent step-up for table reads and exports", as
   });
   assert.equal(exported.statusCode, 403);
   assert.equal(exported.json().error, "STEP_UP_REQUIRED");
+});
+
+test("admin DB explorer masks expanded sensitive column names", () => {
+  const row = {
+    id: "row-1",
+    credential_id: "credential",
+    session_id: "session",
+    recovery_code: "recovery",
+    display_name: "Visible"
+  };
+  const sanitized = sanitizeRow(row, Object.keys(row));
+  assert.equal(sanitized.credential_id, "***");
+  assert.equal(sanitized.session_id, "***");
+  assert.equal(sanitized.recovery_code, "***");
+  assert.equal(sanitized.display_name, "Visible");
+});
+
+test("admin DB explorer sensitive access uses session grants instead of raw token cookies", () => {
+  const app = { config: { API_KEY_PEPPER: "pepper" } };
+  const tenantAccess = {
+    sensitive_allowed: true,
+    sensitive_token_hash: "abc123",
+    sensitive_token_expires_at: new Date(Date.now() + 60_000).toISOString(),
+    sensitive_token_revoked_at: null
+  };
+  const session = {
+    id: "00000000-0000-4000-8000-000000000001",
+    attrs: { admin_db_sensitive_grants: {} }
+  };
+
+  const missing = verifySensitiveGrant(app, session, tenantAccess, "tenant-a");
+  assert.equal(missing.ok, false);
+  assert.equal(missing.error, "SENSITIVE_GRANT_REQUIRED");
+
+  const hash = "89e52a21d6f487d3ee184639ae5da6ab498a405a57ce1e8ae87d13734e2e28e2";
+  session.attrs.admin_db_sensitive_grants["tenant-a"] = {
+    hash,
+    expires_at: new Date(Date.now() + 60_000).toISOString()
+  };
+  const valid = verifySensitiveGrant(app, session, tenantAccess, "tenant-a");
+  assert.equal(valid.ok, true);
 });

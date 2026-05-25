@@ -11,7 +11,11 @@ export async function hasPermission(app, tenantId, identityId, permissionCode) {
     WHERE EXISTS (
       SELECT 1
       FROM eip_authz.identity_role ir
-      JOIN eip_authz.role_permission rp ON rp.role_id = ir.role_id
+      JOIN eip_authz.role r
+        ON r.id = ir.role_id
+       AND r.tenant_id = ir.tenant_id
+       AND r.is_active = true
+      JOIN eip_authz.role_permission rp ON rp.role_id = r.id
       WHERE ir.tenant_id = $1
         AND ir.identity_id = $2
         AND rp.permission_code = $3

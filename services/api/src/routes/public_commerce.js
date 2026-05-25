@@ -15,7 +15,7 @@ import { hydrateConnectionProfileSecrets } from "../services/gateway/secretStore
 import { connectionAllowsOrigin, extractEventId, verifyConnectionRequest } from "../services/gateway/verification.js";
 import { isTenantAssetPath, toLocalAssetPath } from "../services/assets/url_policy.js";
 import { sendEmail } from "../lib/email.js";
-import { safeUploadTarget, uploadPartToBuffer, validateImageUpload } from "../lib/uploadSecurity.js";
+import { safeUploadTarget, uploadPartToBuffer, validateImageUpload, writeVerifiedUpload } from "../lib/uploadSecurity.js";
 import { enforceConnectionQuota } from "../lib/abuseQuota.js";
 import { resolveMarketplaceFxContext } from "../services/fx/marketFxSync.js";
 import { auditSecurityEvent } from "../lib/securityAudit.js";
@@ -2092,6 +2092,48 @@ export default async function publicCommerceRoutes(app) {
     return true;
   }
 
+  function commerceIdempotencyKey(req, body, profile) {
+    return (
+      extractEventId(req, body, profile) ||
+      normalizeText(req.headers["idempotency-key"]) ||
+      normalizeText(req.headers["x-idempotency-key"]) ||
+      normalizeText(body?.idempotency_key || body?.idempotencyKey || body?.event_id || body?.eventId)
+    );
+  }
+
+  function commerceRequestHash(req, body, buffer = null) {
+    if (Buffer.isBuffer(buffer)) return buildRequestHash(buffer);
+    const rawBody = Buffer.isBuffer(req.rawBody) ? req.rawBody : Buffer.from(req.rawBody || "");
+    if (rawBody.length) return buildRequestHash(rawBody);
+    return buildRequestHash(Buffer.from(JSON.stringify(body || {})));
+  }
+
+  async function beginCommerceIdempotency(req, reply, { access, body, action, requestHash = null }) {
+    const key = commerceIdempotencyKey(req, body, access.profile);
+    if (!key) {
+      reply.code(400).send({ ok: false, error: "IDEMPOTENCY_REQUIRED" });
+      return null;
+    }
+    const scope =
+      access.profile.idempotency?.idempotency_scope ||
+      `commerce.${action}.${access.profile.identity?.connection_code || "connection"}`;
+    const idem = await ensureIdempotency(app.db, {
+      tenantId: access.tenant.id,
+      scope,
+      key,
+      requestHash: requestHash || commerceRequestHash(req, body)
+    });
+    if (!idem.ok) {
+      reply.code(409).send({ ok: false, error: idem.error });
+      return null;
+    }
+    if (idem.replay) {
+      reply.send(idem.response || { ok: true, replay: true });
+      return { replay: true, key, scope };
+    }
+    return { key, scope };
+  }
+
   app.post(
     "/commerce/:suffix/member/auth/start",
     { config: { rateLimit: RATE_LIMIT, cors: false }, bodyLimit: MAX_BODY },
@@ -2500,6 +2542,13 @@ export default async function publicCommerceRoutes(app) {
         return reply.code(400).send({ ok: false, error: "INVALID_JSON" });
       }
 
+      const idem = await beginCommerceIdempotency(req, reply, {
+        access,
+        body,
+        action: "member_profile"
+      });
+      if (!idem || idem.replay) return;
+
       const displayName = normalizeOptionalText(body.display_name || body.displayName);
       const title = normalizeOptionalText(body.title);
       const phone = normalizeOptionalText(body.phone);
@@ -2584,10 +2633,25 @@ export default async function publicCommerceRoutes(app) {
 
         const profile = await loadMemberProfile(client, access.tenant.id, member.session.identity_id);
         await client.query("COMMIT");
-        return reply.send({ ok: true, member: profile });
+        const response = { ok: true, member: profile };
+        await finalizeIdempotency(app.db, {
+          tenantId: access.tenant.id,
+          scope: idem.scope,
+          key: idem.key,
+          response,
+          status: "ok"
+        });
+        return reply.send(response);
       } catch (error) {
         await client.query("ROLLBACK");
         app.log.error({ event: "member_profile_update_failed", tenantId: access.tenant.id, error: error.message });
+        await finalizeIdempotency(app.db, {
+          tenantId: access.tenant.id,
+          scope: idem.scope,
+          key: idem.key,
+          response: { ok: false, error: "MEMBER_PROFILE_UPDATE_FAILED" },
+          status: "error"
+        });
         return reply.code(500).send({ ok: false, error: "MEMBER_PROFILE_UPDATE_FAILED" });
       } finally {
         client.release();
@@ -3111,6 +3175,24 @@ export default async function publicCommerceRoutes(app) {
         return reply.code(415).send({ ok: false, error: validation.error });
       }
 
+      const uploadIdempotencyBody = {
+        idempotency_key:
+          normalizeText(req.body?.idempotency_key?.value || req.body?.idempotency_key) ||
+          normalizeText(req.body?.idempotencyKey?.value || req.body?.idempotencyKey)
+      };
+      const requestHash = commerceRequestHash(
+        req,
+        uploadIdempotencyBody,
+        Buffer.concat([Buffer.from(`${filename}\n${mimetype}\n`), buffer])
+      );
+      const idem = await beginCommerceIdempotency(req, reply, {
+        access,
+        body: uploadIdempotencyBody,
+        action: "member_upload",
+        requestHash
+      });
+      if (!idem || idem.replay) return;
+
       const uploadDir = path.join(ASSET_ROOT, access.tenant.id, "blog");
       fs.mkdirSync(uploadDir, { recursive: true });
 
@@ -3118,15 +3200,60 @@ export default async function publicCommerceRoutes(app) {
       const targetPath = safeUploadTarget(uploadDir, storedName);
 
       try {
-        fs.writeFileSync(targetPath, buffer);
+        const stored = await writeVerifiedUpload({
+          app,
+          targetPath,
+          buffer,
+          tenantId: access.tenant.id,
+          storedName,
+          assetKind: "media",
+          category: "blog",
+          filename,
+          mimetype
+        });
+        if (!stored.ok) {
+          auditSecurityEvent(app, "upload.scan_pending", {
+            category: "upload",
+            source: "public_commerce.member_upload",
+            severity: stored.status === "blocked" ? "warning" : "info",
+            outcome: "rejected",
+            tenantId: access.tenant.id,
+            identityId: member.profile.identity_id,
+            connectionCode: access.profile?.identity?.connection_code,
+            suffix: req.params?.suffix,
+            reason: stored.error,
+            ip: req.ip,
+            userAgent: req.headers["user-agent"] || null,
+            metadata: { filename, mimetype, scan_status: stored.scan_status }
+          });
+          await finalizeIdempotency(app.db, {
+            tenantId: access.tenant.id,
+            scope: idem.scope,
+            key: idem.key,
+            response: { ok: false, error: stored.error, scan_status: stored.scan_status },
+            status: "error"
+          });
+          return reply.code(stored.status === "blocked" ? 415 : 202).send({
+            ok: false,
+            error: stored.error,
+            scan_status: stored.scan_status
+          });
+        }
       } catch (error) {
         app.log.error({ event: "member_blog_upload_failed", tenantId: access.tenant.id, error: error.message });
+        await finalizeIdempotency(app.db, {
+          tenantId: access.tenant.id,
+          scope: idem.scope,
+          key: idem.key,
+          response: { ok: false, error: "UPLOAD_FAILED" },
+          status: "error"
+        });
         return reply.code(500).send({ ok: false, error: "UPLOAD_FAILED" });
       }
 
       const rawUrl = `/assets/${access.tenant.id}/blog/${storedName}`;
       const signedUrl = signAssetUrl(rawUrl, app, access.tenant.id);
-      return reply.send({
+      const response = {
         ok: true,
         asset: {
           name: filename || storedName,
@@ -3135,7 +3262,15 @@ export default async function publicCommerceRoutes(app) {
           raw_url: rawUrl,
           url: signedUrl || rawUrl
         }
+      };
+      await finalizeIdempotency(app.db, {
+        tenantId: access.tenant.id,
+        scope: idem.scope,
+        key: idem.key,
+        response,
+        status: "ok"
       });
+      return reply.send(response);
     }
   );
 
@@ -3584,7 +3719,7 @@ export default async function publicCommerceRoutes(app) {
         return reply.code(400).send({ ok: false, error: "SUBSCRIBER_REQUIRED" });
       }
 
-      const eventId = extractEventId(req, body, access.profile);
+      const eventId = commerceIdempotencyKey(req, body, access.profile);
       if (!eventId) return reply.code(400).send({ ok: false, error: "IDEMPOTENCY_REQUIRED" });
 
       const rawBody = Buffer.isBuffer(req.rawBody) ? req.rawBody : Buffer.from(req.rawBody || "");
@@ -4089,7 +4224,15 @@ export default async function publicCommerceRoutes(app) {
           ? materials.get(line.material_id)
           : materials.get(line.material_code);
         if (!material) {
-          return reply.code(404).send({ ok: false, error: "MATERIAL_NOT_FOUND", material: line.material_code || line.material_id });
+          const out = { ok: false, error: "MATERIAL_NOT_FOUND", material: line.material_code || line.material_id };
+          await finalizeIdempotency(app.db, {
+            tenantId: access.tenant.id,
+            scope,
+            key: eventId,
+            response: out,
+            status: "error"
+          });
+          return reply.code(404).send(out);
         }
         preparedLines.push({ ...line, material });
       }
@@ -4131,7 +4274,7 @@ export default async function publicCommerceRoutes(app) {
         return reply.code(400).send({ ok: false, error: "LINE_ITEMS_REQUIRED" });
       }
 
-      const eventId = extractEventId(req, body, access.profile);
+      const eventId = commerceIdempotencyKey(req, body, access.profile);
       if (!eventId) return reply.code(400).send({ ok: false, error: "IDEMPOTENCY_REQUIRED" });
 
       const rawBody = Buffer.isBuffer(req.rawBody) ? req.rawBody : Buffer.from(req.rawBody || "");
@@ -4247,7 +4390,16 @@ export default async function publicCommerceRoutes(app) {
         { currency, line_items: preparedLines },
         { channel, jurisdiction }
       );
-      if (!quote.ok) return reply.code(400).send(quote);
+      if (!quote.ok) {
+        await finalizeIdempotency(app.db, {
+          tenantId: access.tenant.id,
+          scope,
+          key: eventId,
+          response: quote,
+          status: "error"
+        });
+        return reply.code(400).send(quote);
+      }
 
       const memberSession = await loadMemberSession(app, req, access.tenant.id, req.params?.suffix);
       const memberProfile = memberSession
@@ -4471,7 +4623,7 @@ export default async function publicCommerceRoutes(app) {
         return reply.code(400).send({ ok: false, error: "ORDER_REFERENCE_REQUIRED" });
       }
 
-      const eventId = extractEventId(req, body, access.profile);
+      const eventId = commerceIdempotencyKey(req, body, access.profile);
       if (!eventId) return reply.code(400).send({ ok: false, error: "IDEMPOTENCY_REQUIRED" });
 
       const rawBody = Buffer.isBuffer(req.rawBody) ? req.rawBody : Buffer.from(req.rawBody || "");
@@ -4515,13 +4667,31 @@ export default async function publicCommerceRoutes(app) {
         );
       }
       if (!orderRes || orderRes.rowCount === 0) {
-        return reply.code(404).send({ ok: false, error: "ORDER_NOT_FOUND" });
+        const out = { ok: false, error: "ORDER_NOT_FOUND" };
+        await finalizeIdempotency(app.db, {
+          tenantId: access.tenant.id,
+          scope,
+          key: eventId,
+          response: out,
+          status: "error"
+        });
+        return reply.code(404).send(out);
       }
       const orderId = orderRes.rows[0].id;
       const orderCode = normalizeText(orderRes.rows[0].code || requestedOrderCode);
 
       const amount = normalizeAmount(body.amount, null);
-      if (amount === null) return reply.code(400).send({ ok: false, error: "AMOUNT_REQUIRED" });
+      if (amount === null) {
+        const out = { ok: false, error: "AMOUNT_REQUIRED" };
+        await finalizeIdempotency(app.db, {
+          tenantId: access.tenant.id,
+          scope,
+          key: eventId,
+          response: out,
+          status: "error"
+        });
+        return reply.code(400).send(out);
+      }
 
       const currency = normalizeText(body.currency || "USD");
       const paymentSettings = await loadCommercePaymentSettings(app, access.tenant.id);
@@ -4532,7 +4702,15 @@ export default async function publicCommerceRoutes(app) {
       const requestedMethod = normalizePaymentMethodCode(body.method || body.payment_method || "");
       const method = requestedMethod || enabledMethods[0] || "";
       if (!method || !enabledMethods.includes(method)) {
-        return reply.code(403).send({ ok: false, error: "PAYMENT_METHOD_DISABLED" });
+        const out = { ok: false, error: "PAYMENT_METHOD_DISABLED" };
+        await finalizeIdempotency(app.db, {
+          tenantId: access.tenant.id,
+          scope,
+          key: eventId,
+          response: out,
+          status: "error"
+        });
+        return reply.code(403).send(out);
       }
       const provider = paymentSettings.providers?.[method] || {};
 
