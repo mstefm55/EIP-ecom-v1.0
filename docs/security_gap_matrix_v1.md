@@ -42,40 +42,37 @@ Risk vocabulary:
 | Public commerce JWT expiry, not-before, issued-at, and max-age validation | OWASP ASVS 5.0 token validation; OWASP API2:2023; NIST SP 800-63B authenticator/session freshness | implemented | `services/api/src/routes/public_commerce.js`, `services/api/src/services/gateway/verification.js`, `services/api/test/public_commerce_hardening.test.mjs` | low | P0 closed in Prompt 8 |
 | Public commerce order/payment/member write idempotency | OWASP API4/API6:2023 | partial | `services/api/src/routes/public_commerce.js`, `services/api/src/services/gateway/idempotency.js` | high | P1 short-term |
 | Public tenant request abuse resistance | OWASP API4/API6:2023 | partial | `services/api/src/routes/tenant_requests_public.js` | medium | P1 short-term |
-| Per-tenant quotas beyond in-memory route rate limits | OWASP API4/API6:2023 | partial | `services/api/src/server.js`, `services/api/src/routes/public_gateway.js`, `services/api/src/routes/public_commerce.js` | high | P1 short-term |
+| Per-tenant quotas beyond in-memory route rate limits | OWASP API4/API6:2023 | implemented | `services/api/src/lib/abuseQuota.js`, `services/api/src/routes/public_gateway.js`, `services/api/src/routes/public_commerce.js`, `services/api/test/abuse_quota.test.mjs` | medium | Closed in residual hardening sweep; tune live limits after traffic baseline |
 | Outbound gateway SSRF and egress controls | OWASP API7/API10:2023; OWASP ASVS 5.0 SSRF/unsafe API consumption | implemented | `services/api/src/routes/gateway.js`, `services/api/src/services/gateway/outbound.js`, `services/api/test/gateway_outbound_security.test.mjs` | low | Closed in gateway/control-plane hardening wave |
 | Gateway audit redaction defaults for headers/query/raw body | OWASP ASVS 5.0 logging/privacy; OWASP API10:2023 | implemented | `services/api/src/routes/public_gateway.js`, `services/api/src/services/gateway/audit.js`, `services/api/src/lib/securityAudit.js`, `services/api/test/public_gateway_runtime.test.mjs` | low | Closed in gateway/control-plane hardening wave |
 | Password hashing for EIP auth credentials | NIST SP 800-63B memorized secrets; OWASP ASVS 5.0 password storage | implemented | `services/api/src/routes/auth.js` | low | P2 maturity hardening |
 | Password policy alignment with NIST guidance | NIST SP 800-63B memorized secrets | partial | `services/api/src/auth/password.js`, `services/api/src/routes/auth.js` | medium | P1 short-term |
-| Password reuse prevention | NIST SP 800-63B; OWASP ASVS 5.0 credential lifecycle | partial | `services/api/src/auth/password.js`, `services/api/src/routes/auth.js` | high | P1 short-term |
-| Failed login throttling and account lockout durability | NIST SP 800-63B online guessing resistance; OWASP ASVS 5.0 authentication | partial | `services/api/src/auth/password.js`, `services/api/src/routes/auth.js` | high | P1 short-term |
-| Admin MFA and step-up | NIST SP 800-63B authenticator assurance; OWASP ASVS 5.0 reauthentication | partial | `services/api/src/routes/auth.js`, `services/api/src/server.js` | high | P1 short-term |
+| Password reuse prevention | NIST SP 800-63B; OWASP ASVS 5.0 credential lifecycle | implemented | `services/api/src/auth/password.js`, `services/api/src/routes/auth.js`, `services/api/test/password_lifecycle.test.mjs` | low | Closed in residual hardening sweep |
+| Failed login throttling and account lockout durability | NIST SP 800-63B online guessing resistance; OWASP ASVS 5.0 authentication | implemented | `services/api/src/auth/password.js`, `services/api/src/routes/auth.js`, `services/api/test/password_lifecycle.test.mjs` | medium | Closed for EIP password/OTP/TOTP/recovery auth paths; monitor live thresholds |
+| Admin MFA and step-up | NIST SP 800-63B authenticator assurance; OWASP ASVS 5.0 reauthentication | implemented | `services/api/src/auth/privilegedStepUp.js`, `services/api/src/routes/auth.js`, `services/api/src/routes/gateway.js`, `services/api/src/routes/admin_db_explorer.js`, `services/api/test/abuse_quota.test.mjs` | medium | Owner/admin privileged actions require phishing-resistant step-up in production |
 | TOTP secret protection | NIST SP 800-63B OTP authenticators; OWASP ASVS 5.0 secret storage | implemented | `services/api/src/config.js`, `services/api/src/routes/auth.js` | medium | P1 short-term |
 | Account recovery controls | NIST SP 800-63B account recovery; OWASP ASVS 5.0 authentication recovery | partial | `services/api/src/routes/auth.js` | high | P1 short-term |
 | Upload path safety, MIME/extension/signature validation, and file size limits | OWASP ASVS 5.0 file upload; OWASP API8:2023 | partial | `services/api/src/server.js`, `services/api/src/lib/uploadSecurity.js`, `services/api/src/routes/auth.js`, `services/api/src/routes/public_commerce.js`, `services/api/src/routes/admin_access.js` | high | P1 short-term |
-| Malware scanning or content disarm for uploaded tenant assets | OWASP ASVS 5.0 file upload; OWASP API8:2023 | missing | `services/api/src/lib/uploadSecurity.js`, `services/api/src/server.js` | high | P1 short-term |
+| Malware scanning or content disarm for uploaded tenant assets | OWASP ASVS 5.0 file upload; OWASP API8:2023 | partial | `services/api/src/lib/uploadSecurity.js`, `services/api/test/upload_security.test.mjs` | medium | Inline V1 scanner blocks EICAR/active content before publish; external AV/CDR remains maturity work |
 | Signed asset access for tenant upload paths | OWASP ASVS 5.0 access control/data protection | implemented | `services/api/src/server.js`, `services/api/src/services/assets/signing.js`, `services/api/src/services/assets/url_policy.js` | medium | P1 short-term |
 | Production debug route disablement | OWASP ASVS 5.0 security configuration; OWASP API8:2023 | implemented | `services/api/src/server.js`, `services/api/src/config.js` | low | P2 maturity hardening |
 | Feature flags for high-risk operational tools | OWASP ASVS 5.0 security configuration; OWASP API8:2023 | implemented | `services/api/src/config.js`, `services/api/src/routes/admin_db_explorer.js` | low | P0 closed in Prompt 8 |
-| Public/API inventory and machine-readable contract | OWASP API9:2023 | partial | `services/api/src/routes/*`, `docs/DEVELOPER_MANUAL.md` | medium | P2 maturity hardening |
+| Public/API inventory and machine-readable contract | OWASP API9:2023 | implemented | `docs/api_inventory_v1.json`, `services/api/src/routes/*` | low | Closed in residual hardening sweep; keep updated during route changes |
 | Security regression tests for auth, CORS, CSRF, tenant isolation, gateway verification, and uploads | OWASP ASVS 5.0 verification; OWASP API1/API2/API5/API8:2023 | implemented | `services/api/test/*.mjs`, `tools/security/static_security_checks.mjs`, `.github/workflows/security-gates.yml` | low | P1 baseline added in Prompts 7-8 |
-| Secret generation quality for generated passwords | NIST SP 800-63B random secret quality | partial | `services/api/src/auth/password.js` | medium | P1 short-term |
+| Secret generation quality for generated passwords | NIST SP 800-63B random secret quality | implemented | `services/api/src/auth/password.js`, `services/api/test/password_lifecycle.test.mjs` | low | Closed in residual hardening sweep |
 | Consent/version capture for tenant onboarding | NIST SP 800-63B privacy references; OWASP ASVS 5.0 privacy/data handling | implemented | `services/api/src/config.js`, `services/api/src/routes/tenant_requests_public.js`, `services/api/src/routes/privacy.js` | medium | P1 short-term |
 
 ## Highest-Risk Gaps
 
-Prompt 8 closed the original P0 public commerce, query-string API key, DB explorer, and sensitive admin-read browser-trigger gaps. The gateway/control-plane hardening wave closed the gateway audit redaction and outbound SSRF/egress gaps. Remaining highest-risk gaps are:
+Prompt 8 closed the original P0 public commerce, query-string API key, DB explorer, and sensitive admin-read browser-trigger gaps. The gateway/control-plane hardening wave closed the gateway audit redaction and outbound SSRF/egress gaps. The residual hardening sweep closed password reuse, durable auth lock expiry, owner/admin phishing-resistant privileged step-up, security-event-backed gateway/commerce quotas, secure generated password randomness, API inventory, and incident runbook tracking.
 
-1. Password reuse prevention compares hashes directly and is ineffective for salted Argon2 hashes.
-2. Upload handling validates type/signature/path but does not perform malware scanning or content disarm.
-3. Failed-login throttling and lockout behavior still need durable DB-backed enforcement across all auth paths.
-4. Owner/admin MFA policy remains staged and should move to phishing-resistant enforcement after passkey rollout verification.
-5. Per-tenant and per-connection quotas beyond route-local rate limits are still needed for production abuse control.
-6. Public commerce order/payment/member write idempotency remains uneven outside the gateway intake idempotency path.
-7. Admin DB explorer sensitive-token governance can be further tightened with stronger workflow and alerting.
-8. Public/API machine-readable route inventory is not yet generated.
-9. Incident response runbooks are not yet tracked for API key compromise, admin compromise, gateway abuse, malicious upload, and tenant data exposure.
-10. Outbound provider allowlists and per-provider egress policy can be matured beyond the baseline SSRF denylist.
+Remaining highest-risk gaps are:
+
+1. Public commerce order/payment/member write idempotency remains uneven outside the gateway intake idempotency path.
+2. Upload handling now blocks obvious malware/active content before publish, but full external AV/CDR scanning remains staged maturity work.
+3. Admin DB explorer sensitive-token governance can be further tightened with stronger workflow and alerting.
+4. Outbound provider allowlists and per-provider egress policy can be matured beyond the baseline SSRF denylist.
+5. Public tenant request abuse resistance is still route-local and should get the same security-event-backed quota treatment in a later low-risk pass.
 
 ## Notes
 

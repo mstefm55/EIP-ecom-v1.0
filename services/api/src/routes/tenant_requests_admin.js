@@ -2,6 +2,7 @@
 import crypto from "node:crypto";
 import { randomToken, sha256Hex } from "../auth/crypto.js";
 import { hasPermission } from "../auth/perm.js";
+import { requirePrivilegedStepUp } from "../auth/privilegedStepUp.js";
 import { sendEmail } from "../lib/email.js";
 import { auditSecurityEvent } from "../lib/securityAudit.js";
 
@@ -188,7 +189,7 @@ export default async function tenantRequestsAdmin(app) {
       const c = await app.requireCsrf(req);
       if (!c.ok) return reply.code(c.status).send({ ok: false, error: c.error });
 
-      const step = await app.requireStepUp(req);
+      const step = await requirePrivilegedStepUp(app, req);
       if (!step.ok) return reply.code(step.status).send({ ok: false, error: step.error });
 
       const allowed = await hasPermission(app, s.session.tenant_id, s.session.identity_id, "tenant.onboarding.approve");
@@ -421,7 +422,7 @@ If you did not request this, please ignore this email.
       const c = await app.requireCsrf(req);
       if (!c.ok) return reply.code(c.status).send({ ok: false, error: c.error });
 
-      const step = await app.requireStepUp(req);
+      const step = await requirePrivilegedStepUp(app, req);
       if (!step.ok) return reply.code(step.status).send({ ok: false, error: step.error });
 
       const allowed = await hasPermission(app, s.session.tenant_id, s.session.identity_id, "tenant.onboarding.reject");

@@ -1,5 +1,6 @@
 // services/api/src/routes/admin_template_clone.js
 import { hasPermission } from "../auth/perm.js";
+import { requirePrivilegedStepUp } from "../auth/privilegedStepUp.js";
 import { auditSecurityEvent } from "../lib/securityAudit.js";
 
 function normalizeText(value) {
@@ -15,15 +16,15 @@ async function requireAdminPerm(app, req, reply, permCode, opts = {}) {
     return null;
   }
   const session = req.session || guard.session;
+  req.session = session;
+  req.realm = session?.realm || "EIP";
   const allowed = await hasPermission(app, session.tenant_id, session.identity_id, permCode);
   if (!allowed) {
     reply.code(403).send({ ok: false, error: "FORBIDDEN" });
     return null;
   }
   if (opts.stepUp) {
-    const step = await app.requireStepUp(req, {
-      phishingResistant: app.config.REQUIRE_PASSKEY_FOR_PRIVILEGED_ACTIONS === true
-    });
+    const step = await requirePrivilegedStepUp(app, req);
     if (!step.ok) {
       reply.code(step.status).send({ ok: false, error: step.error });
       return null;

@@ -14,6 +14,7 @@ import {
   sha256Hex,
   timingSafeEqual
 } from "../auth/crypto.js";
+import { requirePrivilegedStepUp } from "../auth/privilegedStepUp.js";
 import { sendEmail } from "../lib/email.js";
 import {
   clearAuthCookie,
@@ -25,7 +26,14 @@ import {
 import { auditSecurityEvent } from "../lib/securityAudit.js";
 import { resolveEipSurfaceAccess } from "../lib/surfaceAccess.js";
 import { safeUploadTarget, uploadPartToBuffer, validateImageUpload } from "../lib/uploadSecurity.js";
-import { evaluatePasswordStrength, generateStrongPassword, checkPasswordHistory } from "../auth/password.js";
+import {
+  clearFailedLoginAttempts,
+  checkIdentityLoginLock,
+  checkPasswordHistory,
+  evaluatePasswordStrength,
+  generateStrongPassword,
+  recordFailedLoginAttempt
+} from "../auth/password.js";
 import { buildStepUpAttrs } from "../auth/sessionPolicy.js";
 import {
   buildAuthenticationOptions,
@@ -521,7 +529,7 @@ export default async function authRoutes(app) {
 
       const idRes = await client.query(
         `
-        SELECT id, is_active, is_locked
+        SELECT id, is_active, is_locked, attrs
         FROM eip_auth.auth_identity
         WHERE tenant_id=$1 AND login=$2
         FOR UPDATE
@@ -539,18 +547,23 @@ export default async function authRoutes(app) {
       }
 
       const identity = idRes.rows[0];
-      if (!identity.is_active || identity.is_locked) {
+      const lockCheck = await checkIdentityLoginLock(client, tenantId, identity);
+      if (!lockCheck.ok) {
         await client.query("COMMIT");
         app.log.warn({ event: "otp_request_disabled_identity", tenantId, login: login.substring(0, 3) + "...", ip: req.ip });
         auditSecurityEvent(app, "login_failure", {
           tenantId,
           identityId: identity.id,
           outcome: "failed",
-          reason: "identity_disabled",
+          reason: lockCheck.error === "ACCOUNT_LOCKED" ? "account_locked" : "identity_disabled",
           ip: req.ip
         });
         if (strictErrors) {
-          return reply.code(403).send({ ok: false, error: "IDENTITY_DISABLED" });
+          return reply.code(lockCheck.error === "ACCOUNT_LOCKED" ? 423 : 403).send({
+            ok: false,
+            error: lockCheck.error === "ACCOUNT_LOCKED" ? "ACCOUNT_LOCKED" : "IDENTITY_DISABLED",
+            locked_until: lockCheck.locked_until || null
+          });
         }
         return reply.code(401).send({ ok: false, error: "LOGIN_FAILED" });
       }
@@ -573,6 +586,14 @@ export default async function authRoutes(app) {
       const credential = credRes.rows[0];
       const passwordOk = await verifyPassword(passwordValue, credential);
       if (!passwordOk) {
+        const failure = await recordFailedLoginAttempt(
+          client,
+          tenantId,
+          identity.id,
+          req.ip,
+          req.headers["user-agent"],
+          "otp_request_bad_password"
+        );
         await client.query("COMMIT");
         app.log.warn({ event: "otp_request_bad_password", tenantId, login: login.substring(0, 3) + "...", ip: req.ip });
         auditSecurityEvent(app, "login_failure", {
@@ -582,6 +603,9 @@ export default async function authRoutes(app) {
           reason: "bad_password",
           ip: req.ip
         });
+        if (!failure.ok && failure.error === "ACCOUNT_LOCKED") {
+          return reply.code(423).send({ ok: false, error: "ACCOUNT_LOCKED", locked_until: failure.locked_until || null });
+        }
         if (strictErrors) {
           return reply.code(401).send({ ok: false, error: "BAD_PASSWORD" });
         }
@@ -628,6 +652,7 @@ export default async function authRoutes(app) {
       );
 
       await client.query("COMMIT");
+      await clearFailedLoginAttempts(app.db, tenantId, identity.id);
       if (app.config.NODE_ENV === "production") {
         const subject = "Your EIP one-time code";
         const text = `Your EIP one-time code is ${otp}. It expires in ${otpExpiresMin} minutes. If you did not request this, you can ignore this email.`;
@@ -679,7 +704,7 @@ export default async function authRoutes(app) {
 
       const idRes = await client.query(
         `
-        SELECT id, is_active, is_locked
+        SELECT id, is_active, is_locked, attrs
         FROM eip_auth.auth_identity
         WHERE tenant_id=$1 AND login=$2
         FOR UPDATE
@@ -693,9 +718,13 @@ export default async function authRoutes(app) {
       }
 
       const identity = idRes.rows[0];
-      if (!identity.is_active || identity.is_locked) {
+      const lockCheck = await checkIdentityLoginLock(client, tenantId, identity);
+      if (!lockCheck.ok) {
         await client.query("COMMIT");
         app.log.warn({ event: "password_login_disabled_identity", tenantId, login: login.substring(0, 3) + "...", ip: req.ip });
+        if (lockCheck.error === "ACCOUNT_LOCKED") {
+          return reply.code(423).send({ ok: false, error: "ACCOUNT_LOCKED", locked_until: lockCheck.locked_until || null });
+        }
         return reply.code(401).send({ ok: false, error: "LOGIN_FAILED" });
       }
 
@@ -717,8 +746,19 @@ export default async function authRoutes(app) {
       const credential = credRes.rows[0];
       const passwordOk = await verifyPassword(passwordValue, credential);
       if (!passwordOk) {
+        const failure = await recordFailedLoginAttempt(
+          client,
+          tenantId,
+          identity.id,
+          req.ip,
+          req.headers["user-agent"],
+          "password_login_bad_password"
+        );
         await client.query("COMMIT");
         app.log.warn({ event: "password_login_bad_password", tenantId, login: login.substring(0, 3) + "...", ip: req.ip });
+        if (!failure.ok && failure.error === "ACCOUNT_LOCKED") {
+          return reply.code(423).send({ ok: false, error: "ACCOUNT_LOCKED", locked_until: failure.locked_until || null });
+        }
         return reply.code(401).send({ ok: false, error: "LOGIN_FAILED" });
       }
 
@@ -781,6 +821,7 @@ export default async function authRoutes(app) {
       );
 
       await client.query("COMMIT");
+      await clearFailedLoginAttempts(app.db, tenantId, identity.id);
 
       app.log.info({ event: "password_login_success", tenantId, identityId: identity.id, deviceId: deviceRes.rows[0].id, ip: req.ip });
       auditSecurityEvent(app, "login_success", {
@@ -841,7 +882,7 @@ export default async function authRoutes(app) {
     const c = await app.requireCsrf(req);
     if (!c.ok) return reply.code(c.status).send({ ok: false, error: c.error });
 
-    const step = await app.requireStepUp(req);
+    const step = await requirePrivilegedStepUp(app, req);
     if (!step.ok) return reply.code(step.status).send({ ok: false, error: step.error });
 
     const allowed = await hasPermission(app, s.session.tenant_id, s.session.identity_id, "auth.password.write");
@@ -875,6 +916,12 @@ export default async function authRoutes(app) {
       if (!identity.is_active || identity.is_locked) {
         await client.query("ROLLBACK");
         return reply.code(409).send({ ok: false, error: "IDENTITY_DISABLED" });
+      }
+
+      const historyCheck = await checkPasswordHistory(client, actorTenantId, identity.id, passwordValue);
+      if (!historyCheck.ok) {
+        await client.query("ROLLBACK");
+        return reply.code(400).send({ ok: false, error: historyCheck.error || "PASSWORD_REUSE" });
       }
 
       await client.query(
@@ -939,7 +986,7 @@ export default async function authRoutes(app) {
 
       const idRes = await client.query(
         `
-        SELECT id, is_active, is_locked
+        SELECT id, is_active, is_locked, attrs
         FROM eip_auth.auth_identity
         WHERE tenant_id=$1 AND login=$2
         LIMIT 1
@@ -953,7 +1000,8 @@ export default async function authRoutes(app) {
       }
 
       const identity = idRes.rows[0];
-      if (!identity.is_active || identity.is_locked) {
+      const lockCheck = await checkIdentityLoginLock(client, tenantId, identity);
+      if (!lockCheck.ok) {
         await client.query("COMMIT");
         return reply.send({ ok: true });
       }
@@ -1057,12 +1105,12 @@ export default async function authRoutes(app) {
         return reply.code(401).send({ ok: false, error: "RESET_EXPIRED" });
       }
 
-      const newHash = await hashPassword(passwordValue);
-      const historyCheck = await checkPasswordHistory(client, reset.tenant_id, reset.identity_id, newHash);
+      const historyCheck = await checkPasswordHistory(client, reset.tenant_id, reset.identity_id, passwordValue);
       if (!historyCheck.ok) {
         await client.query("ROLLBACK");
         return reply.code(400).send({ ok: false, error: historyCheck.error || "PASSWORD_REUSE" });
       }
+      const newHash = await hashPassword(passwordValue);
 
       await client.query(
         `
@@ -1111,13 +1159,14 @@ export default async function authRoutes(app) {
       );
 
       await client.query("COMMIT");
+      await clearFailedLoginAttempts(app.db, reset.tenant_id, reset.identity_id);
       auditSecurityEvent(app, "recovery.request_created", {
         category: "recovery",
         source: "auth.recovery",
         severity: "warning",
         outcome: "success",
-        tenantId,
-        identityId: identity.id,
+        tenantId: reset.tenant_id,
+        identityId: reset.identity_id,
         ip: req.ip,
         userAgent: req.headers["user-agent"] || null
       });
@@ -1198,7 +1247,18 @@ export default async function authRoutes(app) {
       const credential = credRes.rows[0];
       const passwordOk = await verifyPassword(passwordValue, credential);
       if (!passwordOk) {
+        const failure = await recordFailedLoginAttempt(
+          client,
+          tenantId,
+          identity.id,
+          req.ip,
+          req.headers["user-agent"],
+          "recovery_bad_password"
+        );
         await client.query("COMMIT");
+        if (!failure.ok && failure.error === "ACCOUNT_LOCKED") {
+          return reply.code(423).send({ ok: false, error: "ACCOUNT_LOCKED", locked_until: failure.locked_until || null });
+        }
         return reply.code(401).send({ ok: false, error: "LOGIN_FAILED" });
       }
 
@@ -1237,7 +1297,18 @@ export default async function authRoutes(app) {
           valid = false;
         }
         if (!valid) {
-          await client.query("ROLLBACK");
+          const failure = await recordFailedLoginAttempt(
+            client,
+            tenantId,
+            identity.id,
+            req.ip,
+            req.headers["user-agent"],
+            "recovery_invalid_totp"
+          );
+          await client.query("COMMIT");
+          if (!failure.ok && failure.error === "ACCOUNT_LOCKED") {
+            return reply.code(423).send({ ok: false, error: "ACCOUNT_LOCKED", locked_until: failure.locked_until || null });
+          }
           return reply.code(401).send({ ok: false, error: "INVALID_TOTP" });
         }
       }
@@ -1480,6 +1551,7 @@ export default async function authRoutes(app) {
       );
 
       await client.query("COMMIT");
+      await clearFailedLoginAttempts(app.db, tenantId, identity.id);
       auditSecurityEvent(app, "recovery.consumed", {
         category: "recovery",
         source: "auth.recovery",
@@ -1554,7 +1626,7 @@ export default async function authRoutes(app) {
     if (!s.ok) return reply.code(s.status).send({ ok: false, error: s.error });
     const c = await app.requireCsrf(req);
     if (!c.ok) return reply.code(c.status).send({ ok: false, error: c.error });
-    const step = await app.requireStepUp(req);
+    const step = await requirePrivilegedStepUp(app, req);
     if (!step.ok) return reply.code(step.status).send({ ok: false, error: step.error });
 
     const { tenant_id, identity_id } = s.session;
@@ -1667,7 +1739,7 @@ export default async function authRoutes(app) {
     if (!s.ok) return reply.code(s.status).send({ ok: false, error: s.error });
     const c = await app.requireCsrf(req);
     if (!c.ok) return reply.code(c.status).send({ ok: false, error: c.error });
-    const step = await app.requireStepUp(req);
+    const step = await requirePrivilegedStepUp(app, req);
     if (!step.ok) return reply.code(step.status).send({ ok: false, error: step.error });
 
     const { tenant_id, identity_id } = s.session;
@@ -1803,7 +1875,7 @@ export default async function authRoutes(app) {
 
       const idRes = await client.query(
         `
-        SELECT id, is_active, is_locked
+        SELECT id, is_active, is_locked, attrs
         FROM eip_auth.auth_identity
         WHERE tenant_id=$1 AND login=$2
         FOR UPDATE
@@ -2192,10 +2264,11 @@ export default async function authRoutes(app) {
       return reply.code(400).send({ ok: false, error: "BAD_REQUEST" });
     }
 
+    let tenantId = null;
     const client = await app.db.connect();
     try {
       await client.query("BEGIN");
-      const tenantId = tenantIdRaw || (await resolveTenantIdByCode(client, tenantCode));
+      tenantId = tenantIdRaw || (await resolveTenantIdByCode(client, tenantCode));
       if (!tenantId) {
         await client.query("COMMIT");
         return reply.code(400).send({ ok: false, error: "BAD_REQUEST" });
@@ -2203,7 +2276,7 @@ export default async function authRoutes(app) {
 
       const idRes = await client.query(
         `
-        SELECT id, is_active, is_locked
+        SELECT id, is_active, is_locked, attrs
         FROM eip_auth.auth_identity
         WHERE tenant_id=$1 AND login=$2
         `,
@@ -2212,7 +2285,12 @@ export default async function authRoutes(app) {
       if (idRes.rowCount === 0) throw new Error("INVALID");
 
       const identityRow = idRes.rows[0];
-      if (!identityRow.is_active || identityRow.is_locked) throw new Error("IDENTITY_DISABLED");
+      const lockCheck = await checkIdentityLoginLock(client, tenantId, identityRow);
+      if (!lockCheck.ok) {
+        const error = new Error(lockCheck.error === "ACCOUNT_LOCKED" ? "ACCOUNT_LOCKED" : "IDENTITY_DISABLED");
+        error.locked_until = lockCheck.locked_until || null;
+        throw error;
+      }
 
       const identityId = identityRow.id;
 
@@ -2274,7 +2352,18 @@ export default async function authRoutes(app) {
               `,
               [ch.id]
             );
+            const failure = await recordFailedLoginAttempt(
+              client,
+              tenantId,
+              identityId,
+              req.ip,
+              req.headers["user-agent"],
+              "otp_verify_exhausted"
+            );
             await client.query("COMMIT");
+            if (!failure.ok && failure.error === "ACCOUNT_LOCKED") {
+              return reply.code(423).send({ ok: false, error: "ACCOUNT_LOCKED", locked_until: failure.locked_until || null });
+            }
             return reply.code(401).send({ ok: false, error: "INVALID_OTP" });
           }
           const nextCount = ch.attempt_count + 1;
@@ -2289,7 +2378,18 @@ export default async function authRoutes(app) {
             `,
             [ch.id, nextCount, exhausted]
           );
+          const failure = await recordFailedLoginAttempt(
+            client,
+            tenantId,
+            identityId,
+            req.ip,
+            req.headers["user-agent"],
+            "otp_verify_invalid"
+          );
           await client.query("COMMIT");
+          if (!failure.ok && failure.error === "ACCOUNT_LOCKED") {
+            return reply.code(423).send({ ok: false, error: "ACCOUNT_LOCKED", locked_until: failure.locked_until || null });
+          }
           return reply.code(401).send({ ok: false, error: "INVALID_OTP" });
         }
       }
@@ -2334,6 +2434,7 @@ export default async function authRoutes(app) {
           );
 
           await client.query("COMMIT");
+          await clearFailedLoginAttempts(app.db, tenantId, identityId);
           app.log.info({ event: "step_up_success", tenantId, identityId, sessionId: sRes.rows[0].id, ip: req.ip });
           return reply.send({ ok: true, step_up: true });
         }
@@ -2373,6 +2474,7 @@ export default async function authRoutes(app) {
       });
 
       await client.query("COMMIT");
+      await clearFailedLoginAttempts(app.db, tenantId, identityId);
 
       app.log.info({ event: "otp_verify_success", tenantId, identityId, deviceId, ip: req.ip });
       auditSecurityEvent(app, "login_success", {
@@ -2385,6 +2487,9 @@ export default async function authRoutes(app) {
       return reply.send({ ok: true });
     } catch (e) {
       await client.query("ROLLBACK");
+      if (e.message === "ACCOUNT_LOCKED") {
+        return reply.code(423).send({ ok: false, error: "ACCOUNT_LOCKED", locked_until: e.locked_until || null });
+      }
       if (e.message === "OTP_EXPIRED" || e.message === "INVALID" || e.message === "IDENTITY_DISABLED") {
         app.log.warn({ event: "otp_verify_failed", tenantId, login: login.substring(0, 3) + '...', ip: req.ip, reason: e.message });
         auditSecurityEvent(app, "login_failure", {
@@ -2791,17 +2896,18 @@ export default async function authRoutes(app) {
     const login = String(email || "").trim().toLowerCase();
     if (!login) return reply.code(400).send({ ok: false, error: "BAD_REQUEST" });
 
+    let tenantId = null;
     const client = await app.db.connect();
     try {
       await client.query("BEGIN");
-      const tenantId = tenantIdRaw || (await resolveTenantIdByCode(client, tenantCode));
+      tenantId = tenantIdRaw || (await resolveTenantIdByCode(client, tenantCode));
       if (!tenantId) {
         await client.query("COMMIT");
         return reply.code(400).send({ ok: false, error: "BAD_REQUEST" });
       }
       const identityRes = await client.query(
         `
-        SELECT id, is_active, is_locked
+        SELECT id, is_active, is_locked, attrs
         FROM eip_auth.auth_identity
         WHERE tenant_id=$1 AND login=$2
         LIMIT 1
@@ -3184,7 +3290,7 @@ export default async function authRoutes(app) {
 
       const idRes = await client.query(
         `
-        SELECT id, is_active, is_locked
+        SELECT id, is_active, is_locked, attrs
         FROM eip_auth.auth_identity
         WHERE tenant_id=$1 AND login=$2
         FOR UPDATE
@@ -3199,16 +3305,20 @@ export default async function authRoutes(app) {
       }
 
       const identity = idRes.rows[0];
-      if (!identity.is_active || identity.is_locked) {
+      const lockCheck = await checkIdentityLoginLock(client, tenantId, identity);
+      if (!lockCheck.ok) {
         await client.query("COMMIT");
         app.log.warn({ event: "totp_login_disabled_identity", tenantId, login: login.substring(0, 3) + "...", ip: req.ip });
         auditSecurityEvent(app, "login_failure", {
           tenantId,
           identityId: identity.id,
           outcome: "failed",
-          reason: "identity_disabled",
+          reason: lockCheck.error === "ACCOUNT_LOCKED" ? "account_locked" : "identity_disabled",
           ip: req.ip
         });
+        if (lockCheck.error === "ACCOUNT_LOCKED") {
+          return reply.code(423).send({ ok: false, error: "ACCOUNT_LOCKED", locked_until: lockCheck.locked_until || null });
+        }
         return reply.code(401).send({ ok: false, error: "LOGIN_FAILED" });
       }
 
@@ -3230,6 +3340,14 @@ export default async function authRoutes(app) {
       const credential = credRes.rows[0];
       const passwordOk = await verifyPassword(passwordValue, credential);
       if (!passwordOk) {
+        const failure = await recordFailedLoginAttempt(
+          client,
+          tenantId,
+          identity.id,
+          req.ip,
+          req.headers["user-agent"],
+          "totp_login_bad_password"
+        );
         await client.query("COMMIT");
         app.log.warn({ event: "totp_login_bad_password", tenantId, login: login.substring(0, 3) + "...", ip: req.ip });
         auditSecurityEvent(app, "login_failure", {
@@ -3239,6 +3357,9 @@ export default async function authRoutes(app) {
           reason: "bad_password",
           ip: req.ip
         });
+        if (!failure.ok && failure.error === "ACCOUNT_LOCKED") {
+          return reply.code(423).send({ ok: false, error: "ACCOUNT_LOCKED", locked_until: failure.locked_until || null });
+        }
         return reply.code(401).send({ ok: false, error: "LOGIN_FAILED" });
       }
 
@@ -3284,6 +3405,14 @@ export default async function authRoutes(app) {
       }
 
       if (!valid) {
+        const failure = await recordFailedLoginAttempt(
+          client,
+          tenantId,
+          identity.id,
+          req.ip,
+          req.headers["user-agent"],
+          "totp_login_invalid_totp"
+        );
         await client.query("COMMIT");
         auditSecurityEvent(app, "login_failure", {
           tenantId,
@@ -3292,6 +3421,9 @@ export default async function authRoutes(app) {
           reason: "invalid_totp",
           ip: req.ip
         });
+        if (!failure.ok && failure.error === "ACCOUNT_LOCKED") {
+          return reply.code(423).send({ ok: false, error: "ACCOUNT_LOCKED", locked_until: failure.locked_until || null });
+        }
         return reply.code(401).send({ ok: false, error: "INVALID_TOTP" });
       }
 
@@ -3326,6 +3458,7 @@ export default async function authRoutes(app) {
           );
 
           await client.query("COMMIT");
+          await clearFailedLoginAttempts(app.db, tenantId, identity.id);
           app.log.info({ event: "totp_step_up_success", tenantId, identityId: identity.id, sessionId: sRes.rows[0].id, ip: req.ip });
           return reply.send({ ok: true, step_up: true });
         }
@@ -3365,6 +3498,7 @@ export default async function authRoutes(app) {
       });
 
       await client.query("COMMIT");
+      await clearFailedLoginAttempts(app.db, tenantId, identity.id);
 
       app.log.info({ event: "totp_login_success", tenantId, identityId: identity.id, deviceId, ip: req.ip });
       auditSecurityEvent(app, "login_success", {

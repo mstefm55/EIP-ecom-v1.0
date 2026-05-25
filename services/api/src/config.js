@@ -60,6 +60,11 @@ export const envSchema = {
     ASSET_TOKEN_TTL_SEC: { type: "integer", default: 604800 },
     INBOUND_RATE_LIMIT_MAX: { type: "integer", default: 120 },
     INBOUND_RATE_LIMIT_WINDOW_SEC: { type: "integer", default: 60 },
+    PUBLIC_GATEWAY_QUOTA_MAX: { type: "integer", default: 3000 },
+    PUBLIC_GATEWAY_QUOTA_WINDOW_SEC: { type: "integer", default: 3600 },
+    PUBLIC_COMMERCE_QUOTA_MAX: { type: "integer", default: 5000 },
+    PUBLIC_COMMERCE_QUOTA_WINDOW_SEC: { type: "integer", default: 3600 },
+    OWNER_ADMIN_PASSKEY_STEP_UP_REQUIRED: { type: "boolean", default: true },
 
     // 2. Define the types for your DB variables
     DB_HOST: { type: "string", default: "localhost" },

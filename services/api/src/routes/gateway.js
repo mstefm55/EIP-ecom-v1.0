@@ -20,6 +20,7 @@ import {
 } from "../services/gateway/secretStore.js";
 import { resolveEipSurfaceAccess } from "../lib/surfaceAccess.js";
 import { emitSecurityEvent } from "../lib/securityAudit.js";
+import { requirePrivilegedStepUp as evaluatePrivilegedStepUp } from "../auth/privilegedStepUp.js";
 
 function normalizeText(value) {
   return String(value || "").trim();
@@ -74,6 +75,8 @@ async function requireSessionWithCsrf(app, req, reply) {
     return null;
   }
 
+  req.session = s.session;
+  req.realm = s.session.realm;
   return s.session;
 }
 
@@ -97,9 +100,7 @@ function collectSubmittedSecretUpdates(profiles) {
 }
 
 async function requirePrivilegedStepUp(app, req, reply) {
-  const step = await app.requireStepUp(req, {
-    phishingResistant: app.config.REQUIRE_PASSKEY_FOR_PRIVILEGED_ACTIONS === true
-  });
+  const step = await evaluatePrivilegedStepUp(app, req);
   if (!step.ok) {
     reply.code(step.status).send({ ok: false, error: step.error });
     return null;

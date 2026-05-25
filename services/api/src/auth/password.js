@@ -1,5 +1,10 @@
 // services/api/src/auth/password.js
 
+import crypto from "node:crypto";
+import { promisify } from "node:util";
+import argon2 from "argon2";
+import { timingSafeEqual } from "./crypto.js";
+
 /**
  * Password strength evaluation and policy enforcement
  */
@@ -16,6 +21,99 @@ const PASSWORD_POLICIES = {
   lockoutDuration: 30, // Minutes
   warnBeforeExpiry: 7 // Days
 };
+
+const SCRYPT_MAX_MEM = 64 * 1024 * 1024;
+const scryptAsync = promisify(crypto.scrypt);
+
+function parseScryptHash(value) {
+  const parts = String(value || "").split("$");
+  if (parts.length !== 6 || parts[0] !== "scrypt") return null;
+
+  const N = Number(parts[1]);
+  const r = Number(parts[2]);
+  const p = Number(parts[3]);
+  if (!Number.isInteger(N) || !Number.isInteger(r) || !Number.isInteger(p)) return null;
+  if (N <= 1 || r <= 0 || p <= 0) return null;
+
+  const salt = Buffer.from(parts[4], "base64");
+  const hash = Buffer.from(parts[5], "base64");
+  if (!salt.length || !hash.length) return null;
+
+  return { N, r, p, salt, hash };
+}
+
+async function verifyStoredPassword(password, credential) {
+  if (!password || !credential?.secret_hash) return false;
+
+  const hash = String(credential.secret_hash || "");
+  const algorithm = String(credential.algorithm || "").toLowerCase();
+  if (hash.startsWith("$argon2") || algorithm.startsWith("argon2")) {
+    try {
+      return await argon2.verify(hash, password);
+    } catch {
+      return false;
+    }
+  }
+  if (algorithm && algorithm !== "scrypt") return false;
+
+  const parsed = parseScryptHash(hash);
+  if (!parsed) return false;
+
+  try {
+    const derived = await scryptAsync(password, parsed.salt, parsed.hash.length, {
+      N: parsed.N,
+      r: parsed.r,
+      p: parsed.p,
+      maxmem: SCRYPT_MAX_MEM
+    });
+    return timingSafeEqual(derived, parsed.hash);
+  } catch {
+    return false;
+  }
+}
+
+function lockExpiresAtFromIdentity(identity) {
+  const raw = identity?.attrs?.auth_lock_expires_at;
+  if (!raw) return null;
+  const date = new Date(raw);
+  return Number.isFinite(date.getTime()) ? date : null;
+}
+
+async function checkIdentityLoginLock(client, tenantId, identity) {
+  if (!identity?.id) return { ok: false, error: "IDENTITY_DISABLED" };
+  if (!identity.is_active) return { ok: false, error: "IDENTITY_DISABLED" };
+  if (!identity.is_locked) return { ok: true };
+
+  const expiresAt = lockExpiresAtFromIdentity(identity);
+  if (expiresAt && expiresAt.getTime() <= Date.now()) {
+    await client.query(
+      `
+      UPDATE eip_auth.auth_identity
+      SET is_locked = false,
+          attrs = COALESCE(attrs,'{}'::jsonb)
+            - 'auth_lock_expires_at'
+            - 'auth_lock_reason'
+            - 'auth_lock_source'
+      WHERE tenant_id = $1 AND id = $2
+      `,
+      [tenantId, identity.id]
+    );
+    identity.is_locked = false;
+    identity.attrs = {
+      ...(identity.attrs || {}),
+      auth_lock_expires_at: undefined,
+      auth_lock_reason: undefined,
+      auth_lock_source: undefined
+    };
+    return { ok: true, unlocked: true };
+  }
+
+  return {
+    ok: false,
+    error: "ACCOUNT_LOCKED",
+    locked_until: expiresAt ? expiresAt.toISOString() : null
+  };
+}
 
 function evaluatePasswordStrength(password) {
   if (!password || typeof password !== "string") {
@@ -101,26 +199,25 @@ function evaluatePasswordStrength(password) {
   };
 }
 
-async function checkPasswordHistory(client, tenantId, identityId, newPasswordHash) {
+async function checkPasswordHistory(client, tenantId, identityId, proposedPassword) {
   if (!PASSWORD_POLICIES.preventReuse) return { ok: true };
+  if (!proposedPassword) return { ok: true };
 
   const history = await client.query(
     `
-    SELECT secret_hash
+    SELECT secret_hash, algorithm
     FROM eip_auth.auth_credential
     WHERE tenant_id = $1
       AND identity_id = $2
       AND credential_type = 'password'
-      AND is_revoked = false
     ORDER BY created_at DESC
     LIMIT $3
     `,
     [tenantId, identityId, PASSWORD_POLICIES.preventReuse]
   );
 
-  // Check if new password matches any recent passwords
   for (const row of history.rows) {
-    if (row.secret_hash === newPasswordHash) {
+    if (await verifyStoredPassword(proposedPassword, row)) {
       return {
         ok: false,
         error: "PASSWORD_REUSE_NOT_ALLOWED",
@@ -183,7 +280,7 @@ async function checkPasswordExpiry(client, tenantId, identityId) {
   return { ok: true };
 }
 
-async function recordFailedLoginAttempt(client, tenantId, identityId, ipAddress, userAgent) {
+async function recordFailedLoginAttempt(client, tenantId, identityId, ipAddress, userAgent, failureType = "login_failed") {
   await client.query(
     `
     INSERT INTO eip_auth.auth_failed_attempt
@@ -207,39 +304,26 @@ async function recordFailedLoginAttempt(client, tenantId, identityId, ipAddress,
   );
 
   if (recentAttempts.rows[0].attempt_count >= PASSWORD_POLICIES.lockoutAfter) {
-    // Lock the account
+    const lockExpiresAt = new Date(Date.now() + PASSWORD_POLICIES.lockoutDuration * 60 * 1000);
     await client.query(
       `
       UPDATE eip_auth.auth_identity
       SET is_locked = true,
-          locked_at = now(),
-          lock_reason = 'too_many_failed_attempts'
+          attrs = COALESCE(attrs,'{}'::jsonb)
+            || jsonb_build_object(
+              'auth_lock_reason', 'too_many_failed_attempts',
+              'auth_lock_source', $3::text,
+              'auth_lock_expires_at', $4::text
+            )
       WHERE tenant_id = $1 AND id = $2
       `,
-      [tenantId, identityId]
+      [tenantId, identityId, failureType, lockExpiresAt.toISOString()]
     );
-
-    // Schedule unlock
-    setTimeout(async () => {
-      try {
-        await client.query(
-          `
-          UPDATE eip_auth.auth_identity
-          SET is_locked = false,
-              locked_at = null,
-              lock_reason = null
-          WHERE tenant_id = $1 AND id = $2
-          `,
-          [tenantId, identityId]
-        );
-      } catch (error) {
-        console.error('Failed to unlock account:', error);
-      }
-    }, PASSWORD_POLICIES.lockoutDuration * 60 * 1000);
 
     return {
       ok: false,
       error: "ACCOUNT_LOCKED",
+      locked_until: lockExpiresAt.toISOString(),
       message: `Account locked due to too many failed attempts. Try again in ${PASSWORD_POLICIES.lockoutDuration} minutes.`
     };
   }
@@ -255,6 +339,38 @@ async function clearFailedLoginAttempts(client, tenantId, identityId) {
     `,
     [tenantId, identityId]
   );
+  await client.query(
+    `
+    UPDATE eip_auth.auth_identity
+    SET is_locked = false,
+        attrs = COALESCE(attrs,'{}'::jsonb)
+          - 'auth_lock_expires_at'
+          - 'auth_lock_reason'
+          - 'auth_lock_source'
+    WHERE tenant_id = $1
+      AND id = $2
+      AND (
+        is_locked = true
+        OR attrs ? 'auth_lock_expires_at'
+        OR attrs ? 'auth_lock_reason'
+        OR attrs ? 'auth_lock_source'
+      )
+    `,
+    [tenantId, identityId]
+  );
+}
+
+function randomChar(chars) {
+  return chars[crypto.randomInt(0, chars.length)];
+}
+
+function shuffleChars(value) {
+  const chars = value.split("");
+  for (let i = chars.length - 1; i > 0; i -= 1) {
+    const j = crypto.randomInt(0, i + 1);
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+  return chars.join("");
 }
 
 function generateStrongPassword(length = 16) {
@@ -267,25 +383,26 @@ function generateStrongPassword(length = 16) {
   let password = '';
 
   // Ensure at least one character from each required set
-  password += lowercase[Math.floor(Math.random() * lowercase.length)];
-  password += uppercase[Math.floor(Math.random() * uppercase.length)];
-  password += numbers[Math.floor(Math.random() * numbers.length)];
-  password += symbols[Math.floor(Math.random() * symbols.length)];
+  password += randomChar(lowercase);
+  password += randomChar(uppercase);
+  password += randomChar(numbers);
+  password += randomChar(symbols);
 
   // Fill the rest randomly
   for (let i = password.length; i < length; i++) {
-    password += allChars[Math.floor(Math.random() * allChars.length)];
+    password += randomChar(allChars);
   }
 
-  // Shuffle the password
-  return password.split('').sort(() => Math.random() - 0.5).join('');
+  return shuffleChars(password);
 }
 
 export {
   PASSWORD_POLICIES,
   evaluatePasswordStrength,
+  verifyStoredPassword,
   checkPasswordHistory,
   checkPasswordExpiry,
+  checkIdentityLoginLock,
   recordFailedLoginAttempt,
   clearFailedLoginAttempts,
   generateStrongPassword

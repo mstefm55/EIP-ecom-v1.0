@@ -1,0 +1,138 @@
+{
+  "name": "EIP V1 exposed API inventory",
+  "version": "2026-05-25",
+  "source_root": "services/api/src/routes",
+  "surfaces": [
+    {
+      "surface": "eip_authenticated_internal",
+      "prefix": "/api/eip",
+      "transport": "cookie_session",
+      "default_requirements": ["EIP realm session", "CSRF for state-changing methods", "dashboard origin guard"],
+      "route_groups": [
+        {
+          "name": "auth_session_profile_security",
+          "files": ["services/api/src/routes/auth.js"],
+          "routes": [
+            "GET /auth/whoami",
+            "GET /auth/csrf",
+            "POST /auth/logout",
+            "GET /auth/profile",
+            "POST /auth/profile",
+            "POST /auth/profile/avatar",
+            "GET /auth/passkeys",
+            "POST /auth/passkeys/register/options",
+            "POST /auth/passkeys/register/verify",
+            "POST /auth/passkeys/step-up/options",
+            "POST /auth/passkeys/step-up/verify",
+            "POST /auth/passkeys/:passkeyId/revoke",
+            "POST /auth/password/set",
+            "POST /auth/devices/:deviceId/trust"
+          ],
+          "security_notes": ["profile/avatar writes require CSRF", "privileged password/recovery admin paths require step-up"]
+        },
+        {
+          "name": "connections_control_plane",
+          "files": ["services/api/src/routes/gateway.js"],
+          "routes": [
+            "GET /gateway/connections",
+            "POST /gateway/connections",
+            "POST /gateway/connections/:tenantId/api-keys",
+            "POST /gateway/connections/:tenantId/api-keys/:keyId/rotate",
+            "POST /gateway/connections/:tenantId/api-keys/:keyId/revoke",
+            "POST /gateway/connections/:tenantId/secrets/rotate",
+            "POST /gateway/connections/:tenantId/secrets/revoke",
+            "POST /gateway/outbound/test"
+          ],
+          "security_notes": ["CSRF required for mutations", "owner/admin production privileged actions require phishing-resistant step-up", "raw secrets are returned only at creation/rotation time where applicable"]
+        },
+        {
+          "name": "admin_operations",
+          "files": [
+            "services/api/src/routes/admin_access.js",
+            "services/api/src/routes/admin_db_explorer.js",
+            "services/api/src/routes/admin_monitoring.js",
+            "services/api/src/routes/admin_template_clone.js",
+            "services/api/src/routes/tenant_requests_admin.js"
+          ],
+          "routes": [
+            "GET /admin/security/ops",
+            "GET /admin/db/tables",
+            "GET /admin/db/table/:schema/:table",
+            "GET /admin/db/table/:schema/:table/export",
+            "POST /admin/db/sensitive/consume",
+            "POST /admin/template-clone",
+            "POST /admin/tenant-requests/:id/approve",
+            "POST /admin/tenant-requests/:id/reject",
+            "GET /admin/tenants/:tenantId/users",
+            "POST /admin/tenants/:tenantId/users",
+            "POST /admin/tenants/:tenantId/users/:identityId/passkeys/:passkeyId/revoke"
+          ],
+          "security_notes": ["DB explorer is disabled by default in production", "sensitive reads enforce browser-origin guard and step-up", "tenant access is explicitly scoped"]
+        }
+      ]
+    },
+    {
+      "surface": "public_gateway",
+      "prefix": "/api/public/gateway",
+      "transport": "external_connection",
+      "default_requirements": ["connection suffix/profile resolution", "origin allowlist", "configured verification mode", "event id/idempotency", "tenant/connection quota"],
+      "route_groups": [
+        {
+          "name": "gateway_intake",
+          "files": ["services/api/src/routes/public_gateway.js"],
+          "routes": [
+            "POST /gateway/intake/:suffix",
+            "POST /gateway/intake",
+            "GET /gateway/manifest/:tenantCode",
+            "GET /gateway/bootstrap/:tenantCode"
+          ],
+          "security_notes": ["query-string API keys are rejected", "HMAC/JWT/API-key verification is profile driven", "raw body is redacted from audit by default"]
+        }
+      ]
+    },
+    {
+      "surface": "public_commerce",
+      "prefix": "/api/public/commerce",
+      "transport": "external_storefront_connection",
+      "default_requirements": ["connection suffix/profile resolution", "origin allowlist", "production verification policy", "tenant/connection quota"],
+      "route_groups": [
+        {
+          "name": "storefront_reads_and_member_flows",
+          "files": ["services/api/src/routes/public_commerce.js"],
+          "routes": [
+            "GET /commerce/:suffix/catalog",
+            "GET /commerce/:suffix/product/:code",
+            "GET /commerce/:suffix/content",
+            "POST /commerce/:suffix/member/auth/start",
+            "POST /commerce/:suffix/member/auth/verify",
+            "GET /commerce/:suffix/member/auth/me",
+            "POST /commerce/:suffix/member/profile",
+            "POST /commerce/:suffix/member/uploads",
+            "POST /commerce/:suffix/quote",
+            "POST /commerce/:suffix/order",
+            "POST /commerce/:suffix/payment",
+            "POST /commerce/:suffix/subscribe"
+          ],
+          "security_notes": ["production mode rejects verification none and wildcard origins", "query-string API keys are rejected", "member uploads run inline V1 scan before write"]
+        }
+      ]
+    },
+    {
+      "surface": "tenant_onboarding_public",
+      "prefix": "/api/public",
+      "transport": "public_form",
+      "default_requirements": ["public origin allowlist", "route rate limit", "agreement capture where configured"],
+      "route_groups": [
+        {
+          "name": "tenant_requests",
+          "files": ["services/api/src/routes/tenant_requests_public.js"],
+          "routes": [
+            "POST /tenant-requests",
+            "GET /tenant-requests/:id/status"
+          ],
+          "security_notes": ["do not treat tenant request as an authenticated tenant context until admin approval/bootstrap completes"]
+        }
+      ]
+    }
+  ]
+}

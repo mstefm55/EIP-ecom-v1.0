@@ -56,6 +56,8 @@ Admin > Audit security operations reads apply the same production origin/Fetch M
 - Temporarily enable it only for a specific owner/admin maintenance window.
 - Confirm `CORS_ORIGIN` includes the hosted dashboard origin.
 - Confirm `OWNER_TENANT_CODE` points to the definitive owner/admin tenant.
+- Keep `OWNER_ADMIN_PASSKEY_STEP_UP_REQUIRED=true` in production so owner/admin privileged actions require phishing-resistant step-up.
+- Tune `PUBLIC_GATEWAY_QUOTA_MAX`, `PUBLIC_GATEWAY_QUOTA_WINDOW_SEC`, `PUBLIC_COMMERCE_QUOTA_MAX`, and `PUBLIC_COMMERCE_QUOTA_WINDOW_SEC` after observing real traffic.
 - Do not place tenant connection API keys in URLs. Use the one configured endpoint plus the API key header value from Admin > Connections.
 
 ## Tests
@@ -66,6 +68,9 @@ Focused coverage lives in:
 - `services/api/test/tenant_isolation.test.mjs`
 - `services/api/test/admin_db_explorer_security.test.mjs`
 - `services/api/test/admin_security_ops.test.mjs`
+- `services/api/test/password_lifecycle.test.mjs`
+- `services/api/test/upload_security.test.mjs`
+- `services/api/test/abuse_quota.test.mjs`
 
 Run:
 

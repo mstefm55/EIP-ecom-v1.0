@@ -4,6 +4,8 @@ const IMAGE_EXT = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp"]);
 const VIDEO_EXT = new Set([".mp4", ".m4v", ".mov", ".webm"]);
 const ZIP_EXT = new Set([".zip", ".docx", ".xlsx", ".pptx", ".zprj", ".zpac"]);
 const TEXT_EXT = new Set([".txt", ".csv", ".json", ".dxf"]);
+const EICAR = "X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*";
+const ACTIVE_CONTENT_PATTERN = /<\s*(script|iframe|object|embed|svg|link|meta)\b|javascript\s*:|on[a-z]+\s*=/i;
 
 function startsWith(buffer, bytes) {
   if (!Buffer.isBuffer(buffer) || buffer.length < bytes.length) return false;
@@ -59,7 +61,38 @@ function isProbablyText(buffer) {
   return true;
 }
 
+export function scanUploadBuffer({ buffer, filename, mimetype, assetKind } = {}) {
+  if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
+    return { ok: false, error: "UPLOAD_EMPTY" };
+  }
+  const extension = path.extname(filename || "").toLowerCase();
+  const mime = String(mimetype || "").toLowerCase();
+  const sample = buffer.subarray(0, Math.min(buffer.length, 65536)).toString("latin1");
+
+  if (sample.includes(EICAR)) {
+    return { ok: false, error: "MALWARE_SIGNATURE_DETECTED", scan_status: "blocked" };
+  }
+
+  const textLike =
+    TEXT_EXT.has(extension) ||
+    mime.startsWith("text/") ||
+    mime.includes("json") ||
+    mime.includes("xml") ||
+    mime.includes("svg");
+  if (textLike && ACTIVE_CONTENT_PATTERN.test(sample)) {
+    return { ok: false, error: "ACTIVE_CONTENT_REJECTED", scan_status: "blocked" };
+  }
+
+  if (assetKind === "document" && (mime.includes("html") || extension === ".html" || extension === ".htm")) {
+    return { ok: false, error: "ACTIVE_CONTENT_REJECTED", scan_status: "blocked" };
+  }
+
+  return { ok: true, scan_status: "clean", scanner: "inline_v1" };
+}
+
 export function validateImageUpload({ buffer, filename, mimetype }) {
+  const scan = scanUploadBuffer({ buffer, filename, mimetype, assetKind: "media" });
+  if (!scan.ok) return scan;
   const extension = path.extname(filename || "").toLowerCase();
   const mime = String(mimetype || "").toLowerCase();
   if (!IMAGE_EXT.has(extension) || !mime.startsWith("image/")) {
@@ -70,10 +103,12 @@ export function validateImageUpload({ buffer, filename, mimetype }) {
   if (signature !== expected) {
     return { ok: false, error: "FILE_SIGNATURE_MISMATCH" };
   }
-  return { ok: true, safeExt: extension };
+  return { ok: true, safeExt: extension, scan_status: scan.scan_status };
 }
 
 export function validateEcomUpload({ buffer, filename, mimetype, assetKind, allowedDocumentExt, allowedDocumentMime }) {
+  const scan = scanUploadBuffer({ buffer, filename, mimetype, assetKind });
+  if (!scan.ok) return scan;
   const extension = path.extname(filename || "").toLowerCase();
   const mime = String(mimetype || "").toLowerCase();
   const signature = detectFileSignature(buffer);
@@ -90,7 +125,7 @@ export function validateEcomUpload({ buffer, filename, mimetype, assetKind, allo
     if ((extension === ".mp4" || extension === ".m4v" || extension === ".mov") && signature !== "mp4") {
       return { ok: false, error: "FILE_SIGNATURE_MISMATCH" };
     }
-    return { ok: true, safeExt: extension };
+    return { ok: true, safeExt: extension, scan_status: scan.scan_status };
   }
 
   if (!allowedDocumentExt.has(extension) || !allowedDocumentMime.has(mime)) {
@@ -101,5 +136,5 @@ export function validateEcomUpload({ buffer, filename, mimetype, assetKind, allo
   if (extension === ".7z" && signature !== "7z") return { ok: false, error: "FILE_SIGNATURE_MISMATCH" };
   if (extension === ".rar" && signature !== "rar") return { ok: false, error: "FILE_SIGNATURE_MISMATCH" };
   if (TEXT_EXT.has(extension) && !isProbablyText(buffer)) return { ok: false, error: "FILE_SIGNATURE_MISMATCH" };
-  return { ok: true, safeExt: extension };
+  return { ok: true, safeExt: extension, scan_status: scan.scan_status };
 }

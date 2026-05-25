@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import argon2 from "argon2";
 import { hasPermission } from "../auth/perm.js";
+import { requirePrivilegedStepUp } from "../auth/privilegedStepUp.js";
 import { evaluatePasswordStrength } from "../auth/password.js";
 import { loadActivePasskeys, publicPasskey } from "../auth/passkeys.js";
 import { auditSecurityEvent } from "../lib/securityAudit.js";
@@ -702,7 +703,7 @@ export default async function adminAccessRoutes(app) {
     const session = await requireAdminPerm(app, req, reply, "admin.user.write", { csrf: true });
     if (!session) return;
 
-    const step = await app.requireStepUp(req);
+    const step = await requirePrivilegedStepUp(app, req);
     if (!step.ok) return reply.code(step.status).send({ ok: false, error: step.error });
 
     const tenantId = normalizeText(req.params.tenantId);

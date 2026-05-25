@@ -16,6 +16,7 @@ import { connectionAllowsOrigin, extractEventId, verifyConnectionRequest } from 
 import { isTenantAssetPath, toLocalAssetPath } from "../services/assets/url_policy.js";
 import { sendEmail } from "../lib/email.js";
 import { safeUploadTarget, uploadPartToBuffer, validateImageUpload } from "../lib/uploadSecurity.js";
+import { enforceConnectionQuota } from "../lib/abuseQuota.js";
 import { resolveMarketplaceFxContext } from "../services/fx/marketFxSync.js";
 import { auditSecurityEvent } from "../lib/securityAudit.js";
 
@@ -1968,6 +1969,32 @@ export default async function publicCommerceRoutes(app) {
         userAgent: req.headers["user-agent"] || null
       });
       reply.code(403).send({ ok: false, error: "IP_NOT_ALLOWED" });
+      return null;
+    }
+
+    const quota = await enforceConnectionQuota(appInstance, {
+      tenantId: tenant.id,
+      category: "public_commerce",
+      profile,
+      connectionCode: profile.identity?.connection_code,
+      suffix
+    });
+    if (!quota.ok) {
+      auditSecurityEvent(appInstance, "commerce.quota_exceeded", {
+        category: "public_commerce",
+        source: "public_commerce.resolveConnection",
+        severity: "warning",
+        outcome: "rejected",
+        tenantId: tenant.id,
+        connectionCode: profile.identity?.connection_code,
+        suffix,
+        reason: "QUOTA_EXCEEDED",
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || null,
+        metadata: quota
+      });
+      reply.header("Retry-After", String(quota.retry_after_sec || quota.window_sec || 3600));
+      reply.code(429).send({ ok: false, error: "QUOTA_EXCEEDED" });
       return null;
     }
 

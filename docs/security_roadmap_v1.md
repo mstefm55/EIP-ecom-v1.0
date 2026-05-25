@@ -44,9 +44,12 @@ Prompt 8 status: items 1-4 are closed in code and covered by focused API securit
 
 Gateway/control-plane hardening status: gateway audit payloads now redact sensitive headers, all query values, body secrets, and raw bodies by default; raw body capture requires both `audit.include_raw_body=true` and `audit.raw_body_safe=true`. Gateway outbound execution and Admin > Connections outbound tests now deny private, loopback, link-local, metadata, and internal targets, validate DNS answers, block URL credentials, and require HTTPS for production profiles. Sandbox profiles may use plain HTTP only when `outbound.allow_insecure_http=true` and the target is still public.
 
+Residual hardening sweep status: password reuse now verifies the proposed plaintext against historic Argon2/scrypt hashes, generated passwords use cryptographic randomness, failed-login locks persist through `auth_failed_attempt` plus `auth_identity.attrs.auth_lock_expires_at`, owner/admin privileged production actions require phishing-resistant step-up, public gateway/commerce enforce security-event-backed tenant/connection quotas, and upload validation runs an inline V1 safety scan before assets are written.
+
 1. Fix password lifecycle controls.
    - Compare a proposed password against historic Argon2 hashes with verifier calls instead of hash equality.
    - Replace generated password randomness with cryptographic random selection.
+   - Status: verifier-based reuse prevention and cryptographic generation are implemented in the residual hardening sweep.
    - Add breached/common password screening.
    - Revisit NIST alignment for length, composition, and forced rotation.
    - Evidence: `services/api/src/auth/password.js`, `services/api/src/routes/auth.js`.
@@ -55,12 +58,14 @@ Gateway/control-plane hardening status: gateway audit payloads now redact sensit
    - Wire failed-attempt tracking into password, OTP, TOTP, and recovery login paths.
    - Replace process-local unlock timers with DB-enforced lock expiry.
    - Keep route-level rate limits as defense in depth.
+   - Status: implemented for EIP password, OTP, TOTP, and recovery flows with durable lock expiry.
    - Evidence: `services/api/src/auth/password.js`, `services/api/src/routes/auth.js`.
 
 3. Strengthen admin MFA.
    - Require TOTP or a stronger authenticator for owner/admin sessions.
    - Consider WebAuthn/passkeys for phishing-resistant admin authentication.
    - Keep OTP email as a recovery or bootstrap channel rather than the strongest normal factor.
+   - Status: owner/admin privileged production actions now require passkey/phishing-resistant step-up by default through `OWNER_ADMIN_PASSKEY_STEP_UP_REQUIRED`.
    - Evidence: `services/api/src/routes/auth.js`, `services/api/src/server.js`.
 
 4. Add SSRF and egress controls for outbound gateway requests.
@@ -73,6 +78,7 @@ Gateway/control-plane hardening status: gateway audit payloads now redact sensit
    - Keep current extension/MIME/signature/path controls.
    - Add asynchronous malware scanning and quarantine state for tenant assets.
    - Do not publish assets until scan passes where the file type is user supplied.
+   - Status: inline V1 scanning blocks EICAR and active-content payloads before write/publish; external AV/CDR remains a maturity item.
    - Evidence: `services/api/src/lib/uploadSecurity.js`, `services/api/src/server.js`.
 
 6. Add security regression tests.
@@ -86,6 +92,7 @@ Gateway/control-plane hardening status: gateway audit payloads now redact sensit
 7. Add per-tenant and per-connection quotas.
    - Keep route-level rate limits.
    - Add tenant and connection aware ceilings for commerce, gateway, tenant request, upload, and auth abuse.
+   - Status: implemented for public gateway and public commerce using the existing security event stream; tenant requests/uploads remain a later tuning pass.
    - Evidence: `services/api/src/routes/public_gateway.js`, `services/api/src/routes/public_commerce.js`, `services/api/src/routes/tenant_requests_public.js`.
 
 8. Improve recovery governance.
@@ -99,6 +106,7 @@ Gateway/control-plane hardening status: gateway audit payloads now redact sensit
 1. Publish a machine-readable API inventory.
    - Generate OpenAPI or an equivalent route contract for EIP, public commerce, public gateway, and admin operations.
    - Track auth, tenant, CSRF, and rate-limit requirements per route.
+   - Status: baseline route contract published as `docs/api_inventory_v1.json`.
 
 2. Add CI security checks.
    - Dependency audit.
@@ -127,6 +135,7 @@ Gateway/control-plane hardening status: gateway audit payloads now redact sensit
    - Gateway replay/abuse.
    - Malicious upload.
    - Tenant data exposure.
+   - Status: baseline runbooks published as `docs/incident_response_runbooks_v1.md`.
 
 ## Recommended Execution Order
 
@@ -134,13 +143,13 @@ Gateway/control-plane hardening status: gateway audit payloads now redact sensit
 2. Query-string API key removal.
 3. Admin DB explorer production gate and sensitive GET/export hardening.
 4. Gateway audit redaction defaults. Completed in gateway/control-plane hardening wave.
-5. Password history, failed-login throttling, and generated-secret randomness.
-6. Admin MFA enforcement policy.
+5. Password history, failed-login throttling, and generated-secret randomness. Completed in residual hardening sweep.
+6. Admin MFA enforcement policy. Completed for owner/admin privileged production actions in residual hardening sweep.
 7. SSRF/egress controls for outbound gateway. Completed in gateway/control-plane hardening wave.
-8. Upload malware scanning/quarantine.
+8. Upload malware scanning/quarantine. Inline V1 scanner completed; external AV/CDR deferred.
 9. Security regression test suite.
-10. Machine-readable API inventory and CI security checks.
+10. Machine-readable API inventory and CI security checks. API inventory baseline completed; CI security suite updated.
 
 ## Production Gate
 
-EIP V1 should not be considered production-ready for broad public tenant traffic until all P0 items are closed and retested against the live hosted dashboard/API and external gateway/commerce deployment model.
+EIP V1 is materially closer to a hosted-production baseline after Prompts 1-8 plus the residual hardening sweep. Before broad public tenant traffic, retest the live Railway deployment, tune quota thresholds from real traffic, and decide whether external AV/CDR is required for the accepted asset types.

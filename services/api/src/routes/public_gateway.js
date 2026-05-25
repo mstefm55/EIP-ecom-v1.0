@@ -9,6 +9,7 @@ import { extractProfiles } from "../services/gateway/connectionProfile.js";
 import { hydrateConnectionProfileSecrets } from "../services/gateway/secretStore.js";
 import { connectionAllowsOrigin, extractEventId, verifyConnectionRequest } from "../services/gateway/verification.js";
 import { emitSecurityEvent, redactSecurityDetails } from "../lib/securityAudit.js";
+import { enforceConnectionQuota } from "../lib/abuseQuota.js";
 import { LRUCache } from "lru-cache";
 
 const INTAKE_RATE_LIMIT = { max: 30, timeWindow: "1 minute" };
@@ -328,6 +329,26 @@ async function handleInbound(app, req, reply, opts) {
       ip: req.ip,
       userAgent: req.headers["user-agent"] || null,
       metadata: { retry_after_sec: retry, rate_limit: resolveInboundRateLimit(app, profile) }
+    });
+  }
+
+  const quota = await enforceConnectionQuota(app, {
+    tenantId: tenant.id,
+    category: "gateway",
+    profile,
+    connectionCode: profile.identity?.connection_code,
+    suffix
+  });
+  if (!quota.ok) {
+    reply.header("Retry-After", String(quota.retry_after_sec || quota.window_sec || 3600));
+    return denyGateway(app, reply, 429, "QUOTA_EXCEEDED", {
+      eventType: "gateway.quota_exceeded",
+      tenantId: tenant.id,
+      connectionCode: profile.identity?.connection_code,
+      suffix,
+      ip: req.ip,
+      userAgent: req.headers["user-agent"] || null,
+      metadata: quota
     });
   }
 

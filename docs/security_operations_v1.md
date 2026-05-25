@@ -82,6 +82,7 @@ Gateway intake audit payloads redact raw request bodies by default and store onl
 - `gateway.idempotency_rejected`
 - `gateway.idempotency_replay`
 - `gateway.rate_limited`
+- `gateway.quota_exceeded`
 - `gateway.payload_too_large`
 - `gateway.handshake_denied`
 - `commerce.query_api_key_rejected`
@@ -89,6 +90,7 @@ Gateway intake audit payloads redact raw request bodies by default and store onl
 - `commerce.verification_failed`
 - `commerce.origin_rejected`
 - `commerce.ip_rejected`
+- `commerce.quota_exceeded`
 - `commerce.routing_not_found`
 - `commerce.channel_not_allowed`
 
@@ -217,6 +219,23 @@ For compatibility, the route also permits existing high-trust audit roles with `
 ## Recommended Alert Thresholds
 
 Start with these hosted-production thresholds and tune after real traffic:
+
+Quota controls added in the residual sweep:
+
+| Variable | Default | Purpose |
+| --- | ---: | --- |
+| `PUBLIC_GATEWAY_QUOTA_MAX` | `3000` | Max gateway security events per tenant/connection/suffix window |
+| `PUBLIC_GATEWAY_QUOTA_WINDOW_SEC` | `3600` | Gateway quota window |
+| `PUBLIC_COMMERCE_QUOTA_MAX` | `5000` | Max public commerce security events per tenant/connection/suffix window |
+| `PUBLIC_COMMERCE_QUOTA_WINDOW_SEC` | `3600` | Public commerce quota window |
+
+Owner/admin privileged action policy:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `OWNER_ADMIN_PASSKEY_STEP_UP_REQUIRED` | `true` | In production, owner/admin privileged actions require phishing-resistant passkey step-up even if the global staged rollout flag is still false |
+
+Upload handling now emits `upload.rejected` before write/publish when the inline V1 scanner detects the EICAR test signature or active content in text-like uploads. External AV/CDR remains an optional maturity control for accepted file types.
 
 | Signal | Initial threshold | Response |
 | --- | ---: | --- |

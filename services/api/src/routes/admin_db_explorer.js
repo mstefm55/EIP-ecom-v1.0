@@ -1,6 +1,7 @@
 // services/api/src/routes/admin_db_explorer.js
 import { hasPermission } from "../auth/perm.js";
 import { sha256Hex, timingSafeEqual } from "../auth/crypto.js";
+import { requirePrivilegedStepUp } from "../auth/privilegedStepUp.js";
 import { resolveEipSurfaceAccess } from "../lib/surfaceAccess.js";
 import { auditSecurityEvent } from "../lib/securityAudit.js";
 
@@ -131,6 +132,9 @@ async function requireAdminDb(app, req, reply, permCode, opts = {}) {
     return null;
   }
   const surfaceAccess = await resolveEipSurfaceAccess(app, session.session);
+  req.session = session.session;
+  req.realm = session.session.realm;
+  req._eipSurfaceAccess = surfaceAccess;
   if (!surfaceAccess?.is_owner_admin_session) {
     return denyAdminDb(app, req, reply, 403, "OWNER_ADMIN_REQUIRED", {
       eventType: "admin_db_explorer.owner_admin_required",
@@ -156,7 +160,7 @@ async function requireAdminDb(app, req, reply, permCode, opts = {}) {
         identityId: session.session.identity_id
       });
     }
-    const stepUp = await app.requireStepUp(req);
+    const stepUp = await requirePrivilegedStepUp(app, req);
     if (!stepUp.ok) {
       reply.code(stepUp.status).send({ ok: false, error: stepUp.error });
       return null;
@@ -648,7 +652,7 @@ export default async function adminDbExplorerRoutes(app) {
     const session = await requireAdminDb(app, req, reply, "admin.db.read_sensitive");
     if (!session) return;
 
-    const stepUp = await app.requireStepUp(req);
+    const stepUp = await requirePrivilegedStepUp(app, req);
     if (!stepUp.ok) {
       return reply.code(stepUp.status).send({ ok: false, error: stepUp.error });
     }
