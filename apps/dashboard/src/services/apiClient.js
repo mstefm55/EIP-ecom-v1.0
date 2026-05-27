@@ -40,6 +40,25 @@ function shouldResetCsrfAfterSuccess(path, method) {
   return SESSION_MUTATING_PATHS.has(path);
 }
 
+function extractCsrfFromPayload(payload) {
+  const token = payload?.csrf || payload?.csrfToken || payload?.csrf_token || null;
+  return typeof token === "string" && token.trim() ? token.trim() : null;
+}
+
+function cacheCsrfFromPayload(payload) {
+  const token = extractCsrfFromPayload(payload);
+  if (!token) return false;
+  cachedCsrfToken = token;
+  return true;
+}
+
+function handleSuccessfulResponseSideEffects(path, method, data) {
+  const hasPayloadToken = cacheCsrfFromPayload(data);
+  if (shouldResetCsrfAfterSuccess(path, method) && !hasPayloadToken) {
+    resetCsrfToken();
+  }
+}
+
 function readCookie(name) {
   if (typeof document === "undefined") return null;
   const parts = String(document.cookie || "").split(";");
@@ -85,7 +104,7 @@ export async function getCsrfToken({ refresh = false } = {}) {
     .then(async (response) => {
       if (!response.ok) return readCsrfCookie();
       const payload = await response.json().catch(() => null);
-      const token = payload?.csrf || payload?.csrfToken || readCsrfCookie() || null;
+      const token = extractCsrfFromPayload(payload) || readCsrfCookie() || null;
       cachedCsrfToken = token;
       return token;
     })
@@ -139,7 +158,7 @@ export async function apiFetchWithMeta(path, options = {}) {
       response = await performRequest({ refreshCsrf: true });
       if (response.ok) {
         const data = await parseSuccessPayload(response);
-        if (shouldResetCsrfAfterSuccess(path, method)) resetCsrfToken();
+        handleSuccessfulResponseSideEffects(path, method, data);
         return { status: response.status, headers: response.headers, data };
       }
       resetCsrfToken();
@@ -149,7 +168,7 @@ export async function apiFetchWithMeta(path, options = {}) {
   }
 
   const data = await parseSuccessPayload(response);
-  if (shouldResetCsrfAfterSuccess(path, method)) resetCsrfToken();
+  handleSuccessfulResponseSideEffects(path, method, data);
   return { status: response.status, headers: response.headers, data };
 }
 
