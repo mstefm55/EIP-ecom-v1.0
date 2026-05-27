@@ -13,6 +13,7 @@ const SOURCE_ROOTS = [
 
 const REQUIRED_SECURITY_TESTS = [
   "services/api/test/admin_db_explorer_security.test.mjs",
+  "services/api/test/admin_audit_panel_static.test.mjs",
   "services/api/test/admin_security_ops.test.mjs",
   "services/api/test/auth_cookie_policy.test.mjs",
   "services/api/test/gateway_api_keys.test.mjs",

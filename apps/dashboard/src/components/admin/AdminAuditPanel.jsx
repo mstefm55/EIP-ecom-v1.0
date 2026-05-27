@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ChevronLeft, ChevronRight, FileClock, Filter, RefreshCw, ShieldAlert, ShieldCheck } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ChevronRight, Copy, FileClock, Filter, RefreshCw, ShieldAlert, ShieldCheck, X } from "lucide-react";
 import { apiFetch } from "../../services/apiClient";
 
 const PAGE_SIZE_OPTIONS = [12, 25, 50];
@@ -18,6 +18,10 @@ const PAGER_CONTROL_CLASS =
   "h-8 rounded-full border border-ink-200 bg-white/80 px-2.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-500 outline-none hover:bg-white";
 const PAGER_BUTTON_CLASS =
   "flex h-8 items-center gap-1.5 rounded-full border border-ink-200 bg-white/80 px-2.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-500 hover:bg-white disabled:opacity-50";
+const DETAIL_COPY_BUTTON_CLASS =
+  "inline-flex h-8 items-center gap-1.5 rounded-full border border-ink-200 bg-white px-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-600 hover:bg-ink-50";
+const SENSITIVE_DETAIL_KEY_PATTERN =
+  /(authorization|cookie|set-cookie|x-api-key|api[_-]?key|secret|token|password|credential|signature|csrf|sid|did|otp|totp|recovery|private[_-]?key)/i;
 
 function formatDate(value) {
   if (!value) return "-";
@@ -30,6 +34,91 @@ function formatEventLabel(value) {
   return String(value || "security.event").replaceAll("_", " ").replaceAll(".", " / ");
 }
 
+function displayValue(value) {
+  const text = String(value || "").trim();
+  return text || "-";
+}
+
+function redactDetailValue(value, depth = 0) {
+  if (value === null || value === undefined) return value;
+  if (depth > 8) return "[TRUNCATED_DEPTH]";
+  if (Array.isArray(value)) return value.map((item) => redactDetailValue(item, depth + 1));
+  if (typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        key,
+        SENSITIVE_DETAIL_KEY_PATTERN.test(key) ? "[REDACTED]" : redactDetailValue(item, depth + 1),
+      ])
+    );
+  }
+  if (typeof value === "string" && value.length > 4096) {
+    return `${value.slice(0, 4096)}...[TRUNCATED]`;
+  }
+  return value;
+}
+
+function eventObjectReference(event) {
+  const metadata = event?.metadata && typeof event.metadata === "object" ? event.metadata : {};
+  return (
+    metadata.object_reference ||
+    metadata.object_ref ||
+    metadata.object_id ||
+    metadata.object_code ||
+    metadata.service_object_id ||
+    metadata.resource ||
+    metadata.table ||
+    metadata.path ||
+    null
+  );
+}
+
+function buildEventDetailPayload(event) {
+  if (!event) return {};
+  return redactDetailValue({
+    id: event.id || null,
+    event_type: event.event_type || null,
+    occurred_at: event.occurred_at || null,
+    severity: event.severity || null,
+    outcome: event.outcome || null,
+    reason: event.reason || null,
+    tenant_id: event.tenant_id || null,
+    tenant_code: event.tenant_code || null,
+    actor_tenant_id: event.actor_tenant_id || null,
+    actor_identity_id: event.actor_identity_id || null,
+    target_tenant_id: event.target_tenant_id || null,
+    target_identity_id: event.target_identity_id || null,
+    connection_code: event.connection_code || null,
+    suffix: event.suffix || null,
+    object_reference: eventObjectReference(event),
+    event_id: event.event_id || null,
+    request_id: event.request_id || null,
+    source: event.source || null,
+    metadata: event.metadata || {},
+  });
+}
+
+function eventDetailRows(event) {
+  const payload = buildEventDetailPayload(event);
+  return [
+    ["Event id", payload.event_id || payload.id],
+    ["Event type", payload.event_type],
+    ["Timestamp", formatDate(payload.occurred_at)],
+    ["Severity", payload.severity],
+    ["Outcome", payload.outcome],
+    ["Reason", payload.reason],
+    ["Tenant", payload.tenant_code || payload.tenant_id],
+    ["Actor tenant", payload.actor_tenant_id],
+    ["Actor identity", payload.actor_identity_id],
+    ["Target tenant", payload.target_tenant_id],
+    ["Target identity", payload.target_identity_id],
+    ["Connection", payload.connection_code || payload.suffix],
+    ["Object reference", payload.object_reference],
+    ["External event id", payload.event_id],
+    ["Request id", payload.request_id],
+    ["Source", payload.source],
+  ];
+}
+
 export default function AdminAuditPanel() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -39,6 +128,8 @@ export default function AdminAuditPanel() {
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [draftFilters, setDraftFilters] = useState(DEFAULT_FILTERS);
+  const [selectedEvent, setSelectedEvent] = useState(null);
+  const [copyStatus, setCopyStatus] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -66,6 +157,15 @@ export default function AdminAuditPanel() {
     load();
   }, [load]);
 
+  useEffect(() => {
+    if (!selectedEvent) return undefined;
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") setSelectedEvent(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [selectedEvent]);
+
   function updateDraftFilter(key, value) {
     setDraftFilters((current) => ({ ...current, [key]: value }));
   }
@@ -85,6 +185,19 @@ export default function AdminAuditPanel() {
     setPage(1);
     setDraftFilters(DEFAULT_FILTERS);
     setFilters(DEFAULT_FILTERS);
+  }
+
+  async function copyDetail(value, label) {
+    const text = String(value || "");
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyStatus(`${label} copied`);
+      window.setTimeout(() => setCopyStatus(""), 1800);
+    } catch {
+      setCopyStatus("Copy unavailable");
+      window.setTimeout(() => setCopyStatus(""), 1800);
+    }
   }
 
   const metrics = useMemo(() => {
@@ -118,6 +231,9 @@ export default function AdminAuditPanel() {
   const activeFilterCount = Object.values(filters).filter(Boolean).length;
   const canGoPrevious = pagination.page > 1 && !loading;
   const canGoNext = pagination.total_pages > pagination.page && !loading;
+  const selectedPayload = selectedEvent ? buildEventDetailPayload(selectedEvent) : null;
+  const selectedPayloadJson = selectedPayload ? JSON.stringify(selectedPayload, null, 2) : "";
+  const selectedMetadataJson = selectedPayload ? JSON.stringify(selectedPayload.metadata || {}, null, 2) : "{}";
 
   return (
     <section className="glass-panel p-6">
@@ -344,7 +460,15 @@ export default function AdminAuditPanel() {
             </p>
           ) : null}
           {recentEvents.map((event) => (
-            <div key={event.id} className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-ink-100 bg-white/70 px-3 py-3">
+            <button
+              key={event.id}
+              type="button"
+              onClick={() => {
+                setSelectedEvent(event);
+                setCopyStatus("");
+              }}
+              className="flex w-full flex-wrap items-start justify-between gap-3 rounded-xl border border-ink-100 bg-white/70 px-3 py-3 text-left transition hover:border-indigo-200 hover:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-200"
+            >
               <div>
                 <p className="text-sm font-semibold text-ink-900">{formatEventLabel(event.event_type)}</p>
                 <p className="mt-1 text-xs text-ink-500">
@@ -356,7 +480,7 @@ export default function AdminAuditPanel() {
                 <p>{event.outcome}</p>
                 <p>{formatDate(event.occurred_at)}</p>
               </div>
-            </div>
+            </button>
           ))}
         </div>
 
@@ -400,6 +524,99 @@ export default function AdminAuditPanel() {
           </div>
         </div>
       </div>
+
+      {selectedEvent ? (
+        <div className="fixed inset-0 z-50 flex justify-end bg-ink-900/30 backdrop-blur-sm" role="dialog" aria-modal="true">
+          <button
+            type="button"
+            aria-label="Close event details"
+            className="absolute inset-0 cursor-default"
+            onClick={() => setSelectedEvent(null)}
+          />
+          <aside className="relative z-10 flex h-full w-full max-w-2xl flex-col border-l border-ink-100 bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-ink-100 px-5 py-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink-400">Security event</p>
+                <h3 className="mt-1 text-lg font-semibold text-ink-900">{formatEventLabel(selectedEvent.event_type)}</h3>
+                <p className="mt-1 text-xs text-ink-500">{formatDate(selectedEvent.occurred_at)}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedEvent(null)}
+                className="rounded-full border border-ink-100 bg-white p-2 text-ink-500 hover:bg-ink-50"
+                aria-label="Close event details"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-5 py-5">
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => copyDetail(selectedEvent.event_id || selectedEvent.id, "Event id")}
+                  className={DETAIL_COPY_BUTTON_CLASS}
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                  Event id
+                </button>
+                <button
+                  type="button"
+                  onClick={() => copyDetail(selectedEvent.event_type, "Event type")}
+                  className={DETAIL_COPY_BUTTON_CLASS}
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                  Event type
+                </button>
+                <button
+                  type="button"
+                  onClick={() => copyDetail(selectedPayloadJson, "Redacted JSON")}
+                  className={DETAIL_COPY_BUTTON_CLASS}
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                  Redacted JSON
+                </button>
+                {copyStatus ? (
+                  <span className="inline-flex h-8 items-center rounded-full bg-emerald-50 px-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-700">
+                    {copyStatus}
+                  </span>
+                ) : null}
+              </div>
+
+              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                {eventDetailRows(selectedEvent).map(([label, value]) => (
+                  <div key={label} className="rounded-xl border border-ink-100 bg-ink-50/70 px-3 py-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink-400">{label}</p>
+                    <p className="mt-1 break-all text-sm font-semibold text-ink-800">{displayValue(value)}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-5 rounded-xl border border-ink-100 bg-ink-950 px-4 py-4">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink-300">Redacted metadata</p>
+                  <button
+                    type="button"
+                    onClick={() => copyDetail(selectedMetadataJson, "Metadata JSON")}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-full border border-white/10 bg-white/10 px-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-white hover:bg-white/15"
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                    Copy
+                  </button>
+                </div>
+                <pre className="mt-3 max-h-[360px] overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-ink-100">
+                  {selectedMetadataJson}
+                </pre>
+              </div>
+            </div>
+          </aside>
+        </div>
+      ) : null}
     </section>
   );
 }
+
+export {
+  buildEventDetailPayload,
+  redactDetailValue
+};
