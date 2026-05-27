@@ -29,10 +29,20 @@ export function getAuthCookie(req, app, logicalName) {
 }
 
 export function setAuthCookie(reply, app, logicalName, value, options = {}) {
-  return reply.setCookie(authCookieName(app, logicalName), value, {
+  const finalOptions = {
     ...authCookieBase(app),
     ...options
-  });
+  };
+
+  // CSRF uses a double-submit pattern: the browser must send the cookie and the
+  // client must echo the same value in the x-csrf header. The value is still
+  // bound to the server-side session hash in requireCsrf, so reading the cookie
+  // does not grant access without the valid session cookie.
+  if (logicalName === "csrf") {
+    delete finalOptions.httpOnly;
+  }
+
+  return reply.setCookie(authCookieName(app, logicalName), value, finalOptions);
 }
 
 export function clearAuthCookie(reply, app, logicalName, options = {}) {
