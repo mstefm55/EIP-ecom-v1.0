@@ -12,6 +12,9 @@ export default function AuthTotpCard({ node, ctx }) {
     qrValue,
     verifyAction,
     backupAction,
+    hideCredentials = false,
+    startFirst = false,
+    loading = false,
   } = node.props || {};
   const enrollment = ctx?.totp?.enrollment;
   const authForm = ctx?.auth?.form || {};
@@ -27,6 +30,9 @@ export default function AuthTotpCard({ node, ctx }) {
   const showSecret = showEnrollment && Boolean(secretValue);
   const showQr = (showEnrollment || allowPreview) && Boolean(uriValue);
   const maskedSecret = useMemo(() => (secretValue ? "************" : ""), [secretValue]);
+  const resolvedAccount = enrollment?.account || account;
+  const canConfirm = showEnrollment && !loading;
+  const canEnroll = !loading;
 
   useEffect(() => {
     let active = true;
@@ -49,6 +55,28 @@ export default function AuthTotpCard({ node, ctx }) {
       active = false;
     };
   }, [uriValue, showQr]);
+
+  const renderEnrollButton = (extraClass = "") => (
+    <button
+      type="button"
+      onClick={() => ctx?.totp?.enroll?.()}
+      disabled={!canEnroll}
+      className={`rounded-2xl border border-ink-200/70 bg-white/70 px-5 py-3 text-sm font-semibold text-ink-600 hover:bg-white disabled:cursor-not-allowed disabled:opacity-60 ${extraClass}`}
+    >
+      {loading && !showEnrollment ? "Generating QR..." : backupAction}
+    </button>
+  );
+
+  const renderConfirmButton = () => (
+    <button
+      type="button"
+      onClick={() => ctx?.totp?.confirm?.()}
+      disabled={!canConfirm}
+      className="rounded-2xl bg-brand-600 px-5 py-3 text-sm font-semibold text-white shadow-glow hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
+    >
+      {loading && showEnrollment ? "Confirming..." : verifyAction}
+    </button>
+  );
 
   return (
     <div className={embedded ? "p-2" : "glass-panel p-7"}>
@@ -82,64 +110,66 @@ export default function AuthTotpCard({ node, ctx }) {
           ) : null}
           <div className="mt-3 flex items-center justify-between text-xs text-ink-400">
             <span>{issuer}</span>
-            <span>{account}</span>
+            <span>{resolvedAccount}</span>
           </div>
         </div>
 
         <div className="space-y-4">
-          <div className="rounded-2xl border border-dashed border-ink-200/80 bg-white/70 p-4">
-            <p className="text-xs uppercase tracking-[0.3em] text-ink-400">Confirm credentials</p>
-            <div className="mt-3 grid gap-3">
-              <label className="block">
-                <span className="text-[0.65rem] uppercase tracking-[0.25em] text-ink-400">Email</span>
-                <input
-                  type="email"
-                  placeholder="ops@organisation.com"
-                  value={authForm.email || ""}
-                  onChange={(event) => setAuthField?.("email", event.target.value)}
-                  className="mt-2 w-full rounded-2xl border border-white/60 bg-white/70 px-4 py-2 text-sm text-ink-700 placeholder:text-ink-300 shadow-soft focus:outline-none"
-                />
-              </label>
-              <label className="block">
-                <span className="text-[0.65rem] uppercase tracking-[0.25em] text-ink-400">Organisation</span>
-                {orgOptions.length ? (
-                  <select
-                    value={authForm.organisation || ""}
-                    onChange={(event) => setAuthField?.("organisation", event.target.value)}
-                    className="mt-2 w-full rounded-2xl border border-white/60 bg-white/70 px-4 py-2 text-sm text-ink-700 shadow-soft focus:outline-none"
-                  >
-                    {orgOptions.map((org) => {
-                      const value = org.code || org.id;
-                      const label = org.name ? `${org.name} (${value})` : value;
-                      return (
-                        <option key={value} value={value}>
-                          {label}
-                        </option>
-                      );
-                    })}
-                  </select>
-                ) : (
+          {!hideCredentials ? (
+            <div className="rounded-2xl border border-dashed border-ink-200/80 bg-white/70 p-4">
+              <p className="text-xs uppercase tracking-[0.3em] text-ink-400">Confirm credentials</p>
+              <div className="mt-3 grid gap-3">
+                <label className="block">
+                  <span className="text-[0.65rem] uppercase tracking-[0.25em] text-ink-400">Email</span>
                   <input
-                    type="text"
-                    placeholder="Organisation code"
-                    value={authForm.organisation || ""}
-                    onChange={(event) => setAuthField?.("organisation", event.target.value)}
+                    type="email"
+                    placeholder="ops@organisation.com"
+                    value={authForm.email || ""}
+                    onChange={(event) => setAuthField?.("email", event.target.value)}
                     className="mt-2 w-full rounded-2xl border border-white/60 bg-white/70 px-4 py-2 text-sm text-ink-700 placeholder:text-ink-300 shadow-soft focus:outline-none"
                   />
-                )}
-              </label>
-              <label className="block">
-                <span className="text-[0.65rem] uppercase tracking-[0.25em] text-ink-400">Password</span>
-                <input
-                  type="password"
-                  placeholder="********"
-                  value={authForm.password || ""}
-                  onChange={(event) => setAuthField?.("password", event.target.value)}
-                  className="mt-2 w-full rounded-2xl border border-white/60 bg-white/70 px-4 py-2 text-sm text-ink-700 placeholder:text-ink-300 shadow-soft focus:outline-none"
-                />
-              </label>
+                </label>
+                <label className="block">
+                  <span className="text-[0.65rem] uppercase tracking-[0.25em] text-ink-400">Organisation</span>
+                  {orgOptions.length ? (
+                    <select
+                      value={authForm.organisation || ""}
+                      onChange={(event) => setAuthField?.("organisation", event.target.value)}
+                      className="mt-2 w-full rounded-2xl border border-white/60 bg-white/70 px-4 py-2 text-sm text-ink-700 shadow-soft focus:outline-none"
+                    >
+                      {orgOptions.map((org) => {
+                        const value = org.code || org.id;
+                        const label = org.name ? `${org.name} (${value})` : value;
+                        return (
+                          <option key={value} value={value}>
+                            {label}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      placeholder="Organisation code"
+                      value={authForm.organisation || ""}
+                      onChange={(event) => setAuthField?.("organisation", event.target.value)}
+                      className="mt-2 w-full rounded-2xl border border-white/60 bg-white/70 px-4 py-2 text-sm text-ink-700 placeholder:text-ink-300 shadow-soft focus:outline-none"
+                    />
+                  )}
+                </label>
+                <label className="block">
+                  <span className="text-[0.65rem] uppercase tracking-[0.25em] text-ink-400">Password</span>
+                  <input
+                    type="password"
+                    placeholder="********"
+                    value={authForm.password || ""}
+                    onChange={(event) => setAuthField?.("password", event.target.value)}
+                    className="mt-2 w-full rounded-2xl border border-white/60 bg-white/70 px-4 py-2 text-sm text-ink-700 placeholder:text-ink-300 shadow-soft focus:outline-none"
+                  />
+                </label>
+              </div>
             </div>
-          </div>
+          ) : null}
 
           {showSecret ? (
             <div className="rounded-2xl border border-dashed border-ink-200/80 bg-white/70 p-4">
@@ -183,28 +213,19 @@ export default function AuthTotpCard({ node, ctx }) {
               placeholder="123 456"
               value={ctx?.totp?.code || ""}
               onChange={(event) => ctx?.totp?.setCode?.(event.target.value)}
-              className="mt-2 w-full rounded-2xl border border-white/60 bg-white/70 px-4 py-3 text-sm text-ink-700 placeholder:text-ink-300 shadow-soft focus:outline-none"
+              disabled={!showEnrollment}
+              className="mt-2 w-full rounded-2xl border border-white/60 bg-white/70 px-4 py-3 text-sm text-ink-700 placeholder:text-ink-300 shadow-soft focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
             />
             <p className="mt-2 text-xs text-ink-400">
-              Enter a code once to activate TOTP (QR scan alone does not enable it).
+              {showEnrollment
+                ? "Scan the QR code, then enter a code once to activate TOTP."
+                : "Generate the QR code before entering the verification code."}
             </p>
           </label>
 
           <div className="flex flex-col gap-3">
-            <button
-              type="button"
-              onClick={() => ctx?.totp?.confirm?.()}
-              className="rounded-2xl bg-brand-600 px-5 py-3 text-sm font-semibold text-white shadow-glow hover:bg-brand-700"
-            >
-              {verifyAction}
-            </button>
-            <button
-              type="button"
-              onClick={() => ctx?.totp?.enroll?.()}
-              className="rounded-2xl border border-ink-200/70 bg-white/70 px-5 py-3 text-sm font-semibold text-ink-600 hover:bg-white"
-            >
-              {backupAction}
-            </button>
+            {startFirst && !showEnrollment ? renderEnrollButton("bg-ink-900 text-white hover:bg-ink-800") : renderConfirmButton()}
+            {startFirst && !showEnrollment ? null : renderEnrollButton()}
           </div>
         </div>
       </div>
