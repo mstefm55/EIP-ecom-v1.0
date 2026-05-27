@@ -6,7 +6,8 @@ import { requirePrivilegedStepUp } from "../auth/privilegedStepUp.js";
 import { sendEmail } from "../lib/email.js";
 import { auditSecurityEvent } from "../lib/securityAudit.js";
 
-const BOOTSTRAP_TOKEN_TTL_MS = 60 * 60 * 1000; // 60 minutes
+const BOOTSTRAP_TOKEN_TTL_MS = 48 * 60 * 60 * 1000; // 48 hours
+const BOOTSTRAP_TOKEN_TTL_LABEL = "48 hours";
 
 function normalizeText(value) {
   return String(value || "").trim();
@@ -18,6 +19,48 @@ function buildTenantCode() {
 
 function buildBootstrapToken() {
   return randomToken(32);
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function getPrimaryAllowedOrigin(app) {
+  return String(app?.config?.CORS_ORIGIN || "")
+    .split(",")
+    .map((item) => item.trim())
+    .find((item) => item && item !== "*") || "";
+}
+
+function buildBootstrapLink(app, token) {
+  const configuredBase = normalizeText(app?.config?.BOOTSTRAP_URL_BASE);
+  const fallbackOrigin = getPrimaryAllowedOrigin(app);
+  const base = configuredBase || (fallbackOrigin ? `${fallbackOrigin.replace(/\/+$/, "")}/bootstrap` : "");
+
+  if (!base) {
+    throw new Error("BOOTSTRAP_URL_BASE_REQUIRED");
+  }
+
+  let url;
+  try {
+    url = new URL(base);
+  } catch {
+    throw new Error("BOOTSTRAP_URL_BASE_INVALID");
+  }
+
+  const isLocalDev = ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
+  const isProduction = String(app?.config?.NODE_ENV || "").toLowerCase() === "production";
+  if (isProduction && url.protocol !== "https:" && !isLocalDev) {
+    throw new Error("BOOTSTRAP_URL_BASE_MUST_BE_HTTPS");
+  }
+
+  url.searchParams.set("token", token);
+  return url.toString();
 }
 
 function maskEmail(value) {
@@ -278,6 +321,7 @@ export default async function tenantRequestsAdmin(app) {
         const token = buildBootstrapToken();
         const tokenHash = sha256Hex(`${token}:${app.config.BOOTSTRAP_TOKEN_PEPPER}`);
         const expiresAt = new Date(Date.now() + BOOTSTRAP_TOKEN_TTL_MS);
+        const bootstrapLink = buildBootstrapLink(app, token);
         const approvedAt = new Date().toISOString();
         const approvalPayload = {
           request_id: row.id,
@@ -329,33 +373,40 @@ export default async function tenantRequestsAdmin(app) {
 
         const isDev = app.config.NODE_ENV !== "production";
 
-        // Send bootstrap token via email (in production) or return in response (in dev).
+        // Send a single-use bootstrap magic link via email in production.
+        // The raw token is never stored and is returned only outside production for local testing.
         if (!isDev) {
           try {
-            const subject = "Your EIP Bootstrap Token";
+            const safeLink = escapeHtml(bootstrapLink);
+            const subject = "Complete your EIP tenant setup";
             const html = `
               <h1>Welcome to EIP</h1>
-              <p>Your tenant has been approved. Use the following token to complete the bootstrap process:</p>
-              <p><strong>${token}</strong></p>
-              <p>This token expires in 60 minutes.</p>
+              <p>Your tenant request has been approved.</p>
+              <p>Click the secure link below to complete your tenant bootstrap:</p>
+              <p><a href="${safeLink}" style="display:inline-block;padding:10px 16px;background:#111827;color:#ffffff;text-decoration:none;border-radius:8px;">Complete setup</a></p>
+              <p>If the button does not work, copy and paste this link into your browser:</p>
+              <p><a href="${safeLink}">${safeLink}</a></p>
+              <p>This one-time link expires in ${BOOTSTRAP_TOKEN_TTL_LABEL}.</p>
               <p>If you did not request this, please ignore this email.</p>
             `;
             const text = `
 Welcome to EIP
 
-Your tenant has been approved. Use the following token to complete the bootstrap process:
+Your tenant request has been approved.
 
-${token}
+Use this secure one-time link to complete your tenant bootstrap:
 
-This token expires in 60 minutes.
+${bootstrapLink}
+
+This link expires in ${BOOTSTRAP_TOKEN_TTL_LABEL}.
 
 If you did not request this, please ignore this email.
             `;
             await sendEmail(app, row.email, subject, text, html);
-            app.log.info({ event: "bootstrap_token_emailed", requestId: row.id, email: maskEmail(row.email) });
+            app.log.info({ event: "bootstrap_magic_link_emailed", requestId: row.id, email: maskEmail(row.email) });
           } catch (emailError) {
             await client.query("ROLLBACK");
-            app.log.error({ event: "bootstrap_token_email_failed", requestId: row.id, email: maskEmail(row.email), error: emailError.message });
+            app.log.error({ event: "bootstrap_magic_link_email_failed", requestId: row.id, email: maskEmail(row.email), error: emailError.message });
             return reply.code(502).send({ ok: false, error: "EMAIL_FAILED" });
           }
         }
@@ -383,7 +434,8 @@ If you did not request this, please ignore this email.
           tenantId,
           tenantCode,
           bootstrapExpiresAt: expiresAt.toISOString(),
-          ...(isDev ? { bootstrapToken: token } : {}),
+          bootstrapTtlHours: 48,
+          ...(isDev ? { bootstrapToken: token, bootstrapLink } : {}),
           approvalPayload,
           approvalSignature
         });
