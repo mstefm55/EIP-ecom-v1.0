@@ -26,7 +26,22 @@ test("step-up policy accepts recent OTP/TOTP assurance and rejects stale assuran
   );
 });
 
-test("privileged phishing-resistant mode requires passkey-backed step-up", () => {
+test("OTP, TOTP, and passkey are alternative step-up methods by default", () => {
+  const nowMs = Date.parse("2026-05-24T12:00:00.000Z");
+  for (const method of ["otp", "totp", "passkey"]) {
+    const session = {
+      attrs: {
+        ...buildStepUpAttrs(method),
+        step_up_at: "2026-05-24T11:59:00.000Z"
+      }
+    };
+    const result = evaluateStepUp(session, { ttlMin: 5, nowMs });
+    assert.equal(result.ok, true);
+    assert.equal(result.method, method);
+  }
+});
+
+test("explicit passkey-only mode still requires passkey-backed step-up", () => {
   const nowMs = Date.parse("2026-05-24T12:00:00.000Z");
   const otp = {
     attrs: {
