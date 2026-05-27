@@ -32,6 +32,13 @@ const STATUS_STYLES = {
   DEFAULT: "bg-ink-100 text-ink-500",
 };
 
+const APPROVABLE_STATUSES = new Set(["PENDING", "SUBMITTED", "UNDER_REVIEW", "APPROVED"]);
+const TERMINAL_OR_BOOTSTRAP_STATUSES = new Set(["BOOTSTRAP_PENDING", "ACTIVE", "REJECTED", "EXPIRED", "CANCELLED"]);
+
+function normalizeStatus(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
 function formatStatus(value) {
   return String(value || "").replace(/_/g, " ");
 }
@@ -47,6 +54,14 @@ function formatDate(value) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(date);
+}
+
+function canApproveRequest(item) {
+  return APPROVABLE_STATUSES.has(normalizeStatus(item?.status_code));
+}
+
+function canRejectRequest(item) {
+  return !TERMINAL_OR_BOOTSTRAP_STATUSES.has(normalizeStatus(item?.status_code));
 }
 
 export default function TenantRequestBoard({ node }) {
@@ -152,8 +167,11 @@ export default function TenantRequestBoard({ node }) {
   const stats = useMemo(() => {
     const summary = { total: items.length, pending: 0, bootstrap: 0, active: 0, rejected: 0 };
     items.forEach((item) => {
-      switch (item.status_code) {
+      switch (normalizeStatus(item.status_code)) {
         case "PENDING":
+        case "SUBMITTED":
+        case "UNDER_REVIEW":
+        case "APPROVED":
           summary.pending += 1;
           break;
         case "BOOTSTRAP_PENDING":
@@ -179,7 +197,7 @@ export default function TenantRequestBoard({ node }) {
       const fields = [item.legal_name, item.email, item.country, item.ref_code].filter(Boolean);
       return fields.some((value) => String(value).toLowerCase().includes(q));
     });
-  }, [items, statusFilter, query]);
+  }, [items, query]);
 
   const totalPages = useMemo(() => {
     if (!pageSize) return 1;
@@ -203,7 +221,16 @@ export default function TenantRequestBoard({ node }) {
 
   const handleApprove = async (item) => {
     if (!item?.id) return;
-    if (item.status_code === "ACTIVE" || item.status_code === "REJECTED") return;
+    if (!canApproveRequest(item)) {
+      setActionStatus({
+        type: "error",
+        message:
+          normalizeStatus(item.status_code) === "BOOTSTRAP_PENDING"
+            ? "This request is already approved and waiting for bootstrap. Use a resend-bootstrap action when available."
+            : "This request cannot be approved in its current status.",
+      });
+      return;
+    }
     const confirmed = await requestConfirm({
       title: "Approve tenant request",
       message: `Approve tenant request for ${item.legal_name || item.email}?`,
@@ -217,11 +244,14 @@ export default function TenantRequestBoard({ node }) {
         body: {},
       });
       const token = result?.bootstrapToken;
+      const link = result?.bootstrapLink;
       setActionStatus({
         type: "success",
-        message: token
-          ? `Approved. Bootstrap token: ${token}`
-          : "Approved. Bootstrap email sent.",
+        message: link
+          ? `Approved. Bootstrap link: ${link}`
+          : token
+            ? `Approved. Bootstrap token: ${token}`
+            : "Approved. Bootstrap email sent.",
       });
       setRefreshKey((prev) => prev + 1);
     } catch (err) {
@@ -230,7 +260,7 @@ export default function TenantRequestBoard({ node }) {
   };
 
   const handleReject = async (item) => {
-    if (!item?.id) return;
+    if (!item?.id || !canRejectRequest(item)) return;
     const reason = await requestPrompt({
       title: "Reject tenant request",
       message: `Provide an optional reason for rejecting ${item.legal_name || item.email}.`,
@@ -254,13 +284,13 @@ export default function TenantRequestBoard({ node }) {
 
   const handleCopyToken = async () => {
     if (!actionStatus?.message) return;
-    const match = actionStatus.message.match(/token: ([A-Za-z0-9_-]+)/i);
+    const match = actionStatus.message.match(/(?:token|link):\s*(\S+)/i);
     if (!match?.[1]) return;
     try {
       await navigator.clipboard.writeText(match[1]);
-      setActionStatus({ type: "success", message: "Bootstrap token copied." });
+      setActionStatus({ type: "success", message: "Bootstrap value copied." });
     } catch {
-      setActionStatus({ type: "error", message: "Unable to copy token." });
+      setActionStatus({ type: "error", message: "Unable to copy value." });
     }
   };
 
@@ -270,7 +300,7 @@ export default function TenantRequestBoard({ node }) {
         <div>
           <h2 className="text-xl font-semibold text-ink-900">Tenant Requests</h2>
           <p className="mt-1 text-sm text-ink-500">
-            Review onboarding submissions and approve to generate bootstrap tokens.
+            Review onboarding submissions and approve to generate bootstrap links.
           </p>
         </div>
         <button
@@ -339,7 +369,7 @@ export default function TenantRequestBoard({ node }) {
         >
           <div className="flex flex-wrap items-center justify-between gap-3">
             <span>{actionStatus.message}</span>
-            {actionStatus.message?.includes("token") ? (
+            {/(token|link):/i.test(actionStatus.message || "") ? (
               <button
                 type="button"
                 onClick={handleCopyToken}
@@ -371,8 +401,11 @@ export default function TenantRequestBoard({ node }) {
         ) : null}
 
         {filtered.map((item) => {
-          const statusStyle = STATUS_STYLES[item.status_code] || STATUS_STYLES.DEFAULT;
-          const approveDisabled = item.status_code === "ACTIVE" || item.status_code === "REJECTED";
+          const status = normalizeStatus(item.status_code);
+          const statusStyle = STATUS_STYLES[status] || STATUS_STYLES.DEFAULT;
+          const approveDisabled = !canApproveRequest(item);
+          const rejectDisabled = !canRejectRequest(item);
+          const approveLabel = status === "BOOTSTRAP_PENDING" ? "Approved" : "Approve";
           return (
             <div key={item.id} className="rounded-3xl border border-white/70 bg-white/80 p-6 shadow-soft">
               <div className="flex flex-wrap items-start justify-between gap-4">
@@ -412,18 +445,24 @@ export default function TenantRequestBoard({ node }) {
                   type="button"
                   onClick={() => handleApprove(item)}
                   disabled={approveDisabled}
+                  title={status === "BOOTSTRAP_PENDING" ? "Already approved. A separate resend-bootstrap action is required." : undefined}
                   className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.25em] ${
                     approveDisabled
                       ? "cursor-not-allowed bg-ink-200 text-ink-400"
                       : "bg-ink-900 text-white shadow-glow hover:bg-ink-800"
                   }`}
                 >
-                  Approve
+                  {approveLabel}
                 </button>
                 <button
                   type="button"
                   onClick={() => handleReject(item)}
-                  className="rounded-full border border-ink-200/70 bg-white/70 px-4 py-2 text-xs font-semibold uppercase tracking-[0.25em] text-ink-500 hover:bg-white"
+                  disabled={rejectDisabled}
+                  className={`rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.25em] ${
+                    rejectDisabled
+                      ? "cursor-not-allowed border-ink-100 bg-ink-100 text-ink-300"
+                      : "border-ink-200/70 bg-white/70 text-ink-500 hover:bg-white"
+                  }`}
                 >
                   Reject
                 </button>
