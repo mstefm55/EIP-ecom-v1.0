@@ -361,6 +361,8 @@ export default async function bootstrapRoutes(app) {
           stage: "bootstrap",
           tenantId: row.tenant_id,
           identityId: row.admin_identity_id,
+          csrf,
+          csrfToken: csrf,
           steps
         });
       } catch (e) {
