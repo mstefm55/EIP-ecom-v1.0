@@ -19,7 +19,13 @@ function shouldRequirePhishingResistantStepUp(config = {}, surfaceAccess = {}) {
 async function resolvePrivilegedStepUpPolicy(app, req) {
   const session = req?.session || (typeof app.loadSession === "function" ? await app.loadSession(req) : null);
   if (!session || String(session.realm || "EIP") !== "EIP") {
-    return { phishingResistant: app.config.REQUIRE_PASSKEY_FOR_PRIVILEGED_ACTIONS === true };
+    return {
+      anyMethodAllowed: true,
+      configuredPhishingResistantPreference: app.config.REQUIRE_PASSKEY_FOR_PRIVILEGED_ACTIONS === true,
+      enforcedPhishingResistant: false,
+      ownerAdmin: false,
+      availableMethods: ["otp", "totp", "passkey"]
+    };
   }
 
   let surfaceAccess = req?._eipSurfaceAccess || null;
@@ -37,23 +43,46 @@ async function resolvePrivilegedStepUpPolicy(app, req) {
   }
 
   return {
-    phishingResistant:
+    anyMethodAllowed: true,
+    configuredPhishingResistantPreference:
       shouldRequirePhishingResistantStepUp(app.config, surfaceAccess) ||
       (
         isProduction(app.config) &&
         app.config.OWNER_ADMIN_PASSKEY_STEP_UP_REQUIRED !== false &&
         surfaceAccessFailed
       ),
-    ownerAdmin: surfaceAccess?.is_owner_admin_session === true
+    enforcedPhishingResistant: false,
+    ownerAdmin: surfaceAccess?.is_owner_admin_session === true,
+    availableMethods: ["otp", "totp", "passkey"]
   };
 }
 
-async function requirePrivilegedStepUp(app, req) {
+async function requirePrivilegedStepUp(app, req, opts = {}) {
   const policy = await resolvePrivilegedStepUpPolicy(app, req);
+
+  // EIP V1 policy: privileged actions require one fresh high-assurance step-up.
+  // OTP, TOTP, and passkey are alternative methods. Do not chain OTP -> passkey.
+  // Passkey-only enforcement must be requested explicitly by a specific route via
+  // opts.passkeyOnly; it must not be inferred globally from owner/admin status.
+  const enforcePasskeyOnly = opts.passkeyOnly === true;
   const step = await app.requireStepUp(req, {
-    phishingResistant: policy.phishingResistant === true
+    ttlMin: opts.ttlMin,
+    phishingResistant: enforcePasskeyOnly
   });
-  return { ...step, policy };
+
+  if (!step.ok && (step.error === "STEP_UP_REQUIRED" || step.error === "PASSKEY_STEP_UP_REQUIRED")) {
+    return {
+      ...step,
+      error: enforcePasskeyOnly ? step.error : "STEP_UP_REQUIRED",
+      availableMethods: enforcePasskeyOnly ? ["passkey"] : policy.availableMethods,
+      policy: { ...policy, enforcedPhishingResistant: enforcePasskeyOnly, anyMethodAllowed: !enforcePasskeyOnly }
+    };
+  }
+
+  return {
+    ...step,
+    policy: { ...policy, enforcedPhishingResistant: enforcePasskeyOnly, anyMethodAllowed: !enforcePasskeyOnly }
+  };
 }
 
 export {
