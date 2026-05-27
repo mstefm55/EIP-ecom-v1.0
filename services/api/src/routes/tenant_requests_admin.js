@@ -70,6 +70,45 @@ function maskEmail(value) {
   return `${email.slice(0, 2)}***${email.slice(at)}`;
 }
 
+async function sendBootstrapMagicLink(app, { requestId, email, bootstrapLink, mode = "approved" }) {
+  const safeLink = escapeHtml(bootstrapLink);
+  const isResend = mode === "resend";
+  const subject = isResend ? "Your EIP bootstrap link" : "Complete your EIP tenant setup";
+  const intro = isResend
+    ? "A new secure bootstrap link has been generated for your EIP tenant setup."
+    : "Your tenant request has been approved.";
+  const textIntro = isResend
+    ? "A new secure bootstrap link has been generated for your EIP tenant setup."
+    : "Your tenant request has been approved.";
+
+  const html = `
+    <h1>Welcome to EIP</h1>
+    <p>${escapeHtml(intro)}</p>
+    <p>Click the secure link below to complete your tenant bootstrap:</p>
+    <p><a href="${safeLink}" style="display:inline-block;padding:10px 16px;background:#111827;color:#ffffff;text-decoration:none;border-radius:8px;">Complete setup</a></p>
+    <p>If the button does not work, copy and paste this link into your browser:</p>
+    <p><a href="${safeLink}">${safeLink}</a></p>
+    <p>This one-time link expires in ${BOOTSTRAP_TOKEN_TTL_LABEL}.</p>
+    <p>If you did not request this, please ignore this email.</p>
+  `;
+  const text = `
+Welcome to EIP
+
+${textIntro}
+
+Use this secure one-time link to complete your tenant bootstrap:
+
+${bootstrapLink}
+
+This link expires in ${BOOTSTRAP_TOKEN_TTL_LABEL}.
+
+If you did not request this, please ignore this email.
+  `;
+
+  await sendEmail(app, email, subject, text, html);
+  app.log.info({ event: "bootstrap_magic_link_emailed", requestId, mode, email: maskEmail(email) });
+}
+
 async function tenantRequestTableExists(app) {
   const r = await app.db.query(
     `
@@ -258,7 +297,7 @@ export default async function tenantRequestsAdmin(app) {
         }
 
         const row = reqRes.rows[0];
-        if (row.status_code === "REJECTED" || row.status_code === "ACTIVE") {
+        if (row.status_code === "REJECTED" || row.status_code === "ACTIVE" || row.status_code === "BOOTSTRAP_PENDING") {
           await client.query("ROLLBACK");
           return reply.code(409).send({ ok: false, error: "INVALID_STATUS" });
         }
@@ -372,38 +411,14 @@ export default async function tenantRequestsAdmin(app) {
         );
 
         const isDev = app.config.NODE_ENV !== "production";
-
-        // Send a single-use bootstrap magic link via email in production.
-        // The raw token is never stored and is returned only outside production for local testing.
         if (!isDev) {
           try {
-            const safeLink = escapeHtml(bootstrapLink);
-            const subject = "Complete your EIP tenant setup";
-            const html = `
-              <h1>Welcome to EIP</h1>
-              <p>Your tenant request has been approved.</p>
-              <p>Click the secure link below to complete your tenant bootstrap:</p>
-              <p><a href="${safeLink}" style="display:inline-block;padding:10px 16px;background:#111827;color:#ffffff;text-decoration:none;border-radius:8px;">Complete setup</a></p>
-              <p>If the button does not work, copy and paste this link into your browser:</p>
-              <p><a href="${safeLink}">${safeLink}</a></p>
-              <p>This one-time link expires in ${BOOTSTRAP_TOKEN_TTL_LABEL}.</p>
-              <p>If you did not request this, please ignore this email.</p>
-            `;
-            const text = `
-Welcome to EIP
-
-Your tenant request has been approved.
-
-Use this secure one-time link to complete your tenant bootstrap:
-
-${bootstrapLink}
-
-This link expires in ${BOOTSTRAP_TOKEN_TTL_LABEL}.
-
-If you did not request this, please ignore this email.
-            `;
-            await sendEmail(app, row.email, subject, text, html);
-            app.log.info({ event: "bootstrap_magic_link_emailed", requestId: row.id, email: maskEmail(row.email) });
+            await sendBootstrapMagicLink(app, {
+              requestId: row.id,
+              email: row.email,
+              bootstrapLink,
+              mode: "approved"
+            });
           } catch (emailError) {
             await client.query("ROLLBACK");
             app.log.error({ event: "bootstrap_magic_link_email_failed", requestId: row.id, email: maskEmail(row.email), error: emailError.message });
@@ -442,6 +457,149 @@ If you did not request this, please ignore this email.
       } catch (e) {
         await client.query("ROLLBACK");
         app.log.error({ event: "tenant_request_approve_error", requestId, ip: req.ip, error: e.message });
+        return reply.code(500).send({ ok: false });
+      } finally {
+        client.release();
+      }
+    }
+  );
+
+  app.post(
+    "/admin/tenant-requests/:id/resend-bootstrap",
+    {
+      schema: {
+        params: {
+          type: "object",
+          required: ["id"],
+          properties: { id: { type: "string", minLength: 36, maxLength: 36 } }
+        }
+      }
+    },
+    async (req, reply) => {
+      const s = await app.requireSession(req, { realm: "EIP" });
+      if (!s.ok) return reply.code(s.status).send({ ok: false, error: s.error });
+
+      const c = await app.requireCsrf(req);
+      if (!c.ok) return reply.code(c.status).send({ ok: false, error: c.error });
+
+      const step = await requirePrivilegedStepUp(app, req);
+      if (!step.ok) return reply.code(step.status).send({ ok: false, error: step.error });
+
+      const allowed = await hasPermission(app, s.session.tenant_id, s.session.identity_id, "tenant.onboarding.approve");
+      if (!allowed) return reply.code(403).send({ ok: false, error: "FORBIDDEN" });
+
+      const requestId = req.params.id;
+      const client = await app.db.connect();
+      try {
+        await client.query("BEGIN");
+
+        const reqRes = await client.query(
+          `
+          SELECT id, status_code, email, legal_name, tenant_id, admin_identity_id
+          FROM eip_core.tenant_request
+          WHERE id = $1::uuid
+          FOR UPDATE
+          `,
+          [requestId]
+        );
+        if (reqRes.rowCount === 0) {
+          await client.query("ROLLBACK");
+          return reply.code(404).send({ ok: false, error: "NOT_FOUND" });
+        }
+
+        const row = reqRes.rows[0];
+        if (row.status_code !== "BOOTSTRAP_PENDING") {
+          await client.query("ROLLBACK");
+          return reply.code(409).send({ ok: false, error: "INVALID_STATUS" });
+        }
+        if (!row.tenant_id || !row.admin_identity_id || !row.email) {
+          await client.query("ROLLBACK");
+          return reply.code(500).send({ ok: false, error: "BOOTSTRAP_STATE_INVALID" });
+        }
+
+        const token = buildBootstrapToken();
+        const tokenHash = sha256Hex(`${token}:${app.config.BOOTSTRAP_TOKEN_PEPPER}`);
+        const expiresAt = new Date(Date.now() + BOOTSTRAP_TOKEN_TTL_MS);
+        const bootstrapLink = buildBootstrapLink(app, token);
+
+        await client.query(
+          `
+          UPDATE eip_auth.auth_session
+          SET is_revoked=true,
+              revoked_at=now(),
+              attrs = COALESCE(attrs,'{}'::jsonb) || jsonb_build_object('revoked_reason', 'bootstrap_link_resent')
+          WHERE tenant_id=$1::uuid
+            AND identity_id=$2::uuid
+            AND is_revoked=false
+            AND COALESCE(attrs->>'stage','') = 'bootstrap'
+          `,
+          [row.tenant_id, row.admin_identity_id]
+        );
+
+        await client.query(
+          `
+          UPDATE eip_core.tenant_request
+          SET bootstrap_token_hash=$2,
+              bootstrap_expires_at=$3,
+              bootstrap_used_at=NULL,
+              attrs = COALESCE(attrs,'{}'::jsonb) || jsonb_build_object(
+                'bootstrap_resend',
+                jsonb_build_object(
+                  'resent_by', $4::uuid,
+                  'resent_at', now(),
+                  'reason', 'manual_resend'
+                )
+              )
+          WHERE id=$1::uuid
+          `,
+          [row.id, tokenHash, expiresAt, s.session.identity_id]
+        );
+
+        const isDev = app.config.NODE_ENV !== "production";
+        if (!isDev) {
+          try {
+            await sendBootstrapMagicLink(app, {
+              requestId: row.id,
+              email: row.email,
+              bootstrapLink,
+              mode: "resend"
+            });
+          } catch (emailError) {
+            await client.query("ROLLBACK");
+            app.log.error({ event: "bootstrap_magic_link_resend_email_failed", requestId: row.id, email: maskEmail(row.email), error: emailError.message });
+            return reply.code(502).send({ ok: false, error: "EMAIL_FAILED" });
+          }
+        }
+
+        await client.query("COMMIT");
+
+        app.log.info({ event: "tenant_request_bootstrap_link_resent", requestId: row.id, tenantId: row.tenant_id, adminIdentityId: row.admin_identity_id, ip: req.ip });
+        auditSecurityEvent(app, "tenant_onboarding.bootstrap_link_resent", {
+          category: "onboarding",
+          source: "tenant_requests_admin",
+          severity: "warning",
+          outcome: "success",
+          actorTenantId: s.session.tenant_id,
+          actorIdentityId: s.session.identity_id,
+          targetTenantId: row.tenant_id,
+          targetIdentityId: row.admin_identity_id,
+          requestId: row.id,
+          ip: req.ip,
+          userAgent: req.headers["user-agent"] || null
+        });
+
+        return reply.send({
+          ok: true,
+          requestId: row.id,
+          tenantId: row.tenant_id,
+          adminIdentityId: row.admin_identity_id,
+          bootstrapExpiresAt: expiresAt.toISOString(),
+          bootstrapTtlHours: 48,
+          ...(isDev ? { bootstrapToken: token, bootstrapLink } : {})
+        });
+      } catch (e) {
+        await client.query("ROLLBACK");
+        app.log.error({ event: "tenant_request_resend_bootstrap_error", requestId, ip: req.ip, error: e.message });
         return reply.code(500).send({ ok: false });
       } finally {
         client.release();
