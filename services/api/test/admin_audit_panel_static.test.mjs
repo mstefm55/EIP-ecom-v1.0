@@ -12,6 +12,8 @@ test("admin audit panel keeps event details in a centered modal with copy and re
   const source = fs.readFileSync(auditPanelPath, "utf8");
 
   assert.match(source, /selectedEvent/);
+  assert.match(source, /createPortal/);
+  assert.match(source, /document\.body/);
   assert.match(source, /role="dialog"/);
   assert.match(source, /aria-modal="true"/);
   assert.match(source, /items-center justify-center/);

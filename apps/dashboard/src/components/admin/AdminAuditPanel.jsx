@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { AlertTriangle, ChevronLeft, ChevronRight, Copy, FileClock, Filter, RefreshCw, ShieldAlert, ShieldCheck, X } from "lucide-react";
 import { apiFetch } from "../../services/apiClient";
 
@@ -525,7 +526,7 @@ export default function AdminAuditPanel() {
         </div>
       </div>
 
-      {selectedEvent ? (
+      {selectedEvent && typeof document !== "undefined" ? createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/30 px-4 py-6 backdrop-blur-sm" role="dialog" aria-modal="true">
           <button
             type="button"
@@ -610,7 +611,8 @@ export default function AdminAuditPanel() {
               </div>
             </div>
           </aside>
-        </div>
+        </div>,
+        document.body
       ) : null}
     </section>
   );
