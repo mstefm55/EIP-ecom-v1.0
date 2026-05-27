@@ -240,7 +240,7 @@ Dashboard location:
 Admin > Audit
 ```
 
-Recent events stay compact in the main list. Select an event to open the right-side details drawer with event identifiers, tenant/actor/target context, connection/suffix context, reason, outcome, severity, and redacted metadata JSON. Copy actions are available for the event id, event type, and redacted JSON payload.
+Recent events stay compact in the main list. Select an event to open the centered details modal with event identifiers, tenant/actor/target context, connection/suffix context, reason, outcome, severity, and redacted metadata JSON. Copy actions are available for the event id, event type, and redacted JSON payload.
 
 Required permission:
 
