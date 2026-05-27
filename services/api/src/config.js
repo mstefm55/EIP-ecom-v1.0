@@ -38,6 +38,7 @@ export const envSchema = {
     ACCESS_GRANT_PEPPER: { type: "string" },
     CSRF_PEPPER: { type: "string", minLength: 1 },
     BOOTSTRAP_TOKEN_PEPPER: { type: "string", minLength: 1 },
+    BOOTSTRAP_URL_BASE: { type: "string", default: "" },
     REQUIRE_TRUSTED_DEVICE: { type: "boolean", default: true },
     ELECTRON_CHALLENGE_TTL_SEC: { type: "integer", default: 120 },
     ELECTRON_DEVICE_REQUIRE_TRUSTED: { type: "boolean", default: true },
