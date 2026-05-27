@@ -40,6 +40,20 @@ function shouldResetCsrfAfterSuccess(path, method) {
   return SESSION_MUTATING_PATHS.has(path);
 }
 
+function readCookie(name) {
+  if (typeof document === "undefined") return null;
+  const parts = String(document.cookie || "").split(";");
+  for (const part of parts) {
+    const [rawKey, ...rest] = part.trim().split("=");
+    if (rawKey === name) return decodeURIComponent(rest.join("="));
+  }
+  return null;
+}
+
+function readCsrfCookie() {
+  return readCookie("csrf") || readCookie("__Host-csrf") || null;
+}
+
 export function resetCsrfToken() {
   cachedCsrfToken = null;
   csrfTokenPromise = null;
@@ -48,9 +62,19 @@ export function resetCsrfToken() {
 export async function getCsrfToken({ refresh = false } = {}) {
   if (!refresh) {
     if (cachedCsrfToken) return cachedCsrfToken;
+    const cookieToken = readCsrfCookie();
+    if (cookieToken) {
+      cachedCsrfToken = cookieToken;
+      return cookieToken;
+    }
     if (csrfTokenPromise) return csrfTokenPromise;
   } else {
     resetCsrfToken();
+    const cookieToken = readCsrfCookie();
+    if (cookieToken) {
+      cachedCsrfToken = cookieToken;
+      return cookieToken;
+    }
   }
 
   csrfTokenPromise = fetch(`${BASE_URL}${CSRF_ENDPOINT}`, {
@@ -59,13 +83,13 @@ export async function getCsrfToken({ refresh = false } = {}) {
     headers: { Accept: "application/json" },
   })
     .then(async (response) => {
-      if (!response.ok) return null;
+      if (!response.ok) return readCsrfCookie();
       const payload = await response.json().catch(() => null);
-      const token = payload?.csrf || payload?.csrfToken || null;
+      const token = payload?.csrf || payload?.csrfToken || readCsrfCookie() || null;
       cachedCsrfToken = token;
       return token;
     })
-    .catch(() => null)
+    .catch(() => readCsrfCookie())
     .finally(() => {
       csrfTokenPromise = null;
     });
