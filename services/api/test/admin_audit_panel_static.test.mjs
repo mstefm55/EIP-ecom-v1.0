@@ -14,10 +14,14 @@ test("admin audit panel keeps event details in a centered modal with copy and re
   assert.match(source, /selectedEvent/);
   assert.match(source, /createPortal/);
   assert.match(source, /document\.body/);
+  assert.match(source, /body\.style\.overflow = "hidden"/);
+  assert.match(source, /body\.style\.position = "fixed"/);
+  assert.match(source, /window\.scrollTo\(0, scrollY\)/);
   assert.match(source, /role="dialog"/);
   assert.match(source, /aria-modal="true"/);
   assert.match(source, /items-center justify-center/);
   assert.match(source, /max-h-\[calc\(100vh-3rem\)\]/);
+  assert.match(source, /overscroll-contain/);
   assert.match(source, /overflow-y-auto/);
   assert.match(source, /buildEventDetailPayload/);
   assert.match(source, /redactDetailValue/);

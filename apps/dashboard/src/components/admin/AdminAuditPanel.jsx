@@ -167,6 +167,45 @@ export default function AdminAuditPanel() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [selectedEvent]);
 
+  useEffect(() => {
+    if (!selectedEvent || typeof document === "undefined" || typeof window === "undefined") return undefined;
+
+    const body = document.body;
+    const root = document.documentElement;
+    const scrollY = window.scrollY || window.pageYOffset || 0;
+    const previousBodyStyle = {
+      left: body.style.left,
+      overflow: body.style.overflow,
+      overscrollBehavior: body.style.overscrollBehavior,
+      position: body.style.position,
+      right: body.style.right,
+      top: body.style.top,
+      width: body.style.width,
+    };
+    const previousRootOverscroll = root.style.overscrollBehavior;
+
+    body.style.overflow = "hidden";
+    body.style.overscrollBehavior = "contain";
+    body.style.position = "fixed";
+    body.style.top = `-${scrollY}px`;
+    body.style.left = "0";
+    body.style.right = "0";
+    body.style.width = "100%";
+    root.style.overscrollBehavior = "contain";
+
+    return () => {
+      body.style.left = previousBodyStyle.left;
+      body.style.overflow = previousBodyStyle.overflow;
+      body.style.overscrollBehavior = previousBodyStyle.overscrollBehavior;
+      body.style.position = previousBodyStyle.position;
+      body.style.right = previousBodyStyle.right;
+      body.style.top = previousBodyStyle.top;
+      body.style.width = previousBodyStyle.width;
+      root.style.overscrollBehavior = previousRootOverscroll;
+      window.scrollTo(0, scrollY);
+    };
+  }, [selectedEvent]);
+
   function updateDraftFilter(key, value) {
     setDraftFilters((current) => ({ ...current, [key]: value }));
   }
@@ -527,14 +566,17 @@ export default function AdminAuditPanel() {
       </div>
 
       {selectedEvent && typeof document !== "undefined" ? createPortal(
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/30 px-4 py-6 backdrop-blur-sm" role="dialog" aria-modal="true">
+        <div className="fixed inset-0 z-50 flex items-center justify-center overscroll-contain bg-ink-900/30 px-4 py-6 backdrop-blur-sm" role="dialog" aria-modal="true">
           <button
             type="button"
             aria-label="Close event details"
             className="absolute inset-0 cursor-default"
             onClick={() => setSelectedEvent(null)}
           />
-          <aside className="relative z-10 flex max-h-[calc(100vh-3rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-ink-100 bg-white shadow-2xl">
+          <aside
+            className="relative z-10 flex max-h-[calc(100vh-3rem)] w-full max-w-3xl flex-col overflow-hidden overscroll-contain rounded-2xl border border-ink-100 bg-white shadow-2xl"
+            onWheel={(event) => event.stopPropagation()}
+          >
             <div className="flex shrink-0 items-start justify-between gap-4 border-b border-ink-100 px-5 py-4">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink-400">Security event</p>
@@ -551,7 +593,7 @@ export default function AdminAuditPanel() {
               </button>
             </div>
 
-            <div className="min-h-0 overflow-y-auto px-5 py-5">
+            <div className="min-h-0 overflow-y-auto overscroll-contain px-5 py-5">
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
@@ -605,7 +647,7 @@ export default function AdminAuditPanel() {
                     Copy
                   </button>
                 </div>
-                <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-ink-100">
+                <pre className="mt-3 max-h-64 overflow-auto overscroll-contain whitespace-pre-wrap break-words text-xs leading-5 text-ink-100">
                   {selectedMetadataJson}
                 </pre>
               </div>
