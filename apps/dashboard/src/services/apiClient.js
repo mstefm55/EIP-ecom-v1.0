@@ -8,6 +8,8 @@ const SESSION_MUTATING_PATHS = new Set([
   "/api/eip/auth/passkeys/login/verify",
   "/api/eip/auth/password/reset",
   "/api/eip/auth/recovery/consume",
+  "/api/eip/bootstrap/consume",
+  "/api/eip/bootstrap/complete",
   "/api/eip/auth/logout",
 ]);
 
@@ -112,7 +114,7 @@ export async function apiFetchWithMeta(path, options = {}) {
     if (CSRF_ERROR_CODES.has(payload?.error)) {
       response = await performRequest({ refreshCsrf: true });
       if (response.ok) {
-        const data = await response.json();
+        const data = await parseSuccessPayload(response);
         if (shouldResetCsrfAfterSuccess(path, method)) resetCsrfToken();
         return { status: response.status, headers: response.headers, data };
       }
@@ -122,13 +124,20 @@ export async function apiFetchWithMeta(path, options = {}) {
     return handleParsedError(response, errorText, payload);
   }
 
-  if (response.status === 304) {
-    return { status: 304, headers: response.headers, data: null };
-  }
-
-  const data = await response.json();
+  const data = await parseSuccessPayload(response);
   if (shouldResetCsrfAfterSuccess(path, method)) resetCsrfToken();
   return { status: response.status, headers: response.headers, data };
+}
+
+async function parseSuccessPayload(response) {
+  if (response.status === 204 || response.status === 205) return { ok: true };
+  const text = await response.text();
+  if (!text) return { ok: true };
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
 }
 
 async function handleErrorResponse(response) {
