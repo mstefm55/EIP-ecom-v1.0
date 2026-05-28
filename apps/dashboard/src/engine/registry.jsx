@@ -21,7 +21,7 @@ import AdminSecurityPanel from "../components/admin/AdminSecurityPanel";
 import AdminAuditPanel from "../components/admin/AdminAuditPanel";
 import AdminPlaceholderPanel from "../components/admin/AdminPlaceholderPanel";
 import AdminMonitoringDashboard from "../components/admin/AdminMonitoringDashboard";
-import AdminConnectionsPanel from "../components/admin/AdminConnectionsPanel";
+import AdminConnectionsPanel from "../components/admin/AdminConnectionsPanelSafe";
 import AdminProcessBuilder from "../components/admin/AdminProcessBuilder";
 import AdminDbExplorer from "../components/admin/AdminDbExplorer";
 import AdminPortfolioPanel from "../components/admin/AdminPortfolioPanel";
