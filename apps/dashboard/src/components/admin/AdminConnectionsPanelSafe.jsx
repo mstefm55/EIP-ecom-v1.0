@@ -1,0 +1,1008 @@
+import { useEffect, useMemo, useState } from "react";
+import { CheckCircle2, Clipboard, Copy, EyeOff, Plus, RefreshCw, ShieldCheck, Trash2, XCircle } from "lucide-react";
+import { apiFetch } from "../../services/apiClient";
+import ActionMiniModal from "../shared/ActionMiniModal";
+
+const KIND_OPTIONS = [
+  { value: "website", label: "Website" },
+  { value: "ecommerce", label: "E-commerce" },
+  { value: "banking", label: "Banking" },
+  { value: "edi", label: "EDI" },
+  { value: "social", label: "Social" },
+  { value: "email", label: "Email" },
+  { value: "custom", label: "Custom" }
+];
+
+const DIRECTION_OPTIONS = [
+  { value: "inbound", label: "Inbound" },
+  { value: "outbound", label: "Outbound" },
+  { value: "both", label: "Both" }
+];
+
+const ENV_OPTIONS = [
+  { value: "sandbox", label: "Sandbox" },
+  { value: "production", label: "Production" }
+];
+
+const VERIFICATION_MODES = [
+  { value: "none", label: "None" },
+  { value: "api_key", label: "API Key" },
+  { value: "hmac_signature", label: "HMAC Signature" },
+  { value: "oauth2_jwt", label: "OAuth2 JWT" }
+];
+
+const CHANNEL_OPTIONS = [
+  { value: "website_intake", label: "Website Intake" },
+  { value: "edi", label: "EDI" },
+  { value: "banking", label: "Banking" },
+  { value: "payments", label: "Payments" },
+  { value: "social", label: "Social" },
+  { value: "email", label: "Email" },
+  { value: "custom", label: "Custom" }
+];
+
+const MAPPING_MODES = [
+  { value: "passthrough", label: "Passthrough" },
+  { value: "mapped", label: "Mapped" }
+];
+
+const LOG_LEVELS = ["error", "warn", "info", "debug"];
+const HTTP_METHODS = ["POST", "PUT", "PATCH"];
+
+function normalizeList(text) {
+  return String(text || "")
+    .split(/[\n,]+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function slugifyCode(value) {
+  const base = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  if (!base) return "conn";
+  if (base.length < 3) return `${base}-conn`;
+  return base.slice(0, 65);
+}
+
+function normalizeJson(text) {
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function formatDate(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleString();
+}
+
+function hasStoredSecret(container, key) {
+  return Boolean(container?.[key] || container?.[`${key}_set`]);
+}
+
+function buildProfile(id, overrides = {}) {
+  return {
+    id: id || `conn-${Date.now()}`,
+    identity: {
+      connection_name: "",
+      connection_code: "",
+      connection_kind: "custom",
+      frontend_url: "",
+      portal_url: "",
+      direction: "inbound",
+      environment: "production",
+      is_enabled: true
+    },
+    inbound: {
+      inbound_path_suffix: "",
+      http_method: "POST",
+      expected_content_type: "application/json",
+      origin_allowlist_text: "",
+      raw_body_required: true,
+      rate_limit_max: 3000,
+      rate_limit_window_sec: 3600
+    },
+    verification: {
+      mode: "none",
+      allow_unverified: false,
+      api_key: { header_name: "X-API-Key", secret: "", secret_set: false },
+      hmac_signature: {
+        header_name: "",
+        algorithm: "sha256",
+        encoding: "hex",
+        secret: "",
+        secret_set: false,
+        payload_mode: "raw",
+        timestamp_header: "x-timestamp",
+        max_skew_sec: 300
+      },
+      oauth2_jwt: {
+        header_name: "Authorization",
+        token_prefix: "Bearer",
+        issuer: "",
+        audience: "",
+        jwks_url: "",
+        secret: "",
+        secret_set: false,
+        test_token: "",
+        max_skew_sec: 300,
+        max_age_sec: 900
+      }
+    },
+    idempotency: {
+      event_id_location: "header",
+      event_id_key: "X-Event-Id",
+      idempotency_scope: "connection"
+    },
+    outbound: {
+      base_url: "",
+      path_prefix: "/",
+      auth_mode: "none",
+      auth: {
+        header_name: "",
+        query_param_name: "",
+        secret: "",
+        secret_set: false,
+        token: "",
+        token_set: false,
+        username: "",
+        password: "",
+        password_set: false,
+        client_id: "",
+        client_secret: "",
+        client_secret_set: false,
+        token_url: "",
+        scope: ""
+      },
+      default_headers_text: "",
+      timeout_ms: 8000,
+      retry_policy: { max_retries: 2, backoff_ms: 500 },
+      healthcheck_path: "/health",
+      test_request_method: "GET"
+    },
+    routing: {
+      channel: "custom",
+      protocol: "",
+      supported_message_types_text: "",
+      schema_version: "v1",
+      envelope_profile: "canonical_v1",
+      mapping_mode: "passthrough",
+      mapping_rules_text: ""
+    },
+    audit: {
+      audit_record_type: "GATEWAY_AUDIT",
+      redaction_policy_text: "",
+      max_body_size: 262144,
+      ip_allowlist_text: "",
+      log_level: "info"
+    },
+    ...overrides
+  };
+}
+
+function fromApiProfile(profile) {
+  return buildProfile(profile.id, {
+    identity: {
+      connection_name: profile.identity?.connection_name || "",
+      connection_code: profile.identity?.connection_code || "",
+      connection_kind: profile.identity?.connection_kind || "custom",
+      frontend_url: profile.identity?.frontend_url || "",
+      portal_url: profile.identity?.portal_url || "",
+      direction: profile.identity?.direction || "inbound",
+      environment: profile.identity?.environment || "production",
+      is_enabled: profile.identity?.is_enabled ?? true
+    },
+    inbound: {
+      inbound_path_suffix: profile.inbound?.inbound_path_suffix || "",
+      http_method: profile.inbound?.http_method || "POST",
+      expected_content_type: profile.inbound?.expected_content_type || "application/json",
+      origin_allowlist_text: Array.isArray(profile.inbound?.origin_allowlist) ? profile.inbound.origin_allowlist.join("\n") : "",
+      raw_body_required: profile.inbound?.raw_body_required ?? true,
+      rate_limit_max: profile.inbound?.rate_limit?.max ?? 3000,
+      rate_limit_window_sec: profile.inbound?.rate_limit?.window_sec ?? 3600
+    },
+    verification: {
+      mode: profile.verification?.mode || "none",
+      allow_unverified: profile.verification?.allow_unverified ?? false,
+      api_key: {
+        header_name: profile.verification?.api_key?.header_name || "X-API-Key",
+        secret: "",
+        secret_set: Boolean(profile.verification?.api_key?.secret_set)
+      },
+      hmac_signature: {
+        header_name: profile.verification?.hmac_signature?.header_name || "",
+        algorithm: profile.verification?.hmac_signature?.algorithm || "sha256",
+        encoding: profile.verification?.hmac_signature?.encoding || "hex",
+        secret: "",
+        secret_set: Boolean(profile.verification?.hmac_signature?.secret_set),
+        payload_mode: profile.verification?.hmac_signature?.payload_mode || "raw",
+        timestamp_header: profile.verification?.hmac_signature?.timestamp_header || "x-timestamp",
+        max_skew_sec: profile.verification?.hmac_signature?.max_skew_sec ?? 300
+      },
+      oauth2_jwt: {
+        header_name: profile.verification?.oauth2_jwt?.header_name || "Authorization",
+        token_prefix: profile.verification?.oauth2_jwt?.token_prefix || "Bearer",
+        issuer: profile.verification?.oauth2_jwt?.issuer || "",
+        audience: profile.verification?.oauth2_jwt?.audience || "",
+        jwks_url: profile.verification?.oauth2_jwt?.jwks_url || "",
+        secret: "",
+        secret_set: Boolean(profile.verification?.oauth2_jwt?.secret_set),
+        test_token: "",
+        max_skew_sec: profile.verification?.oauth2_jwt?.max_skew_sec ?? 300,
+        max_age_sec: profile.verification?.oauth2_jwt?.max_age_sec ?? 900
+      }
+    },
+    idempotency: {
+      event_id_location: profile.idempotency?.event_id_location || "header",
+      event_id_key: profile.idempotency?.event_id_key || "X-Event-Id",
+      idempotency_scope: profile.idempotency?.idempotency_scope || "connection"
+    },
+    outbound: {
+      base_url: profile.outbound?.base_url || "",
+      path_prefix: profile.outbound?.path_prefix || "/",
+      auth_mode: profile.outbound?.auth_mode || "none",
+      auth: {
+        header_name: profile.outbound?.auth?.header_name || "",
+        query_param_name: profile.outbound?.auth?.query_param_name || "",
+        secret: "",
+        secret_set: Boolean(profile.outbound?.auth?.secret_set),
+        token: "",
+        token_set: Boolean(profile.outbound?.auth?.token_set),
+        username: profile.outbound?.auth?.username || "",
+        password: "",
+        password_set: Boolean(profile.outbound?.auth?.password_set),
+        client_id: profile.outbound?.auth?.client_id || "",
+        client_secret: "",
+        client_secret_set: Boolean(profile.outbound?.auth?.client_secret_set),
+        token_url: profile.outbound?.auth?.token_url || "",
+        scope: profile.outbound?.auth?.scope || ""
+      },
+      default_headers_text: profile.outbound?.default_headers ? JSON.stringify(profile.outbound.default_headers, null, 2) : "",
+      timeout_ms: profile.outbound?.timeout_ms || 8000,
+      retry_policy: profile.outbound?.retry_policy || { max_retries: 2, backoff_ms: 500 },
+      healthcheck_path: profile.outbound?.healthcheck_path || "/health",
+      test_request_method: profile.outbound?.test_request_method || "GET"
+    },
+    routing: {
+      channel: profile.routing?.channel || "custom",
+      protocol: profile.routing?.protocol || "",
+      supported_message_types_text: Array.isArray(profile.routing?.supported_message_types) ? profile.routing.supported_message_types.join("\n") : "",
+      schema_version: profile.routing?.schema_version || "v1",
+      envelope_profile: profile.routing?.envelope_profile || "canonical_v1",
+      mapping_mode: profile.routing?.mapping_mode || "passthrough",
+      mapping_rules_text: profile.routing?.mapping_rules ? JSON.stringify(profile.routing.mapping_rules, null, 2) : ""
+    },
+    audit: {
+      audit_record_type: profile.audit?.audit_record_type || "GATEWAY_AUDIT",
+      redaction_policy_text: profile.audit?.redaction_policy ? JSON.stringify(profile.audit.redaction_policy, null, 2) : "",
+      max_body_size: profile.audit?.max_body_size || 262144,
+      ip_allowlist_text: Array.isArray(profile.audit?.ip_allowlist) ? profile.audit.ip_allowlist.join("\n") : "",
+      log_level: profile.audit?.log_level || "info"
+    }
+  });
+}
+
+function toApiProfile(profile) {
+  return {
+    id: profile.id,
+    identity: { ...profile.identity },
+    inbound: {
+      inbound_path_suffix: profile.inbound.inbound_path_suffix,
+      http_method: profile.inbound.http_method,
+      expected_content_type: profile.inbound.expected_content_type,
+      origin_allowlist: normalizeList(profile.inbound.origin_allowlist_text),
+      raw_body_required: profile.inbound.raw_body_required,
+      rate_limit: {
+        max: Number(profile.inbound.rate_limit_max || 0) || null,
+        window_sec: Number(profile.inbound.rate_limit_window_sec || 0) || null
+      }
+    },
+    verification: {
+      mode: profile.verification.mode,
+      allow_unverified: profile.verification.allow_unverified,
+      api_key: {
+        header_name: profile.verification.api_key.header_name,
+        secret: profile.verification.api_key.secret
+      },
+      hmac_signature: {
+        header_name: profile.verification.hmac_signature.header_name,
+        algorithm: profile.verification.hmac_signature.algorithm,
+        encoding: profile.verification.hmac_signature.encoding,
+        secret: profile.verification.hmac_signature.secret,
+        payload_mode: profile.verification.hmac_signature.payload_mode,
+        timestamp_header: profile.verification.hmac_signature.timestamp_header,
+        max_skew_sec: Number(profile.verification.hmac_signature.max_skew_sec || 300)
+      },
+      oauth2_jwt: {
+        header_name: profile.verification.oauth2_jwt.header_name,
+        token_prefix: profile.verification.oauth2_jwt.token_prefix,
+        issuer: profile.verification.oauth2_jwt.issuer,
+        audience: profile.verification.oauth2_jwt.audience,
+        jwks_url: profile.verification.oauth2_jwt.jwks_url,
+        secret: profile.verification.oauth2_jwt.secret,
+        max_skew_sec: Number(profile.verification.oauth2_jwt.max_skew_sec || 300),
+        max_age_sec: Number(profile.verification.oauth2_jwt.max_age_sec || 0) || null
+      }
+    },
+    idempotency: { ...profile.idempotency },
+    outbound: {
+      base_url: profile.outbound.base_url,
+      path_prefix: profile.outbound.path_prefix,
+      auth_mode: profile.outbound.auth_mode,
+      auth: { ...profile.outbound.auth },
+      default_headers: normalizeJson(profile.outbound.default_headers_text) || {},
+      timeout_ms: Number(profile.outbound.timeout_ms || 8000),
+      retry_policy: profile.outbound.retry_policy,
+      healthcheck_path: profile.outbound.healthcheck_path,
+      test_request_method: profile.outbound.test_request_method
+    },
+    routing: {
+      channel: profile.routing.channel,
+      protocol: profile.routing.protocol,
+      supported_message_types: normalizeList(profile.routing.supported_message_types_text),
+      schema_version: profile.routing.schema_version,
+      envelope_profile: profile.routing.envelope_profile,
+      mapping_mode: profile.routing.mapping_mode,
+      mapping_rules: normalizeJson(profile.routing.mapping_rules_text)
+    },
+    audit: {
+      audit_record_type: profile.audit.audit_record_type,
+      redaction_policy: normalizeJson(profile.audit.redaction_policy_text),
+      max_body_size: Number(profile.audit.max_body_size || 262144),
+      ip_allowlist: normalizeList(profile.audit.ip_allowlist_text),
+      log_level: profile.audit.log_level
+    }
+  };
+}
+
+function validateProfile(profile) {
+  const errors = [];
+  if (!profile.identity.connection_name) errors.push("Connection name is required");
+  if (!profile.identity.connection_code) errors.push("Connection code is required");
+  if (["website", "ecommerce"].includes(profile.identity.connection_kind) && profile.identity.direction !== "outbound" && !profile.identity.frontend_url) {
+    errors.push("Frontend URL is required for website/e-commerce connections");
+  }
+  if (profile.identity.direction !== "outbound") {
+    if (!profile.inbound.inbound_path_suffix) errors.push("Inbound path suffix is required");
+    if (!profile.inbound.origin_allowlist_text) errors.push("Origin allowlist is required for inbound connections");
+  }
+  if (profile.identity.direction !== "inbound" && !profile.outbound.base_url) {
+    errors.push("Outbound base URL is required for outbound/both connections");
+  }
+  if (profile.verification.mode === "api_key") {
+    if (!profile.verification.api_key.header_name) errors.push("API key header name is required");
+    if (!profile.verification.api_key.secret && !profile.verification.api_key.secret_set) errors.push("API key secret is required");
+  }
+  if (profile.verification.mode === "none" && profile.identity.environment !== "sandbox") {
+    errors.push("Verification is required for production connections");
+  }
+  if (!profile.idempotency.event_id_location) errors.push("Idempotency location is required");
+  if (!profile.idempotency.event_id_key) errors.push("Idempotency key is required");
+  if (!profile.routing.channel) errors.push("Routing channel is required");
+  if (!profile.routing.schema_version) errors.push("Schema version is required");
+  if (!profile.routing.envelope_profile) errors.push("Envelope profile is required");
+  if (!profile.audit.audit_record_type) errors.push("Audit record type is required");
+  return errors;
+}
+
+function friendlyError(err, fallback) {
+  const message = err?.message || "";
+  const match = message.match(/API \d+: (.*)$/);
+  if (match) {
+    try {
+      const payload = JSON.parse(match[1]);
+      const code = payload?.error;
+      const map = {
+        STEP_UP_REQUIRED: "Step-up required. Verify using OTP/TOTP/passkey, then try again.",
+        FORBIDDEN: "You do not have permission for this action.",
+        TENANT_NOT_FOUND: "Tenant not found.",
+        CONNECTION_NOT_FOUND: "Connection not found.",
+        DUPLICATE_SUFFIX: "Inbound path suffix already in use.",
+        VALIDATION_ERROR: "Validation failed. Review required fields.",
+        ORIGIN_NOT_ALLOWED: "Origin not allowed for this connection."
+      };
+      return map[code] || code || fallback;
+    } catch {
+      return message;
+    }
+  }
+  return message || fallback;
+}
+
+export default function AdminConnectionsPanelSafe() {
+  const [items, setItems] = useState([]);
+  const [detail, setDetail] = useState(null);
+  const [selectedTenantId, setSelectedTenantId] = useState(null);
+  const [connections, setConnections] = useState([buildProfile("conn-1")]);
+  const [selectedConnectionId, setSelectedConnectionId] = useState(null);
+  const [activeStep, setActiveStep] = useState("identity");
+  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [testing, setTesting] = useState(null);
+  const [testResult, setTestResult] = useState(null);
+  const [error, setError] = useState(null);
+  const [rawKey, setRawKey] = useState(null);
+  const [rawKeyMeta, setRawKeyMeta] = useState(null);
+  const [miniModalRequest, setMiniModalRequest] = useState(null);
+
+  const selectedTenant = items.find((item) => item.id === selectedTenantId) || detail?.tenant || null;
+  const selectedConnection = connections.find((item) => item.id === selectedConnectionId) || connections[0] || null;
+  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
+  const inboundUrls = selectedConnection?.inbound?.inbound_path_suffix
+    ? {
+        storefront: `${apiBaseUrl}/api/public/commerce/${selectedConnection.inbound.inbound_path_suffix}`,
+        public: `${apiBaseUrl}/api/public/gateway/intake/${selectedConnection.inbound.inbound_path_suffix}`,
+        edi: `${apiBaseUrl}/api/edi/gateway/webhook/${selectedConnection.inbound.inbound_path_suffix}`
+      }
+    : null;
+
+  const visibleSteps = useMemo(() => {
+    const base = [
+      { id: "identity", label: "Identity" },
+      { id: "inbound", label: "Inbound" },
+      { id: "verification", label: "Security" },
+      { id: "idempotency", label: "Idempotency" },
+      { id: "routing", label: "Routing" },
+      { id: "audit", label: "Audit" }
+    ];
+    if (selectedConnection?.identity?.direction !== "inbound") {
+      base.splice(2, 0, { id: "outbound", label: "Outbound" });
+    }
+    return base;
+  }, [selectedConnection?.identity?.direction]);
+
+  useEffect(() => {
+    let active = true;
+    async function loadTenants() {
+      try {
+        setLoading(true);
+        const list = await apiFetch("/api/eip/gateway/connections");
+        if (!active) return;
+        setItems(list.items || []);
+        if (!selectedTenantId && list.items?.length) setSelectedTenantId(list.items[0].id);
+      } catch (err) {
+        if (active) setError(friendlyError(err, "Failed to load tenants"));
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+    loadTenants();
+    return () => { active = false; };
+  }, [selectedTenantId]);
+
+  useEffect(() => {
+    let active = true;
+    async function loadDetail() {
+      if (!selectedTenantId) return;
+      try {
+        setLoading(true);
+        const result = await apiFetch(`/api/eip/gateway/connections/${selectedTenantId}`);
+        if (!active) return;
+        setDetail(result);
+        const list = Array.isArray(result.connections) && result.connections.length ? result.connections.map(fromApiProfile) : [buildProfile("conn-1")];
+        setConnections(list);
+        setSelectedConnectionId(list[0]?.id || null);
+        setRawKey(null);
+        setRawKeyMeta(null);
+      } catch (err) {
+        if (active) setError(friendlyError(err, "Failed to load tenant profile"));
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+    loadDetail();
+    return () => { active = false; };
+  }, [selectedTenantId]);
+
+  const refreshDetail = async ({ clearRaw = false } = {}) => {
+    if (!selectedTenantId) return null;
+    const result = await apiFetch(`/api/eip/gateway/connections/${selectedTenantId}`);
+    setDetail(result);
+    if (clearRaw) {
+      setRawKey(null);
+      setRawKeyMeta(null);
+    }
+    return result;
+  };
+
+  const requestConfirm = ({ title, message, confirmLabel = "Confirm", confirmTone = "default" }) => new Promise((resolve) => {
+    setMiniModalRequest({ title, message, confirmLabel, confirmTone, resolve });
+  });
+
+  const closeMiniModal = (confirmed) => {
+    if (miniModalRequest?.resolve) miniModalRequest.resolve(Boolean(confirmed));
+    setMiniModalRequest(null);
+  };
+
+  const updateSection = (section, patch) => {
+    if (!selectedConnection) return;
+    setConnections((prev) => prev.map((item) => item.id === selectedConnection.id ? { ...item, [section]: { ...item[section], ...patch } } : item));
+  };
+
+  const updateNested = (section, key, patch) => {
+    if (!selectedConnection) return;
+    setConnections((prev) => prev.map((item) => item.id === selectedConnection.id ? { ...item, [section]: { ...item[section], [key]: { ...item[section][key], ...patch } } } : item));
+  };
+
+  const buildUniqueCode = (name, currentId, avoidCode = null) => {
+    const base = slugifyCode(name);
+    const exists = (code) => connections.some((conn) => conn.id !== currentId && conn.identity?.connection_code === code);
+    let candidate = base;
+    let idx = 2;
+    if (avoidCode && candidate === avoidCode) candidate = `${base}-${idx++}`;
+    while (exists(candidate) || (avoidCode && candidate === avoidCode)) candidate = `${base}-${idx++}`;
+    return candidate;
+  };
+
+  const handleConnectionNameChange = (event) => {
+    if (!selectedConnection) return;
+    const nextName = event.target.value;
+    setConnections((prev) => prev.map((item) => {
+      if (item.id !== selectedConnection.id) return item;
+      return {
+        ...item,
+        identity: {
+          ...item.identity,
+          connection_name: nextName,
+          connection_code: nextName ? item.identity.connection_code || buildUniqueCode(nextName, item.id) : ""
+        }
+      };
+    }));
+  };
+
+  const handleAddConnection = () => {
+    const next = buildProfile(`conn-${Date.now()}`);
+    setConnections((prev) => [...prev, next]);
+    setSelectedConnectionId(next.id);
+    setActiveStep("identity");
+  };
+
+  const handleRemoveConnection = (id) => {
+    setConnections((prev) => prev.filter((item) => item.id !== id));
+    if (selectedConnectionId === id) setSelectedConnectionId(connections[0]?.id || null);
+  };
+
+  const handleSaveProfile = async () => {
+    if (!selectedTenantId) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const validations = connections.flatMap(validateProfile);
+      if (validations.length) {
+        setError(validations[0]);
+        return;
+      }
+      const result = await apiFetch(`/api/eip/gateway/connections/${selectedTenantId}/profile`, {
+        method: "POST",
+        body: { connections: connections.map(toApiProfile) }
+      });
+      const list = Array.isArray(result.connections) && result.connections.length ? result.connections.map(fromApiProfile) : [buildProfile("conn-1")];
+      setConnections(list);
+      setSelectedConnectionId(list[0]?.id || null);
+      setRawKey(null);
+      setRawKeyMeta(null);
+      await refreshDetail({ clearRaw: true });
+    } catch (err) {
+      setError(friendlyError(err, "Failed to save profile"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCreateKey = async () => {
+    if (!selectedTenantId) return;
+    setError(null);
+    try {
+      const result = await apiFetch(`/api/eip/gateway/connections/${selectedTenantId}/api-keys`, {
+        method: "POST",
+        body: { label: "plug-play", set_primary: true }
+      });
+      setRawKey(result.raw_key || null);
+      setRawKeyMeta({ action: "created", id: result.api_key?.id || null, label: result.api_key?.label || "plug-play" });
+      await refreshDetail({ clearRaw: false });
+    } catch (err) {
+      setError(friendlyError(err, "Failed to create API key"));
+    }
+  };
+
+  const handleRotateKey = async (keyId) => {
+    if (!selectedTenantId || !keyId) return;
+    const confirmed = await requestConfirm({ title: "Rotate API key", message: "Rotate this API key? The old key will be revoked.", confirmLabel: "Rotate", confirmTone: "danger" });
+    if (!confirmed) return;
+    setError(null);
+    try {
+      const result = await apiFetch(`/api/eip/gateway/connections/${selectedTenantId}/api-keys/${keyId}/rotate`, {
+        method: "POST",
+        body: { label: "plug-play" }
+      });
+      setRawKey(result.raw_key || null);
+      setRawKeyMeta({ action: "rotated", id: result.api_key?.id || null, label: result.api_key?.label || "plug-play" });
+      await refreshDetail({ clearRaw: false });
+    } catch (err) {
+      setError(friendlyError(err, "Failed to rotate API key"));
+    }
+  };
+
+  const handleRevokeKey = async (keyId) => {
+    if (!selectedTenantId || !keyId) return;
+    const confirmed = await requestConfirm({ title: "Revoke API key", message: "Revoke this API key? This cannot be undone.", confirmLabel: "Revoke", confirmTone: "danger" });
+    if (!confirmed) return;
+    setError(null);
+    try {
+      await apiFetch(`/api/eip/gateway/connections/${selectedTenantId}/api-keys/${keyId}/revoke`, { method: "POST" });
+      setRawKey(null);
+      setRawKeyMeta(null);
+      await refreshDetail({ clearRaw: true });
+    } catch (err) {
+      setError(friendlyError(err, "Failed to revoke API key"));
+    }
+  };
+
+  const handleCopyRawKey = async () => {
+    if (!rawKey) return;
+    try {
+      await navigator.clipboard?.writeText?.(rawKey);
+      setRawKeyMeta((prev) => ({ ...(prev || {}), copied: true }));
+    } catch {
+      setError("Could not copy the API key automatically. Select and copy it manually now.");
+    }
+  };
+
+  const handleTest = async (type) => {
+    if (!selectedTenantId || !selectedConnection) return;
+    setTesting(type);
+    setError(null);
+    setTestResult(null);
+    try {
+      const result = await apiFetch(`/api/eip/gateway/connections/${selectedTenantId}/test/${type}`, {
+        method: "POST",
+        body: { connection_code: selectedConnection.identity.connection_code }
+      });
+      setTestResult({ tone: result.ok ? "success" : "error", text: `${type === "outbound" ? "Outbound" : "Inbound"} test ${result.ok ? "passed" : "failed"} (HTTP ${result.status}).` });
+    } catch (err) {
+      setError(friendlyError(err, "Failed to test connection"));
+    } finally {
+      setTesting(null);
+    }
+  };
+
+  const apiKeys = detail?.api_keys || [];
+
+  return (
+    <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
+      <div className="glass-panel rounded-2xl p-4">
+        <h3 className="text-sm font-semibold text-ink-900">Tenants</h3>
+        <div className="mt-3 space-y-2">
+          {items.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => setSelectedTenantId(item.id)}
+              className={`w-full rounded-2xl border px-3 py-3 text-left text-sm ${item.id === selectedTenantId ? "border-ink-900/10 bg-white shadow-soft" : "border-white/60 bg-white/70 text-ink-500 hover:bg-white"}`}
+            >
+              <p className="font-semibold text-ink-900">{item.name}</p>
+              <p className="text-xs uppercase tracking-[0.25em] text-ink-400">{item.code}</p>
+              <p className="mt-2 text-xs text-ink-500">{item.connection_count || 0} connection{item.connection_count === 1 ? "" : "s"}</p>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="space-y-5">
+        <div className="glass-panel rounded-2xl p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-xs uppercase tracking-[0.3em] text-ink-400">Gateway Connection Profiles</p>
+              <h3 className="text-base font-semibold text-ink-900">{selectedTenant?.name || "Select tenant"}</h3>
+              <p className="text-xs text-ink-500">{selectedTenant?.code}</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="button" onClick={() => refreshDetail({ clearRaw: true })} className="rounded-full border border-ink-200/70 bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-ink-600">
+                <RefreshCw className="mr-1 inline h-4 w-4" />Refresh
+              </button>
+              <button type="button" onClick={handleAddConnection} className="rounded-full border border-ink-200/70 bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-ink-600">
+                <Plus className="mr-1 inline h-4 w-4" />Add
+              </button>
+              <button type="button" onClick={handleSaveProfile} disabled={saving || !selectedTenantId} className="rounded-full bg-ink-900 px-4 py-2 text-xs font-semibold uppercase tracking-[0.25em] text-white shadow-glow disabled:opacity-60">
+                {saving ? "Saving..." : "Save"}
+              </button>
+            </div>
+          </div>
+
+          {loading ? <Notice>Loading...</Notice> : null}
+          {error ? <Notice tone="error">{error}</Notice> : null}
+          {testResult ? <Notice tone={testResult.tone}>{testResult.text}</Notice> : null}
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            {connections.map((conn) => (
+              <button key={conn.id} type="button" onClick={() => setSelectedConnectionId(conn.id)} className={`rounded-xl border px-3 py-2 text-left text-[0.7rem] ${conn.id === selectedConnection?.id ? "border-ink-900/10 bg-white shadow-soft" : "border-white/60 bg-white/70 text-ink-500"}`}>
+                <p className="font-semibold text-ink-900">{conn.identity.connection_name || "New connection"}</p>
+                <p className="uppercase tracking-[0.2em] text-ink-400">{conn.identity.connection_code || "auto-generated"}</p>
+                <p className="mt-1 text-[0.6rem] uppercase tracking-[0.2em] text-ink-400">{conn.identity.connection_kind || "custom"}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {selectedConnection ? (
+          <div className="glass-panel rounded-2xl p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-[0.3em] text-ink-400">Connection</p>
+                <h3 className="text-base font-semibold text-ink-900">{selectedConnection.identity.connection_name || "Untitled"}</h3>
+                <p className="text-xs text-ink-500">{selectedConnection.identity.connection_code || "auto-generated"}</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button type="button" onClick={() => handleRemoveConnection(selectedConnection.id)} className="rounded-full border border-rose-200 bg-rose-50 px-3 py-2 text-[0.6rem] uppercase tracking-[0.2em] text-rose-500"><Trash2 className="mr-1 inline h-3 w-3" />Remove</button>
+                <button type="button" onClick={() => handleTest("inbound")} disabled={Boolean(testing)} className="rounded-full border border-ink-200/70 bg-white px-3 py-2 text-[0.6rem] uppercase tracking-[0.2em] text-ink-600">{testing === "inbound" ? "Testing..." : "Test inbound"}</button>
+                {selectedConnection.identity.direction !== "inbound" ? <button type="button" onClick={() => handleTest("outbound")} disabled={Boolean(testing)} className="rounded-full border border-ink-200/70 bg-white px-3 py-2 text-[0.6rem] uppercase tracking-[0.2em] text-ink-600">{testing === "outbound" ? "Testing..." : "Test outbound"}</button> : null}
+              </div>
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              {visibleSteps.map((step) => <TabButton key={step.id} active={activeStep === step.id} onClick={() => setActiveStep(step.id)}>{step.label}</TabButton>)}
+            </div>
+
+            {activeStep === "identity" ? (
+              <Grid>
+                <Field label="Connection name"><input value={selectedConnection.identity.connection_name} onChange={handleConnectionNameChange} className={inputClass} /></Field>
+                <Field label="Connection code"><input value={selectedConnection.identity.connection_code} readOnly placeholder="auto-generated" className={`${inputClass} bg-slate-50 text-ink-600`} /></Field>
+                <Field label="Connection kind"><select value={selectedConnection.identity.connection_kind} onChange={(e) => updateSection("identity", { connection_kind: e.target.value })} className={inputClass}>{KIND_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>
+                <Field label="Direction"><select value={selectedConnection.identity.direction} onChange={(e) => updateSection("identity", { direction: e.target.value })} className={inputClass}>{DIRECTION_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>
+                <Field label="Environment"><select value={selectedConnection.identity.environment} onChange={(e) => updateSection("identity", { environment: e.target.value })} className={inputClass}>{ENV_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>
+                <Field label="Frontend URL"><input value={selectedConnection.identity.frontend_url} onChange={(e) => { updateSection("identity", { frontend_url: e.target.value }); if (!selectedConnection.inbound.origin_allowlist_text) updateSection("inbound", { origin_allowlist_text: e.target.value }); }} placeholder="https://samara-web.up.railway.app" className={inputClass} /></Field>
+                <Field label="Portal URL"><input value={selectedConnection.identity.portal_url} onChange={(e) => updateSection("identity", { portal_url: e.target.value })} className={inputClass} /></Field>
+                <label className="flex items-center gap-2 text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink-400"><input type="checkbox" checked={selectedConnection.identity.is_enabled} onChange={(e) => updateSection("identity", { is_enabled: e.target.checked })} />Enabled</label>
+              </Grid>
+            ) : null}
+
+            {activeStep === "inbound" ? (
+              <div className="mt-4 space-y-4">
+                <Grid>
+                  <Field label="Path suffix"><input value={selectedConnection.inbound.inbound_path_suffix} onChange={(e) => updateSection("inbound", { inbound_path_suffix: e.target.value })} placeholder="samara" className={inputClass} /></Field>
+                  <Field label="HTTP method"><select value={selectedConnection.inbound.http_method} onChange={(e) => updateSection("inbound", { http_method: e.target.value })} className={inputClass}>{HTTP_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}</select></Field>
+                  <Field label="Expected content type"><input value={selectedConnection.inbound.expected_content_type} onChange={(e) => updateSection("inbound", { expected_content_type: e.target.value })} className={inputClass} /></Field>
+                  <Field label="Rate limit max"><input type="number" value={selectedConnection.inbound.rate_limit_max} onChange={(e) => updateSection("inbound", { rate_limit_max: e.target.value })} className={inputClass} /></Field>
+                  <Field label="Rate limit window sec"><input type="number" value={selectedConnection.inbound.rate_limit_window_sec} onChange={(e) => updateSection("inbound", { rate_limit_window_sec: e.target.value })} className={inputClass} /></Field>
+                </Grid>
+                <Field label="Origin allowlist"><textarea value={selectedConnection.inbound.origin_allowlist_text} onChange={(e) => updateSection("inbound", { origin_allowlist_text: e.target.value })} placeholder="https://samara-web.up.railway.app" className={`${inputClass} min-h-[80px]`} /></Field>
+                {inboundUrls ? <EndpointGrid urls={inboundUrls} /> : null}
+              </div>
+            ) : null}
+
+            {activeStep === "verification" ? (
+              <div className="mt-4 space-y-4">
+                <Grid>
+                  <Field label="Verification mode"><select value={selectedConnection.verification.mode} onChange={(e) => updateSection("verification", { mode: e.target.value })} className={inputClass}>{VERIFICATION_MODES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>
+                  <label className="flex items-center gap-2 rounded-lg border border-ink-200/70 bg-white px-3 py-2 text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink-400"><input type="checkbox" checked={selectedConnection.verification.allow_unverified} onChange={(e) => updateSection("verification", { allow_unverified: e.target.checked })} />Allow unverified (sandbox only)</label>
+                </Grid>
+
+                {selectedConnection.verification.mode === "api_key" ? (
+                  <Grid>
+                    <Field label="API key header name"><input value={selectedConnection.verification.api_key.header_name} onChange={(e) => updateNested("verification", "api_key", { header_name: e.target.value })} placeholder="X-API-Key" className={inputClass} /></Field>
+                    <SecretField
+                      label="API key secret"
+                      value={selectedConnection.verification.api_key.secret}
+                      stored={selectedConnection.verification.api_key.secret_set}
+                      onChange={(value) => updateNested("verification", "api_key", { secret: value })}
+                    />
+                  </Grid>
+                ) : null}
+
+                {selectedConnection.verification.mode === "hmac_signature" ? (
+                  <Grid>
+                    <Field label="Signature header"><input value={selectedConnection.verification.hmac_signature.header_name} onChange={(e) => updateNested("verification", "hmac_signature", { header_name: e.target.value })} className={inputClass} /></Field>
+                    <Field label="Timestamp header"><input value={selectedConnection.verification.hmac_signature.timestamp_header} onChange={(e) => updateNested("verification", "hmac_signature", { timestamp_header: e.target.value })} className={inputClass} /></Field>
+                    <SecretField label="HMAC secret" value={selectedConnection.verification.hmac_signature.secret} stored={selectedConnection.verification.hmac_signature.secret_set} onChange={(value) => updateNested("verification", "hmac_signature", { secret: value })} />
+                  </Grid>
+                ) : null}
+
+                {selectedConnection.verification.mode === "oauth2_jwt" ? (
+                  <Grid>
+                    <Field label="Header name"><input value={selectedConnection.verification.oauth2_jwt.header_name} onChange={(e) => updateNested("verification", "oauth2_jwt", { header_name: e.target.value })} className={inputClass} /></Field>
+                    <Field label="Token prefix"><input value={selectedConnection.verification.oauth2_jwt.token_prefix} onChange={(e) => updateNested("verification", "oauth2_jwt", { token_prefix: e.target.value })} className={inputClass} /></Field>
+                    <Field label="Issuer"><input value={selectedConnection.verification.oauth2_jwt.issuer} onChange={(e) => updateNested("verification", "oauth2_jwt", { issuer: e.target.value })} className={inputClass} /></Field>
+                    <Field label="Audience"><input value={selectedConnection.verification.oauth2_jwt.audience} onChange={(e) => updateNested("verification", "oauth2_jwt", { audience: e.target.value })} className={inputClass} /></Field>
+                    <Field label="JWKS URL"><input value={selectedConnection.verification.oauth2_jwt.jwks_url} onChange={(e) => updateNested("verification", "oauth2_jwt", { jwks_url: e.target.value })} className={inputClass} /></Field>
+                    <SecretField label="Shared secret optional" value={selectedConnection.verification.oauth2_jwt.secret} stored={selectedConnection.verification.oauth2_jwt.secret_set} onChange={(value) => updateNested("verification", "oauth2_jwt", { secret: value })} />
+                  </Grid>
+                ) : null}
+              </div>
+            ) : null}
+
+            {activeStep === "outbound" ? (
+              <Grid>
+                <Field label="Base URL"><input value={selectedConnection.outbound.base_url} onChange={(e) => updateSection("outbound", { base_url: e.target.value })} className={inputClass} /></Field>
+                <Field label="Path prefix"><input value={selectedConnection.outbound.path_prefix} onChange={(e) => updateSection("outbound", { path_prefix: e.target.value })} className={inputClass} /></Field>
+                <Field label="Auth mode"><input value={selectedConnection.outbound.auth_mode} onChange={(e) => updateSection("outbound", { auth_mode: e.target.value })} className={inputClass} /></Field>
+                <Field label="Healthcheck path"><input value={selectedConnection.outbound.healthcheck_path} onChange={(e) => updateSection("outbound", { healthcheck_path: e.target.value })} className={inputClass} /></Field>
+              </Grid>
+            ) : null}
+
+            {activeStep === "idempotency" ? (
+              <Grid>
+                <Field label="Event ID location"><input value={selectedConnection.idempotency.event_id_location} onChange={(e) => updateSection("idempotency", { event_id_location: e.target.value })} className={inputClass} /></Field>
+                <Field label="Event ID key"><input value={selectedConnection.idempotency.event_id_key} onChange={(e) => updateSection("idempotency", { event_id_key: e.target.value })} className={inputClass} /></Field>
+                <Field label="Idempotency scope"><input value={selectedConnection.idempotency.idempotency_scope} onChange={(e) => updateSection("idempotency", { idempotency_scope: e.target.value })} className={inputClass} /></Field>
+              </Grid>
+            ) : null}
+
+            {activeStep === "routing" ? (
+              <Grid>
+                <Field label="Channel"><select value={selectedConnection.routing.channel} onChange={(e) => updateSection("routing", { channel: e.target.value })} className={inputClass}>{CHANNEL_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>
+                <Field label="Protocol"><input value={selectedConnection.routing.protocol} onChange={(e) => updateSection("routing", { protocol: e.target.value })} className={inputClass} /></Field>
+                <Field label="Schema version"><input value={selectedConnection.routing.schema_version} onChange={(e) => updateSection("routing", { schema_version: e.target.value })} className={inputClass} /></Field>
+                <Field label="Envelope profile"><input value={selectedConnection.routing.envelope_profile} onChange={(e) => updateSection("routing", { envelope_profile: e.target.value })} className={inputClass} /></Field>
+                <Field label="Mapping mode"><select value={selectedConnection.routing.mapping_mode} onChange={(e) => updateSection("routing", { mapping_mode: e.target.value })} className={inputClass}>{MAPPING_MODES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>
+                <Field label="Supported message types"><textarea value={selectedConnection.routing.supported_message_types_text} onChange={(e) => updateSection("routing", { supported_message_types_text: e.target.value })} className={`${inputClass} min-h-[70px]`} /></Field>
+              </Grid>
+            ) : null}
+
+            {activeStep === "audit" ? (
+              <Grid>
+                <Field label="Audit record type"><input value={selectedConnection.audit.audit_record_type} onChange={(e) => updateSection("audit", { audit_record_type: e.target.value })} className={inputClass} /></Field>
+                <Field label="Max body size"><input type="number" value={selectedConnection.audit.max_body_size} onChange={(e) => updateSection("audit", { max_body_size: Number(e.target.value) })} className={inputClass} /></Field>
+                <Field label="Log level"><select value={selectedConnection.audit.log_level} onChange={(e) => updateSection("audit", { log_level: e.target.value })} className={inputClass}>{LOG_LEVELS.map((level) => <option key={level} value={level}>{level}</option>)}</select></Field>
+                <Field label="IP allowlist"><textarea value={selectedConnection.audit.ip_allowlist_text} onChange={(e) => updateSection("audit", { ip_allowlist_text: e.target.value })} className={`${inputClass} min-h-[70px]`} /></Field>
+              </Grid>
+            ) : null}
+          </div>
+        ) : null}
+
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div className="glass-panel rounded-2xl p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-semibold text-ink-900">API Keys</h3>
+                <p className="mt-1 text-xs text-ink-500">Raw keys are displayed once only. Saved keys show safe status metadata.</p>
+              </div>
+              <button type="button" onClick={handleCreateKey} className="rounded-full bg-ink-900 px-3 py-1 text-xs font-semibold uppercase tracking-[0.25em] text-white shadow-glow">New key</button>
+            </div>
+
+            {rawKey ? (
+              <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold uppercase tracking-[0.2em]">One-time raw key</p>
+                    <p className="mt-1">Copy it into Samara now. It will be hidden after you copy/hide, refresh, or save.</p>
+                    <p className="mt-2 break-all rounded-xl bg-white/80 px-3 py-2 font-mono text-[0.72rem] text-ink-800">{rawKey}</p>
+                    {rawKeyMeta?.copied ? <p className="mt-2 text-emerald-700">Copied. You can now hide it safely.</p> : null}
+                  </div>
+                  <div className="flex shrink-0 flex-col gap-2">
+                    <button type="button" onClick={handleCopyRawKey} className="rounded-full border border-amber-200 bg-white px-3 py-1 text-[0.6rem] font-semibold uppercase tracking-[0.2em]"><Clipboard className="mr-1 inline h-3 w-3" />Copy</button>
+                    <button type="button" onClick={() => { setRawKey(null); setRawKeyMeta(null); }} className="rounded-full border border-ink-200 bg-white px-3 py-1 text-[0.6rem] font-semibold uppercase tracking-[0.2em]"><EyeOff className="mr-1 inline h-3 w-3" />Hide</button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            <div className="mt-3 space-y-2 text-xs text-ink-600">
+              {apiKeys.length === 0 ? <Notice>No API keys yet.</Notice> : null}
+              {apiKeys.map((key) => (
+                <div key={key.id} className="rounded-2xl border border-white/60 bg-white/80 px-3 py-3">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="font-semibold text-ink-900">{key.label || "API key"}</p>
+                      <p className="text-[0.65rem] text-ink-400">ID: {key.id}</p>
+                      <div className="mt-2 flex flex-wrap gap-2 text-[0.6rem] uppercase tracking-[0.18em]">
+                        <StatusPill ok={Boolean(key.is_active)}>{key.is_active ? "Active" : "Revoked"}</StatusPill>
+                        <StatusPill ok>Stored server-side</StatusPill>
+                        <StatusPill ok={Boolean(key.expires_at)}>{key.expires_at ? `Expires ${formatDate(key.expires_at)}` : "No expiry"}</StatusPill>
+                      </div>
+                      <p className="mt-2 text-[0.65rem] text-ink-400">Created: {formatDate(key.created_at)}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {key.is_active ? (
+                        <>
+                          <button type="button" onClick={() => handleRotateKey(key.id)} className="rounded-full border border-ink-200/60 bg-white px-2 py-1 text-[0.6rem] uppercase tracking-[0.2em] text-ink-500 hover:text-ink-900">Rotate</button>
+                          <button type="button" onClick={() => handleRevokeKey(key.id)} className="rounded-full border border-rose-200 bg-rose-50 px-2 py-1 text-[0.6rem] uppercase tracking-[0.2em] text-rose-500 hover:text-rose-700">Revoke</button>
+                        </>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="glass-panel rounded-2xl p-4">
+            <h3 className="text-sm font-semibold text-ink-900">Connection Health</h3>
+            <div className="mt-3 grid gap-2 text-xs text-ink-600">
+              <HealthRow label="Last 24h handshakes" value={detail?.health?.last_24h ?? 0} />
+              <HealthRow label="Last 7d handshakes" value={detail?.health?.last_7d ?? 0} />
+              <HealthRow label="Last seen" value={detail?.health?.last_seen ? formatDate(detail.health.last_seen) : "?"} />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <ActionMiniModal
+        open={Boolean(miniModalRequest)}
+        mode="confirm"
+        title={miniModalRequest?.title || "Confirm action"}
+        message={miniModalRequest?.message || ""}
+        confirmLabel={miniModalRequest?.confirmLabel || "Confirm"}
+        cancelLabel="Cancel"
+        confirmTone={miniModalRequest?.confirmTone || "default"}
+        onCancel={() => closeMiniModal(false)}
+        onConfirm={() => closeMiniModal(true)}
+      />
+    </div>
+  );
+}
+
+const inputClass = "w-full rounded-lg border border-ink-200/70 bg-white px-3 py-2 text-xs";
+
+function Grid({ children }) {
+  return <div className="mt-4 grid gap-4 md:grid-cols-2">{children}</div>;
+}
+
+function Field({ label, children }) {
+  return (
+    <label className="text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink-400">
+      <span className="mb-1 block">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function SecretField({ label, value, stored, onChange }) {
+  return (
+    <label className="text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink-400">
+      <span className="mb-1 flex items-center justify-between gap-2">
+        <span>{label}</span>
+        {stored ? <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[0.55rem] text-emerald-700"><ShieldCheck className="h-3 w-3" />Stored</span> : <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[0.55rem] text-amber-700">Not stored</span>}
+      </span>
+      <input
+        type="password"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={stored ? "Stored secret hidden — enter a new value only to rotate" : "Enter secret"}
+        className={inputClass}
+      />
+      <span className="mt-1 block text-[0.55rem] normal-case tracking-normal text-ink-400">
+        {stored ? "Saved securely on the server. The raw value is not displayed again." : "Secret will be vaulted on save."}
+      </span>
+    </label>
+  );
+}
+
+function EndpointGrid({ urls }) {
+  return (
+    <div className="grid gap-3 md:grid-cols-3">
+      {Object.entries(urls).map(([label, url]) => (
+        <div key={label} className="rounded-xl border border-ink-200/70 bg-white px-3 py-2 text-xs">
+          <p className="text-[0.65rem] uppercase tracking-[0.2em] text-ink-400">{label} endpoint</p>
+          <div className="mt-1 flex items-center justify-between gap-2">
+            <span className="truncate text-ink-700">{url}</span>
+            <button type="button" onClick={() => navigator.clipboard?.writeText?.(url)} className="rounded-full border border-ink-200/70 px-2 py-1 text-[0.6rem] uppercase tracking-[0.2em]"><Copy className="mr-1 inline h-3 w-3" />Copy</button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function StatusPill({ ok, children }) {
+  return <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 ${ok ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-600"}`}>{ok ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}{children}</span>;
+}
+
+function HealthRow({ label, value }) {
+  return <div className="flex items-center justify-between rounded-xl border border-white/60 bg-white/80 px-3 py-2"><span>{label}</span><span className="font-semibold">{value}</span></div>;
+}
+
+function Notice({ children, tone = "neutral" }) {
+  const cls = tone === "error" ? "border-rose-200 bg-rose-50 text-rose-600" : tone === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-ink-200/60 bg-white/70 text-ink-500";
+  return <div className={`mt-3 rounded-2xl border px-4 py-3 text-xs ${cls}`}>{children}</div>;
+}
+
+function TabButton({ active, onClick, children }) {
+  return <button type="button" onClick={onClick} className={`rounded-full px-3 py-1 text-[0.65rem] uppercase tracking-[0.2em] ${active ? "bg-ink-900 text-white" : "border border-ink-200/70 bg-white text-ink-500"}`}>{children}</button>;
+}
