@@ -1,0 +1,182 @@
+{
+  "schema_version": "v1",
+  "site": "samara",
+  "description": "Samara storefront structure manifest for EIP storefront structure scanning.",
+  "zones": [
+    {
+      "tag": "home.hero",
+      "page": "home",
+      "label": "Home hero",
+      "renderer_type": "hero",
+      "occurrences": 1
+    },
+    {
+      "tag": "home.drop",
+      "page": "home",
+      "label": "Featured collection drop",
+      "renderer_type": "feature",
+      "occurrences": 1
+    },
+    {
+      "tag": "home.worth",
+      "page": "home",
+      "label": "Worth making pattern carousel",
+      "renderer_type": "product_grid",
+      "occurrences": 1
+    },
+    {
+      "tag": "home.process",
+      "page": "home",
+      "label": "Process section",
+      "renderer_type": "steps",
+      "occurrences": 1
+    },
+    {
+      "tag": "home.community",
+      "page": "home",
+      "label": "Community signup section",
+      "renderer_type": "article",
+      "occurrences": 1
+    },
+    {
+      "tag": "patterns.hero",
+      "page": "patterns",
+      "label": "Pattern listing hero",
+      "renderer_type": "hero",
+      "occurrences": 1
+    },
+    {
+      "tag": "patterns.filters",
+      "page": "patterns",
+      "label": "Pattern filters",
+      "renderer_type": "filters",
+      "occurrences": 1
+    },
+    {
+      "tag": "patterns.grid",
+      "page": "patterns",
+      "label": "Pattern product grid",
+      "renderer_type": "product_grid",
+      "occurrences": 1
+    },
+    {
+      "tag": "product.detail",
+      "page": "product",
+      "label": "Product detail page",
+      "renderer_type": "product_detail",
+      "occurrences": 1
+    },
+    {
+      "tag": "pages.hero",
+      "page": "pages",
+      "label": "Pages hero",
+      "renderer_type": "hero",
+      "occurrences": 1
+    },
+    {
+      "tag": "pages.cards",
+      "page": "pages",
+      "label": "Pages cards",
+      "renderer_type": "cards",
+      "occurrences": 1
+    },
+    {
+      "tag": "sizes.hero",
+      "page": "sizes",
+      "label": "Size guide hero",
+      "renderer_type": "hero",
+      "occurrences": 1
+    },
+    {
+      "tag": "sizes.measurements",
+      "page": "sizes",
+      "label": "Interactive measurement guide",
+      "renderer_type": "interactive_guide",
+      "occurrences": 1
+    },
+    {
+      "tag": "blog.hero",
+      "page": "blog",
+      "label": "Blog hero",
+      "renderer_type": "hero",
+      "occurrences": 1
+    },
+    {
+      "tag": "blog.list",
+      "page": "blog",
+      "label": "Blog article list",
+      "renderer_type": "article_list",
+      "occurrences": 1
+    },
+    {
+      "tag": "line.hero",
+      "page": "line",
+      "label": "Line overview hero",
+      "renderer_type": "hero",
+      "occurrences": 1
+    },
+    {
+      "tag": "line.cards",
+      "page": "line",
+      "label": "Line cards",
+      "renderer_type": "cards",
+      "occurrences": 1
+    },
+    {
+      "tag": "learning.hero",
+      "page": "learning",
+      "label": "Learning hero",
+      "renderer_type": "hero",
+      "occurrences": 1
+    },
+    {
+      "tag": "learning.cards",
+      "page": "learning",
+      "label": "Learning cards",
+      "renderer_type": "cards",
+      "occurrences": 1
+    },
+    {
+      "tag": "collab.hero",
+      "page": "collab",
+      "label": "Collaboration hero",
+      "renderer_type": "hero",
+      "occurrences": 1
+    },
+    {
+      "tag": "collab.cards",
+      "page": "collab",
+      "label": "Collaboration cards",
+      "renderer_type": "cards",
+      "occurrences": 1
+    },
+    {
+      "tag": "global.nav",
+      "page": "global",
+      "label": "Global navigation",
+      "renderer_type": "navigation",
+      "occurrences": 1
+    },
+    {
+      "tag": "global.footer",
+      "page": "global",
+      "label": "Global footer",
+      "renderer_type": "footer",
+      "occurrences": 1
+    }
+  ],
+  "nodes": [
+    { "tag": "global.nav", "page": "global", "file": "src/App.jsx", "line": null },
+    { "tag": "home.hero", "page": "home", "file": "src/App.jsx", "line": null },
+    { "tag": "home.drop", "page": "home", "file": "src/App.jsx", "line": null },
+    { "tag": "home.worth", "page": "home", "file": "src/App.jsx", "line": null },
+    { "tag": "home.process", "page": "home", "file": "src/App.jsx", "line": null },
+    { "tag": "home.community", "page": "home", "file": "src/App.jsx", "line": null },
+    { "tag": "patterns.hero", "page": "patterns", "file": "src/App.jsx", "line": null },
+    { "tag": "patterns.filters", "page": "patterns", "file": "src/App.jsx", "line": null },
+    { "tag": "patterns.grid", "page": "patterns", "file": "src/App.jsx", "line": null },
+    { "tag": "product.detail", "page": "product", "file": "src/App.jsx", "line": null },
+    { "tag": "sizes.measurements", "page": "sizes", "file": "src/App.jsx", "line": null },
+    { "tag": "global.footer", "page": "global", "file": "src/App.jsx", "line": null }
+  ]
+}
