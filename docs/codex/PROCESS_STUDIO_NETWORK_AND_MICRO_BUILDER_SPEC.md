@@ -33,23 +33,7 @@ EIP is not a traditional transaction-based ERP. The differentiator is that the b
 Object -> process -> trigger -> task/effect -> next process
 ```
 
-The UI should show this as a live process nervous system:
-
-```text
-Customer Signup
-  -> Account Verification
-  -> KYC Verification
-  -> Customer Onboarding
-  -> Customer Portal Access
-
-Payment Confirmed
-  -> Order Fulfillment
-  -> Create Access Grant
-  -> Generate Download
-  -> Notify Customer
-```
-
-The process network view must help users understand how the entire tenant operates, not only edit one workflow.
+The UI should show this as a live process nervous system, not a static module menu.
 
 ## Mandatory architecture rule
 
@@ -75,6 +59,98 @@ The frontend may own only:
 - canvas zoom/pan state
 - selected node state
 - draft UI state before validation
+
+## HARD RULE — UI engine is mandatory, not optional
+
+Process Studio must maximize use of the EIP UI engine / surface engine. This is mandatory.
+
+Reason: if Process Studio is implemented as a fixed custom React screen, future tenant customization will require hardcoded forks, large custom patches, and brittle UI drift. That directly threatens EIP’s objective as a configurable ERP platform.
+
+The implementation must follow this model:
+
+```text
+Governed backend metadata / surface descriptor
+-> UI engine / surface renderer
+-> Process Studio shell
+-> specialized graph canvas widgets where necessary
+```
+
+The UI engine must govern as much of the screen composition as practical, including:
+
+- sidebar/menu placement
+- top toolbar actions
+- KPI cards
+- legend panels
+- details panels
+- inspector tabs and fields
+- builder library categories
+- empty states
+- validation/simulation panels
+- runtime status panels
+- tenant-specific labels
+- tenant-specific enabled/disabled actions
+- theme tokens and visual density
+- role-based visibility
+- surface composition around the graph canvases
+
+React Flow / xyflow may be used, but only as a **specialized graph widget inside the UI engine**. It must not become the full UI authority.
+
+Acceptable hardcoded React responsibilities:
+
+- graph rendering primitive
+- pan/zoom behavior
+- node drag/connect mechanics
+- modal drag mechanics
+- low-level custom node visual components
+- low-level edge visual components
+
+Must be driven by UI engine / governed descriptors where possible:
+
+- which panels are visible
+- which toolbar actions exist
+- which node categories appear
+- which inspector fields appear for a selected node type
+- which validation blocks are displayed
+- which theme/density tokens apply
+- which actions are available by tenant/role/status
+- which labels and sections are shown
+
+The result must support customization such as:
+
+```text
+Tenant A sees Process Network + Runtime Monitor + Audit panel.
+Tenant B sees Process Network + Risk panel + simplified builder library.
+Manufacturing tenant sees Workcenter / Material / Lot node groups.
+Commerce tenant sees Product / Access Grant / Checkout / Content node groups.
+Healthcare tenant sees Patient / Appointment / Care Pathway node groups.
+```
+
+without forking the React component.
+
+If a first V1 implementation needs mock descriptors, clearly mark them:
+
+```text
+// MOCK SURFACE DESCRIPTOR ONLY — replace with governed UI metadata before production
+```
+
+Do not bypass the UI engine because a static React implementation is faster. Adaptability and tenant customization are core product requirements.
+
+## Drift prevention rule
+
+Codex must explicitly check for UI-engine bypass drift at the end of every Process Studio wave.
+
+Required final statement:
+
+```text
+UI engine drift check:
+- What is UI-engine/surface-descriptor driven?
+- What remains hardcoded React?
+- Why is each hardcoded part justified?
+- What must move to descriptors before production?
+- Did this wave increase or reduce future customization risk?
+```
+
+Do not mark the wave complete if the implementation creates a large hardcoded surface that would require custom React forks for tenant adaptation.
 
 ## Two levels of interaction
 
@@ -215,7 +291,7 @@ export const eipTheme = {
 };
 ```
 
-Preferred overall styling:
+Preferred styling:
 
 ```text
 Sidebar: dark navy with EIP logo and active blue route.
@@ -412,12 +488,14 @@ Deliver:
 - Process Network page with sidebar/topbar/KPIs/canvas/details panel.
 - Draggable modal shell at 70vw/70vh.
 - Static Micro Builder inside modal.
+- UI-engine/surface-descriptor skeleton for surrounding panels/toolbars where practical.
 
 Acceptance:
 
 - Looks visually close to concept.
 - No generic or low-density dashboard replacement.
 - Sidebar/topbar/canvas/modal proportions match concept.
+- Surface composition is not locked into one uncustomizable component.
 
 ### Step 2 — React Flow static nodes
 
@@ -429,6 +507,7 @@ Acceptance:
 - Canvas supports pan/zoom.
 - Edges render cleanly.
 - Modal micro builder also uses React Flow.
+- Graph widget receives node/edge/panel configuration from a descriptor layer where practical.
 
 ### Step 3 — Interaction layer
 
@@ -457,6 +536,7 @@ Potential sources:
 - info_record
 - gateway connections
 - effect catalog / trigger registry when available
+- UI/surface descriptors for role/tenant/customization
 
 ### Step 5 — Backend validation/publish
 
@@ -487,6 +567,7 @@ Micro builder inside modal keeps three-panel layout.
 Right inspector does not look generic.
 Buttons use EIP blue/cyan language.
 No accidental dark-only theme unless intentionally scoped.
+UI engine/surface descriptors can alter panels/actions/labels without rewriting the graph component.
 ```
 
 Do not accept implementation just because it compiles.
@@ -499,6 +580,7 @@ The Process Studio must comply with EIP architecture:
 - kernel-first
 - metadata-governed
 - engine-driven
+- UI-engine/surface-engine driven where practical
 - no hidden hardcoded business authority
 
 Must not hardcode:
@@ -510,11 +592,19 @@ Must not hardcode:
 - process lifecycle rules
 - trigger semantics
 - publish authority
+- tenant-specific surface composition
+- tenant-specific labels/actions/visibility
 
 Temporary mock constants are allowed only in visual prototype files and must be clearly marked:
 
 ```text
 // MOCK ONLY — replace with governed backend metadata before production
+```
+
+Temporary mock surface descriptors are allowed only if clearly marked:
+
+```text
+// MOCK SURFACE DESCRIPTOR ONLY — replace with governed UI metadata before production
 ```
 
 ## V1 vs V2 / V24 recommendation
@@ -528,6 +618,7 @@ Process Network Preview
 Static/controlled prototype
 Read-only or layout-only interactions
 No production editing until backend governance catches up
+Use UI-engine-friendly descriptors even if backed by temporary mocks
 ```
 
 ### V2 / V24
@@ -540,6 +631,7 @@ Network view + micro builder modal
 Backend-governed validation and publishing
 Runtime overlay
 Effect catalog / trigger registry / document governance integration
+UI-engine/surface-engine driven customization
 ```
 
 ## Required final deliverables from Codex
@@ -553,8 +645,10 @@ For the first implementation wave, Codex must deliver:
 5. Confirmation that Micro Builder opens in a 70vw/70vh draggable modal.
 6. Confirmation that macro and micro graph nodes are draggable.
 7. Confirmation that semantic publishing is not hardcoded in frontend.
-8. Any temporary mock data clearly identified.
-9. Known gaps and next wave plan.
+8. Confirmation that UI engine/surface descriptors are used wherever practical.
+9. Any temporary mock data/descriptors clearly identified.
+10. UI engine drift check with hardcoded areas justified.
+11. Known gaps and next wave plan.
 
 ## Do not regress
 
@@ -563,6 +657,8 @@ For the first implementation wave, Codex must deliver:
 - Do not make the modal non-draggable.
 - Do not implement a generic CRUD dashboard instead of the process graph.
 - Do not hardcode business semantics into React.
+- Do not hardcode tenant-specific surface composition into React.
+- Do not bypass the UI engine/surface engine for panels/actions/labels when descriptor-driven rendering is practical.
 - Do not publish invalid graph edits without backend validation.
 - Do not treat visual node movement as semantic process changes.
 - Do not remove the user’s n8n/Visio-style drag/connect requirement.
@@ -578,7 +674,9 @@ The main view must be a Process Network neural map of all processes.
 Clicking the builder/edit icon on a process node opens a draggable 70vw/70vh modal containing the Micro Process Builder for that process.
 Use React Flow/xyflow for draggable/connectable macro and micro canvases.
 Preserve EIP Hybrid Light visual identity: dark navy EIP sidebar, light canvas, white panels, blue/cyan accents, compact premium nodes.
+Maximize use of the EIP UI engine/surface engine. React Flow must be a graph widget inside a descriptor-driven surface, not a monolithic hardcoded screen.
 Do visual shell first, then interactions, then backend read, then backend validation/publish in later waves.
 Frontend must not become business authority; process/effect/trigger/document semantics must remain governed by backend metadata.
 Provide screenshots and do not claim completion unless the rendered UI visually matches the concept proportions.
+End with a UI engine drift check explaining what is descriptor-driven, what is hardcoded, why, and what must move to descriptors before production.
 ```
