@@ -603,6 +603,7 @@ async function buildServer() {
   // ============================================================
   await app.register(healthRoutes, { prefix: "/api/public" });
   await app.register(tenantRequestsPublic, { prefix: "/api/public" });
+  await app.register(publicCommercePreflightRoutes, { prefix: "/api/public" });
   await app.register(publicCommerceRoutes, { prefix: "/api/public" });
   await app.register(publicGatewayRoutes, { prefix: "/api/public" });
   await app.register(uiSurfaceRoutes, { prefix: "/api/public", public: true });
