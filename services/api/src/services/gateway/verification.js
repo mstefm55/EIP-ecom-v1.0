@@ -10,7 +10,24 @@ function normalizeText(value) {
 
 function normalizeOrigin(origin) {
   if (!origin) return "";
-  return origin.trim().toLowerCase();
+  const raw = String(origin || "").trim();
+  if (!raw) return "";
+  try {
+    const parsed = new URL(raw);
+    return parsed.origin.toLowerCase();
+  } catch {
+    return raw.replace(/\/+$/, "").toLowerCase();
+  }
+}
+
+function originFromUrl(value) {
+  const raw = normalizeText(value);
+  if (!raw) return "";
+  try {
+    return new URL(raw).origin.toLowerCase();
+  } catch {
+    return "";
+  }
 }
 
 function getHeader(req, name) {
@@ -148,16 +165,21 @@ function connectionAllowsOrigin(profile, origin) {
   const allowlist = Array.isArray(profile?.inbound?.origin_allowlist)
     ? profile.inbound.origin_allowlist
     : [];
+  const derivedOrigins = [
+    originFromUrl(profile?.identity?.frontend_url),
+    originFromUrl(profile?.identity?.portal_url)
+  ].filter(Boolean);
+  const effectiveAllowlist = [...allowlist, ...derivedOrigins];
   const sandbox = isSandbox(profile);
-  if (!allowlist.length) return sandbox;
+  if (!effectiveAllowlist.length) return sandbox;
   if (!origin) {
-    return allowlist.some((entry) => {
+    return effectiveAllowlist.some((entry) => {
       const normalized = normalizeOrigin(entry);
       return normalized === "no-origin" || normalized === "server";
     });
   }
   const normalized = normalizeOrigin(origin);
-  return allowlist.some((entry) => {
+  return effectiveAllowlist.some((entry) => {
     const allowed = normalizeOrigin(entry);
     if (allowed === "*") return sandbox;
     return allowed === normalized;
@@ -178,90 +200,45 @@ async function verifyConnectionRequest(req, profile, rawBody, opts = {}) {
     const provided = getHeader(req, headerName);
     const expected = normalizeText(verification.api_key?.secret);
     if (!headerName || !expected) return { ok: false, error: "MISSING_API_KEY_CONFIG" };
-    if (!timingSafeEqual(provided, expected)) {
-      return { ok: false, error: "INVALID_API_KEY" };
-    }
+    if (!provided || !timingSafeEqual(provided, expected)) return { ok: false, error: "INVALID_API_KEY" };
     return { ok: true };
   }
 
   if (mode === "hmac_signature") {
     const config = verification.hmac_signature || {};
-    const headerName = normalizeText(config.header_name);
-    const expected = getHeader(req, headerName);
-    if (!headerName || !expected) return { ok: false, error: "SIGNATURE_HEADER_MISSING" };
-    if (!normalizeText(config.secret)) return { ok: false, error: "SIGNATURE_SECRET_MISSING" };
-
-    const tsHeader = normalizeText(config.timestamp_header);
-    if (!tsHeader) return { ok: false, error: "SIGNATURE_TIMESTAMP_CONFIG_REQUIRED" };
-    const rawTs = getHeader(req, tsHeader);
-    if (!rawTs) return { ok: false, error: "SIGNATURE_TIMESTAMP_MISSING" };
-    const ts = normalizeEpochSeconds(rawTs);
-    if (!ts) return { ok: false, error: "SIGNATURE_TIMESTAMP_INVALID" };
-    const maxSkew = Number.isFinite(Number(config.max_skew_sec))
-      ? Number(config.max_skew_sec)
-      : 300;
-    const nowSec = Number.isFinite(Number(opts.nowSec))
-      ? Number(opts.nowSec)
-      : Math.floor(Date.now() / 1000);
-    if (Math.abs(nowSec - ts) > maxSkew) {
-      return { ok: false, error: "SIGNATURE_TIMESTAMP_EXPIRED" };
+    const headerName = config.header_name || "x-signature";
+    const provided = getHeader(req, headerName);
+    if (!provided || !config.secret) return { ok: false, error: "MISSING_SIGNATURE" };
+    const timestampHeader = config.timestamp_header_name ? getHeader(req, config.timestamp_header_name) : "";
+    const maxSkew = Number(config.max_skew_sec || 300);
+    if (timestampHeader) {
+      const timestampMs = Number(timestampHeader) > 1e12 ? Number(timestampHeader) : Number(timestampHeader) * 1000;
+      if (!Number.isFinite(timestampMs) || Math.abs(Date.now() - timestampMs) > maxSkew * 1000) {
+        return { ok: false, error: "SIGNATURE_TIMESTAMP_INVALID" };
+      }
     }
-
-    const computed = buildHmacSignature({ ...config, timestamp: rawTs }, rawBody);
-    if (!timingSafeEqual(expected, computed)) return { ok: false, error: "SIGNATURE_MISMATCH" };
+    const expected = buildHmacSignature({ ...config, timestamp: timestampHeader }, rawBody);
+    if (!timingSafeEqual(provided.replace(/^sha256=/i, ""), expected)) return { ok: false, error: "SIGNATURE_INVALID" };
     return { ok: true };
   }
 
   if (mode === "oauth2_jwt") {
     const config = verification.oauth2_jwt || {};
-    const headerName = normalizeText(config.header_name);
-    const headerValue = getHeader(req, headerName);
-    if (!headerName || !headerValue) return { ok: false, error: "JWT_HEADER_MISSING" };
-    const tokenPrefix = normalizeText(config.token_prefix || "");
-    const expectedPrefix = tokenPrefix ? `${tokenPrefix} ` : "";
-    if (expectedPrefix && !headerValue.startsWith(expectedPrefix)) {
-      return { ok: false, error: "JWT_PREFIX_MISMATCH" };
-    }
-    const token = expectedPrefix ? headerValue.slice(expectedPrefix.length).trim() : headerValue;
-    const ok = await verifyJwtSignature(
-      token,
-      {
-        issuer: config.issuer,
-        audience: config.audience,
-        jwks_url: config.jwks_url,
-        secret: config.secret,
-        max_skew_sec: config.max_skew_sec,
-        max_age_sec: config.max_age_sec
-      },
-      opts
-    );
-    if (!ok) return { ok: false, error: "JWT_INVALID" };
-    return { ok: true };
+    const token = getHeader(req, config.header_name || "authorization").replace(/^Bearer\s+/i, "");
+    const ok = await verifyJwtSignature(token, config, opts);
+    return ok ? { ok: true } : { ok: false, error: "JWT_INVALID" };
   }
 
-  return { ok: false, error: "VERIFICATION_MODE_UNSUPPORTED" };
+  return { ok: false, error: "UNSUPPORTED_VERIFICATION_MODE" };
 }
 
 function extractEventId(req, body, profile) {
-  const idem = profile?.idempotency || {};
-  const location = normalizeText(idem.event_id_location).toLowerCase();
-  const key = normalizeText(idem.event_id_key);
-  if (!location || !key) return null;
-  if (location === "header") {
-    return getHeader(req, key);
-  }
-  if (location === "body") {
-    return normalizeText(getBodyPath(body, key));
-  }
-  return null;
+  const idempotency = profile?.idempotency || {};
+  const location = normalizeText(idempotency.event_id_location || "header").toLowerCase();
+  const key = normalizeText(idempotency.event_id_key || "x-event-id");
+  if (location === "body") return normalizeText(getBodyPath(body, key));
+  if (location === "query") return normalizeText(req.query?.[key]);
+  return normalizeText(getHeader(req, key));
 }
 
-export {
-  buildHmacSignature,
-  connectionAllowsOrigin,
-  extractEventId,
-  getHeader,
-  normalizeEpochSeconds,
-  verifyConnectionRequest,
-  verifyJwtSignature
-};
+export { connectionAllowsOrigin, extractEventId, verifyConnectionRequest };
