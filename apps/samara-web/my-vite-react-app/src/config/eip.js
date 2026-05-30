@@ -23,6 +23,18 @@ function buildConnectionKey(endpoint) {
   }
 }
 
+function buildGatewayBootstrapUrl(endpoint) {
+  const explicit = cleanUrl(import.meta.env.VITE_EIP_GATEWAY_BOOTSTRAP_URL || "");
+  if (explicit) return explicit;
+  if (!endpoint) return "";
+  try {
+    const parsed = new URL(endpoint, typeof window !== "undefined" ? window.location.origin : "http://localhost");
+    return `${parsed.origin}/api/public/gateway/bootstrap`;
+  } catch {
+    return "";
+  }
+}
+
 const endpoint = cleanUrl(
   import.meta.env.VITE_EIP_ENDPOINT ||
     import.meta.env.VITE_EIP_SITE_ENDPOINT ||
@@ -40,6 +52,8 @@ export const EIP_CONFIG = {
   endpoint,
   apiKey,
   apiKeyHeader: "X-API-Key",
+  connectionCode: import.meta.env.VITE_EIP_CONNECTION_CODE || "",
+  gatewayBootstrapUrl: buildGatewayBootstrapUrl(endpoint),
   connectionKey: buildConnectionKey(endpoint),
   materialType: import.meta.env.VITE_EIP_MATERIAL_TYPE || "PRODUCT",
   featuredTag: import.meta.env.VITE_EIP_FEATURED_TAG || "featured",
