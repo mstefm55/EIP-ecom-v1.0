@@ -35,6 +35,7 @@ import crmRoutes from "./routes/crm.js";
 import commerceOrdersRoutes from "./routes/commerce_orders.js";
 import ecomRoutes from "./routes/ecom.js";
 import gatewayRoutes from "./routes/gateway.js";
+import publicCommercePreflightRoutes from "./routes/public_commerce_preflight.js";
 import publicCommerceRoutes from "./routes/public_commerce.js";
 import publicGatewayRoutes from "./routes/public_gateway.js";
 import ediGatewayRoutes from "./routes/edi_gateway.js";
