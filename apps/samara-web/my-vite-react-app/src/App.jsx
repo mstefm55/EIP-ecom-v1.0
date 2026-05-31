@@ -1351,6 +1351,10 @@ const PAGE_CONTENT_SLOTS = {
   collab: { hero: "collab.hero", cards: "collab.cards" },
   blog: { hero: "blog.hero" },
 };
+const HOME_PRODUCT_SLOTS = {
+  featured: "home.featured",
+  worth: "home.worth",
+};
 const ALL_PAGE_CONTENT_SLOTS = Array.from(
   new Set(
     Object.values(PAGE_CONTENT_SLOTS)
@@ -2700,7 +2704,7 @@ function Hero({ onCta, t, slides }) {
   );
 }
 
-function DropSection({ t, featuredItems, onShop, onOpenProduct }) {
+function DropSection({ t, featuredItems, onShop, onOpenProduct, renderer }) {
   const fallback = {
     code: "",
     title: t("drop.productTitle"),
@@ -2725,7 +2729,9 @@ function DropSection({ t, featuredItems, onShop, onOpenProduct }) {
   const mainImage = product.image || dropMain;
   const maxDropGallery = Math.max(1, Number(EIP_CONFIG.dropGalleryMax) || 8);
   const gallery = product.gallery?.length ? product.gallery.slice(0, maxDropGallery) : dropGallery;
-  const useCardCarouselTest = EIP_CONFIG.dropCardCarouselTest;
+  const useCardCarousel =
+    String(renderer || EIP_CONFIG.dropRenderer || "").toLowerCase() === "product_carousel" ||
+    EIP_CONFIG.dropCardCarouselTest;
   const carouselItems = [
     {
       id: "drop-main",
@@ -2743,7 +2749,7 @@ function DropSection({ t, featuredItems, onShop, onOpenProduct }) {
   return (
     <section id="drop" className="drop" data-eip-parent="home.featured" data-eip-page="home">
       <div className="drop-image">
-        {useCardCarouselTest ? (
+        {useCardCarousel ? (
           <FeaturedCoverflow
             compact
             autoPlay
@@ -2814,7 +2820,7 @@ function DropSection({ t, featuredItems, onShop, onOpenProduct }) {
   );
 }
 
-function WorthMaking({ onShop, onOpenProduct, t, items, useFallback }) {
+function WorthMaking({ onShop, onOpenProduct, t, items, useFallback, renderer }) {
   const fallback = WORTH_ITEMS.map((item) => ({
     id: item.id,
     title: t(`products.worth.${item.id}.name`),
@@ -2824,7 +2830,9 @@ function WorthMaking({ onShop, onOpenProduct, t, items, useFallback }) {
   }));
   const list = items && items.length ? items : useFallback ? fallback : [];
   const maxWorthCards = Math.max(1, Number(EIP_CONFIG.worthMaxCards) || 24);
-  const useWorthCarouselTest = EIP_CONFIG.worthCardCarouselTest;
+  const useWorthCarousel =
+    String(renderer || EIP_CONFIG.worthRenderer || "").toLowerCase() === "product_carousel" ||
+    EIP_CONFIG.worthCardCarouselTest;
   const carouselItems = list.slice(0, maxWorthCards).map((item, index) => ({
     id: item.id || `worth-card-${index + 1}`,
     code: item.code || "",
@@ -2839,7 +2847,7 @@ function WorthMaking({ onShop, onOpenProduct, t, items, useFallback }) {
         <h2>{t("worth.title")}</h2>
         <p>{t("worth.subtitle")}</p>
       </div>
-      {useWorthCarouselTest ? (
+      {useWorthCarousel ? (
         carouselItems.length ? (
           <div className="worth-coverflow">
             <FeaturedCoverflow
@@ -2974,14 +2982,16 @@ function HomePage({
   heroSlides,
   featuredItems,
   worthItems,
+  featuredRenderer,
+  worthRenderer,
   loading,
   plugReady,
 }) {
   return (
     <main className="page home">
       <Hero onCta={onHeroCta} t={t} slides={heroSlides} />
-      <DropSection t={t} featuredItems={featuredItems} onShop={onShop} onOpenProduct={onOpenProduct} />
-      <WorthMaking onShop={onShop} onOpenProduct={onOpenProduct} t={t} items={worthItems} useFallback={!plugReady} />
+      <DropSection t={t} featuredItems={featuredItems} onShop={onShop} onOpenProduct={onOpenProduct} renderer={featuredRenderer} />
+      <WorthMaking onShop={onShop} onOpenProduct={onOpenProduct} t={t} items={worthItems} useFallback={!plugReady} renderer={worthRenderer} />
       {!plugReady ? (
         <p className="samara-alert">{t("alerts.connectEip")}</p>
       ) : loading ? (
@@ -6280,6 +6290,9 @@ export default function App() {
   useEffect(() => {
     fetchHomeItems();
     fetchHeroContent();
+    Object.values(HOME_PRODUCT_SLOTS).forEach((slot) => {
+      fetchSlotContent(slot);
+    });
     ALL_PAGE_CONTENT_SLOTS.forEach((slot) => {
       fetchSlotContent(slot);
     });
@@ -6572,6 +6585,9 @@ export default function App() {
     const interval = setInterval(() => {
       fetchHomeItems();
       fetchHeroContent();
+      Object.values(HOME_PRODUCT_SLOTS).forEach((slot) => {
+        fetchSlotContent(slot, { force: true });
+      });
       if (activePage === "patterns" || activePage === "product") {
         fetchCatalogPage();
       }
@@ -7968,11 +7984,14 @@ export default function App() {
   }, [heroContent, language, t]);
 
   const featuredCards = useMemo(() => {
-    if (!homeItems.length) return [];
-    const dropTagged = homeItems.filter((item) => hasTag(item, EIP_CONFIG.dropTag));
-    const featuredTagged = homeItems.filter((item) => hasTag(item, EIP_CONFIG.featuredTag));
+    const configured = getSlotItem(contentBySlot, HOME_PRODUCT_SLOTS.featured);
+    const configuredProducts = Array.isArray(configured?.products) ? configured.products : [];
+    if (!configuredProducts.length && !homeItems.length) return [];
+    const sourceItems = configuredProducts.length ? configuredProducts : homeItems;
+    const dropTagged = sourceItems.filter((item) => hasTag(item, EIP_CONFIG.dropTag));
+    const featuredTagged = sourceItems.filter((item) => hasTag(item, EIP_CONFIG.featuredTag));
     const pool = [...dropTagged, ...featuredTagged];
-    const source = pool.length ? pool : homeItems.slice(0, 1);
+    const source = configuredProducts.length ? configuredProducts : pool.length ? pool : sourceItems.slice(0, 1);
     const seen = new Set();
     const maxDropCards = Math.max(1, Number(EIP_CONFIG.dropMaxCards) || 48);
     return source
@@ -7984,15 +8003,18 @@ export default function App() {
       })
       .slice(0, maxDropCards)
       .map((item) => buildCard(item, language, priceContext));
-  }, [homeItems, language, priceContext]);
+  }, [contentBySlot, homeItems, language, priceContext]);
 
   const worthCards = useMemo(() => {
-    if (!homeItems.length) return [];
-    const tagged = homeItems.filter((item) => hasTag(item, EIP_CONFIG.worthTag));
-    const source = tagged.length ? tagged : homeItems;
+    const configured = getSlotItem(contentBySlot, HOME_PRODUCT_SLOTS.worth);
+    const configuredProducts = Array.isArray(configured?.products) ? configured.products : [];
+    if (!configuredProducts.length && !homeItems.length) return [];
+    const sourceItems = configuredProducts.length ? configuredProducts : homeItems;
+    const tagged = sourceItems.filter((item) => hasTag(item, EIP_CONFIG.worthTag));
+    const source = configuredProducts.length ? configuredProducts : tagged.length ? tagged : sourceItems;
     const maxWorthCards = Math.max(1, Number(EIP_CONFIG.worthMaxCards) || 24);
     return source.slice(0, maxWorthCards).map((item) => buildCard(item, language, priceContext));
-  }, [homeItems, language, priceContext]);
+  }, [contentBySlot, homeItems, language, priceContext]);
 
   const catalogCards = useMemo(
     () => catalogItems.map((item) => buildCard(item, language, priceContext)),
@@ -8090,6 +8112,8 @@ export default function App() {
           heroSlides={heroSlides}
           featuredItems={featuredCards}
           worthItems={worthCards}
+          featuredRenderer={getSlotItem(contentBySlot, HOME_PRODUCT_SLOTS.featured)?.renderer}
+          worthRenderer={getSlotItem(contentBySlot, HOME_PRODUCT_SLOTS.worth)?.renderer}
           loading={homeLoading}
           plugReady={plugReady}
         />

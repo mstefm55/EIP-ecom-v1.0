@@ -19,6 +19,7 @@ import { safeUploadTarget, uploadPartToBuffer, validateImageUpload, writeVerifie
 import { enforceConnectionQuota } from "../lib/abuseQuota.js";
 import { resolveMarketplaceFxContext } from "../services/fx/marketFxSync.js";
 import { auditSecurityEvent } from "../lib/securityAudit.js";
+import { normalizeProductSource, resolveProductDrivenRows } from "../lib/storefrontContentResolution.js";
 
 const RATE_LIMIT = { max: 120, timeWindow: "1 minute" };
 const MAX_BODY = 512 * 1024;
@@ -142,6 +143,41 @@ function isStorefrontContentPublished(row = {}, attrs = {}) {
   const stage = normalizeText(attrs?.workflow?.stage || "").toLowerCase();
   const status = normalizeText(row?.status || "").toLowerCase();
   return stage === PUBLISHED_STAGE || status === PUBLISHED_STAGE;
+}
+
+function storefrontRenderer(attrs = {}, slot = "") {
+  const configured = normalizeText(attrs.renderer || attrs.renderer_type).toLowerCase();
+  if (configured) return configured;
+  const normalizedSlot = normalizeText(slot).toLowerCase();
+  if (normalizedSlot.includes("hero") || normalizedSlot.includes("banner")) return "hero_slider";
+  if (normalizedSlot.includes("product") || normalizedSlot.includes("worth") || normalizedSlot.includes("featured")) {
+    return "product_carousel";
+  }
+  return "rich_text_block";
+}
+
+async function resolveStorefrontSlotProducts(app, tenantId, attrs = {}) {
+  const source = normalizeProductSource(attrs);
+  if (!source) return { source_mode: null, products: [] };
+  const r = await app.db.query(
+    `
+    SELECT id, code, name, material_type, attrs
+    FROM eip_core.material
+    WHERE tenant_id = $1
+      AND ${publishedMaterialPredicate()}
+    ORDER BY name ASC
+    LIMIT 250
+    `,
+    [tenantId]
+  );
+  const resolved = resolveProductDrivenRows(r.rows || [], attrs);
+  return {
+    source_mode: resolved.source_mode,
+    products: resolved.products.map((row) => ({
+      ...row,
+      attrs: signMediaAttrs(row.attrs, app, tenantId)
+    }))
+  };
 }
 
 function normalizeStorefrontCta(slide = {}) {
@@ -2924,6 +2960,8 @@ export default async function publicCommerceRoutes(app) {
             .filter(Boolean)
             .sort((a, b) => (a.order || 0) - (b.order || 0))
         : [];
+      const renderer = storefrontRenderer(attrs, slot);
+      const productSlot = await resolveStorefrontSlotProducts(app, access.tenant.id, attrs);
 
       return reply.send({
         ok: true,
@@ -2934,11 +2972,18 @@ export default async function publicCommerceRoutes(app) {
           title: normalizeText(attrs.title || row.title || ""),
           status: row.status,
           is_active: isActive,
+          renderer,
+          renderer_type: renderer,
+          source_mode: productSlot.source_mode,
           translation:
             attrs.translation && typeof attrs.translation === "object"
               ? attrs.translation
               : null,
           slides,
+          content: {
+            slides
+          },
+          products: productSlot.products,
           updated_at: row.updated_at
         }
       });

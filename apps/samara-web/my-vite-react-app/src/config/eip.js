@@ -74,7 +74,9 @@ export const EIP_CONFIG = {
   dropCardCarouselTest: String(import.meta.env.VITE_EIP_DROP_CARD_CAROUSEL_TEST || "")
     .trim()
     .toLowerCase() === "true",
+  dropRenderer: String(import.meta.env.VITE_EIP_DROP_RENDERER || "").trim().toLowerCase(),
   worthCardCarouselTest: String(import.meta.env.VITE_EIP_WORTH_CARD_CAROUSEL_TEST || "")
     .trim()
     .toLowerCase() === "true",
+  worthRenderer: String(import.meta.env.VITE_EIP_WORTH_RENDERER || "").trim().toLowerCase(),
 };

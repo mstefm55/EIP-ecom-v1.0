@@ -10,7 +10,15 @@ import { resolveAssetRoot } from "../services/assets/root.js";
 import { sanitizeMediaForStorage } from "../services/assets/url_policy.js";
 import { safeUploadTarget, uploadPartToBuffer, validateEcomUpload, writeVerifiedUpload } from "../lib/uploadSecurity.js";
 import { extractProfiles } from "../services/gateway/connectionProfile.js";
-import { fetchWithTimeout } from "../services/gateway/outbound.js";
+import { assertOutboundUrlAllowed, fetchWithTimeout } from "../services/gateway/outbound.js";
+import {
+  buildMappingProfile,
+  mappingProfileZones,
+  mergeScanCandidates,
+  scanGenericStorefrontHtml,
+  taggedZoneToCandidate,
+  updateMappingCandidate
+} from "../lib/storefrontStructureScanner.js";
 import {
   resolveTranslationRuntime,
   checkTranslationServiceAvailability,
@@ -797,12 +805,25 @@ function normalizeStructureManifest(payload) {
   };
 }
 
-async function fetchStructureManifest(frontendUrl) {
+async function fetchStructureUrl(url, profile, options = {}, redirectCount = 0) {
+  if (redirectCount > 3) throw new Error("STRUCTURE_SCAN_REDIRECT_LIMIT");
+  await assertOutboundUrlAllowed(url, profile, { purpose: "storefront_structure_scan" });
+  const response = await fetchWithTimeout(url, { ...options, redirect: "manual" });
+  if (response.status >= 300 && response.status < 400) {
+    const location = normalizeText(response.headers.get("location") || "");
+    if (!location) throw new Error("STRUCTURE_SCAN_REDIRECT_INVALID");
+    const redirected = new URL(location, url).toString();
+    return fetchStructureUrl(redirected, profile, options, redirectCount + 1);
+  }
+  return response;
+}
+
+async function fetchStructureManifest(frontendUrl, profile) {
   for (const candidatePath of STRUCTURE_SCAN_MANIFEST_PATHS) {
     const candidateUrl = new URL(candidatePath, frontendUrl).toString();
     let response;
     try {
-      response = await fetchWithTimeout(candidateUrl, {
+      response = await fetchStructureUrl(candidateUrl, profile, {
         method: "GET",
         headers: { Accept: "application/json" },
         timeout_ms: STRUCTURE_SCAN_TIMEOUT_MS
@@ -834,8 +855,8 @@ async function fetchStructureManifest(frontendUrl) {
   return null;
 }
 
-async function fetchTextForStructure(url) {
-  const response = await fetchWithTimeout(url, {
+async function fetchTextForStructure(url, profile) {
+  const response = await fetchStructureUrl(url, profile, {
     method: "GET",
     headers: { Accept: "text/html,application/javascript,text/javascript,*/*;q=0.5" },
     timeout_ms: STRUCTURE_SCAN_TIMEOUT_MS
@@ -865,19 +886,16 @@ async function fetchTextForStructure(url) {
   return { url: response.url || url, text, contentType };
 }
 
-async function buildStructureScanFromFrontend(frontendUrl) {
-  const manifest = await fetchStructureManifest(frontendUrl);
-  if (manifest) {
-    return {
-      project_path: frontendUrl,
-      ...manifest
-    };
-  }
-
-  const rootDoc = await fetchTextForStructure(frontendUrl);
+async function buildStructureScanFromFrontend(frontendUrl, profile, scanMode = "auto") {
+  const mode = ["auto", "generic", "tagged"].includes(normalizeText(scanMode).toLowerCase())
+    ? normalizeText(scanMode).toLowerCase()
+    : "auto";
+  const rootDoc = await fetchTextForStructure(frontendUrl, profile);
+  const genericCandidates = mode === "tagged" ? [] : scanGenericStorefrontHtml(rootDoc.text);
+  const manifest = mode === "generic" ? null : await fetchStructureManifest(frontendUrl, profile);
   const origin = new URL(rootDoc.url).origin;
   const scan = buildStructureScanAccumulator(frontendUrl);
-  appendStructureFromText(scan, rootDoc.url, rootDoc.text);
+  if (mode !== "generic") appendStructureFromText(scan, rootDoc.url, rootDoc.text);
   scan.scanned_sources.add(rootDoc.url);
 
   const queue = [];
@@ -888,21 +906,23 @@ async function buildStructureScanFromFrontend(frontendUrl) {
     queue.push({ url, depth });
   };
 
-  for (const link of extractAbsoluteLinksFromHtml(rootDoc.text, rootDoc.url, STRUCTURE_SCRIPT_SRC_REGEX)) {
-    enqueue(link, 0);
-  }
-  for (const link of extractAbsoluteLinksFromHtml(rootDoc.text, rootDoc.url, STRUCTURE_LINK_MODULE_REGEX)) {
-    enqueue(link, 0);
+  if (mode !== "generic") {
+    for (const link of extractAbsoluteLinksFromHtml(rootDoc.text, rootDoc.url, STRUCTURE_SCRIPT_SRC_REGEX)) {
+      enqueue(link, 0);
+    }
+    for (const link of extractAbsoluteLinksFromHtml(rootDoc.text, rootDoc.url, STRUCTURE_LINK_MODULE_REGEX)) {
+      enqueue(link, 0);
+    }
   }
 
   let fetchedModules = 0;
-  while (queue.length && fetchedModules < STRUCTURE_SCAN_MAX_MODULES) {
+  while (mode !== "generic" && queue.length && fetchedModules < STRUCTURE_SCAN_MAX_MODULES) {
     const current = queue.shift();
     if (!current || scan.scanned_sources.has(current.url)) continue;
     if (current.depth > STRUCTURE_SCAN_MAX_DEPTH) continue;
     let doc;
     try {
-      doc = await fetchTextForStructure(current.url);
+      doc = await fetchTextForStructure(current.url, profile);
     } catch {
       scan.scanned_sources.add(current.url);
       continue;
@@ -916,16 +936,44 @@ async function buildStructureScanFromFrontend(frontendUrl) {
     }
   }
 
-  const zones = Array.from(scan.zone_map.values()).sort((a, b) => a.tag.localeCompare(b.tag));
+  const scannedZones = Array.from(scan.zone_map.values()).sort((a, b) => a.tag.localeCompare(b.tag));
+  const taggedZones = manifest?.zones?.length ? manifest.zones : scannedZones;
+  const taggedCandidates = mode === "generic" ? [] : taggedZones.map(taggedZoneToCandidate).filter(Boolean);
+  const candidates =
+    mode === "generic"
+      ? genericCandidates
+      : mode === "tagged"
+        ? taggedCandidates
+        : mergeScanCandidates(genericCandidates, taggedZones);
+  const usableCandidates = candidates.filter((candidate) => Number(candidate.confidence || 0) >= 0.45);
+  const scanSource =
+    mode === "tagged"
+      ? "tagged_scan"
+      : genericCandidates.some((candidate) => Number(candidate.confidence || 0) >= 0.45)
+        ? taggedCandidates.length
+          ? "generic_scan_with_tagged_markers"
+          : "generic_scan"
+        : taggedCandidates.length
+          ? "tagged_scan_fallback"
+          : "generic_scan_low_confidence";
   return {
     project_path: frontendUrl,
-    source_kind: "frontend_scan",
+    source_kind: manifest?.source_kind || "frontend_scan",
     source_url: frontendUrl,
     files_scanned: scan.scanned_sources.size,
-    tags_found: zones.length,
+    tags_found: taggedCandidates.length,
     scanned_at: new Date().toISOString(),
-    zones,
-    nodes: scan.nodes
+    scan_id: `scan-${randomUUID()}`,
+    scan_mode: mode,
+    scan_source: scanSource,
+    generic_candidate_count: genericCandidates.length,
+    tagged_candidate_count: taggedCandidates.length,
+    usable_candidate_count: usableCandidates.length,
+    candidate_zones: candidates,
+    unmapped_candidates: candidates.filter((candidate) => candidate.mapping_status !== "approved"),
+    approved_mappings: candidates.filter((candidate) => candidate.mapping_status === "approved"),
+    zones: taggedZones,
+    nodes: manifest?.nodes?.length ? manifest.nodes : scan.nodes
   };
 }
 
@@ -972,6 +1020,28 @@ function mapStructureConnection(profile) {
     scan_eligible: reasons.length === 0,
     excluded_reasons: reasons
   };
+}
+
+function findStructureMappingProfile(attrs = {}, connectionCode = "") {
+  const requested = normalizeText(connectionCode);
+  const profiles = Array.isArray(attrs.mapping_profiles) ? attrs.mapping_profiles : [];
+  if (requested) {
+    const matched = profiles.find((profile) => normalizeText(profile?.connection_code) === requested);
+    if (matched) return matched;
+  }
+  const active = attrs.mapping_profile && typeof attrs.mapping_profile === "object"
+    ? attrs.mapping_profile
+    : null;
+  if (!requested || normalizeText(active?.connection_code) === requested) return active || {};
+  return {};
+}
+
+function upsertStructureMappingProfile(profiles, nextProfile) {
+  const connectionCode = normalizeText(nextProfile?.connection_code);
+  const existing = Array.isArray(profiles) ? profiles : [];
+  const next = existing.filter((profile) => normalizeText(profile?.connection_code) !== connectionCode);
+  next.push(nextProfile);
+  return next.sort((a, b) => normalizeText(a?.connection_code).localeCompare(normalizeText(b?.connection_code)));
 }
 
 function clampPercent(value, fallback = 50) {
@@ -1193,6 +1263,10 @@ function mapStorefrontContentRow(row) {
 function mapStorefrontStructureRow(row) {
   if (!row) return null;
   const attrs = row?.attrs && typeof row.attrs === "object" ? row.attrs : {};
+  const mappingProfile =
+    attrs.mapping_profile && typeof attrs.mapping_profile === "object"
+      ? attrs.mapping_profile
+      : null;
   const zones = Array.isArray(attrs.zones)
     ? attrs.zones
         .map((zone) => {
@@ -1203,7 +1277,20 @@ function mapStorefrontStructureRow(row) {
             page: normalizeContentSlot(zone?.page || tag.split(".")[0] || "home") || "home",
             label: normalizeOptionalText(zone?.label) || slotLabelFromTag(tag),
             renderer_type: normalizeContentSlot(zone?.renderer_type || rendererTypeFromTag(tag)) || rendererTypeFromTag(tag),
-            occurrences: Number(zone?.occurrences || 1)
+            occurrences: Number(zone?.occurrences || 1),
+            candidate_id: normalizeText(zone?.candidate_id || ""),
+            selector: normalizeText(zone?.selector || ""),
+            dom_signature: normalizeText(zone?.dom_signature || ""),
+            text_sample: normalizeText(zone?.text_sample || "").slice(0, 160),
+            image_count: Number(zone?.image_count || 0),
+            link_count: Number(zone?.link_count || 0),
+            button_count: Number(zone?.button_count || 0),
+            repeated_item_count: Number(zone?.repeated_item_count || 0),
+            confidence: Number(zone?.confidence || 0),
+            confidence_reasons: Array.isArray(zone?.confidence_reasons) ? zone.confidence_reasons : [],
+            mapping_status: normalizeText(zone?.mapping_status || "proposed"),
+            source: normalizeText(zone?.source || ""),
+            push_allowed: zone?.push_allowed !== false
           };
         })
         .filter(Boolean)
@@ -1237,6 +1324,16 @@ function mapStorefrontStructureRow(row) {
     connection_name: normalizeText(attrs.connection_name || ""),
     files_scanned: Number(attrs.files_scanned || 0),
     tags_found: Number(attrs.tags_found || zones.length),
+    scan_mode: normalizeText(attrs.scan_mode || mappingProfile?.source_mode || "auto"),
+    scan_source: normalizeText(attrs.scan_source || mappingProfile?.scan_source || ""),
+    generic_candidate_count: Number(attrs.generic_candidate_count || mappingProfile?.last_scan_result?.generic_candidate_count || 0),
+    tagged_candidate_count: Number(attrs.tagged_candidate_count || mappingProfile?.last_scan_result?.tagged_candidate_count || 0),
+    usable_candidate_count: Number(attrs.usable_candidate_count || mappingProfile?.last_scan_result?.usable_candidate_count || zones.length),
+    mapping_profile: mappingProfile,
+    mapping_profiles: Array.isArray(attrs.mapping_profiles) ? attrs.mapping_profiles : mappingProfile ? [mappingProfile] : [],
+    candidate_zones: Array.isArray(mappingProfile?.candidate_zones) ? mappingProfile.candidate_zones : [],
+    approved_mappings: Array.isArray(mappingProfile?.approved_mappings) ? mappingProfile.approved_mappings : [],
+    ignored_candidates: Array.isArray(mappingProfile?.ignored_candidates) ? mappingProfile.ignored_candidates : [],
     scanned_at: attrs.scanned_at || row.updated_at || row.created_at,
     zones,
     nodes,
@@ -3763,7 +3860,8 @@ export default async function ecomRoutes(app) {
           type: "object",
           additionalProperties: false,
           properties: {
-            connection_code: { type: "string", maxLength: 65 }
+            connection_code: { type: "string", maxLength: 65 },
+            scan_mode: { type: "string", enum: ["auto", "generic", "tagged"] }
           }
         }
       }
@@ -3796,7 +3894,7 @@ export default async function ecomRoutes(app) {
 
       let scanned;
       try {
-        scanned = await buildStructureScanFromFrontend(frontendUrl);
+        scanned = await buildStructureScanFromFrontend(frontendUrl, selected.profile, req.body?.scan_mode || "auto");
       } catch (error) {
         app.log.error({
           event: "storefront_structure_scan_failed",
@@ -3808,30 +3906,26 @@ export default async function ecomRoutes(app) {
         return reply.code(500).send({ ok: false, error: "STRUCTURE_SCAN_FAILED" });
       }
 
-      if (!Array.isArray(scanned?.zones) || scanned.zones.length === 0) {
+      if (!Number(scanned?.usable_candidate_count || 0)) {
         return reply.code(409).send({
           ok: false,
           error: "STRUCTURE_TAGS_NOT_FOUND",
           connection_code: connectionCode || null,
-          frontend_url: frontendUrl
+          frontend_url: frontendUrl,
+          scan_report: {
+            scan_mode: scanned?.scan_mode || "auto",
+            scan_source: scanned?.scan_source || "",
+            generic_candidate_count: Number(scanned?.generic_candidate_count || 0),
+            tagged_candidate_count: Number(scanned?.tagged_candidate_count || 0),
+            usable_candidate_count: 0,
+            unmapped_candidates: Array.isArray(scanned?.unmapped_candidates) ? scanned.unmapped_candidates : []
+          }
         });
       }
 
-      const attrs = {
-        scope: STOREFRONT_STRUCTURE_SCOPE,
-        title: "Storefront structure",
-        source_type: "gateway_connection",
-        connection_code: connectionCode || null,
-        connection_name: connectionName || null,
-        frontend_url: frontendUrl,
-        ...scanned,
-        updated_at: new Date().toISOString(),
-        updated_by_identity_id: session.identity_id
-      };
-
       const existing = await app.db.query(
         `
-        SELECT id
+        SELECT id, attrs
         FROM eip_core.service_object
         WHERE tenant_id = $1
           AND object_type = $2
@@ -3841,6 +3935,31 @@ export default async function ecomRoutes(app) {
         `,
         [session.tenant_id, STOREFRONT_STRUCTURE_OBJECT_TYPE, STOREFRONT_STRUCTURE_SCOPE]
       );
+      const previousAttrs =
+        existing.rows[0]?.attrs && typeof existing.rows[0].attrs === "object"
+          ? existing.rows[0].attrs
+          : {};
+      const mappingProfile = buildMappingProfile({
+        tenantId: session.tenant_id,
+        connectionCode,
+        frontendUrl,
+        scan: scanned,
+        previous: findStructureMappingProfile(previousAttrs, connectionCode)
+      });
+      const attrs = {
+        scope: STOREFRONT_STRUCTURE_SCOPE,
+        title: "Storefront structure",
+        source_type: "gateway_connection",
+        connection_code: connectionCode || null,
+        connection_name: connectionName || null,
+        frontend_url: frontendUrl,
+        ...scanned,
+        mapping_profile: mappingProfile,
+        mapping_profiles: upsertStructureMappingProfile(previousAttrs.mapping_profiles, mappingProfile),
+        zones: mappingProfileZones(mappingProfile),
+        updated_at: new Date().toISOString(),
+        updated_by_identity_id: session.identity_id
+      };
 
       let persisted;
       if (existing.rowCount) {
@@ -3895,6 +4014,94 @@ export default async function ecomRoutes(app) {
         item,
         tags: item.zones.map((zone) => zone.tag)
       });
+    }
+  );
+
+  app.put(
+    "/storefront/structure/mappings/:candidateId",
+    {
+      schema: {
+        params: {
+          type: "object",
+          required: ["candidateId"],
+          properties: {
+            candidateId: { type: "string", maxLength: 100 }
+          }
+        },
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["mapping_status"],
+          properties: {
+            mapping_status: { type: "string", enum: ["proposed", "approved", "ignored", "needs_review"] },
+            suggested_slot: { type: "string", maxLength: 80 },
+            suggested_renderer: { type: "string", maxLength: 80 },
+            selector: { type: "string", maxLength: 500 }
+          }
+        }
+      }
+    },
+    async (req, reply) => {
+      const session = await requireWrite(app, req, reply, "ECOM_PRODUCT_WRITE");
+      if (!session) return;
+
+      const row = await app.db.query(
+        `
+        SELECT id, code, title, status, attrs, created_at, updated_at
+        FROM eip_core.service_object
+        WHERE tenant_id = $1
+          AND object_type = $2
+          AND attrs->>'scope' = $3
+        ORDER BY updated_at DESC, created_at DESC
+        LIMIT 1
+        `,
+        [session.tenant_id, STOREFRONT_STRUCTURE_OBJECT_TYPE, STOREFRONT_STRUCTURE_SCOPE]
+      );
+      if (!row.rowCount) return reply.code(404).send({ ok: false, error: "STOREFRONT_STRUCTURE_NOT_FOUND" });
+
+      const attrs = row.rows[0]?.attrs && typeof row.rows[0].attrs === "object" ? row.rows[0].attrs : {};
+      const profile = attrs.mapping_profile && typeof attrs.mapping_profile === "object"
+        ? attrs.mapping_profile
+        : null;
+      if (!profile) return reply.code(409).send({ ok: false, error: "MAPPING_PROFILE_NOT_FOUND" });
+
+      let nextProfile;
+      try {
+        nextProfile = updateMappingCandidate(profile, {
+          candidate_id: req.params.candidateId,
+          ...req.body
+        });
+      } catch (error) {
+        const code = normalizeText(error?.message || "MAPPING_UPDATE_FAILED");
+        const status = code === "CANDIDATE_NOT_FOUND" ? 404 : 400;
+        return reply.code(status).send({ ok: false, error: code });
+      }
+
+      const updated = await app.db.query(
+        `
+        UPDATE eip_core.service_object
+        SET attrs = $4::jsonb,
+            updated_at = now()
+        WHERE tenant_id = $1
+          AND id = $2
+          AND object_type = $3
+        RETURNING id, code, title, status, attrs, created_at, updated_at
+        `,
+        [
+          session.tenant_id,
+          row.rows[0].id,
+          STOREFRONT_STRUCTURE_OBJECT_TYPE,
+          JSON.stringify({
+            ...attrs,
+            mapping_profile: nextProfile,
+            mapping_profiles: upsertStructureMappingProfile(attrs.mapping_profiles, nextProfile),
+            zones: mappingProfileZones(nextProfile),
+            updated_at: new Date().toISOString(),
+            updated_by_identity_id: session.identity_id
+          })
+        ]
+      );
+      return reply.send({ ok: true, item: mapStorefrontStructureRow(updated.rows[0]) });
     }
   );
 
