@@ -4337,7 +4337,7 @@ export default async function ecomRoutes(app) {
           title: normalizeOptionalText(row.title)
         };
 
-        if (action !== "INTAKE") {
+        if (action === "DRAFT_READY") {
           const intake = await app.coreProcess.advanceInstance(client, {
             tenantId: session.tenant_id,
             identityId: session.identity_id,
@@ -4862,7 +4862,7 @@ export default async function ecomRoutes(app) {
           code: row.code
         };
 
-        if (action !== "INTAKE") {
+        if (action === "DRAFT_READY") {
           const intake = await app.coreProcess.advanceInstance(client, {
             tenantId: session.tenant_id,
             identityId: session.identity_id,

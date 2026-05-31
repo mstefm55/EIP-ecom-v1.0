@@ -3229,7 +3229,7 @@ export default function EcomProductWorkspace({ node }) {
         }
       }
       await callAction("APPROVE", { allowInvalidTransition: true });
-      let published = await callAction("PUBLISH", { allowInvalidTransition: true });
+      let published = await callAction("PUBLISH");
       if (published?.publish_state === "translation_unavailable_confirmation_required") {
         const translationErrorCode = String(published?.translation?.error_code || "").trim();
         const translationErrorMessage = String(published?.translation?.error_message || "").trim();
@@ -3253,10 +3253,7 @@ export default function EcomProductWorkspace({ node }) {
           setStatusMessage("Publish cancelled. You can try again later.");
           return;
         }
-        published = await callAction("PUBLISH", {
-          allowInvalidTransition: true,
-          publishEnglishOnly: true
-        });
+        published = await callAction("PUBLISH", { publishEnglishOnly: true });
       }
       if (published?.item) {
         setStorefrontDraft(normalizeStorefrontDraft(published.item));

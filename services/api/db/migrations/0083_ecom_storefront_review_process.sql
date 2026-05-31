@@ -203,6 +203,16 @@ BEGIN
             },
             {
               "from": "content_published",
+              "to": "content_draft",
+              "action": "INTAKE",
+              "edge_type": "DEFAULT",
+              "effects": [
+                { "type": "STATUS_SET", "to": "new" },
+                { "type": "JSON_MERGE", "target": "service_object", "value": { "workflow": { "stage": "draft", "outcome": "pending_update", "republish_required": true } } }
+              ]
+            },
+            {
+              "from": "content_published",
               "to": "content_closed",
               "action": "CANCEL",
               "edge_type": "DEFAULT",
