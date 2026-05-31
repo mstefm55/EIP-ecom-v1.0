@@ -3309,6 +3309,20 @@ export default function EcomProductWorkspace({ node }) {
           }))
           .filter((slide) => isStorefrontSlideContentful(slide))
       };
+      const rendererType = String(payload.attrs?.renderer_type || "").trim().toLowerCase();
+      const requiredFields = Array.isArray(storefrontMappingUi.requiredFieldsByRenderer?.[rendererType])
+        ? storefrontMappingUi.requiredFieldsByRenderer[rendererType]
+        : [];
+      if (requiredFields.includes("slides") && !payload.slides.length) {
+        setStatusTone("error");
+        setStatusMessage("Add at least one content slide or card before saving.");
+        return;
+      }
+      if (requiredFields.includes("source_mode") && !String(payload.attrs?.source_mode || "").trim()) {
+        setStatusTone("error");
+        setStatusMessage("Choose a governed product source before saving this placement.");
+        return;
+      }
       if (!payload.slides.length && !String(payload.attrs?.source_mode || "").trim()) {
         const mode = storefrontSlotModeFor(storefrontDraft.slot);
         setStatusTone("error");
@@ -5253,9 +5267,13 @@ export default function EcomProductWorkspace({ node }) {
       <div className="grid gap-2 md:grid-cols-2">
         <Field
           label="Renderer descriptor"
+          type="select"
           value={storefrontDraft?.attrs?.renderer_type || ""}
           onChange={(value) => updateStorefrontAttr("renderer_type", value)}
-          placeholder="hero_slider, product_carousel..."
+          options={[
+            { value: "", label: "Auto from mapping" },
+            ...storefrontMappingUi.rendererOptions
+          ]}
         />
         <Field
           label="Placement source"

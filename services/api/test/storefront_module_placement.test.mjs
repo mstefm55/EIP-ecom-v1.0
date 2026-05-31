@@ -20,6 +20,7 @@ const descriptorMigration = read("../db/migrations/0098_storefront_mapping_ui_de
 const cloneTemplate = read("../db/seed/clone_template_to_tenant.sql");
 const canonicalSeed = read("../db/seed/template_ecom_canonical_v1.sql");
 const adminConnections = read("../../../apps/dashboard/src/components/admin/AdminConnectionsPanelSafe.jsx");
+const ecomWorkspace = read("../../../apps/dashboard/src/components/ecom/EcomProductWorkspace.jsx");
 
 const GENERIC_STOREFRONT = `
   <html>
@@ -111,4 +112,11 @@ test("generic connection setup placeholders do not imply a storefront-specific i
   assert.match(adminConnections, /https:\/\/storefront\.example\.com/);
   assert.match(adminConnections, /tenant-storefront/);
   assert.doesNotMatch(adminConnections, /samara|samarapattern|samara-web-storefront-2/i);
+});
+
+test("mapping descriptor drives renderer options and required-field validation in the editor primitive", () => {
+  assert.match(ecomWorkspace, /storefrontMappingUi\.rendererOptions/);
+  assert.match(ecomWorkspace, /storefrontMappingUi\.requiredFieldsByRenderer/);
+  assert.match(ecomWorkspace, /requiredFields\.includes\("slides"\)/);
+  assert.match(ecomWorkspace, /requiredFields\.includes\("source_mode"\)/);
 });
