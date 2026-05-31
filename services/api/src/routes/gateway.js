@@ -6,6 +6,7 @@ import { hasPermission } from "../auth/perm.js";
 import { fetchWithTimeout, buildOutboundAuth, assertOutboundUrlAllowed } from "../services/gateway/outbound.js";
 import {
   extractProfiles,
+  hasSecretConfigured,
   normalizeProfile,
   maskSecrets,
   mergeSecrets,
@@ -21,6 +22,7 @@ import {
 import { resolveEipSurfaceAccess } from "../lib/surfaceAccess.js";
 import { emitSecurityEvent } from "../lib/securityAudit.js";
 import { requirePrivilegedStepUp as evaluatePrivilegedStepUp } from "../auth/privilegedStepUp.js";
+import { buildRenderedDomScannerDiagnostic } from "../services/storefront/renderedDomScanner.js";
 
 function normalizeText(value) {
   return String(value || "").trim();
@@ -28,6 +30,29 @@ function normalizeText(value) {
 
 function buildApiKey() {
   return crypto.randomBytes(32).toString("base64url");
+}
+
+function connectionDiagnostic(profile, mappingProfile, scannerDiagnostic) {
+  const origins = Array.isArray(profile?.inbound?.origin_allowlist)
+    ? profile.inbound.origin_allowlist
+    : [];
+  const verificationMode = normalizeText(profile?.verification?.mode || "none");
+  const apiKeySaved = verificationMode === "api_key"
+    ? hasSecretConfigured(profile?.verification?.api_key, "secret")
+    : null;
+  return {
+    connection_code: normalizeText(profile?.identity?.connection_code) || null,
+    cors_ready:
+      origins.length > 0 &&
+      (profile?.identity?.environment === "sandbox" || !origins.includes("*")),
+    verification_mode: verificationMode,
+    api_key_saved: apiKeySaved,
+    rendered_scan_ready: scannerDiagnostic.browser_found === true,
+    loader_enabled: profile?.public_storefront?.loader_enabled === true,
+    public_api_enabled: profile?.public_storefront?.public_api_enabled !== false,
+    scan_allowed: profile?.public_storefront?.scan_allowed !== false,
+    last_scan_result: mappingProfile?.last_scan_result || null
+  };
 }
 
 function buildInboundUrl(baseUrl, suffix, channel) {
@@ -288,6 +313,45 @@ export default async function gatewayRoutes(app) {
       `,
       [tenantId]
     );
+    let structureRes = { rows: [] };
+    try {
+      structureRes = await app.db.query(
+        `
+        SELECT attrs
+        FROM eip_core.service_object
+        WHERE tenant_id = $1::uuid
+          AND object_type = 'storefront_structure'
+          AND attrs->>'scope' = 'auto_scan'
+        ORDER BY updated_at DESC, created_at DESC
+        LIMIT 1
+        `,
+        [tenantId]
+      );
+    } catch (error) {
+      app.log.warn({
+        event: "storefront_connection_diagnostic_unavailable",
+        tenant_id: tenantId,
+        error: error?.message || String(error)
+      });
+    }
+    const structureAttrs =
+      structureRes?.rows?.[0]?.attrs && typeof structureRes.rows[0].attrs === "object"
+        ? structureRes.rows[0].attrs
+        : {};
+    const mappingProfiles = Array.isArray(structureAttrs.mapping_profiles)
+      ? structureAttrs.mapping_profiles
+      : [];
+    const scannerDiagnostic = buildRenderedDomScannerDiagnostic(app.config);
+    const connectionDiagnostics = connections.map((profile) => {
+      const mappingProfile = mappingProfiles.find(
+        (item) => normalizeText(item?.connection_code) === normalizeText(profile?.identity?.connection_code)
+      ) || (
+        normalizeText(structureAttrs.mapping_profile?.connection_code) === normalizeText(profile?.identity?.connection_code)
+          ? structureAttrs.mapping_profile
+          : null
+      );
+      return connectionDiagnostic(profile, mappingProfile, scannerDiagnostic);
+    });
 
     return reply.send({
       ok: true,
@@ -295,7 +359,11 @@ export default async function gatewayRoutes(app) {
       connections: connections.map(maskSecrets),
       api_keys: keysRes.rows,
       logs: logRes.rows,
-      health: healthRes.rows[0] || {}
+      health: healthRes.rows[0] || {},
+      storefront_diagnostics: {
+        rendered_scanner: scannerDiagnostic,
+        connections: connectionDiagnostics
+      }
     });
   });
 
@@ -856,11 +924,12 @@ export default async function gatewayRoutes(app) {
            'created_by', $5::uuid,
            'rotated_by', $5::uuid,
            'last_rotated_at', now(),
+           'fingerprint', $6,
            'status', 'active'
          ))
       RETURNING id, label, is_active, expires_at, created_at
       `,
-      [tenantId, keyHash, label, expiresAt, s.session.identity_id]
+      [tenantId, keyHash, label, expiresAt, s.session.identity_id, keyHash.slice(0, 12)]
     );
 
     if (setPrimary) {
@@ -1019,11 +1088,12 @@ export default async function gatewayRoutes(app) {
            'rotated_from', $5::uuid,
            'rotated_by', $6::uuid,
            'last_rotated_at', now(),
+           'fingerprint', $7,
            'status', 'active'
          ))
       RETURNING id, label, is_active, expires_at, created_at
       `,
-      [tenantId, keyHash, label, expiresAt, keyId, s.session.identity_id]
+      [tenantId, keyHash, label, expiresAt, keyId, s.session.identity_id, keyHash.slice(0, 12)]
     );
 
     await app.db.query(

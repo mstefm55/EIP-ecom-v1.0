@@ -497,6 +497,8 @@ function buildMappingProfile({
       rendered_dom_available: scan?.rendered_dom_available === true,
       rendered_dom_error: normalizeText(scan?.rendered_dom_error || "") || null,
       rendered_dom_candidate_count: Number(scan?.rendered_dom_candidate_count || 0),
+      rendered_shell_detected: scan?.rendered_shell_detected === true,
+      fallback_recommendation: normalizeText(scan?.fallback_recommendation || "") || null,
       files_scanned: Number(scan?.files_scanned || 0),
       scanned_at: scan?.scanned_at || nowIso
     }

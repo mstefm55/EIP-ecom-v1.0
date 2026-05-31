@@ -1353,6 +1353,9 @@ const PAGE_CONTENT_SLOTS = {
 };
 const HOME_PRODUCT_SLOTS = {
   featured: "home.featured",
+  worth: "home.worth_making",
+};
+const LEGACY_HOME_PRODUCT_SLOTS = {
   worth: "home.worth",
 };
 const ALL_PAGE_CONTENT_SLOTS = Array.from(
@@ -2314,6 +2317,13 @@ function getSlotItem(contentBySlot, slot) {
   return item && typeof item === "object" ? item : null;
 }
 
+function getHomeProductSlotItem(contentBySlot, key) {
+  return (
+    getSlotItem(contentBySlot, HOME_PRODUCT_SLOTS[key]) ||
+    getSlotItem(contentBySlot, LEGACY_HOME_PRODUCT_SLOTS[key])
+  );
+}
+
 function getSlotSlides(contentBySlot, slot) {
   const item = getSlotItem(contentBySlot, slot);
   if (!item || !Array.isArray(item.slides)) return [];
@@ -2730,8 +2740,7 @@ function DropSection({ t, featuredItems, onShop, onOpenProduct, renderer }) {
   const maxDropGallery = Math.max(1, Number(EIP_CONFIG.dropGalleryMax) || 8);
   const gallery = product.gallery?.length ? product.gallery.slice(0, maxDropGallery) : dropGallery;
   const useCardCarousel =
-    String(renderer || EIP_CONFIG.dropRenderer || "").toLowerCase() === "product_carousel" ||
-    EIP_CONFIG.dropCardCarouselTest;
+    String(renderer || EIP_CONFIG.dropRenderer || "").toLowerCase() === "product_carousel";
   const carouselItems = [
     {
       id: "drop-main",
@@ -2831,8 +2840,7 @@ function WorthMaking({ onShop, onOpenProduct, t, items, useFallback, renderer })
   const list = items && items.length ? items : useFallback ? fallback : [];
   const maxWorthCards = Math.max(1, Number(EIP_CONFIG.worthMaxCards) || 24);
   const useWorthCarousel =
-    String(renderer || EIP_CONFIG.worthRenderer || "").toLowerCase() === "product_carousel" ||
-    EIP_CONFIG.worthCardCarouselTest;
+    String(renderer || EIP_CONFIG.worthRenderer || "").toLowerCase() === "product_carousel";
   const carouselItems = list.slice(0, maxWorthCards).map((item, index) => ({
     id: item.id || `worth-card-${index + 1}`,
     code: item.code || "",
@@ -2842,7 +2850,7 @@ function WorthMaking({ onShop, onOpenProduct, t, items, useFallback, renderer })
     price: item.price || "EUR 14",
   }));
   return (
-    <section id="worth" className="worth" data-eip-parent="home.worth" data-eip-page="home">
+    <section id="worth" className="worth" data-eip-parent="home.worth_making" data-eip-page="home">
       <div className="section-head">
         <h2>{t("worth.title")}</h2>
         <p>{t("worth.subtitle")}</p>
@@ -6293,6 +6301,9 @@ export default function App() {
     Object.values(HOME_PRODUCT_SLOTS).forEach((slot) => {
       fetchSlotContent(slot);
     });
+    Object.values(LEGACY_HOME_PRODUCT_SLOTS).forEach((slot) => {
+      fetchSlotContent(slot);
+    });
     ALL_PAGE_CONTENT_SLOTS.forEach((slot) => {
       fetchSlotContent(slot);
     });
@@ -6586,6 +6597,9 @@ export default function App() {
       fetchHomeItems();
       fetchHeroContent();
       Object.values(HOME_PRODUCT_SLOTS).forEach((slot) => {
+        fetchSlotContent(slot, { force: true });
+      });
+      Object.values(LEGACY_HOME_PRODUCT_SLOTS).forEach((slot) => {
         fetchSlotContent(slot, { force: true });
       });
       if (activePage === "patterns" || activePage === "product") {
@@ -7984,7 +7998,7 @@ export default function App() {
   }, [heroContent, language, t]);
 
   const featuredCards = useMemo(() => {
-    const configured = getSlotItem(contentBySlot, HOME_PRODUCT_SLOTS.featured);
+    const configured = getHomeProductSlotItem(contentBySlot, "featured");
     const configuredProducts = Array.isArray(configured?.products) ? configured.products : [];
     if (!configuredProducts.length && !homeItems.length) return [];
     const sourceItems = configuredProducts.length ? configuredProducts : homeItems;
@@ -8006,7 +8020,7 @@ export default function App() {
   }, [contentBySlot, homeItems, language, priceContext]);
 
   const worthCards = useMemo(() => {
-    const configured = getSlotItem(contentBySlot, HOME_PRODUCT_SLOTS.worth);
+    const configured = getHomeProductSlotItem(contentBySlot, "worth");
     const configuredProducts = Array.isArray(configured?.products) ? configured.products : [];
     if (!configuredProducts.length && !homeItems.length) return [];
     const sourceItems = configuredProducts.length ? configuredProducts : homeItems;
@@ -8112,8 +8126,8 @@ export default function App() {
           heroSlides={heroSlides}
           featuredItems={featuredCards}
           worthItems={worthCards}
-          featuredRenderer={getSlotItem(contentBySlot, HOME_PRODUCT_SLOTS.featured)?.renderer}
-          worthRenderer={getSlotItem(contentBySlot, HOME_PRODUCT_SLOTS.worth)?.renderer}
+          featuredRenderer={getHomeProductSlotItem(contentBySlot, "featured")?.renderer}
+          worthRenderer={getHomeProductSlotItem(contentBySlot, "worth")?.renderer}
           loading={homeLoading}
           plugReady={plugReady}
         />

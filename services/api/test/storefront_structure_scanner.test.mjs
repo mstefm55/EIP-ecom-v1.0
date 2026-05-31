@@ -72,6 +72,15 @@ test("client-rendered storefront shells run the isolated rendered DOM adapter be
   assert.match(ecomRoute, /renderStorefrontDom\(\{ url: rootDoc\.url, profile, config: renderedScanConfig \}\)/);
   assert.match(ecomRoute, /rendered_dom_attempted: renderedDom !== null/);
   assert.match(ecomRoute, /rendered_dom_available: renderedDom\?\.ok === true/);
+  assert.match(ecomRoute, /\["auto", "rendered"\]\.includes\(mode\)/);
+  assert.match(ecomRoute, /source: "rendered_dom_scan"/);
+  assert.match(ecomRoute, /"rendered", "generic", "tagged"/);
+});
+
+test("rendered-only scan failures remain diagnostic and do not save a static shell as complete", () => {
+  assert.match(ecomRoute, /requestedScanMode === "rendered" && scanned\?\.rendered_dom_available !== true/);
+  assert.match(ecomRoute, /error: scanned\?\.rendered_dom_error \|\| "RENDERED_DOM_SCANNER_UNAVAILABLE"/);
+  assert.match(ecomRoute, /"configure_rendered_dom_scanner"/);
 });
 
 test("tagged mappings remain high-confidence approved candidates in auto merge", () => {

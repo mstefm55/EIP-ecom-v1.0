@@ -23,6 +23,12 @@ const CHANNELS = [
 const MAPPING_MODES = ["passthrough", "mapped"];
 const LOG_LEVELS = ["error", "warn", "info", "debug"];
 const HTTP_METHODS = ["POST", "PUT", "PATCH"];
+const STOREFRONT_SCAN_MODES = ["auto", "rendered", "generic", "tagged"];
+const PUBLIC_STOREFRONT_SCOPES = [
+  "storefront.mapping.read",
+  "storefront.content.read",
+  "storefront.catalog.read"
+];
 const SECRET_FIELD_SPECS = [
   { kind: "verification.api_key.secret", path: ["verification", "api_key"], key: "secret" },
   { kind: "verification.hmac_signature.secret", path: ["verification", "hmac_signature"], key: "secret" },
@@ -126,10 +132,16 @@ function normalizeProfile(raw = {}, fallbackId) {
   const idempotency = raw.idempotency || {};
   const routing = raw.routing || {};
   const audit = raw.audit || {};
+  const publicStorefront = raw.public_storefront || {};
 
   const connectionName = normalizeText(identity.connection_name || raw.connection_name);
   const connectionCodeRaw = normalizeText(identity.connection_code || raw.connection_code);
   const connectionCode = connectionCodeRaw || slugifyCode(connectionName);
+  const connectionKind = normalizeText(identity.connection_kind || raw.connection_kind || "custom");
+  const storefrontDefault =
+    ["website", "ecommerce"].includes(connectionKind) ||
+    normalizeText(routing.channel || raw.channel) === "website_intake" ||
+    Boolean(normalizeText(identity.frontend_url || raw.frontend_url));
   const direction = DIRECTIONS.includes(identity.direction)
     ? identity.direction
     : DIRECTIONS.includes(raw.direction)
@@ -146,7 +158,7 @@ function normalizeProfile(raw = {}, fallbackId) {
     identity: {
       connection_name: connectionName,
       connection_code: connectionCode,
-      connection_kind: normalizeText(identity.connection_kind || raw.connection_kind || "custom"),
+      connection_kind: connectionKind,
       frontend_url: normalizeText(identity.frontend_url || raw.frontend_url),
       portal_url: normalizeText(identity.portal_url || raw.portal_url),
       direction,
@@ -230,6 +242,17 @@ function normalizeProfile(raw = {}, fallbackId) {
         ? routing.mapping_mode || raw.mapping_mode
         : "passthrough",
       mapping_rules: routing.mapping_rules || raw.mapping_rules || null
+    },
+    public_storefront: {
+      scan_allowed: normalizeBool(publicStorefront.scan_allowed, storefrontDefault),
+      loader_enabled: normalizeBool(publicStorefront.loader_enabled, false),
+      public_api_enabled: normalizeBool(publicStorefront.public_api_enabled, storefrontDefault),
+      allowed_scan_modes: normalizeArray(publicStorefront.allowed_scan_modes).length
+        ? normalizeArray(publicStorefront.allowed_scan_modes).filter((mode) => STOREFRONT_SCAN_MODES.includes(mode))
+        : [...STOREFRONT_SCAN_MODES],
+      scopes: normalizeArray(publicStorefront.scopes).length
+        ? normalizeArray(publicStorefront.scopes).filter((scope) => PUBLIC_STOREFRONT_SCOPES.includes(scope))
+        : [...PUBLIC_STOREFRONT_SCOPES]
     },
     audit: {
       audit_record_type: normalizeText(audit.audit_record_type || raw.audit_record_type || "GATEWAY_AUDIT"),
@@ -451,6 +474,20 @@ function validateProfile(profile) {
   if (!normalizeText(routing.envelope_profile)) errors.push(`${id}: envelope_profile required`);
   if (!MAPPING_MODES.includes(routing.mapping_mode)) errors.push(`${id}: mapping_mode invalid`);
 
+  const publicStorefront = profile?.public_storefront || {};
+  if (!Array.isArray(publicStorefront.allowed_scan_modes) || !publicStorefront.allowed_scan_modes.length) {
+    errors.push(`${id}: at least one storefront scan mode required`);
+  }
+  if ((publicStorefront.loader_enabled || publicStorefront.public_api_enabled) && identity.direction === "outbound") {
+    errors.push(`${id}: storefront loader/public API requires inbound or both direction`);
+  }
+  if (publicStorefront.scan_allowed && !identity.frontend_url) {
+    errors.push(`${id}: frontend_url required when storefront scan is enabled`);
+  }
+  if (!Array.isArray(publicStorefront.scopes) || !publicStorefront.scopes.length) {
+    errors.push(`${id}: at least one public storefront scope required`);
+  }
+
   const audit = profile?.audit || {};
   if (!normalizeText(audit.audit_record_type)) errors.push(`${id}: audit_record_type required`);
   if (!LOG_LEVELS.includes(audit.log_level)) errors.push(`${id}: log_level invalid`);
@@ -474,6 +511,22 @@ function validateProfiles(profiles) {
   return errors;
 }
 
+function connectionAllowsStorefrontCapability(profile, capability) {
+  const settings = profile?.public_storefront || {};
+  if (capability === "scan") return settings.scan_allowed !== false;
+  if (capability === "loader") return settings.loader_enabled === true;
+  if (capability === "public_api") return settings.public_api_enabled !== false;
+  return false;
+}
+
+function connectionAllowsStorefrontScope(profile, scope) {
+  if (!PUBLIC_STOREFRONT_SCOPES.includes(scope)) return false;
+  const configured = Array.isArray(profile?.public_storefront?.scopes)
+    ? profile.public_storefront.scopes
+    : PUBLIC_STOREFRONT_SCOPES;
+  return configured.includes(scope);
+}
+
 export {
   normalizeProfile,
   extractProfiles,
@@ -483,5 +536,9 @@ export {
   SECRET_FIELD_SPECS,
   hasSecretConfigured,
   normalizeArray,
-  normalizeJson
+  normalizeJson,
+  PUBLIC_STOREFRONT_SCOPES,
+  STOREFRONT_SCAN_MODES,
+  connectionAllowsStorefrontCapability,
+  connectionAllowsStorefrontScope
 };

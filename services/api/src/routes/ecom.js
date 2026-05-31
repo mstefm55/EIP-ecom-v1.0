@@ -11,7 +11,10 @@ import { sanitizeMediaForStorage } from "../services/assets/url_policy.js";
 import { safeUploadTarget, uploadPartToBuffer, validateEcomUpload, writeVerifiedUpload } from "../lib/uploadSecurity.js";
 import { extractProfiles } from "../services/gateway/connectionProfile.js";
 import { assertOutboundUrlAllowed, fetchWithTimeout } from "../services/gateway/outbound.js";
-import { renderStorefrontDom } from "../services/storefront/renderedDomScanner.js";
+import {
+  buildRenderedDomScannerDiagnostic,
+  renderStorefrontDom
+} from "../services/storefront/renderedDomScanner.js";
 import {
   buildMappingProfile,
   isLikelyClientRenderedShell,
@@ -901,22 +904,40 @@ async function fetchTextForStructure(url, profile) {
 }
 
 async function buildStructureScanFromFrontend(frontendUrl, profile, scanMode = "auto", renderedScanConfig = {}) {
-  const mode = ["auto", "generic", "tagged"].includes(normalizeText(scanMode).toLowerCase())
+  const mode = ["auto", "rendered", "generic", "tagged"].includes(normalizeText(scanMode).toLowerCase())
     ? normalizeText(scanMode).toLowerCase()
     : "auto";
   const rootDoc = await fetchTextForStructure(frontendUrl, profile);
-  const staticGenericCandidates = mode === "tagged" ? [] : scanGenericStorefrontHtml(rootDoc.text);
+  const staticGenericCandidates = ["auto", "generic"].includes(mode)
+    ? scanGenericStorefrontHtml(rootDoc.text)
+    : [];
   const renderedShellDetected = mode !== "tagged" && isLikelyClientRenderedShell(rootDoc.text, staticGenericCandidates);
-  const staticHasUsableCandidate = staticGenericCandidates.some((candidate) => Number(candidate.confidence || 0) >= 0.45);
-  const renderedDom = mode !== "tagged" && (renderedShellDetected || !staticHasUsableCandidate)
+  const renderedDom = ["auto", "rendered"].includes(mode)
     ? await renderStorefrontDom({ url: rootDoc.url, profile, config: renderedScanConfig })
     : null;
-  const renderedGenericCandidates = renderedDom?.ok ? scanGenericStorefrontHtml(renderedDom.html) : [];
-  const genericCandidates = renderedGenericCandidates.length ? renderedGenericCandidates : staticGenericCandidates;
-  const manifest = mode === "generic" ? null : await fetchStructureManifest(frontendUrl, profile);
+  const renderedGenericCandidates = renderedDom?.ok
+    ? scanGenericStorefrontHtml(renderedDom.html).map((candidate) => ({
+        ...candidate,
+        source: "rendered_dom_scan"
+      }))
+    : [];
+  const renderedHasUsableCandidate = renderedGenericCandidates.some(
+    (candidate) => Number(candidate.confidence || 0) >= 0.45
+  );
+  const genericCandidates =
+    mode === "rendered"
+      ? renderedGenericCandidates
+      : mode === "generic"
+        ? staticGenericCandidates
+        : renderedHasUsableCandidate
+          ? renderedGenericCandidates
+          : staticGenericCandidates;
+  const manifest = ["auto", "tagged"].includes(mode)
+    ? await fetchStructureManifest(frontendUrl, profile)
+    : null;
   const origin = new URL(rootDoc.url).origin;
   const scan = buildStructureScanAccumulator(frontendUrl);
-  if (mode !== "generic") appendStructureFromText(scan, rootDoc.url, rootDoc.text);
+  if (["auto", "tagged"].includes(mode)) appendStructureFromText(scan, rootDoc.url, rootDoc.text);
   scan.scanned_sources.add(rootDoc.url);
 
   const queue = [];
@@ -927,7 +948,7 @@ async function buildStructureScanFromFrontend(frontendUrl, profile, scanMode = "
     queue.push({ url, depth });
   };
 
-  if (mode !== "generic") {
+  if (["auto", "tagged"].includes(mode)) {
     for (const link of extractAbsoluteLinksFromHtml(rootDoc.text, rootDoc.url, STRUCTURE_SCRIPT_SRC_REGEX)) {
       enqueue(link, 0);
     }
@@ -937,7 +958,7 @@ async function buildStructureScanFromFrontend(frontendUrl, profile, scanMode = "
   }
 
   let fetchedModules = 0;
-  while (mode !== "generic" && queue.length && fetchedModules < STRUCTURE_SCAN_MAX_MODULES) {
+  while (["auto", "tagged"].includes(mode) && queue.length && fetchedModules < STRUCTURE_SCAN_MAX_MODULES) {
     const current = queue.shift();
     if (!current || scan.scanned_sources.has(current.url)) continue;
     if (current.depth > STRUCTURE_SCAN_MAX_DEPTH) continue;
@@ -959,9 +980,11 @@ async function buildStructureScanFromFrontend(frontendUrl, profile, scanMode = "
 
   const scannedZones = Array.from(scan.zone_map.values()).sort((a, b) => a.tag.localeCompare(b.tag));
   const taggedZones = manifest?.zones?.length ? manifest.zones : scannedZones;
-  const taggedCandidates = mode === "generic" ? [] : taggedZones.map(taggedZoneToCandidate).filter(Boolean);
+  const taggedCandidates = ["auto", "tagged"].includes(mode)
+    ? taggedZones.map(taggedZoneToCandidate).filter(Boolean)
+    : [];
   const candidates =
-    mode === "generic"
+    ["generic", "rendered"].includes(mode)
       ? genericCandidates
       : mode === "tagged"
         ? taggedCandidates
@@ -970,6 +993,12 @@ async function buildStructureScanFromFrontend(frontendUrl, profile, scanMode = "
   const scanSource =
     mode === "tagged"
       ? "tagged_scan"
+      : mode === "rendered"
+        ? renderedDom?.ok
+          ? renderedHasUsableCandidate
+            ? "rendered_dom_scan"
+            : "rendered_dom_scan_low_confidence"
+          : "rendered_dom_scan_unavailable"
       : genericCandidates.some((candidate) => Number(candidate.confidence || 0) >= 0.45)
         ? taggedCandidates.length
           ? renderedDom?.ok
@@ -984,8 +1013,8 @@ async function buildStructureScanFromFrontend(frontendUrl, profile, scanMode = "
             ? "rendered_dom_scan_low_confidence"
             : "generic_scan_low_confidence";
   const fallbackRecommendation =
-    renderedShellDetected && mode === "generic" && !renderedDom?.ok
-      ? "configure_rendered_dom_scanner_or_retry_auto"
+    renderedShellDetected && !renderedDom?.ok
+      ? "configure_rendered_dom_scanner"
       : renderedDom?.ok && !usableCandidates.length
         ? "review_low_confidence_rendered_dom"
         : null;
@@ -1049,6 +1078,7 @@ function mapStructureConnection(profile) {
   const reasons = [];
   if (!isEnabled) reasons.push("disabled");
   if (!frontendUrl) reasons.push("missing_frontend_url");
+  if (profile?.public_storefront?.scan_allowed === false) reasons.push("scan_disabled");
   return {
     connection_code: code,
     connection_name: name || code || "Connection",
@@ -1056,6 +1086,12 @@ function mapStructureConnection(profile) {
     direction: normalizeText(profile?.identity?.direction || ""),
     frontend_url: frontendUrl || normalizeText(profile?.identity?.frontend_url || ""),
     is_enabled: isEnabled,
+    scan_allowed: profile?.public_storefront?.scan_allowed !== false,
+    allowed_scan_modes: Array.isArray(profile?.public_storefront?.allowed_scan_modes)
+      ? profile.public_storefront.allowed_scan_modes
+      : ["auto", "rendered", "generic", "tagged"],
+    loader_enabled: profile?.public_storefront?.loader_enabled === true,
+    public_api_enabled: profile?.public_storefront?.public_api_enabled !== false,
     scan_eligible: reasons.length === 0,
     excluded_reasons: reasons
   };
@@ -3871,6 +3907,18 @@ export default async function ecomRoutes(app) {
   );
 
   app.get(
+    "/storefront/structure/scanner-diagnostic",
+    async (req, reply) => {
+      const session = await requirePerm(app, req, reply, "ECOM_PRODUCT_READ");
+      if (!session) return;
+      return reply.send({
+        ok: true,
+        item: buildRenderedDomScannerDiagnostic(app.config)
+      });
+    }
+  );
+
+  app.get(
     "/storefront/structure",
     async (req, reply) => {
       const session = await requirePerm(app, req, reply, "ECOM_PRODUCT_READ");
@@ -3906,7 +3954,7 @@ export default async function ecomRoutes(app) {
           additionalProperties: false,
           properties: {
             connection_code: { type: "string", maxLength: 65 },
-            scan_mode: { type: "string", enum: ["auto", "generic", "tagged"] }
+            scan_mode: { type: "string", enum: ["auto", "rendered", "generic", "tagged"] }
           }
         }
       }
@@ -3936,13 +3984,23 @@ export default async function ecomRoutes(app) {
       if (!frontendUrl) {
         return reply.code(400).send({ ok: false, error: "INVALID_FRONTEND_URL" });
       }
+      const requestedScanMode = normalizeText(req.body?.scan_mode || "auto").toLowerCase() || "auto";
+      const allowedScanModes = Array.isArray(selected.profile.public_storefront?.allowed_scan_modes)
+        ? selected.profile.public_storefront.allowed_scan_modes
+        : ["auto", "rendered", "generic", "tagged"];
+      if (selected.profile.public_storefront?.scan_allowed === false) {
+        return reply.code(403).send({ ok: false, error: "STOREFRONT_SCAN_DISABLED" });
+      }
+      if (!allowedScanModes.includes(requestedScanMode)) {
+        return reply.code(403).send({ ok: false, error: "STOREFRONT_SCAN_MODE_NOT_ALLOWED" });
+      }
 
       let scanned;
       try {
         scanned = await buildStructureScanFromFrontend(
           frontendUrl,
           selected.profile,
-          req.body?.scan_mode || "auto",
+          requestedScanMode,
           app.config
         );
       } catch (error) {
@@ -3977,6 +4035,25 @@ export default async function ecomRoutes(app) {
             rendered_dom_error: scanned?.rendered_dom_error || null,
             fallback_recommendation: scanned?.fallback_recommendation || null,
             unmapped_candidates: Array.isArray(scanned?.unmapped_candidates) ? scanned.unmapped_candidates : []
+          }
+        });
+      }
+
+      if (requestedScanMode === "rendered" && scanned?.rendered_dom_available !== true) {
+        return reply.code(409).send({
+          ok: false,
+          error: scanned?.rendered_dom_error || "RENDERED_DOM_SCANNER_UNAVAILABLE",
+          connection_code: connectionCode || null,
+          frontend_url: frontendUrl,
+          scan_report: {
+            scan_mode: scanned?.scan_mode || "rendered",
+            scan_source: scanned?.scan_source || "rendered_dom_scan_unavailable",
+            rendered_shell_detected: scanned?.rendered_shell_detected === true,
+            rendered_dom_attempted: scanned?.rendered_dom_attempted === true,
+            rendered_dom_available: false,
+            rendered_dom_error: scanned?.rendered_dom_error || "RENDERED_DOM_SCANNER_UNAVAILABLE",
+            rendered_dom_candidate_count: Number(scanned?.rendered_dom_candidate_count || 0),
+            fallback_recommendation: scanned?.fallback_recommendation || "configure_rendered_dom_scanner"
           }
         });
       }

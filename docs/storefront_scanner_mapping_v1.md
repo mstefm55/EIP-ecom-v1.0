@@ -6,8 +6,9 @@ Content Studio can scan an enabled tenant storefront connection, infer DOM/conte
 
 ## Scan Modes
 
-- `auto`: default. Run generic DOM inference first, render client-side JavaScript when the fetched page is only a mount shell, then merge explicit tagged markers when available.
-- `generic`: inspect fetched HTML and, when needed, an isolated browser-rendered DOM snapshot. Propose zones using semantic DOM, class/id, text, media, link, button, form, and repeated-layout signals.
+- `auto`: default. Try an isolated rendered DOM scan first, use static generic inference when rendered DOM is unavailable or low-confidence, then merge explicit tagged mappings when available.
+- `rendered`: require Chromium and inspect the hydrated DOM. If Chromium is unavailable, return a clear diagnostic and do not save a static shell as a complete mapping.
+- `generic`: inspect fetched HTML only. This is useful for static sites and deliberately does not launch Chromium.
 - `tagged`: use explicit `data-eip-parent`, `data-eip-page`, structure manifests, and the existing frontend-module marker scan.
 
 The scanner returns short redacted text samples only. It does not persist raw HTML. Account, login, checkout, and payment form candidates can be reported for operator awareness but cannot be approved for content push.
@@ -54,6 +55,7 @@ At API startup, the log event `storefront_rendered_dom_scanner_diagnostic` repor
 - `configured_executable_path`
 - `discovered_executable_path`
 - `browser_found`
+- `browser_version`
 
 The diagnostic does not log secrets.
 
@@ -64,7 +66,15 @@ which chromium
 chromium --version
 ```
 
-Then run a Content Studio generic scan. A hydrated client-rendered storefront should report `rendered_dom_available=true`, an empty `rendered_dom_error`, and `rendered_dom_candidate_count > 0`.
+Then run a Content Studio **Rendered DOM scan**. A hydrated client-rendered storefront should report `rendered_dom_available=true`, an empty `rendered_dom_error`, and `rendered_dom_candidate_count > 0`.
+
+The authenticated tenant diagnostic endpoint is:
+
+```text
+GET /api/eip/ecom/storefront/structure/scanner-diagnostic
+```
+
+It requires an EIP session and `ECOM_PRODUCT_READ`. It returns readiness metadata only, never secrets.
 
 ## Governed Persistence
 
@@ -86,7 +96,7 @@ The same object keeps `attrs.mapping_profiles` as a connection-keyed registry so
 
 1. Open tenant Content Studio.
 2. Select an enabled storefront connection.
-3. Run an `auto`, `generic`, or `tagged` scan.
+3. Run an `auto`, `rendered`, `generic`, or `tagged` scan.
 4. Open **View map**.
 5. Review selector, renderer, confidence, source, and redacted sample.
 6. Approve, edit, or ignore each zone.
@@ -105,11 +115,25 @@ Editorial slots return render-ready content:
 }
 ```
 
+## Integration Modes
+
+The scanner only discovers zones and records approved mappings. A website renders published data through one of three explicit modes:
+
+1. Native frontend integration for EIP-aware React or app code.
+2. Loader script integration for sites that can add a script tag.
+3. Public API integration for developer-managed rendering.
+
+See:
+
+- `docs/public_storefront_loader_v1.md`
+- `docs/public_storefront_api_v1.md`
+- `docs/admin_connections_storefront_v1.md`
+
 Product-driven slots return Product Studio rows resolved from placement rules:
 
 ```json
 {
-  "slot": "home.worth",
+  "slot": "home.worth_making",
   "renderer": "product_carousel",
   "source_mode": "hybrid_tag_overrides",
   "products": []

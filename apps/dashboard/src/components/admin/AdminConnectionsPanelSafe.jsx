@@ -176,6 +176,17 @@ function buildProfile(id, overrides = {}) {
       mapping_mode: "passthrough",
       mapping_rules_text: ""
     },
+    public_storefront: {
+      scan_allowed: true,
+      loader_enabled: false,
+      public_api_enabled: true,
+      allowed_scan_modes: ["auto", "rendered", "generic", "tagged"],
+      scopes: [
+        "storefront.mapping.read",
+        "storefront.content.read",
+        "storefront.catalog.read"
+      ]
+    },
     audit: {
       audit_record_type: "GATEWAY_AUDIT",
       redaction_policy_text: "",
@@ -279,6 +290,17 @@ function fromApiProfile(profile) {
       mapping_mode: profile.routing?.mapping_mode || "passthrough",
       mapping_rules_text: profile.routing?.mapping_rules ? JSON.stringify(profile.routing.mapping_rules, null, 2) : ""
     },
+    public_storefront: {
+      scan_allowed: profile.public_storefront?.scan_allowed !== false,
+      loader_enabled: profile.public_storefront?.loader_enabled === true,
+      public_api_enabled: profile.public_storefront?.public_api_enabled !== false,
+      allowed_scan_modes: Array.isArray(profile.public_storefront?.allowed_scan_modes)
+        ? profile.public_storefront.allowed_scan_modes
+        : ["auto", "rendered", "generic", "tagged"],
+      scopes: Array.isArray(profile.public_storefront?.scopes)
+        ? profile.public_storefront.scopes
+        : ["storefront.mapping.read", "storefront.content.read", "storefront.catalog.read"]
+    },
     audit: {
       audit_record_type: profile.audit?.audit_record_type || "GATEWAY_AUDIT",
       redaction_policy_text: profile.audit?.redaction_policy ? JSON.stringify(profile.audit.redaction_policy, null, 2) : "",
@@ -352,6 +374,9 @@ function toApiProfile(profile) {
       mapping_mode: profile.routing.mapping_mode,
       mapping_rules: normalizeJson(profile.routing.mapping_rules_text)
     },
+    public_storefront: {
+      ...profile.public_storefront
+    },
     audit: {
       audit_record_type: profile.audit.audit_record_type,
       redaction_policy: normalizeJson(profile.audit.redaction_policy_text),
@@ -388,6 +413,8 @@ function validateProfile(profile) {
   if (!profile.routing.channel) errors.push("Routing channel is required");
   if (!profile.routing.schema_version) errors.push("Schema version is required");
   if (!profile.routing.envelope_profile) errors.push("Envelope profile is required");
+  if (!profile.public_storefront.allowed_scan_modes.length) errors.push("At least one storefront scan mode is required");
+  if (!profile.public_storefront.scopes.length) errors.push("At least one public storefront scope is required");
   if (!profile.audit.audit_record_type) errors.push("Audit record type is required");
   return errors;
 }
@@ -450,6 +477,7 @@ export default function AdminConnectionsPanelSafe() {
       { id: "verification", label: "Security" },
       { id: "idempotency", label: "Idempotency" },
       { id: "routing", label: "Routing" },
+      { id: "storefront", label: "Storefront" },
       { id: "audit", label: "Audit" }
     ];
     if (selectedConnection?.identity?.direction !== "inbound") {
@@ -674,6 +702,12 @@ export default function AdminConnectionsPanelSafe() {
   };
 
   const apiKeys = detail?.api_keys || [];
+  const selectedStorefrontDiagnostic = detail?.storefront_diagnostics?.connections?.find(
+    (item) => item.connection_code === selectedConnection?.identity?.connection_code
+  ) || null;
+  const mappingStudioHref = selectedConnection?.identity?.connection_code
+    ? `?surface=dashboard&module=content&storefront_connection=${encodeURIComponent(selectedConnection.identity.connection_code)}`
+    : "?surface=dashboard&module=content";
 
   return (
     <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
@@ -845,6 +879,55 @@ export default function AdminConnectionsPanelSafe() {
               </Grid>
             ) : null}
 
+            {activeStep === "storefront" ? (
+              <div className="mt-4 space-y-4">
+                <Grid>
+                  <label className="flex items-center gap-2 text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink-400"><input type="checkbox" checked={selectedConnection.public_storefront.scan_allowed} onChange={(e) => updateSection("public_storefront", { scan_allowed: e.target.checked })} />Scanner enabled</label>
+                  <label className="flex items-center gap-2 text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink-400"><input type="checkbox" checked={selectedConnection.public_storefront.loader_enabled} onChange={(e) => updateSection("public_storefront", { loader_enabled: e.target.checked })} />Loader script enabled</label>
+                  <label className="flex items-center gap-2 text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink-400"><input type="checkbox" checked={selectedConnection.public_storefront.public_api_enabled} onChange={(e) => updateSection("public_storefront", { public_api_enabled: e.target.checked })} />Public API enabled</label>
+                </Grid>
+                <Field label="Allowed scan modes">
+                  <div className="flex flex-wrap gap-2 rounded-lg border border-ink-200/70 bg-white px-3 py-2">
+                    {["auto", "rendered", "generic", "tagged"].map((mode) => (
+                      <label key={mode} className="flex items-center gap-1.5 text-[0.62rem] normal-case tracking-normal text-ink-600">
+                        <input
+                          type="checkbox"
+                          checked={selectedConnection.public_storefront.allowed_scan_modes.includes(mode)}
+                          onChange={(event) => updateSection("public_storefront", {
+                            allowed_scan_modes: event.target.checked
+                              ? [...new Set([...selectedConnection.public_storefront.allowed_scan_modes, mode])]
+                              : selectedConnection.public_storefront.allowed_scan_modes.filter((item) => item !== mode)
+                          })}
+                        />
+                        {mode}
+                      </label>
+                    ))}
+                  </div>
+                </Field>
+                <Field label="Public storefront scopes">
+                  <div className="flex flex-wrap gap-2 rounded-lg border border-ink-200/70 bg-white px-3 py-2">
+                    {["storefront.mapping.read", "storefront.content.read", "storefront.catalog.read"].map((scope) => (
+                      <label key={scope} className="flex items-center gap-1.5 text-[0.62rem] normal-case tracking-normal text-ink-600">
+                        <input
+                          type="checkbox"
+                          checked={selectedConnection.public_storefront.scopes.includes(scope)}
+                          onChange={(event) => updateSection("public_storefront", {
+                            scopes: event.target.checked
+                              ? [...new Set([...selectedConnection.public_storefront.scopes, scope])]
+                              : selectedConnection.public_storefront.scopes.filter((item) => item !== scope)
+                          })}
+                        />
+                        {scope}
+                      </label>
+                    ))}
+                  </div>
+                </Field>
+                <a href={mappingStudioHref} className="inline-flex rounded-full border border-ink-200/70 bg-white px-3 py-2 text-[0.6rem] font-semibold uppercase tracking-[0.2em] text-ink-600">
+                  Open Mapping Studio
+                </a>
+              </div>
+            ) : null}
+
             {activeStep === "audit" ? (
               <Grid>
                 <Field label="Audit record type"><input value={selectedConnection.audit.audit_record_type} onChange={(e) => updateSection("audit", { audit_record_type: e.target.value })} className={inputClass} /></Field>
@@ -871,7 +954,7 @@ export default function AdminConnectionsPanelSafe() {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="font-semibold uppercase tracking-[0.2em]">One-time raw key</p>
-                    <p className="mt-1">Copy it into Samara now. It will be hidden after you copy/hide, refresh, or save.</p>
+                    <p className="mt-1">Copy it into the external storefront now. It will be hidden after you copy/hide, refresh, or save.</p>
                     <p className="mt-2 break-all rounded-xl bg-white/80 px-3 py-2 font-mono text-[0.72rem] text-ink-800">{rawKey}</p>
                     {rawKeyMeta?.copied ? <p className="mt-2 text-emerald-700">Copied. You can now hide it safely.</p> : null}
                   </div>
@@ -897,6 +980,7 @@ export default function AdminConnectionsPanelSafe() {
                         <StatusPill ok={Boolean(key.expires_at)}>{key.expires_at ? `Expires ${formatDate(key.expires_at)}` : "No expiry"}</StatusPill>
                       </div>
                       <p className="mt-2 text-[0.65rem] text-ink-400">Created: {formatDate(key.created_at)}</p>
+                      {key.attrs?.fingerprint ? <p className="mt-1 text-[0.65rem] text-ink-400">Fingerprint: {key.attrs.fingerprint}</p> : null}
                     </div>
                     <div className="flex items-center gap-2">
                       {key.is_active ? (
@@ -918,6 +1002,11 @@ export default function AdminConnectionsPanelSafe() {
               <HealthRow label="Last 24h handshakes" value={detail?.health?.last_24h ?? 0} />
               <HealthRow label="Last 7d handshakes" value={detail?.health?.last_7d ?? 0} />
               <HealthRow label="Last seen" value={detail?.health?.last_seen ? formatDate(detail.health.last_seen) : "?"} />
+              <HealthRow label="Last verified at" value={detail?.health?.last_seen ? formatDate(detail.health.last_seen) : "-"} />
+              <HealthRow label="CORS ready" value={selectedStorefrontDiagnostic?.cors_ready ? "Yes" : "No"} />
+              <HealthRow label="Verification key saved" value={selectedStorefrontDiagnostic?.api_key_saved === null ? "N/A" : selectedStorefrontDiagnostic?.api_key_saved ? "Yes" : "No"} />
+              <HealthRow label="Rendered scanner ready" value={selectedStorefrontDiagnostic?.rendered_scan_ready ? "Yes" : "No"} />
+              <HealthRow label="Last scan usable zones" value={selectedStorefrontDiagnostic?.last_scan_result?.usable_candidate_count ?? "-"} />
             </div>
           </div>
         </div>

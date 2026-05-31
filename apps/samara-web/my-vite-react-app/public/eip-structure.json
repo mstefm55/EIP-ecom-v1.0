@@ -18,10 +18,10 @@
       "occurrences": 1
     },
     {
-      "tag": "home.worth",
+      "tag": "home.worth_making",
       "page": "home",
       "label": "Worth making pattern carousel",
-      "renderer_type": "product_grid",
+      "renderer_type": "product_carousel",
       "occurrences": 1
     },
     {
@@ -169,7 +169,7 @@
     { "tag": "global.nav", "page": "global", "file": "src/App.jsx", "line": null },
     { "tag": "home.hero", "page": "home", "file": "src/App.jsx", "line": null },
     { "tag": "home.drop", "page": "home", "file": "src/App.jsx", "line": null },
-    { "tag": "home.worth", "page": "home", "file": "src/App.jsx", "line": null },
+    { "tag": "home.worth_making", "page": "home", "file": "src/App.jsx", "line": null },
     { "tag": "home.process", "page": "home", "file": "src/App.jsx", "line": null },
     { "tag": "home.community", "page": "home", "file": "src/App.jsx", "line": null },
     { "tag": "patterns.hero", "page": "patterns", "file": "src/App.jsx", "line": null },

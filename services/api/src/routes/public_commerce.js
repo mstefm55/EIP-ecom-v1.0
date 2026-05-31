@@ -9,7 +9,11 @@ import { buildSignedAssetUrl } from "../services/assets/signing.js";
 import { resolveAssetRoot } from "../services/assets/root.js";
 import { randomToken, sha256Hex, timingSafeEqual } from "../auth/crypto.js";
 import { buildRequestHash, ensureIdempotency, finalizeIdempotency } from "../services/gateway/idempotency.js";
-import { extractProfiles } from "../services/gateway/connectionProfile.js";
+import {
+  connectionAllowsStorefrontCapability,
+  connectionAllowsStorefrontScope,
+  extractProfiles
+} from "../services/gateway/connectionProfile.js";
 import { registerRawBody, parseJsonBody } from "../services/gateway/rawBody.js";
 import { hydrateConnectionProfileSecrets } from "../services/gateway/secretStore.js";
 import { connectionAllowsOrigin, extractEventId, verifyConnectionRequest } from "../services/gateway/verification.js";
@@ -71,6 +75,19 @@ const DEFAULT_TRANSLATION_SETTINGS = {
     source_locale: "en"
   }
 };
+const STOREFRONT_STRUCTURE_OBJECT_TYPE = "storefront_structure";
+const STOREFRONT_STRUCTURE_SCOPE = "auto_scan";
+const SAFE_PUBLIC_SELECTOR = /^[a-z0-9#.[\]="' _>:+~*(),-]+$/i;
+const SAFE_LOADER_RENDERERS = new Set([
+  "hero_slider",
+  "rich_text_block",
+  "cta_block",
+  "product_carousel",
+  "product_grid",
+  "editorial_card_grid",
+  "newsletter_block",
+  "newsletter_form"
+]);
 
 function normalizeText(value) {
   return String(value || "").trim();
@@ -143,6 +160,191 @@ function isStorefrontContentPublished(row = {}, attrs = {}) {
   const stage = normalizeText(attrs?.workflow?.stage || "").toLowerCase();
   const status = normalizeText(row?.status || "").toLowerCase();
   return stage === PUBLISHED_STAGE || status === PUBLISHED_STAGE;
+}
+
+function normalizePublicSelector(value) {
+  const selector = normalizeText(value).slice(0, 500);
+  return selector && SAFE_PUBLIC_SELECTOR.test(selector) ? selector : "";
+}
+
+function normalizePublicMapping(candidate = {}) {
+  const slotCode = normalizeText(candidate.suggested_slot).toLowerCase();
+  const renderer = normalizeText(candidate.suggested_renderer).toLowerCase();
+  const selector = normalizePublicSelector(candidate.selector);
+  if (
+    !slotCode ||
+    !selector ||
+    candidate.mapping_status !== "approved" ||
+    candidate.push_allowed === false ||
+    !SAFE_LOADER_RENDERERS.has(renderer)
+  ) {
+    return null;
+  }
+  return {
+    slot_code: slotCode,
+    renderer,
+    selector,
+    source: "approved_mapping",
+    content_endpoint: null
+  };
+}
+
+function findConnectionMappingProfile(attrs = {}, connectionCode = "") {
+  const code = normalizeText(connectionCode);
+  const profiles = Array.isArray(attrs.mapping_profiles) ? attrs.mapping_profiles : [];
+  const matched = profiles.find((profile) => normalizeText(profile?.connection_code) === code);
+  if (matched) return matched;
+  const active = attrs.mapping_profile && typeof attrs.mapping_profile === "object"
+    ? attrs.mapping_profile
+    : null;
+  return normalizeText(active?.connection_code) === code ? active : null;
+}
+
+async function loadPublicStorefrontManifest(app, access, suffix, integration = "api") {
+  const r = await app.db.query(
+    `
+    SELECT attrs
+    FROM eip_core.service_object
+    WHERE tenant_id = $1
+      AND object_type = $2
+      AND attrs->>'scope' = $3
+    ORDER BY updated_at DESC, created_at DESC
+    LIMIT 1
+    `,
+    [access.tenant.id, STOREFRONT_STRUCTURE_OBJECT_TYPE, STOREFRONT_STRUCTURE_SCOPE]
+  );
+  const attrs = r.rows[0]?.attrs && typeof r.rows[0].attrs === "object" ? r.rows[0].attrs : {};
+  const profile = findConnectionMappingProfile(attrs, access.profile.identity?.connection_code);
+  const approved = Array.isArray(profile?.approved_mappings) ? profile.approved_mappings : [];
+  const encodedSuffix = encodeURIComponent(suffix);
+  const integrationQuery = integration === "loader" ? "&integration=loader" : "";
+  const slots = approved
+    .map(normalizePublicMapping)
+    .filter(Boolean)
+    .map((mapping) => ({
+      ...mapping,
+      content_endpoint: `/api/public/commerce/${encodedSuffix}/content?slot=${encodeURIComponent(mapping.slot_code)}${integrationQuery}`
+    }));
+  return {
+    ok: true,
+    connection_code: access.profile.identity?.connection_code || null,
+    mapping_profile_code: profile?.mapping_profile_code || null,
+    mapping_version: Number(profile?.mapping_version || 0),
+    frontend_url: normalizeOptionalText(access.profile.identity?.frontend_url),
+    slots
+  };
+}
+
+function storefrontLoaderScript() {
+  return `(() => {
+  "use strict";
+  const script = document.currentScript;
+  if (!script) return;
+  const connection = String(script.dataset.connection || "").trim();
+  const apiBase = String(script.dataset.apiBase || new URL(script.src).origin).replace(/\\/+$/, "");
+  const apiKey = String(script.dataset.apiKey || "").trim();
+  const debug = script.dataset.debug === "true";
+  const warn = (...args) => { if (debug && globalThis.console) console.warn("[EIP storefront loader]", ...args); };
+  if (!connection || !apiBase) return warn("Missing data-connection or data-api-base.");
+  const headers = apiKey ? { "X-API-Key": apiKey } : {};
+  const getJson = async (url) => {
+    const response = await fetch(url, { headers, credentials: "omit", mode: "cors" });
+    if (!response.ok) throw new Error("HTTP_" + response.status);
+    return response.json();
+  };
+  const text = (value) => String(value == null ? "" : value);
+  const el = (tag, className, value) => {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (value) node.textContent = text(value);
+    return node;
+  };
+  const safeUrl = (value) => {
+    const raw = text(value).trim();
+    return /^(?:https?:\\/\\/|\\/|#)/i.test(raw) ? raw : "";
+  };
+  const image = (src, alt = "") => {
+    const url = safeUrl(src);
+    if (!url) return null;
+    const node = el("img", "eip-storefront-image");
+    node.src = url;
+    node.alt = text(alt);
+    node.loading = "lazy";
+    return node;
+  };
+  const buttonLink = (label, href) => {
+    const url = safeUrl(href);
+    if (!label || !url) return null;
+    const node = el("a", "eip-storefront-cta", label);
+    node.href = url;
+    return node;
+  };
+  const productCard = (product) => {
+    const card = el("article", "eip-storefront-product-card");
+    const media = product?.attrs?.media || {};
+    const img = image(media.main_asset?.url || media.main_url || media.hero_asset?.url || media.hero_url, product?.name || "");
+    if (img) card.append(img);
+    card.append(el("h3", "eip-storefront-product-title", product?.name || product?.title || product?.code || "Product"));
+    return card;
+  };
+  const render = (target, mapping, item) => {
+    if (!target || !item || mapping.renderer !== item.renderer) return false;
+    const root = el("div", "eip-storefront-slot eip-renderer-" + mapping.renderer);
+    if (mapping.renderer === "hero_slider") {
+      const slides = Array.isArray(item.slides) ? item.slides : [];
+      if (!slides.length) return false;
+      for (const slide of slides) {
+        const panel = el("article", "eip-storefront-hero-slide");
+        const img = image(slide.image, slide.title || "");
+        if (img) panel.append(img);
+        if (slide.eyebrow) panel.append(el("p", "eip-storefront-eyebrow", slide.eyebrow));
+        if (slide.title) panel.append(el("h2", "eip-storefront-title", slide.title));
+        if (slide.subtitle || slide.body) panel.append(el("p", "eip-storefront-copy", slide.subtitle || slide.body));
+        const cta = buttonLink(slide.cta_label, slide.cta_target || slide.cta_url);
+        if (cta) panel.append(cta);
+        root.append(panel);
+      }
+    } else if (["product_carousel", "product_grid"].includes(mapping.renderer)) {
+      const products = Array.isArray(item.products) ? item.products : [];
+      if (!products.length) return false;
+      root.classList.add(mapping.renderer === "product_carousel" ? "eip-storefront-carousel" : "eip-storefront-grid");
+      for (const product of products) root.append(productCard(product));
+    } else {
+      const slides = Array.isArray(item.slides) ? item.slides : [];
+      const entries = slides.length ? slides : [item.content || item];
+      for (const entry of entries) {
+        const block = el("article", "eip-storefront-block");
+        const img = image(entry.image, entry.title || "");
+        if (img) block.append(img);
+        if (entry.title || item.title) block.append(el("h3", "eip-storefront-title", entry.title || item.title));
+        if (entry.body || entry.subtitle) block.append(el("p", "eip-storefront-copy", entry.body || entry.subtitle));
+        const cta = buttonLink(entry.cta_label, entry.cta_target || entry.cta_url);
+        if (cta) block.append(cta);
+        root.append(block);
+      }
+    }
+    if (!root.childNodes.length) return false;
+    target.replaceChildren(root);
+    return true;
+  };
+  const run = async () => {
+    const manifestUrl = apiBase + "/api/public/commerce/" + encodeURIComponent(connection) + "/storefront/manifest?integration=loader";
+    const manifest = await getJson(manifestUrl);
+    for (const mapping of Array.isArray(manifest.slots) ? manifest.slots : []) {
+      if (!mapping?.selector || !mapping?.content_endpoint) continue;
+      let target;
+      try { target = document.querySelector(mapping.selector); } catch { continue; }
+      if (!target) continue;
+      try {
+        const payload = await getJson(apiBase + mapping.content_endpoint);
+        render(target, mapping, payload?.item);
+      } catch (error) {
+        warn("Slot fallback preserved", mapping.slot_code, error?.message || error);
+      }
+    }
+  };
+  run().catch((error) => warn("Manifest load failed", error?.message || error));
+})();`;
 }
 
 function storefrontRenderer(attrs = {}, slot = "") {
@@ -1810,6 +2012,14 @@ async function ensureEntityContact(client, tenantId, entityId, type, value, labe
 export default async function publicCommerceRoutes(app) {
   registerRawBody(app);
 
+  app.get("/commerce-loader/v1.js", async (_req, reply) => {
+    reply.header("Content-Type", "application/javascript; charset=utf-8");
+    reply.header("Cache-Control", "public, max-age=300");
+    reply.header("Cross-Origin-Resource-Policy", "cross-origin");
+    reply.header("X-Content-Type-Options", "nosniff");
+    return reply.send(storefrontLoaderScript());
+  });
+
   app.options("/commerce/*", async (req, reply) => {
     const origin = req.headers.origin;
     applyCors(reply, origin, req.headers["access-control-request-headers"]);
@@ -2081,6 +2291,18 @@ export default async function publicCommerceRoutes(app) {
 
     applyCors(reply, origin);
     return { tenant, profile };
+  }
+
+  function requireStorefrontRead(access, reply, { capability = "public_api", scope }) {
+    if (!connectionAllowsStorefrontCapability(access?.profile, capability)) {
+      reply.code(403).send({ ok: false, error: "STOREFRONT_CAPABILITY_DISABLED" });
+      return false;
+    }
+    if (!connectionAllowsStorefrontScope(access?.profile, scope)) {
+      reply.code(403).send({ ok: false, error: "STOREFRONT_SCOPE_FORBIDDEN" });
+      return false;
+    }
+    return true;
   }
 
   function clearMemberCookies(reply) {
@@ -2873,11 +3095,37 @@ export default async function publicCommerceRoutes(app) {
   );
 
   app.get(
+    "/commerce/:suffix/storefront/manifest",
+    { config: { rateLimit: RATE_LIMIT, cors: false } },
+    async (req, reply) => {
+      const access = await resolveConnection(app, req, reply, ["website_intake", "custom", "payments"]);
+      if (!access) return;
+      const capability = req.query?.integration === "loader" ? "loader" : "public_api";
+      if (!requireStorefrontRead(access, reply, { capability, scope: "storefront.mapping.read" })) return;
+      return reply.send(await loadPublicStorefrontManifest(app, access, req.params.suffix, capability === "loader" ? "loader" : "api"));
+    }
+  );
+
+  app.get(
+    "/commerce/:suffix/storefront/mapping",
+    { config: { rateLimit: RATE_LIMIT, cors: false } },
+    async (req, reply) => {
+      const access = await resolveConnection(app, req, reply, ["website_intake", "custom", "payments"]);
+      if (!access) return;
+      const capability = req.query?.integration === "loader" ? "loader" : "public_api";
+      if (!requireStorefrontRead(access, reply, { capability, scope: "storefront.mapping.read" })) return;
+      return reply.send(await loadPublicStorefrontManifest(app, access, req.params.suffix, capability === "loader" ? "loader" : "api"));
+    }
+  );
+
+  app.get(
     "/commerce/:suffix/content",
     { config: { rateLimit: RATE_LIMIT, cors: false } },
     async (req, reply) => {
       const access = await resolveConnection(app, req, reply, ["website_intake", "custom", "payments"]);
       if (!access) return;
+      const capability = req.query?.integration === "loader" ? "loader" : "public_api";
+      if (!requireStorefrontRead(access, reply, { capability, scope: "storefront.content.read" })) return;
 
       const slot = normalizeText(req.query?.slot || "home.hero").toLowerCase();
       if (!slot) return reply.code(400).send({ ok: false, error: "SLOT_REQUIRED" });
@@ -2996,6 +3244,7 @@ export default async function publicCommerceRoutes(app) {
     async (req, reply) => {
       const access = await resolveConnection(app, req, reply, ["website_intake", "custom", "payments"]);
       if (!access) return;
+      if (!requireStorefrontRead(access, reply, { scope: "storefront.content.read" })) return;
 
       const slot = normalizeText(req.query?.slot || "").toLowerCase();
       const page = normalizeText(req.query?.page || "").toLowerCase();
@@ -3696,6 +3945,7 @@ export default async function publicCommerceRoutes(app) {
     async (req, reply) => {
       const access = await resolveConnection(app, req, reply, ["website_intake", "custom", "payments"]);
       if (!access) return;
+      if (!requireStorefrontRead(access, reply, { scope: "storefront.catalog.read" })) return;
 
       const materialType = normalizeText(req.query?.material_type || "").toUpperCase();
       const q = normalizeText(req.query?.q || "");
@@ -5153,3 +5403,9 @@ export default async function publicCommerceRoutes(app) {
     }
   );
 }
+
+export {
+  loadPublicStorefrontManifest,
+  normalizePublicMapping,
+  storefrontLoaderScript
+};

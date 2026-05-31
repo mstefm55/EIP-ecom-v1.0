@@ -4,6 +4,7 @@ import test from "node:test";
 
 const dockerfile = fs.readFileSync(new URL("../Dockerfile", import.meta.url), "utf8");
 const server = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
+const scanner = fs.readFileSync(new URL("../src/services/storefront/renderedDomScanner.js", import.meta.url), "utf8");
 
 test("API Dockerfile installs Debian Bookworm Chromium at the scanner path", () => {
   assert.match(dockerfile, /FROM node:22-bookworm-slim/);
@@ -16,4 +17,5 @@ test("API Dockerfile installs Debian Bookworm Chromium at the scanner path", () 
 test("API startup emits a safe rendered DOM browser diagnostic", () => {
   assert.match(server, /event: "storefront_rendered_dom_scanner_diagnostic"/);
   assert.match(server, /buildRenderedDomScannerDiagnostic\(app\.config\)/);
+  assert.match(scanner, /browser_version: readChromiumVersion/);
 });

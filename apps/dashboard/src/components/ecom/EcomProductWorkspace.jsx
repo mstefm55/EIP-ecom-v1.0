@@ -1512,6 +1512,10 @@ export default function EcomProductWorkspace({ node }) {
           candidateId: String(zone?.candidate_id || "").trim(),
           selector: String(zone?.selector || "").trim(),
           textSample: String(zone?.text_sample || "").trim(),
+          image_count: Number(zone?.image_count || 0),
+          link_count: Number(zone?.link_count || 0),
+          button_count: Number(zone?.button_count || 0),
+          repeated_item_count: Number(zone?.repeated_item_count || 0),
           confidence: Number(zone?.confidence || 0),
           confidenceReasons: Array.isArray(zone?.confidence_reasons) ? zone.confidence_reasons : [],
           mappingStatus: String(zone?.mapping_status || "proposed").trim().toLowerCase(),
@@ -2575,8 +2579,8 @@ export default function EcomProductWorkspace({ node }) {
       if (data?.requires_manual_review) {
         setStatusTone("error");
         setStatusMessage(
-          data?.fallback_recommendation === "configure_rendered_dom_scanner_or_retry_auto"
-            ? "This storefront needs rendered DOM scanning. Configure Chromium on the API or select Auto scan to use a governed manifest fallback."
+          data?.fallback_recommendation === "configure_rendered_dom_scanner"
+            ? "This storefront is a client-rendered shell. Configure Chromium on the API and run Rendered DOM scan."
             : data?.fallback_recommendation === "review_low_confidence_rendered_dom"
               ? "Rendered DOM scan found only low-confidence zones. Review the proposed mappings before use."
               : "Structure scan found only low-confidence zones. Review the proposed mappings before use."
@@ -5515,7 +5519,7 @@ export default function EcomProductWorkspace({ node }) {
             <div className="mt-3 rounded-2xl border border-ink-100/60 bg-white/75 p-3">
               <div className="flex items-center justify-between gap-2">
                 <p className="text-[0.55rem] font-semibold uppercase tracking-[0.24em] text-ink-500">
-                  Structure tags
+                  Storefront mapping
                 </p>
                 <button
                   type="button"
@@ -5554,9 +5558,10 @@ export default function EcomProductWorkspace({ node }) {
                   onChange={(event) => setStorefrontScanMode(event.target.value)}
                   className="mt-1 w-full rounded-xl border border-ink-100/70 bg-white/90 px-2 py-2 text-[0.72rem] uppercase tracking-[0.16em] text-ink-700 outline-none"
                 >
-                  <option value="auto">Auto: infer then tagged fallback</option>
-                  <option value="generic">Generic rendered DOM inference</option>
-                  <option value="tagged">Tagged markers only</option>
+                  <option value="auto">Auto scan</option>
+                  <option value="rendered">Rendered DOM scan</option>
+                  <option value="generic">Static generic scan</option>
+                  <option value="tagged">Tagged fallback scan</option>
                 </select>
               </label>
               <p className="mt-1 text-[0.65rem] text-ink-500">
@@ -5585,6 +5590,17 @@ export default function EcomProductWorkspace({ node }) {
                 <p className="mt-1 text-[0.62rem] uppercase tracking-[0.18em] text-ink-400">
                   Source: {storefrontStructure.source_kind}
                 </p>
+              ) : null}
+              {storefrontStructure ? (
+                <div className="mt-3 grid grid-cols-2 gap-1 rounded-xl border border-ink-100/60 bg-white/75 px-2.5 py-2 text-[0.58rem] text-ink-500">
+                  <span>Rendered available</span><strong className="text-right text-ink-700">{storefrontStructure.rendered_dom_available ? "Yes" : "No"}</strong>
+                  <span>Rendered candidates</span><strong className="text-right text-ink-700">{storefrontStructure.rendered_dom_candidate_count || 0}</strong>
+                  <span>Static candidates</span><strong className="text-right text-ink-700">{storefrontStructure.generic_candidate_count || 0}</strong>
+                  <span>Tagged candidates</span><strong className="text-right text-ink-700">{storefrontStructure.tagged_candidate_count || 0}</strong>
+                  <span>Usable candidates</span><strong className="text-right text-ink-700">{storefrontStructure.usable_candidate_count || 0}</strong>
+                  {storefrontStructure.rendered_dom_error ? <><span>Rendered error</span><strong className="truncate text-right text-rose-600">{storefrontStructure.rendered_dom_error}</strong></> : null}
+                  {storefrontStructure.fallback_recommendation ? <><span>Recommendation</span><strong className="truncate text-right text-amber-700">{storefrontStructure.fallback_recommendation}</strong></> : null}
+                </div>
               ) : null}
               {storefrontStructureMappingRows.length ? (
                 <div className="mt-3 rounded-xl border border-ink-100/60 bg-white/75 px-2.5 py-2">
@@ -6437,6 +6453,9 @@ export default function EcomProductWorkspace({ node }) {
                           {row.textSample ? (
                             <p className="mt-1 line-clamp-2 text-[0.68rem] text-ink-500">{row.textSample}</p>
                           ) : null}
+                          <p className="mt-1 truncate text-[0.62rem] text-ink-400">
+                            {row.image_count || 0} images · {row.link_count || 0} links · {row.button_count || 0} buttons · {row.repeated_item_count || 0} repeated items
+                          </p>
                           <p className="mt-1 truncate text-[0.68rem] text-ink-500">
                             {hasMapped
                               ? `Mapped to: ${row.primaryItem?.title || "Untitled content"}`
@@ -6484,6 +6503,16 @@ export default function EcomProductWorkspace({ node }) {
                         >
                           Ignore
                         </button>
+                        {row.mappingStatus !== "proposed" ? (
+                          <button
+                            type="button"
+                            onClick={() => updateStorefrontMapping(row, "proposed")}
+                            disabled={saving}
+                            className="rounded-full border border-ink-100/80 bg-white px-2.5 py-1 text-[0.52rem] font-semibold uppercase tracking-[0.16em] text-ink-600 disabled:opacity-50"
+                          >
+                            Reset
+                          </button>
+                        ) : null}
                         {approved ? (
                           <button
                             type="button"

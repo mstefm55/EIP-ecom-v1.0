@@ -71,12 +71,16 @@ export const EIP_CONFIG = {
   clientSource: "web-client",
   externalRefPrefix: "web",
   lookbookUrl: import.meta.env.VITE_EIP_LOOKBOOK_URL || "",
-  dropCardCarouselTest: String(import.meta.env.VITE_EIP_DROP_CARD_CAROUSEL_TEST || "")
-    .trim()
-    .toLowerCase() === "true",
-  dropRenderer: String(import.meta.env.VITE_EIP_DROP_RENDERER || "").trim().toLowerCase(),
-  worthCardCarouselTest: String(import.meta.env.VITE_EIP_WORTH_CARD_CAROUSEL_TEST || "")
-    .trim()
-    .toLowerCase() === "true",
-  worthRenderer: String(import.meta.env.VITE_EIP_WORTH_RENDERER || "").trim().toLowerCase(),
+  dropRenderer: String(
+    import.meta.env.VITE_EIP_DROP_RENDERER ||
+      (String(import.meta.env.VITE_EIP_DROP_CARD_CAROUSEL_TEST || "").trim().toLowerCase() === "true"
+        ? "product_carousel"
+        : "")
+  ).trim().toLowerCase(),
+  worthRenderer: String(
+    import.meta.env.VITE_EIP_WORTH_RENDERER ||
+      (String(import.meta.env.VITE_EIP_WORTH_CARD_CAROUSEL_TEST || "").trim().toLowerCase() === "true"
+        ? "product_carousel"
+        : "")
+  ).trim().toLowerCase(),
 };

@@ -119,6 +119,8 @@ test("rendered DOM scanner startup diagnostic reports browser discovery without 
     rendered_scan_enabled: true,
     configured_executable_path: executablePath,
     discovered_executable_path: executablePath,
-    browser_found: true
+    browser_found: true,
+    browser_version: diagnostic.browser_version
   });
+  assert.equal(typeof diagnostic.browser_version === "string" || diagnostic.browser_version === null, true);
 });

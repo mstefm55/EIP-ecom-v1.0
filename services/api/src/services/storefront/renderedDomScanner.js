@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { assertOutboundUrlAllowed } from "../gateway/outbound.js";
 
 const DEFAULT_TIMEOUT_MS = 15000;
@@ -91,8 +92,26 @@ function buildRenderedDomScannerDiagnostic(config = {}) {
     rendered_scan_enabled: settings.enabled,
     configured_executable_path: normalizeText(config.STOREFRONT_RENDERED_SCAN_EXECUTABLE_PATH) || null,
     discovered_executable_path: settings.executable_path || null,
-    browser_found: Boolean(settings.executable_path)
+    browser_found: Boolean(settings.executable_path),
+    browser_version: readChromiumVersion(settings.executable_path)
   };
+}
+
+function readChromiumVersion(executablePath) {
+  const executable = normalizeText(executablePath);
+  if (!executable) return null;
+  try {
+    return normalizeText(
+      execFileSync(executable, ["--version"], {
+        encoding: "utf8",
+        timeout: 3000,
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "ignore"]
+      })
+    ).slice(0, 160) || null;
+  } catch {
+    return null;
+  }
 }
 
 function shouldAllowRenderedResource({ url, method, resourceType } = {}) {
@@ -257,6 +276,7 @@ async function renderStorefrontDom({
 
 export {
   buildRenderedDomScannerDiagnostic,
+  readChromiumVersion,
   renderStorefrontDom,
   resolveRenderedScanConfig,
   shouldAllowRenderedResource
