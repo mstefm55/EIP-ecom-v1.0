@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 import {
+  buildRenderedDomScannerDiagnostic,
   renderStorefrontDom,
   resolveRenderedScanConfig,
   shouldAllowRenderedResource
@@ -107,4 +108,17 @@ test("rendered DOM scanner config is bounded and discovers an explicit executabl
   assert.equal(config.wait_ms, 0);
   assert.equal(config.max_requests, 20);
   assert.equal(config.allow_no_sandbox, false);
+});
+
+test("rendered DOM scanner startup diagnostic reports browser discovery without sensitive values", () => {
+  const diagnostic = buildRenderedDomScannerDiagnostic({
+    STOREFRONT_RENDERED_SCAN_ENABLED: true,
+    STOREFRONT_RENDERED_SCAN_EXECUTABLE_PATH: executablePath
+  });
+  assert.deepEqual(diagnostic, {
+    rendered_scan_enabled: true,
+    configured_executable_path: executablePath,
+    discovered_executable_path: executablePath,
+    browser_found: true
+  });
 });

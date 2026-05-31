@@ -85,6 +85,16 @@ function resolveRenderedScanConfig(config = {}) {
   };
 }
 
+function buildRenderedDomScannerDiagnostic(config = {}) {
+  const settings = resolveRenderedScanConfig(config);
+  return {
+    rendered_scan_enabled: settings.enabled,
+    configured_executable_path: normalizeText(config.STOREFRONT_RENDERED_SCAN_EXECUTABLE_PATH) || null,
+    discovered_executable_path: settings.executable_path || null,
+    browser_found: Boolean(settings.executable_path)
+  };
+}
+
 function shouldAllowRenderedResource({ url, method, resourceType } = {}) {
   let parsed;
   try {
@@ -246,6 +256,7 @@ async function renderStorefrontDom({
 }
 
 export {
+  buildRenderedDomScannerDiagnostic,
   renderStorefrontDom,
   resolveRenderedScanConfig,
   shouldAllowRenderedResource

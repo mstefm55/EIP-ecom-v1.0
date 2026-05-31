@@ -20,15 +20,51 @@ Every scan URL, redirect, and browser subresource origin passes through the exis
 
 The API uses `playwright-core` with a system Chromium executable. Static sites still scan without Chromium. Client-rendered React, Vue, Angular, Next, and similar sites gain generic zone inference when Chromium is available.
 
-Recommended Railway API service settings:
+### Railway API Deployment
+
+The API service uses `services/api/Dockerfile`, based on Debian 12 Bookworm. The image installs the Debian `chromium` package explicitly and sets the default scanner executable to `/usr/bin/chromium`. This replaces the earlier Nixpacks package-hint approach.
+
+In Railway, confirm the API service **Root Directory** is:
 
 ```text
-NIXPACKS_PKGS=chromium
-STOREFRONT_RENDERED_SCAN_ENABLED=true
-STOREFRONT_RENDERED_SCAN_EXECUTABLE_PATH=/usr/bin/chromium
+services/api
 ```
 
-If the executable is exposed elsewhere on `PATH`, leave `STOREFRONT_RENDERED_SCAN_EXECUTABLE_PATH` empty and the API will discover it. Keep `STOREFRONT_RENDERED_SCAN_ALLOW_NO_SANDBOX=false`; only change that after an explicit container-isolation review.
+Railway automatically detects `services/api/Dockerfile` when that root directory is active. If the service has an explicit builder override, select the Dockerfile builder or set:
+
+```text
+RAILWAY_DOCKERFILE_PATH=Dockerfile
+```
+
+Recommended Railway API service variables:
+
+```text
+STOREFRONT_RENDERED_SCAN_ENABLED=true
+STOREFRONT_RENDERED_SCAN_EXECUTABLE_PATH=/usr/bin/chromium
+STOREFRONT_RENDERED_SCAN_ALLOW_NO_SANDBOX=false
+```
+
+The prior `NIXPACKS_PKGS` and `NIXPACKS_APT_PKGS` attempts are no longer needed. If an operator deliberately changes the image and exposes Chromium elsewhere on `PATH`, leave `STOREFRONT_RENDERED_SCAN_EXECUTABLE_PATH` empty and the API will discover it.
+
+Keep `STOREFRONT_RENDERED_SCAN_ALLOW_NO_SANDBOX=false`. The Docker image runs the API as the non-root `node` user and does not hardcode Chromium's `--no-sandbox` flag. Only change this variable after an explicit container-isolation review.
+
+At API startup, the log event `storefront_rendered_dom_scanner_diagnostic` reports:
+
+- `rendered_scan_enabled`
+- `configured_executable_path`
+- `discovered_executable_path`
+- `browser_found`
+
+The diagnostic does not log secrets.
+
+After deployment, verify in the Railway API shell:
+
+```sh
+which chromium
+chromium --version
+```
+
+Then run a Content Studio generic scan. A hydrated client-rendered storefront should report `rendered_dom_available=true`, an empty `rendered_dom_error`, and `rendered_dom_candidate_count > 0`.
 
 ## Governed Persistence
 

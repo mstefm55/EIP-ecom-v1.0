@@ -52,6 +52,7 @@ import { verifyAssetToken } from "./services/assets/signing.js";
 import { sessionCanAccessAssetTenant } from "./services/assets/access.js";
 import { resolveAssetRoot } from "./services/assets/root.js";
 import { syncAllTenantMarketplaceFx } from "./services/fx/marketFxSync.js";
+import { buildRenderedDomScannerDiagnostic } from "./services/storefront/renderedDomScanner.js";
 
 const DEFAULT_BODY_LIMIT = 1024 * 1024; // 1 MiB
 const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
@@ -82,6 +83,10 @@ async function buildServer() {
   await app.register(env, {
     schema: envSchema,
     dotenv: { path: path.join(__dirname, "../../../.env") }
+  });
+  app.log.info({
+    event: "storefront_rendered_dom_scanner_diagnostic",
+    ...buildRenderedDomScannerDiagnostic(app.config)
   });
 
   const requiredAgreements = parseRequiredAgreements(
