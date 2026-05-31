@@ -33,6 +33,15 @@ const SAFE_RENDERERS = new Set([
   "unknown"
 ]);
 const MAPPING_STATUSES = new Set(["proposed", "approved", "ignored", "needs_review"]);
+const SINGLETON_SLOT_RENDERERS = new Set([
+  "hero_slider",
+  "product_carousel",
+  "newsletter_form",
+  "navigation",
+  "footer_block",
+  "media_gallery",
+  "testimonial_grid"
+]);
 const SENSITIVE_TEXT = /\b(password|passwd|secret|token|api[-_ ]?key|authorization|cookie|session|credential|private[-_ ]?key)\b/gi;
 const SENSITIVE_ZONE = /\b(login|log-in|signin|sign-in|account|profile|password|checkout|payment|card|billing|authentication|register|signup|sign-up)\b/i;
 const SAFE_CLASS = /^[a-z_][a-z0-9_-]{1,80}$/i;
@@ -293,7 +302,9 @@ function dedupeCandidates(candidates) {
   const bySignature = new Map();
   for (const candidate of candidates || []) {
     if (!candidate?.candidate_id || !candidate?.suggested_slot) continue;
-    const key = `${candidate.dom_signature}|${candidate.suggested_slot}`;
+    const key = SINGLETON_SLOT_RENDERERS.has(candidate.suggested_renderer)
+      ? `${candidate.suggested_slot}|${candidate.suggested_renderer}`
+      : `${candidate.dom_signature}|${candidate.suggested_slot}`;
     const existing = bySignature.get(key);
     if (!existing || Number(candidate.confidence || 0) > Number(existing.confidence || 0)) {
       bySignature.set(key, candidate);
@@ -482,6 +493,10 @@ function buildMappingProfile({
       usable_candidate_count: Number(scan?.usable_candidate_count || 0),
       generic_candidate_count: Number(scan?.generic_candidate_count || 0),
       tagged_candidate_count: Number(scan?.tagged_candidate_count || 0),
+      rendered_dom_attempted: scan?.rendered_dom_attempted === true,
+      rendered_dom_available: scan?.rendered_dom_available === true,
+      rendered_dom_error: normalizeText(scan?.rendered_dom_error || "") || null,
+      rendered_dom_candidate_count: Number(scan?.rendered_dom_candidate_count || 0),
       files_scanned: Number(scan?.files_scanned || 0),
       scanned_at: scan?.scanned_at || nowIso
     }

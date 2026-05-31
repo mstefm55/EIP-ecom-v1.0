@@ -11,6 +11,7 @@ import { sanitizeMediaForStorage } from "../services/assets/url_policy.js";
 import { safeUploadTarget, uploadPartToBuffer, validateEcomUpload, writeVerifiedUpload } from "../lib/uploadSecurity.js";
 import { extractProfiles } from "../services/gateway/connectionProfile.js";
 import { assertOutboundUrlAllowed, fetchWithTimeout } from "../services/gateway/outbound.js";
+import { renderStorefrontDom } from "../services/storefront/renderedDomScanner.js";
 import {
   buildMappingProfile,
   isLikelyClientRenderedShell,
@@ -899,13 +900,19 @@ async function fetchTextForStructure(url, profile) {
   return { url: response.url || url, text, contentType };
 }
 
-async function buildStructureScanFromFrontend(frontendUrl, profile, scanMode = "auto") {
+async function buildStructureScanFromFrontend(frontendUrl, profile, scanMode = "auto", renderedScanConfig = {}) {
   const mode = ["auto", "generic", "tagged"].includes(normalizeText(scanMode).toLowerCase())
     ? normalizeText(scanMode).toLowerCase()
     : "auto";
   const rootDoc = await fetchTextForStructure(frontendUrl, profile);
-  const genericCandidates = mode === "tagged" ? [] : scanGenericStorefrontHtml(rootDoc.text);
-  const renderedShellDetected = mode !== "tagged" && isLikelyClientRenderedShell(rootDoc.text, genericCandidates);
+  const staticGenericCandidates = mode === "tagged" ? [] : scanGenericStorefrontHtml(rootDoc.text);
+  const renderedShellDetected = mode !== "tagged" && isLikelyClientRenderedShell(rootDoc.text, staticGenericCandidates);
+  const staticHasUsableCandidate = staticGenericCandidates.some((candidate) => Number(candidate.confidence || 0) >= 0.45);
+  const renderedDom = mode !== "tagged" && (renderedShellDetected || !staticHasUsableCandidate)
+    ? await renderStorefrontDom({ url: rootDoc.url, profile, config: renderedScanConfig })
+    : null;
+  const renderedGenericCandidates = renderedDom?.ok ? scanGenericStorefrontHtml(renderedDom.html) : [];
+  const genericCandidates = renderedGenericCandidates.length ? renderedGenericCandidates : staticGenericCandidates;
   const manifest = mode === "generic" ? null : await fetchStructureManifest(frontendUrl, profile);
   const origin = new URL(rootDoc.url).origin;
   const scan = buildStructureScanAccumulator(frontendUrl);
@@ -965,14 +972,26 @@ async function buildStructureScanFromFrontend(frontendUrl, profile, scanMode = "
       ? "tagged_scan"
       : genericCandidates.some((candidate) => Number(candidate.confidence || 0) >= 0.45)
         ? taggedCandidates.length
-          ? "generic_scan_with_tagged_markers"
-          : "generic_scan"
+          ? renderedDom?.ok
+            ? "rendered_dom_scan_with_tagged_markers"
+            : "generic_scan_with_tagged_markers"
+          : renderedDom?.ok
+            ? "rendered_dom_scan"
+            : "generic_scan"
         : taggedCandidates.length
           ? "tagged_scan_fallback"
-          : "generic_scan_low_confidence";
+          : renderedDom?.ok
+            ? "rendered_dom_scan_low_confidence"
+            : "generic_scan_low_confidence";
+  const fallbackRecommendation =
+    renderedShellDetected && mode === "generic" && !renderedDom?.ok
+      ? "configure_rendered_dom_scanner_or_retry_auto"
+      : renderedDom?.ok && !usableCandidates.length
+        ? "review_low_confidence_rendered_dom"
+        : null;
   return {
     project_path: frontendUrl,
-    source_kind: manifest?.source_kind || "frontend_scan",
+    source_kind: renderedDom?.ok ? renderedDom.source_kind : manifest?.source_kind || "frontend_scan",
     source_url: frontendUrl,
     files_scanned: scan.scanned_sources.size,
     tags_found: taggedCandidates.length,
@@ -984,10 +1003,11 @@ async function buildStructureScanFromFrontend(frontendUrl, profile, scanMode = "
     tagged_candidate_count: taggedCandidates.length,
     usable_candidate_count: usableCandidates.length,
     rendered_shell_detected: renderedShellDetected,
-    fallback_recommendation:
-      renderedShellDetected && mode === "generic"
-        ? "retry_auto_for_manifest_or_tagged_fallback"
-        : null,
+    rendered_dom_attempted: renderedDom !== null,
+    rendered_dom_available: renderedDom?.ok === true,
+    rendered_dom_error: renderedDom?.ok === false ? renderedDom.error : null,
+    rendered_dom_candidate_count: renderedGenericCandidates.length,
+    fallback_recommendation: fallbackRecommendation,
     candidate_zones: candidates,
     unmapped_candidates: candidates.filter((candidate) => candidate.mapping_status !== "approved"),
     approved_mappings: candidates.filter((candidate) => candidate.mapping_status === "approved"),
@@ -1349,6 +1369,10 @@ function mapStorefrontStructureRow(row) {
     tagged_candidate_count: Number(attrs.tagged_candidate_count || mappingProfile?.last_scan_result?.tagged_candidate_count || 0),
     usable_candidate_count: Number(attrs.usable_candidate_count || mappingProfile?.last_scan_result?.usable_candidate_count || zones.length),
     rendered_shell_detected: attrs.rendered_shell_detected === true,
+    rendered_dom_attempted: attrs.rendered_dom_attempted === true || mappingProfile?.last_scan_result?.rendered_dom_attempted === true,
+    rendered_dom_available: attrs.rendered_dom_available === true || mappingProfile?.last_scan_result?.rendered_dom_available === true,
+    rendered_dom_error: normalizeOptionalText(attrs.rendered_dom_error || mappingProfile?.last_scan_result?.rendered_dom_error),
+    rendered_dom_candidate_count: Number(attrs.rendered_dom_candidate_count || mappingProfile?.last_scan_result?.rendered_dom_candidate_count || 0),
     fallback_recommendation: normalizeOptionalText(attrs.fallback_recommendation),
     mapping_profile: mappingProfile,
     mapping_profiles: Array.isArray(attrs.mapping_profiles) ? attrs.mapping_profiles : mappingProfile ? [mappingProfile] : [],
@@ -3915,7 +3939,12 @@ export default async function ecomRoutes(app) {
 
       let scanned;
       try {
-        scanned = await buildStructureScanFromFrontend(frontendUrl, selected.profile, req.body?.scan_mode || "auto");
+        scanned = await buildStructureScanFromFrontend(
+          frontendUrl,
+          selected.profile,
+          req.body?.scan_mode || "auto",
+          app.config
+        );
       } catch (error) {
         app.log.error({
           event: "storefront_structure_scan_failed",
@@ -3943,6 +3972,9 @@ export default async function ecomRoutes(app) {
             tagged_candidate_count: Number(scanned?.tagged_candidate_count || 0),
             usable_candidate_count: 0,
             rendered_shell_detected: scanned?.rendered_shell_detected === true,
+            rendered_dom_attempted: scanned?.rendered_dom_attempted === true,
+            rendered_dom_available: scanned?.rendered_dom_available === true,
+            rendered_dom_error: scanned?.rendered_dom_error || null,
             fallback_recommendation: scanned?.fallback_recommendation || null,
             unmapped_candidates: Array.isArray(scanned?.unmapped_candidates) ? scanned.unmapped_candidates : []
           }

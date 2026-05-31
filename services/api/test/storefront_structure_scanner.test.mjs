@@ -42,6 +42,15 @@ test("unknown static storefront returns generic candidate mappings without EIP t
   assert.equal(candidates.every((item) => item.candidate_id && item.dom_signature && item.selector), true);
 });
 
+test("generic scan collapses nested singleton slot proposals into a lean mapping review", () => {
+  const candidates = scanGenericStorefrontHtml(`
+    <section class="hero-banner">
+      <div class="hero-slider-track"><article class="hero-slide">One</article></div>
+    </section>
+  `);
+  assert.equal(candidates.filter((item) => item.suggested_slot === "home.hero").length, 1);
+});
+
 test("client-rendered shells are identified when static HTML has no usable DOM zones", () => {
   const html = '<div id="root"></div><script type="module" src="/assets/index.js"></script>';
   const candidates = scanGenericStorefrontHtml(html);
@@ -57,6 +66,12 @@ test("low-confidence generic candidates are persisted for review instead of disc
   assert.match(ecomRoute, /requires_manual_review: !Number\(scanned\?\.usable_candidate_count \|\| 0\)/);
   assert.match(ecomRoute, /fallback_recommendation: scanned\?\.fallback_recommendation \|\| null/);
   assert.doesNotMatch(ecomRoute, /error: "STRUCTURE_TAGS_NOT_FOUND"/);
+});
+
+test("client-rendered storefront shells run the isolated rendered DOM adapter before fallback", () => {
+  assert.match(ecomRoute, /renderStorefrontDom\(\{ url: rootDoc\.url, profile, config: renderedScanConfig \}\)/);
+  assert.match(ecomRoute, /rendered_dom_attempted: renderedDom !== null/);
+  assert.match(ecomRoute, /rendered_dom_available: renderedDom\?\.ok === true/);
 });
 
 test("tagged mappings remain high-confidence approved candidates in auto merge", () => {

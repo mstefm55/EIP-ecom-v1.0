@@ -74,6 +74,13 @@ export const envSchema = {
     PUBLIC_COMMERCE_QUOTA_MAX: { type: "integer", default: 5000 },
     PUBLIC_COMMERCE_QUOTA_WINDOW_SEC: { type: "integer", default: 3600 },
     OWNER_ADMIN_PASSKEY_STEP_UP_REQUIRED: { type: "boolean", default: true },
+    STOREFRONT_RENDERED_SCAN_ENABLED: { type: "boolean", default: true },
+    STOREFRONT_RENDERED_SCAN_EXECUTABLE_PATH: { type: "string", default: "" },
+    STOREFRONT_RENDERED_SCAN_TIMEOUT_MS: { type: "integer", default: 15000 },
+    STOREFRONT_RENDERED_SCAN_WAIT_MS: { type: "integer", default: 900 },
+    STOREFRONT_RENDERED_SCAN_MAX_HTML_CHARS: { type: "integer", default: 1048576 },
+    STOREFRONT_RENDERED_SCAN_MAX_REQUESTS: { type: "integer", default: 300 },
+    STOREFRONT_RENDERED_SCAN_ALLOW_NO_SANDBOX: { type: "boolean", default: false },
 
     // 2. Define the types for your DB variables
     DB_HOST: { type: "string", default: "localhost" },

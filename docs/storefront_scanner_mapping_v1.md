@@ -6,15 +6,29 @@ Content Studio can scan an enabled tenant storefront connection, infer DOM/conte
 
 ## Scan Modes
 
-- `auto`: default. Run generic static DOM inference first, then merge explicit tagged markers when available.
-- `generic`: inspect fetched static HTML and propose zones using semantic DOM, class/id, text, media, link, button, form, and repeated-layout signals. If the fetched document is only a JavaScript mount shell, persist its low-confidence candidates for manual review and recommend `auto`.
+- `auto`: default. Run generic DOM inference first, render client-side JavaScript when the fetched page is only a mount shell, then merge explicit tagged markers when available.
+- `generic`: inspect fetched HTML and, when needed, an isolated browser-rendered DOM snapshot. Propose zones using semantic DOM, class/id, text, media, link, button, form, and repeated-layout signals.
 - `tagged`: use explicit `data-eip-parent`, `data-eip-page`, structure manifests, and the existing frontend-module marker scan.
 
 The scanner returns short redacted text samples only. It does not persist raw HTML. Account, login, checkout, and payment form candidates can be reported for operator awareness but cannot be approved for content push.
 
 ## Security Boundary
 
-Every scan URL and redirect passes through the existing outbound egress guard. Private, loopback, link-local, metadata, internal, credential-bearing, and insecure production targets remain blocked.
+Every scan URL, redirect, and browser subresource origin passes through the existing outbound egress guard. Private, loopback, link-local, metadata, internal, credential-bearing, and insecure production targets remain blocked. The isolated browser does not receive EIP cookies, refuses non-`GET`/`HEAD` requests, blocks downloads and service workers, caps subresource requests, and discards scripts, styles, sensitive attributes, and form values before inference. Raw HTML is processed in memory only and is never persisted.
+
+## Rendered DOM Adapter
+
+The API uses `playwright-core` with a system Chromium executable. Static sites still scan without Chromium. Client-rendered React, Vue, Angular, Next, and similar sites gain generic zone inference when Chromium is available.
+
+Recommended Railway API service settings:
+
+```text
+NIXPACKS_PKGS=chromium
+STOREFRONT_RENDERED_SCAN_ENABLED=true
+STOREFRONT_RENDERED_SCAN_EXECUTABLE_PATH=/usr/bin/chromium
+```
+
+If the executable is exposed elsewhere on `PATH`, leave `STOREFRONT_RENDERED_SCAN_EXECUTABLE_PATH` empty and the API will discover it. Keep `STOREFRONT_RENDERED_SCAN_ALLOW_NO_SANDBOX=false`; only change that after an explicit container-isolation review.
 
 ## Governed Persistence
 
@@ -68,4 +82,4 @@ Product-driven slots return Product Studio rows resolved from placement rules:
 
 ## Current Limitation
 
-V1 scans fetched static HTML plus the existing textual frontend-module markers. It does not execute client-side JavaScript in a headless browser. Generic mode detects JavaScript mount shells instead of reporting a misleading missing-tags failure. Heavily client-rendered websites should use `auto` and expose tagged markers or a structure manifest until a governed rendered-DOM scanner adapter is added.
+The rendered scanner evaluates the public page with bounded browser execution, but intentionally blocks write requests, downloads, service workers, and private/internal network targets. A website that requires authenticated browsing, mutation requests, or unusually long client-side hydration may still need an explicit structure manifest or operator-reviewed mapping.
