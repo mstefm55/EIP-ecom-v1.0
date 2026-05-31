@@ -14,5 +14,6 @@ test("dashboard API client resets cached CSRF after session-changing auth respon
   assert.match(source, /\/api\/eip\/auth\/verify-otp/);
   assert.match(source, /\/api\/eip\/auth\/passkeys\/login\/verify/);
   assert.match(source, /shouldResetCsrfAfterSuccess\(path, method\)/);
-  assert.match(source, /if \(shouldResetCsrfAfterSuccess\(path, method\)\) resetCsrfToken\(\)/);
+  assert.match(source, /if \(shouldResetCsrfAfterSuccess\(path, method\) && !hasPayloadToken\)/);
+  assert.match(source, /resetCsrfToken\(\)/);
 });

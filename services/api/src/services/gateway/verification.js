@@ -116,6 +116,7 @@ async function verifyJwtSignature(token, config = {}, opts = {}) {
   if (nbf && nowSec + skewSec < nbf) return false;
 
   const iat = normalizeEpochSeconds(payload.iat);
+  if (iat && iat > nowSec + skewSec) return false;
   if (Number.isFinite(Number(config.max_age_sec))) {
     if (!iat) return false;
     if (nowSec - iat > Number(config.max_age_sec) + skewSec) return false;
@@ -208,23 +209,36 @@ async function verifyConnectionRequest(req, profile, rawBody, opts = {}) {
     const config = verification.hmac_signature || {};
     const headerName = config.header_name || "x-signature";
     const provided = getHeader(req, headerName);
-    if (!provided || !config.secret) return { ok: false, error: "MISSING_SIGNATURE" };
-    const timestampHeader = config.timestamp_header_name ? getHeader(req, config.timestamp_header_name) : "";
+    if (!provided) return { ok: false, error: "SIGNATURE_HEADER_MISSING" };
+    if (!config.secret) return { ok: false, error: "MISSING_SIGNATURE_CONFIG" };
+    const timestampHeaderName = config.timestamp_header || config.timestamp_header_name;
+    const timestampHeader = timestampHeaderName ? getHeader(req, timestampHeaderName) : "";
     const maxSkew = Number(config.max_skew_sec || 300);
+    if (timestampHeaderName && !timestampHeader) {
+      return { ok: false, error: "SIGNATURE_TIMESTAMP_MISSING" };
+    }
     if (timestampHeader) {
-      const timestampMs = Number(timestampHeader) > 1e12 ? Number(timestampHeader) : Number(timestampHeader) * 1000;
-      if (!Number.isFinite(timestampMs) || Math.abs(Date.now() - timestampMs) > maxSkew * 1000) {
+      const timestampSec = normalizeEpochSeconds(timestampHeader);
+      const nowMs = Number.isFinite(Number(opts.nowSec)) ? Number(opts.nowSec) * 1000 : Date.now();
+      if (!timestampSec) {
         return { ok: false, error: "SIGNATURE_TIMESTAMP_INVALID" };
+      }
+      if (Math.abs(nowMs - timestampSec * 1000) > maxSkew * 1000) {
+        return { ok: false, error: "SIGNATURE_TIMESTAMP_EXPIRED" };
       }
     }
     const expected = buildHmacSignature({ ...config, timestamp: timestampHeader }, rawBody);
-    if (!timingSafeEqual(provided.replace(/^sha256=/i, ""), expected)) return { ok: false, error: "SIGNATURE_INVALID" };
+    if (!timingSafeEqual(provided.replace(/^sha256=/i, ""), expected)) return { ok: false, error: "SIGNATURE_MISMATCH" };
     return { ok: true };
   }
 
   if (mode === "oauth2_jwt") {
     const config = verification.oauth2_jwt || {};
-    const token = getHeader(req, config.header_name || "authorization").replace(/^Bearer\s+/i, "");
+    const provided = getHeader(req, config.header_name || "authorization");
+    const tokenPrefix = normalizeText(config.token_prefix || "Bearer");
+    const prefixPattern = new RegExp(`^${tokenPrefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s+`, "i");
+    if (!prefixPattern.test(provided)) return { ok: false, error: "JWT_PREFIX_MISMATCH" };
+    const token = provided.replace(prefixPattern, "");
     const ok = await verifyJwtSignature(token, config, opts);
     return ok ? { ok: true } : { ok: false, error: "JWT_INVALID" };
   }
@@ -241,4 +255,4 @@ function extractEventId(req, body, profile) {
   return normalizeText(getHeader(req, key));
 }
 
-export { connectionAllowsOrigin, extractEventId, verifyConnectionRequest };
+export { buildHmacSignature, connectionAllowsOrigin, extractEventId, verifyConnectionRequest };
