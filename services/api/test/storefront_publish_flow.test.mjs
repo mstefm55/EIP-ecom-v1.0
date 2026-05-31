@@ -35,6 +35,11 @@ test("storefront item actions bootstrap intake only for draft handoff", () => {
   assert.doesNotMatch(source, /if \(action !== "INTAKE"\) \{/);
 });
 
+test("storefront transition idempotency is scoped to the publication lifecycle", () => {
+  assert.match(ecomRoute, /function storefrontContentLifecycleKey\(row\)/);
+  assert.equal((ecomRoute.match(/lifecycle: lifecycleKey/g) || []).length, 4);
+});
+
 test("published storefront content can re-enter governed draft flow for republish", () => {
   for (const source of [migration, templateSeed]) {
     assert.match(source, /"from": "content_published"/);

@@ -221,6 +221,18 @@ function markAttrsRepublishRequired(attrsInput, nowIso = new Date().toISOString(
   return attrs;
 }
 
+function storefrontContentLifecycleKey(row) {
+  const attrs = row?.attrs && typeof row.attrs === "object" ? row.attrs : {};
+  return normalizeText(
+    attrs?.translation?.updated_at ||
+      attrs?.workflow?.updated_at ||
+      attrs.updated_at ||
+      row?.updated_at ||
+      row?.created_at ||
+      row?.id
+  );
+}
+
 function toComparableStorefrontAttrs(attrsInput, fallbackTitle = null) {
   const source = attrsInput && typeof attrsInput === "object" ? attrsInput : {};
   const comparable = JSON.parse(JSON.stringify(source || {}));
@@ -4336,6 +4348,7 @@ export default async function ecomRoutes(app) {
           slot,
           title: normalizeOptionalText(row.title)
         };
+        const lifecycleKey = storefrontContentLifecycleKey(row);
 
         if (action === "DRAFT_READY") {
           const intake = await app.coreProcess.advanceInstance(client, {
@@ -4346,7 +4359,8 @@ export default async function ecomRoutes(app) {
             payload: basePayload,
             idempotencyKey: buildIdempotencyKey("storefront_content_intake", {
               id: row.id,
-              slot
+              slot,
+              lifecycle: lifecycleKey
             })
           });
           if (!intake.ok && intake.error !== "INVALID_TRANSITION") {
@@ -4421,7 +4435,8 @@ export default async function ecomRoutes(app) {
           idempotencyKey: buildIdempotencyKey("storefront_content_action", {
             id: row.id,
             action,
-            from_status: normalizeText(row.status || "")
+            from_status: normalizeText(row.status || ""),
+            lifecycle: lifecycleKey
           })
         });
         if (!transition.ok) {
@@ -4861,6 +4876,7 @@ export default async function ecomRoutes(app) {
           title: normalizeOptionalText(row.title),
           code: row.code
         };
+        const lifecycleKey = storefrontContentLifecycleKey(row);
 
         if (action === "DRAFT_READY") {
           const intake = await app.coreProcess.advanceInstance(client, {
@@ -4871,7 +4887,8 @@ export default async function ecomRoutes(app) {
             payload,
             idempotencyKey: buildIdempotencyKey("storefront_content_item_intake", {
               id: row.id,
-              slot
+              slot,
+              lifecycle: lifecycleKey
             })
           });
           if (!intake.ok && intake.error !== "INVALID_TRANSITION") {
@@ -4946,7 +4963,8 @@ export default async function ecomRoutes(app) {
           idempotencyKey: buildIdempotencyKey("storefront_content_item_action", {
             id: row.id,
             action,
-            from_status: normalizeText(row.status || "")
+            from_status: normalizeText(row.status || ""),
+            lifecycle: lifecycleKey
           })
         });
         if (!transition.ok) {
