@@ -92,6 +92,33 @@ No new table is required. The existing tenant-scoped `storefront_structure` serv
 
 The same object keeps `attrs.mapping_profiles` as a connection-keyed registry so one tenant can manage more than one storefront connection without losing prior scan decisions. `attrs.mapping_profile` remains the active profile shown in Content Studio.
 
+## Reusable ECOM Module Placement
+
+Storefront Mapping is an ECOM module capability, not a storefront customization. The generic dashboard `ui_surface` descriptor mounts `EcomProductWorkspace` in `content-studio` mode. Ecommerce template clones copy that governed surface to new tenants. Migration `0098_storefront_mapping_ui_descriptor.sql` also adds the Mapping Studio descriptor to existing published dashboard surfaces that already mount the reusable widget.
+
+The surface descriptor controls the operator-facing mapping configuration:
+
+- labels and help text
+- scan mode labels
+- allowed renderer types
+- product source mode labels
+- slot presets
+- required content fields by renderer
+- action labels
+- diagnostics labels
+
+React remains the low-level interaction primitive for scan requests, candidate editing, preview, and content form controls. A tenant can replace the Mapping Studio descriptor in its `ui_surface` metadata without adding a tenant-specific React branch.
+
+## Process Boundary
+
+Candidate approval records an operator-reviewed DOM-to-slot configuration in the tenant and connection-scoped mapping profile. It does not publish storefront content. Content creation and publication remain governed by the ecommerce storefront content process:
+
+```text
+ECOM_STOREFRONT_CONTENT_FLOW
+```
+
+The process binding, review task, transition graph, and effects remain the authority for draft, review, approval, and publication. Commercial deployments that require dual-control approval for mapping configuration itself can add a mapping-review process binding later without changing scanner or rendering primitives.
+
 ## Operator Flow
 
 1. Open tenant Content Studio.

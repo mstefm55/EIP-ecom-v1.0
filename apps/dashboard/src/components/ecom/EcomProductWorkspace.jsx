@@ -68,6 +68,70 @@ const PRODUCT_SLOT_SOURCE_MODES = [
   { value: "collection_or_drop", label: "Collection or drop" },
   { value: "hybrid_tag_overrides", label: "Tag with manual overrides" }
 ];
+const DEFAULT_STOREFRONT_MAPPING_UI = {
+  title: "Storefront mapping",
+  scanButtonLabel: "Scan",
+  scanningLabel: "Scanning...",
+  connectionLabel: "Scan connection",
+  modeLabel: "Scan mode",
+  connectionLoadingLabel: "Loading connections...",
+  connectionEmptyLabel: "No connected frontend",
+  structureLoadingLabel: "Loading structure...",
+  structureEmptyLabel: "No structure map yet. Run scan.",
+  zoneMappingLabel: "Zone mapping",
+  viewMapLabel: "View map",
+  modal: {
+    eyebrow: "Storefront structure",
+    title: "Detected zone mapping",
+    subtitle: "Review inferred website zones, approve slots, then create governed content.",
+    closeLabel: "Close"
+  },
+  actions: {
+    approve: "Approve",
+    edit: "Edit",
+    ignore: "Ignore",
+    reset: "Reset",
+    openContent: "Open content",
+    createContent: "Create content"
+  },
+  diagnostics: {
+    renderedAvailable: "Rendered available",
+    renderedCandidates: "Rendered candidates",
+    staticCandidates: "Static candidates",
+    taggedCandidates: "Tagged candidates",
+    usableCandidates: "Usable candidates",
+    renderedError: "Rendered error",
+    recommendation: "Recommendation"
+  },
+  scanModes: [
+    { value: "auto", label: "Auto scan" },
+    { value: "rendered", label: "Rendered DOM scan" },
+    { value: "generic", label: "Static generic scan" },
+    { value: "tagged", label: "Tagged fallback scan" }
+  ],
+  rendererOptions: [
+    "hero_slider",
+    "product_carousel",
+    "product_grid",
+    "editorial_card_grid",
+    "rich_text_block",
+    "cta_block",
+    "newsletter_form",
+    "media_gallery",
+    "testimonial_grid",
+    "feature_block"
+  ],
+  productSourceModes: PRODUCT_SLOT_SOURCE_MODES,
+  requiredFieldsByRenderer: {
+    hero_slider: ["slides"],
+    product_carousel: ["source_mode"],
+    product_grid: ["source_mode"],
+    editorial_card_grid: ["slides"],
+    rich_text_block: ["slides"],
+    cta_block: ["slides"],
+    newsletter_form: ["slides"]
+  }
+};
 
 const STOREFRONT_SLOT_PRESETS = [
   {
@@ -1013,6 +1077,66 @@ function storefrontSlotMode(slotValue) {
   return "hero";
 }
 
+function resolveStorefrontMappingUi(value) {
+  const input = value && typeof value === "object" ? value : {};
+  const scanModes = Array.isArray(input.scanModes)
+    ? input.scanModes
+        .map((item) => ({
+          value: String(item?.value || "").trim().toLowerCase(),
+          label: String(item?.label || item?.value || "").trim()
+        }))
+        .filter((item) => item.value && item.label)
+    : [];
+  const rendererOptions = Array.isArray(input.rendererOptions)
+    ? input.rendererOptions.map((item) => String(item || "").trim().toLowerCase()).filter(Boolean)
+    : [];
+  const productSourceModes = Array.isArray(input.productSourceModes)
+    ? input.productSourceModes
+        .map((item) => ({
+          value: String(item?.value || "").trim().toLowerCase(),
+          label: String(item?.label || item?.value || "").trim()
+        }))
+        .filter((item) => item.label)
+    : [];
+  const slotPresets = Array.isArray(input.slotPresets)
+    ? input.slotPresets
+        .map((item) => {
+          const rawSlot = String(item?.slot || "").trim();
+          if (!rawSlot) return null;
+          const slot = normalizeStorefrontSlot(rawSlot);
+          return {
+            slot,
+            title: String(item?.title || slot).trim(),
+            page: normalizeStorefrontSlot(item?.page || slot.split(".")[0] || "home"),
+            mode: String(item?.mode || "").trim().toLowerCase() === "cards" ? "cards" : "hero",
+            description: String(item?.description || "").trim()
+          };
+        })
+        .filter(Boolean)
+    : [];
+  const requiredFieldsByRenderer =
+    input.requiredFieldsByRenderer && typeof input.requiredFieldsByRenderer === "object"
+      ? input.requiredFieldsByRenderer
+      : {};
+  return {
+    ...DEFAULT_STOREFRONT_MAPPING_UI,
+    ...input,
+    modal: { ...DEFAULT_STOREFRONT_MAPPING_UI.modal, ...(input.modal || {}) },
+    actions: { ...DEFAULT_STOREFRONT_MAPPING_UI.actions, ...(input.actions || {}) },
+    diagnostics: { ...DEFAULT_STOREFRONT_MAPPING_UI.diagnostics, ...(input.diagnostics || {}) },
+    scanModes: scanModes.length ? scanModes : DEFAULT_STOREFRONT_MAPPING_UI.scanModes,
+    rendererOptions: rendererOptions.length ? rendererOptions : DEFAULT_STOREFRONT_MAPPING_UI.rendererOptions,
+    productSourceModes: productSourceModes.length
+      ? productSourceModes
+      : DEFAULT_STOREFRONT_MAPPING_UI.productSourceModes,
+    slotPresets: slotPresets.length ? slotPresets : STOREFRONT_SLOT_PRESETS,
+    requiredFieldsByRenderer: {
+      ...DEFAULT_STOREFRONT_MAPPING_UI.requiredFieldsByRenderer,
+      ...requiredFieldsByRenderer
+    }
+  };
+}
+
 function inferProductSourceTag(slotValue) {
   const slot = normalizeStorefrontSlot(slotValue);
   if (slot.includes("worth")) return "worth";
@@ -1156,6 +1280,21 @@ function buildPageNumbers(page, totalPages) {
 
 export default function EcomProductWorkspace({ node }) {
   const contentStudioOnly = node?.props?.mode === "content-studio";
+  const storefrontMappingUi = useMemo(
+    () => resolveStorefrontMappingUi(node?.props?.storefrontMapping),
+    [node?.props?.storefrontMapping]
+  );
+  const storefrontSlotPresetMap = useMemo(
+    () => new Map(storefrontMappingUi.slotPresets.map((item) => [item.slot, item])),
+    [storefrontMappingUi.slotPresets]
+  );
+  const getConfiguredStorefrontSlotPreset = (slotValue) =>
+    storefrontSlotPresetMap.get(normalizeStorefrontSlot(slotValue)) || null;
+  const storefrontSlotModeFor = (slotValue) => {
+    const preset = getConfiguredStorefrontSlotPreset(slotValue);
+    if (preset?.mode) return preset.mode;
+    return normalizeStorefrontSlot(slotValue).endsWith(".cards") ? "cards" : "hero";
+  };
   const [query, setQuery] = useState("");
   const [products, setProducts] = useState([]);
   const [loadingList, setLoadingList] = useState(false);
@@ -1482,8 +1621,8 @@ export default function EcomProductWorkspace({ node }) {
   const hasStorefrontSelection = Boolean(
     normalizeStorefrontSlot(storefrontDraft?.slot || selectedStorefrontSlot)
   );
-  const selectedStorefrontPreset = getStorefrontSlotPreset(storefrontDraft?.slot || selectedStorefrontSlot);
-  const storefrontMode = storefrontSlotMode(storefrontDraft?.slot || selectedStorefrontSlot);
+  const selectedStorefrontPreset = getConfiguredStorefrontSlotPreset(storefrontDraft?.slot || selectedStorefrontSlot);
+  const storefrontMode = storefrontSlotModeFor(storefrontDraft?.slot || selectedStorefrontSlot);
   const storefrontStructureZones = useMemo(() => {
     const profileCandidates = storefrontStructure?.mapping_profile?.candidate_zones;
     const zones = Array.isArray(profileCandidates) && profileCandidates.length
@@ -1546,10 +1685,26 @@ export default function EcomProductWorkspace({ node }) {
       }))
       .filter((item) => item.value);
   }, [storefrontConnections]);
+  const selectedStorefrontConnection = useMemo(() => {
+    return (Array.isArray(storefrontConnections) ? storefrontConnections : []).find(
+      (item) => String(item?.connection_code || "").trim() === selectedStorefrontConnectionCode
+    ) || null;
+  }, [storefrontConnections, selectedStorefrontConnectionCode]);
+  const storefrontScanModeOptions = useMemo(() => {
+    const allowed = Array.isArray(selectedStorefrontConnection?.allowed_scan_modes)
+      ? new Set(selectedStorefrontConnection.allowed_scan_modes)
+      : null;
+    return storefrontMappingUi.scanModes.filter((item) => !allowed || allowed.has(item.value));
+  }, [selectedStorefrontConnection, storefrontMappingUi.scanModes]);
   const storefrontEligibleConnectionCount = useMemo(
     () => storefrontConnectionOptions.length,
     [storefrontConnectionOptions]
   );
+  useEffect(() => {
+    if (!storefrontScanModeOptions.length) return;
+    if (storefrontScanModeOptions.some((item) => item.value === storefrontScanMode)) return;
+    setStorefrontScanMode(storefrontScanModeOptions[0].value);
+  }, [storefrontScanMode, storefrontScanModeOptions]);
   const storefrontCategoryByCode = useMemo(() => {
     const map = new Map();
     (Array.isArray(storefrontCategories) ? storefrontCategories : []).forEach((item) => {
@@ -1646,12 +1801,12 @@ export default function EcomProductWorkspace({ node }) {
       if (!map.has(slot)) map.set(slot, `${slot} - Existing`);
     });
     if (!map.size) {
-      STOREFRONT_SLOT_PRESETS.forEach((preset) => {
+      storefrontMappingUi.slotPresets.forEach((preset) => {
         map.set(preset.slot, `${preset.slot} - ${preset.title}`);
       });
     }
     return Array.from(map.entries()).map(([value, label]) => ({ value, label }));
-  }, [storefrontStructureSlotOptions, storefrontItems]);
+  }, [storefrontStructureSlotOptions, storefrontItems, storefrontMappingUi.slotPresets]);
   const storefrontItemsBySlot = useMemo(() => {
     const map = new Map();
     [...storefrontItems, ...pageContentItems].forEach((item) => {
@@ -1687,11 +1842,11 @@ export default function EcomProductWorkspace({ node }) {
   const pageArticleSlotOptions = useMemo(() => {
     const options = storefrontStructureSlotOptions.filter((option) => option.value.startsWith("pages."));
     if (options.length) return options;
-    return STOREFRONT_SLOT_PRESETS.filter((item) => item.page === "pages").map((item) => ({
+    return storefrontMappingUi.slotPresets.filter((item) => item.page === "pages").map((item) => ({
       value: item.slot,
       label: item.title
     }));
-  }, [storefrontStructureSlotOptions]);
+  }, [storefrontStructureSlotOptions, storefrontMappingUi.slotPresets]);
   const mainAsset = useMemo(
     () =>
       normalizeAsset(
@@ -2629,26 +2784,34 @@ export default function EcomProductWorkspace({ node }) {
 
   const editStorefrontMapping = async (row) => {
     const suggestedSlot = await requestPrompt({
-      title: "Edit mapped slot",
-      message: "Choose the governed content slot for this detected website zone.",
-      inputLabel: "Slot code",
+      title: storefrontMappingUi.editSlotTitle || "Edit mapped slot",
+      message: storefrontMappingUi.editSlotMessage || "Choose the governed content slot for this detected website zone.",
+      inputLabel: storefrontMappingUi.slotCodeLabel || "Slot code",
       defaultValue: row?.tag || "",
-      confirmLabel: "Continue",
+      confirmLabel: storefrontMappingUi.continueLabel || "Continue",
       required: true
     });
     if (!suggestedSlot) return;
     const renderer = await requestPrompt({
-      title: "Edit renderer",
-      message: "Choose the renderer descriptor consumed by the storefront.",
-      inputLabel: "Renderer",
+      title: storefrontMappingUi.editRendererTitle || "Edit renderer",
+      message:
+        storefrontMappingUi.editRendererMessage ||
+        `Choose a renderer descriptor: ${storefrontMappingUi.rendererOptions.join(", ")}.`,
+      inputLabel: storefrontMappingUi.rendererLabel || "Renderer",
       defaultValue: row?.rendererType || "rich_text_block",
-      confirmLabel: "Approve mapping",
+      confirmLabel: storefrontMappingUi.approveMappingLabel || "Approve mapping",
       required: true
     });
     if (!renderer) return;
+    const normalizedRenderer = String(renderer).trim().toLowerCase();
+    if (!storefrontMappingUi.rendererOptions.includes(normalizedRenderer)) {
+      setStatusTone("error");
+      setStatusMessage("Renderer is not allowed by the active storefront mapping descriptor.");
+      return;
+    }
     await updateStorefrontMapping(row, "approved", {
       suggested_slot: suggestedSlot,
-      suggested_renderer: renderer
+      suggested_renderer: normalizedRenderer
     });
   };
 
@@ -3147,7 +3310,7 @@ export default function EcomProductWorkspace({ node }) {
           .filter((slide) => isStorefrontSlideContentful(slide))
       };
       if (!payload.slides.length && !String(payload.attrs?.source_mode || "").trim()) {
-        const mode = storefrontSlotMode(storefrontDraft.slot);
+        const mode = storefrontSlotModeFor(storefrontDraft.slot);
         setStatusTone("error");
         setStatusMessage(
           mode === "cards"
@@ -3181,8 +3344,10 @@ export default function EcomProductWorkspace({ node }) {
     const base = String(ECOM_PREVIEW_BASE_URL || "").trim().replace(/\/$/, "");
     const normalizedSlot = normalizeStorefrontSlot(storefrontDraft.slot || defaultStorefrontSlot);
     const slot = encodeURIComponent(normalizedSlot);
+    const mappedPage = String(storefrontStructureZoneByTag.get(normalizedSlot)?.page || "").trim();
     const mappedPreviewPage =
-      normalizeStorefrontSlot(storefrontStructureZoneByTag.get(normalizedSlot)?.page || "") ||
+      (mappedPage ? normalizeStorefrontSlot(mappedPage) : "") ||
+      getConfiguredStorefrontSlotPreset(normalizedSlot)?.page ||
       storefrontPreviewPageForSlot(normalizedSlot);
     const previewPage = encodeURIComponent(mappedPreviewPage);
     const previewUrl = `${base}/?page=${previewPage}&content_slot=${slot}&content_preview=1`;
@@ -5100,7 +5265,7 @@ export default function EcomProductWorkspace({ node }) {
             updateStorefrontAttr("source_mode", value);
             updateStorefrontProductSource("mode", value);
           }}
-          options={PRODUCT_SLOT_SOURCE_MODES}
+          options={storefrontMappingUi.productSourceModes}
         />
       </div>
       {storefrontProductDriven ? (
@@ -5519,7 +5684,7 @@ export default function EcomProductWorkspace({ node }) {
             <div className="mt-3 rounded-2xl border border-ink-100/60 bg-white/75 p-3">
               <div className="flex items-center justify-between gap-2">
                 <p className="text-[0.55rem] font-semibold uppercase tracking-[0.24em] text-ink-500">
-                  Storefront mapping
+                  {storefrontMappingUi.title}
                 </p>
                 <button
                   type="button"
@@ -5528,11 +5693,13 @@ export default function EcomProductWorkspace({ node }) {
                   className="inline-flex items-center gap-1 rounded-full border border-ink-100/70 bg-white/80 px-3 py-1 text-[0.55rem] font-semibold uppercase tracking-[0.2em] text-ink-600 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {storefrontStructureScanning ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
-                  {storefrontStructureScanning ? "Scanning..." : "Scan"}
+                  {storefrontStructureScanning
+                    ? storefrontMappingUi.scanningLabel
+                    : storefrontMappingUi.scanButtonLabel}
                 </button>
               </div>
               <label className="mt-2 block text-[0.55rem] font-semibold uppercase tracking-[0.22em] text-ink-400">
-                Scan connection
+                {storefrontMappingUi.connectionLabel}
                 <select
                   value={selectedStorefrontConnectionCode}
                   onChange={(event) => setSelectedStorefrontConnectionCode(event.target.value)}
@@ -5541,7 +5708,9 @@ export default function EcomProductWorkspace({ node }) {
                 >
                   {storefrontConnectionOptions.length ? null : (
                     <option value="">
-                      {storefrontConnectionsLoading ? "Loading..." : "No connected frontend"}
+                      {storefrontConnectionsLoading
+                        ? storefrontMappingUi.connectionLoadingLabel
+                        : storefrontMappingUi.connectionEmptyLabel}
                     </option>
                   )}
                   {storefrontConnectionOptions.map((option) => (
@@ -5552,16 +5721,15 @@ export default function EcomProductWorkspace({ node }) {
                 </select>
               </label>
               <label className="mt-2 block text-[0.55rem] font-semibold uppercase tracking-[0.22em] text-ink-400">
-                Scan mode
+                {storefrontMappingUi.modeLabel}
                 <select
                   value={storefrontScanMode}
                   onChange={(event) => setStorefrontScanMode(event.target.value)}
                   className="mt-1 w-full rounded-xl border border-ink-100/70 bg-white/90 px-2 py-2 text-[0.72rem] uppercase tracking-[0.16em] text-ink-700 outline-none"
                 >
-                  <option value="auto">Auto scan</option>
-                  <option value="rendered">Rendered DOM scan</option>
-                  <option value="generic">Static generic scan</option>
-                  <option value="tagged">Tagged fallback scan</option>
+                  {storefrontScanModeOptions.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
                 </select>
               </label>
               <p className="mt-1 text-[0.65rem] text-ink-500">
@@ -5571,10 +5739,10 @@ export default function EcomProductWorkspace({ node }) {
               </p>
               <p className="mt-2 text-[0.68rem] text-ink-500">
                 {storefrontStructureLoading
-                  ? "Loading structure..."
+                  ? storefrontMappingUi.structureLoadingLabel
                   : storefrontStructure?.usable_candidate_count
                     ? `${storefrontStructure.usable_candidate_count} usable zones detected`
-                    : "No structure map yet. Run scan."}
+                    : storefrontMappingUi.structureEmptyLabel}
               </p>
               {storefrontStructure?.project_path ? (
                 <p className="mt-1 text-[0.62rem] uppercase tracking-[0.18em] text-ink-400">
@@ -5593,27 +5761,27 @@ export default function EcomProductWorkspace({ node }) {
               ) : null}
               {storefrontStructure ? (
                 <div className="mt-3 grid grid-cols-2 gap-1 rounded-xl border border-ink-100/60 bg-white/75 px-2.5 py-2 text-[0.58rem] text-ink-500">
-                  <span>Rendered available</span><strong className="text-right text-ink-700">{storefrontStructure.rendered_dom_available ? "Yes" : "No"}</strong>
-                  <span>Rendered candidates</span><strong className="text-right text-ink-700">{storefrontStructure.rendered_dom_candidate_count || 0}</strong>
-                  <span>Static candidates</span><strong className="text-right text-ink-700">{storefrontStructure.generic_candidate_count || 0}</strong>
-                  <span>Tagged candidates</span><strong className="text-right text-ink-700">{storefrontStructure.tagged_candidate_count || 0}</strong>
-                  <span>Usable candidates</span><strong className="text-right text-ink-700">{storefrontStructure.usable_candidate_count || 0}</strong>
-                  {storefrontStructure.rendered_dom_error ? <><span>Rendered error</span><strong className="truncate text-right text-rose-600">{storefrontStructure.rendered_dom_error}</strong></> : null}
-                  {storefrontStructure.fallback_recommendation ? <><span>Recommendation</span><strong className="truncate text-right text-amber-700">{storefrontStructure.fallback_recommendation}</strong></> : null}
+                  <span>{storefrontMappingUi.diagnostics.renderedAvailable}</span><strong className="text-right text-ink-700">{storefrontStructure.rendered_dom_available ? "Yes" : "No"}</strong>
+                  <span>{storefrontMappingUi.diagnostics.renderedCandidates}</span><strong className="text-right text-ink-700">{storefrontStructure.rendered_dom_candidate_count || 0}</strong>
+                  <span>{storefrontMappingUi.diagnostics.staticCandidates}</span><strong className="text-right text-ink-700">{storefrontStructure.generic_candidate_count || 0}</strong>
+                  <span>{storefrontMappingUi.diagnostics.taggedCandidates}</span><strong className="text-right text-ink-700">{storefrontStructure.tagged_candidate_count || 0}</strong>
+                  <span>{storefrontMappingUi.diagnostics.usableCandidates}</span><strong className="text-right text-ink-700">{storefrontStructure.usable_candidate_count || 0}</strong>
+                  {storefrontStructure.rendered_dom_error ? <><span>{storefrontMappingUi.diagnostics.renderedError}</span><strong className="truncate text-right text-rose-600">{storefrontStructure.rendered_dom_error}</strong></> : null}
+                  {storefrontStructure.fallback_recommendation ? <><span>{storefrontMappingUi.diagnostics.recommendation}</span><strong className="truncate text-right text-amber-700">{storefrontStructure.fallback_recommendation}</strong></> : null}
                 </div>
               ) : null}
               {storefrontStructureMappingRows.length ? (
                 <div className="mt-3 rounded-xl border border-ink-100/60 bg-white/75 px-2.5 py-2">
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-[0.55rem] font-semibold uppercase tracking-[0.22em] text-ink-500">
-                      Zone mapping
+                      {storefrontMappingUi.zoneMappingLabel}
                     </p>
                     <button
                       type="button"
                       onClick={() => setShowStorefrontMappingModal(true)}
                       className="inline-flex items-center gap-1 rounded-full border border-ink-100/80 bg-white px-2.5 py-1 text-[0.5rem] font-semibold uppercase tracking-[0.18em] text-ink-600"
                     >
-                      View map
+                      {storefrontMappingUi.viewMapLabel}
                     </button>
                   </div>
                   <p className="mt-1 text-[0.62rem] text-ink-500">
@@ -5713,7 +5881,7 @@ export default function EcomProductWorkspace({ node }) {
                     const active =
                       normalizeStorefrontSlot(item.slot) === normalizeStorefrontSlot(selectedStorefrontSlot);
                     const slotKey = normalizeStorefrontSlot(item.slot);
-                    const preset = getStorefrontSlotPreset(slotKey);
+                    const preset = getConfiguredStorefrontSlotPreset(slotKey);
                     const mappedZone = storefrontStructureZoneByTag.get(slotKey);
                     const itemStage = String(item?.attrs?.workflow?.stage || item?.status || "new").toLowerCase();
                     return (
@@ -6410,11 +6578,11 @@ export default function EcomProductWorkspace({ node }) {
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-[0.6rem] font-semibold uppercase tracking-[0.28em] text-ink-400">
-                    Storefront structure
+                    {storefrontMappingUi.modal.eyebrow}
                   </p>
-                  <h3 className="text-[1rem] font-semibold text-ink-900">Detected zone mapping</h3>
+                  <h3 className="text-[1rem] font-semibold text-ink-900">{storefrontMappingUi.modal.title}</h3>
                   <p className="text-[0.72rem] text-ink-500">
-                    Review inferred website zones, approve slots, then create governed content.
+                    {storefrontMappingUi.modal.subtitle}
                   </p>
                 </div>
                 <button
@@ -6423,7 +6591,7 @@ export default function EcomProductWorkspace({ node }) {
                   className="inline-flex items-center gap-1 rounded-full border border-ink-100/80 bg-white px-3 py-1.5 text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-ink-600"
                 >
                   <X className="h-3.5 w-3.5" />
-                  Close
+                  {storefrontMappingUi.modal.closeLabel}
                 </button>
               </div>
               <div className="mt-4 max-h-[65vh] space-y-2 overflow-y-auto pr-1">
@@ -6484,7 +6652,7 @@ export default function EcomProductWorkspace({ node }) {
                             disabled={saving || !row.pushAllowed}
                             className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[0.52rem] font-semibold uppercase tracking-[0.16em] text-emerald-700 disabled:opacity-50"
                           >
-                            Approve
+                            {storefrontMappingUi.actions.approve}
                           </button>
                         ) : null}
                         <button
@@ -6493,7 +6661,7 @@ export default function EcomProductWorkspace({ node }) {
                           disabled={saving || !row.pushAllowed}
                           className="rounded-full border border-ink-100/80 bg-white px-2.5 py-1 text-[0.52rem] font-semibold uppercase tracking-[0.16em] text-ink-600 disabled:opacity-50"
                         >
-                          Edit
+                          {storefrontMappingUi.actions.edit}
                         </button>
                         <button
                           type="button"
@@ -6501,7 +6669,7 @@ export default function EcomProductWorkspace({ node }) {
                           disabled={saving}
                           className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[0.52rem] font-semibold uppercase tracking-[0.16em] text-rose-700 disabled:opacity-50"
                         >
-                          Ignore
+                          {storefrontMappingUi.actions.ignore}
                         </button>
                         {row.mappingStatus !== "proposed" ? (
                           <button
@@ -6510,7 +6678,7 @@ export default function EcomProductWorkspace({ node }) {
                             disabled={saving}
                             className="rounded-full border border-ink-100/80 bg-white px-2.5 py-1 text-[0.52rem] font-semibold uppercase tracking-[0.16em] text-ink-600 disabled:opacity-50"
                           >
-                            Reset
+                            {storefrontMappingUi.actions.reset}
                           </button>
                         ) : null}
                         {approved ? (
@@ -6522,7 +6690,9 @@ export default function EcomProductWorkspace({ node }) {
                             }}
                             className="rounded-full border border-ink-100/80 bg-white px-2.5 py-1 text-[0.52rem] font-semibold uppercase tracking-[0.16em] text-ink-600"
                           >
-                            {hasMapped ? "Open content" : "Create content"}
+                            {hasMapped
+                              ? storefrontMappingUi.actions.openContent
+                              : storefrontMappingUi.actions.createContent}
                           </button>
                         ) : null}
                       </div>

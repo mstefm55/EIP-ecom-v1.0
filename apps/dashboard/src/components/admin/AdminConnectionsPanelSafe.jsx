@@ -791,7 +791,7 @@ export default function AdminConnectionsPanelSafe() {
                 <Field label="Connection kind"><select value={selectedConnection.identity.connection_kind} onChange={(e) => updateSection("identity", { connection_kind: e.target.value })} className={inputClass}>{KIND_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>
                 <Field label="Direction"><select value={selectedConnection.identity.direction} onChange={(e) => updateSection("identity", { direction: e.target.value })} className={inputClass}>{DIRECTION_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>
                 <Field label="Environment"><select value={selectedConnection.identity.environment} onChange={(e) => updateSection("identity", { environment: e.target.value })} className={inputClass}>{ENV_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>
-                <Field label="Frontend URL"><input value={selectedConnection.identity.frontend_url} onChange={(e) => { updateSection("identity", { frontend_url: e.target.value }); if (!selectedConnection.inbound.origin_allowlist_text) updateSection("inbound", { origin_allowlist_text: e.target.value }); }} placeholder="https://samara-web.up.railway.app" className={inputClass} /></Field>
+                <Field label="Frontend URL"><input value={selectedConnection.identity.frontend_url} onChange={(e) => { updateSection("identity", { frontend_url: e.target.value }); if (!selectedConnection.inbound.origin_allowlist_text) updateSection("inbound", { origin_allowlist_text: e.target.value }); }} placeholder="https://storefront.example.com" className={inputClass} /></Field>
                 <Field label="Portal URL"><input value={selectedConnection.identity.portal_url} onChange={(e) => updateSection("identity", { portal_url: e.target.value })} className={inputClass} /></Field>
                 <label className="flex items-center gap-2 text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink-400"><input type="checkbox" checked={selectedConnection.identity.is_enabled} onChange={(e) => updateSection("identity", { is_enabled: e.target.checked })} />Enabled</label>
               </Grid>
@@ -800,13 +800,13 @@ export default function AdminConnectionsPanelSafe() {
             {activeStep === "inbound" ? (
               <div className="mt-4 space-y-4">
                 <Grid>
-                  <Field label="Path suffix"><input value={selectedConnection.inbound.inbound_path_suffix} onChange={(e) => updateSection("inbound", { inbound_path_suffix: e.target.value })} placeholder="samara" className={inputClass} /></Field>
+                  <Field label="Path suffix"><input value={selectedConnection.inbound.inbound_path_suffix} onChange={(e) => updateSection("inbound", { inbound_path_suffix: e.target.value })} placeholder="tenant-storefront" className={inputClass} /></Field>
                   <Field label="HTTP method"><select value={selectedConnection.inbound.http_method} onChange={(e) => updateSection("inbound", { http_method: e.target.value })} className={inputClass}>{HTTP_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}</select></Field>
                   <Field label="Expected content type"><input value={selectedConnection.inbound.expected_content_type} onChange={(e) => updateSection("inbound", { expected_content_type: e.target.value })} className={inputClass} /></Field>
                   <Field label="Rate limit max"><input type="number" value={selectedConnection.inbound.rate_limit_max} onChange={(e) => updateSection("inbound", { rate_limit_max: e.target.value })} className={inputClass} /></Field>
                   <Field label="Rate limit window sec"><input type="number" value={selectedConnection.inbound.rate_limit_window_sec} onChange={(e) => updateSection("inbound", { rate_limit_window_sec: e.target.value })} className={inputClass} /></Field>
                 </Grid>
-                <Field label="Origin allowlist"><textarea value={selectedConnection.inbound.origin_allowlist_text} onChange={(e) => updateSection("inbound", { origin_allowlist_text: e.target.value })} placeholder="https://samara-web.up.railway.app" className={`${inputClass} min-h-[80px]`} /></Field>
+                <Field label="Origin allowlist"><textarea value={selectedConnection.inbound.origin_allowlist_text} onChange={(e) => updateSection("inbound", { origin_allowlist_text: e.target.value })} placeholder="https://storefront.example.com" className={`${inputClass} min-h-[80px]`} /></Field>
                 {inboundUrls ? <EndpointGrid urls={inboundUrls} /> : null}
               </div>
             ) : null}
