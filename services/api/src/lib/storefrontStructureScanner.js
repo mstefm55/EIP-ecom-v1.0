@@ -340,6 +340,15 @@ function scanGenericStorefrontHtml(html) {
   return dedupeCandidates(candidates);
 }
 
+function isLikelyClientRenderedShell(html, candidates = []) {
+  const source = String(html || "");
+  const hasScript = /<script\b[^>]*\bsrc\s*=/i.test(source);
+  const hasEmptyMount = /<(?:div|main)\b[^>]*(?:\bid\s*=\s*["'](?:root|app|__next)["']|\bdata-reactroot\b)[^>]*>\s*<\/(?:div|main)>/i.test(source);
+  const hasUsableCandidate = (Array.isArray(candidates) ? candidates : [])
+    .some((candidate) => Number(candidate?.confidence || 0) >= 0.45);
+  return hasScript && hasEmptyMount && !hasUsableCandidate;
+}
+
 function taggedZoneToCandidate(zone = {}) {
   const tag = normalizeSlot(zone.tag || zone.slot || zone.parent);
   if (!tag) return null;
@@ -523,6 +532,7 @@ export {
   mergeScanCandidates,
   normalizeMappingStatus,
   normalizeRenderer,
+  isLikelyClientRenderedShell,
   scanGenericStorefrontHtml,
   taggedZoneToCandidate,
   updateMappingCandidate

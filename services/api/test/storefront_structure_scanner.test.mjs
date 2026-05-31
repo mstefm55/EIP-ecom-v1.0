@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import test from "node:test";
 import {
   buildMappingProfile,
+  isLikelyClientRenderedShell,
   mappingProfileZones,
   mergeScanCandidates,
   scanGenericStorefrontHtml,
@@ -29,6 +31,7 @@ const UNKNOWN_STOREFRONT = `
     </body>
   </html>
 `;
+const ecomRoute = fs.readFileSync(new URL("../src/routes/ecom.js", import.meta.url), "utf8");
 
 test("unknown static storefront returns generic candidate mappings without EIP tags", () => {
   const candidates = scanGenericStorefrontHtml(UNKNOWN_STOREFRONT);
@@ -37,6 +40,23 @@ test("unknown static storefront returns generic candidate mappings without EIP t
   assert.equal(candidates.some((item) => item.suggested_renderer === "newsletter_form"), true);
   assert.equal(candidates.every((item) => item.source === "generic_scan"), true);
   assert.equal(candidates.every((item) => item.candidate_id && item.dom_signature && item.selector), true);
+});
+
+test("client-rendered shells are identified when static HTML has no usable DOM zones", () => {
+  const html = '<div id="root"></div><script type="module" src="/assets/index.js"></script>';
+  const candidates = scanGenericStorefrontHtml(html);
+  assert.equal(isLikelyClientRenderedShell(html, candidates), true);
+});
+
+test("static storefronts with usable DOM zones are not misclassified as client-rendered shells", () => {
+  const candidates = scanGenericStorefrontHtml(UNKNOWN_STOREFRONT);
+  assert.equal(isLikelyClientRenderedShell(UNKNOWN_STOREFRONT, candidates), false);
+});
+
+test("low-confidence generic candidates are persisted for review instead of discarded", () => {
+  assert.match(ecomRoute, /requires_manual_review: !Number\(scanned\?\.usable_candidate_count \|\| 0\)/);
+  assert.match(ecomRoute, /fallback_recommendation: scanned\?\.fallback_recommendation \|\| null/);
+  assert.doesNotMatch(ecomRoute, /error: "STRUCTURE_TAGS_NOT_FOUND"/);
 });
 
 test("tagged mappings remain high-confidence approved candidates in auto merge", () => {

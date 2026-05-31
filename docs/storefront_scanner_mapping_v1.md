@@ -7,7 +7,7 @@ Content Studio can scan an enabled tenant storefront connection, infer DOM/conte
 ## Scan Modes
 
 - `auto`: default. Run generic static DOM inference first, then merge explicit tagged markers when available.
-- `generic`: inspect fetched static HTML and propose zones using semantic DOM, class/id, text, media, link, button, form, and repeated-layout signals.
+- `generic`: inspect fetched static HTML and propose zones using semantic DOM, class/id, text, media, link, button, form, and repeated-layout signals. If the fetched document is only a JavaScript mount shell, persist its low-confidence candidates for manual review and recommend `auto`.
 - `tagged`: use explicit `data-eip-parent`, `data-eip-page`, structure manifests, and the existing frontend-module marker scan.
 
 The scanner returns short redacted text samples only. It does not persist raw HTML. Account, login, checkout, and payment form candidates can be reported for operator awareness but cannot be approved for content push.
@@ -68,4 +68,4 @@ Product-driven slots return Product Studio rows resolved from placement rules:
 
 ## Current Limitation
 
-V1 scans fetched static HTML plus the existing textual frontend-module markers. It does not execute client-side JavaScript in a headless browser. Heavily client-rendered websites should expose tagged markers or a structure manifest until a governed rendered-DOM scanner adapter is added.
+V1 scans fetched static HTML plus the existing textual frontend-module markers. It does not execute client-side JavaScript in a headless browser. Generic mode detects JavaScript mount shells instead of reporting a misleading missing-tags failure. Heavily client-rendered websites should use `auto` and expose tagged markers or a structure manifest until a governed rendered-DOM scanner adapter is added.

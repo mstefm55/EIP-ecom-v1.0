@@ -2571,10 +2571,20 @@ export default function EcomProductWorkspace({ node }) {
         setSelectedStorefrontSlot(firstTag);
         setStorefrontDraft((prev) => ({ ...prev, slot: firstTag }));
       }
-      setStatusTone("success");
-      setStatusMessage(
-        `Structure scanned (${Number(item?.usable_candidate_count || 0)} usable zones) on ${usedCode || "default connection"}.`
-      );
+      const usableCount = Number(item?.usable_candidate_count || 0);
+      if (data?.requires_manual_review) {
+        setStatusTone("error");
+        setStatusMessage(
+          data?.fallback_recommendation === "retry_auto_for_manifest_or_tagged_fallback"
+            ? "Generic scan found a JavaScript-rendered shell. Select Auto scan to use the governed storefront manifest fallback."
+            : "Structure scan found only low-confidence zones. Review the proposed mappings before use."
+        );
+      } else {
+        setStatusTone("success");
+        setStatusMessage(
+          `Structure scanned (${usableCount} usable zones) on ${usedCode || "default connection"}.`
+        );
+      }
       return item;
     } catch (err) {
       setStatusTone("error");
@@ -5543,7 +5553,7 @@ export default function EcomProductWorkspace({ node }) {
                   className="mt-1 w-full rounded-xl border border-ink-100/70 bg-white/90 px-2 py-2 text-[0.72rem] uppercase tracking-[0.16em] text-ink-700 outline-none"
                 >
                   <option value="auto">Auto: infer then tagged fallback</option>
-                  <option value="generic">Generic DOM inference</option>
+                  <option value="generic">Generic static DOM inference</option>
                   <option value="tagged">Tagged markers only</option>
                 </select>
               </label>

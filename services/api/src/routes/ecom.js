@@ -13,6 +13,7 @@ import { extractProfiles } from "../services/gateway/connectionProfile.js";
 import { assertOutboundUrlAllowed, fetchWithTimeout } from "../services/gateway/outbound.js";
 import {
   buildMappingProfile,
+  isLikelyClientRenderedShell,
   mappingProfileZones,
   mergeScanCandidates,
   scanGenericStorefrontHtml,
@@ -904,6 +905,7 @@ async function buildStructureScanFromFrontend(frontendUrl, profile, scanMode = "
     : "auto";
   const rootDoc = await fetchTextForStructure(frontendUrl, profile);
   const genericCandidates = mode === "tagged" ? [] : scanGenericStorefrontHtml(rootDoc.text);
+  const renderedShellDetected = mode !== "tagged" && isLikelyClientRenderedShell(rootDoc.text, genericCandidates);
   const manifest = mode === "generic" ? null : await fetchStructureManifest(frontendUrl, profile);
   const origin = new URL(rootDoc.url).origin;
   const scan = buildStructureScanAccumulator(frontendUrl);
@@ -981,6 +983,11 @@ async function buildStructureScanFromFrontend(frontendUrl, profile, scanMode = "
     generic_candidate_count: genericCandidates.length,
     tagged_candidate_count: taggedCandidates.length,
     usable_candidate_count: usableCandidates.length,
+    rendered_shell_detected: renderedShellDetected,
+    fallback_recommendation:
+      renderedShellDetected && mode === "generic"
+        ? "retry_auto_for_manifest_or_tagged_fallback"
+        : null,
     candidate_zones: candidates,
     unmapped_candidates: candidates.filter((candidate) => candidate.mapping_status !== "approved"),
     approved_mappings: candidates.filter((candidate) => candidate.mapping_status === "approved"),
@@ -1341,6 +1348,8 @@ function mapStorefrontStructureRow(row) {
     generic_candidate_count: Number(attrs.generic_candidate_count || mappingProfile?.last_scan_result?.generic_candidate_count || 0),
     tagged_candidate_count: Number(attrs.tagged_candidate_count || mappingProfile?.last_scan_result?.tagged_candidate_count || 0),
     usable_candidate_count: Number(attrs.usable_candidate_count || mappingProfile?.last_scan_result?.usable_candidate_count || zones.length),
+    rendered_shell_detected: attrs.rendered_shell_detected === true,
+    fallback_recommendation: normalizeOptionalText(attrs.fallback_recommendation),
     mapping_profile: mappingProfile,
     mapping_profiles: Array.isArray(attrs.mapping_profiles) ? attrs.mapping_profiles : mappingProfile ? [mappingProfile] : [],
     candidate_zones: Array.isArray(mappingProfile?.candidate_zones) ? mappingProfile.candidate_zones : [],
@@ -3918,10 +3927,13 @@ export default async function ecomRoutes(app) {
         return reply.code(500).send({ ok: false, error: "STRUCTURE_SCAN_FAILED" });
       }
 
-      if (!Number(scanned?.usable_candidate_count || 0)) {
+      if (
+        !Number(scanned?.usable_candidate_count || 0) &&
+        (!Array.isArray(scanned?.candidate_zones) || !scanned.candidate_zones.length)
+      ) {
         return reply.code(409).send({
           ok: false,
-          error: "STRUCTURE_TAGS_NOT_FOUND",
+          error: "STRUCTURE_ZONES_NOT_FOUND",
           connection_code: connectionCode || null,
           frontend_url: frontendUrl,
           scan_report: {
@@ -3930,6 +3942,8 @@ export default async function ecomRoutes(app) {
             generic_candidate_count: Number(scanned?.generic_candidate_count || 0),
             tagged_candidate_count: Number(scanned?.tagged_candidate_count || 0),
             usable_candidate_count: 0,
+            rendered_shell_detected: scanned?.rendered_shell_detected === true,
+            fallback_recommendation: scanned?.fallback_recommendation || null,
             unmapped_candidates: Array.isArray(scanned?.unmapped_candidates) ? scanned.unmapped_candidates : []
           }
         });
@@ -4024,6 +4038,8 @@ export default async function ecomRoutes(app) {
         ok: true,
         connection: mapStructureConnection(selected.profile),
         item,
+        requires_manual_review: !Number(scanned?.usable_candidate_count || 0),
+        fallback_recommendation: scanned?.fallback_recommendation || null,
         tags: item.zones.map((zone) => zone.tag)
       });
     }
