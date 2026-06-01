@@ -17,6 +17,9 @@
 - Tasks: `eip_core.task` + task status events.
 - Process engine (kernel): `process_def`, `process_instance`.
 - Segment notes: `info_record.record_type='CRM_SEGMENT_NOTE'` + `object_link`.
+- Segments and market groups: `agent.agent_type='SEGMENT'|'MARKET_GROUP'`.
+- Master campaigns: `service_object.object_type='CRM_CAMPAIGN'`.
+- Normalized CRM intelligence signals: `info_record.record_type='CRM_SIGNAL'|'CRM_CAMPAIGN_SIGNAL'`.
 
 ## Permissions
 CRM permissions are separate from core process permissions:
@@ -28,6 +31,10 @@ CRM permissions are separate from core process permissions:
 - `CRM_DASHBOARD_READ`
 - `CRM_LEAD_READ`, `CRM_LEAD_WRITE`, `CRM_LEAD_CONVERT`
 - `CRM_TIMELINE_READ`, `CRM_NOTE_WRITE`
+- `CRM_SEGMENT_READ`, `CRM_SEGMENT_WRITE`
+- `CRM_CAMPAIGN_READ`, `CRM_CAMPAIGN_WRITE`
+- `CRM_SIGNAL_READ`, `CRM_SIGNAL_WRITE`
+- `CRM_INTELLIGENCE_READ`, `CRM_CONNECTOR_READ`
 
 Core process permissions:
 - `PROCESS_DEF_READ`, `PROCESS_DEF_WRITE`
@@ -101,6 +108,34 @@ Governance and timeline:
 Segment notes:
 - POST /segments/:id/notes
 
+CRM Intelligence foundation:
+- GET /segments
+- POST /segments
+- GET /segments/:id
+- PATCH /segments/:id
+- POST /segments/:id/link
+- POST /segments/:id/tasks
+- GET /segments/:id/timeline
+- GET /campaigns
+- POST /campaigns
+- GET /campaigns/:id
+- PATCH /campaigns/:id
+- POST /campaigns/:id/status
+- POST /campaigns/:id/link
+- POST /campaigns/:id/tasks
+- POST /campaigns/:id/notes
+- GET /campaigns/:id/timeline
+- POST /campaigns/:id/channel-variants
+- PATCH /campaigns/:id/channel-variants/:variantId
+- GET /signals
+- POST /signals
+- GET /signals/:id
+- POST /signals/:id/link
+- POST /signals/:id/promote
+- GET /intelligence/capabilities
+- GET /intelligence/overview
+- GET /intelligence/connectors
+
 ## Status Governance
 - CRM statuses are stored in `SERVICE_OBJECT_STATUS` (core list) with scoped attrs.
 - Case values: new, in_progress, on_hold, resolved, closed, cancelled.
@@ -123,6 +158,10 @@ Segment notes:
 - `db/migrations/0099_crm_module_completion.sql`
   - Adds governed CRM dropdown lists, lead status values, additive permissions, reusable process definitions, process bindings, follow-up templates, and dashboard UI descriptors.
   - Adds no CRM-specific persistence table.
+- `db/migrations/0101_crm_intelligence_foundation.sql`
+  - Adds governed segment, campaign, signal, and connector-readiness vocabularies.
+  - Adds `CRM_CAMPAIGN_FLOW_V1`, `CRM_SEGMENT_REVIEW_FLOW_V1`, bindings, task templates, additive permissions, capability defaults, and descriptor tabs.
+  - Adds no CRM-specific persistence table.
 
 ## Scripts
 - `scripts/crm_happy_path.sh`
@@ -134,3 +173,6 @@ Segment notes:
 - Status transitions insert into event tables through the core engine.
 - Lead conversion is a core process transition. It creates a linked opportunity, links the customer party, creates the opportunity follow-up task, records an activity note, and starts the opportunity process.
 - Dashboard visibility is descriptor-driven and gated by the active `crm` tenant module setting.
+- CRM Intelligence tabs are descriptor-driven and gated by capabilities under the active `crm` subscription setting.
+- CRM Signals are sanitized append-only information records. External references are hashed by default.
+- Connector readiness is secret-free metadata derived from existing connection profiles. Technical setup remains in Admin Console.

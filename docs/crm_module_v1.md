@@ -87,6 +87,23 @@ No route accepts tenant scope from the browser.
 
 The dashboard surface includes a CRM descriptor node. Its menu item is shown only when the tenant has an active `crm` module setting. Use the existing Admin Modules panel to enable CRM for a tenant.
 
+## CRM Intelligence Foundation
+
+The additive CRM Intelligence foundation is documented in:
+
+```text
+docs/crm_intelligence_foundation_v1.md
+```
+
+It continues the same kernel model:
+
+- segments and market groups are agents
+- campaigns are `CRM_CAMPAIGN` service objects
+- normalized signals are sanitized information records
+- campaign and signal relationships use object links
+- connector readiness is secret-free metadata derived from existing connection profiles
+- dashboard tabs are descriptor-driven and capability-gated
+
 ## Railway Restore
 
 After deploying the API commit, run:

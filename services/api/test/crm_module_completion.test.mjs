@@ -102,7 +102,7 @@ test("CRM dashboard is descriptor registered, module gated, and backed by a reus
   assert.match(workspace, /export default function CrmWorkspace/);
   assert.match(workspace, /CRM_LEAD_STATUS/);
   assert.match(workspace, /WRITE_PERMISSIONS/);
-  assert.match(completion, /return reply\.send\(\{ ok: true, options, permissions \}\)/);
+  assert.match(completion, /options,[\s\S]*permissions,[\s\S]*capabilities: await loadCapabilities/);
 });
 
 test("CRM module visibility uses a narrow entitlement endpoint and repairs older dashboard descriptors", () => {

@@ -27,6 +27,7 @@ The dashboard descriptor supplies:
 - tabs, labels, object kinds, endpoints, and required read permissions
 - KPI labels and formats
 - common action labels
+- capability-gated CRM Intelligence tabs
 
 DB dropdown governance supplies:
 
@@ -53,6 +54,11 @@ DB dropdown governance supplies:
 - follow-up creation
 - lead conversion
 - agent contact, address, and bank-account actions
+- segment and market-group management
+- campaign management and channel-variant metadata editing
+- normalized signal review, linking, and explicit task promotion
+- CRM Intelligence KPI cards
+- read-only connector readiness
 
 It contains no tenant-specific condition and no tenant code.
 
@@ -67,6 +73,34 @@ Tenant behavior should continue to move into:
 - module settings for visibility
 
 The current React primitive keeps fallback form definitions for resilience. Before commercial customization expands, move each form schema into UI descriptor or schema-bundle metadata so tenants can hide, rename, or require fields without a frontend build.
+
+## CRM Intelligence Tabs
+
+Migration `0101_crm_intelligence_foundation.sql` repairs published dashboard descriptors and adds:
+
+```text
+Intelligence
+Segments
+Campaigns
+Signals
+Connectors
+```
+
+Each tab is permission-gated and capability-gated. The capability source is the existing CRM subscription setting:
+
+```json
+{
+  "capabilities": {
+    "segments": true,
+    "campaigns": true,
+    "signals": true,
+    "intelligence": true,
+    "connectors": true
+  }
+}
+```
+
+The Connectors tab is intentionally read-only. Admin Console remains the technical connection-management surface.
 
 ## Process Compliance
 

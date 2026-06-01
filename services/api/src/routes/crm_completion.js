@@ -1,5 +1,6 @@
 import { hasPermission } from "../auth/perm.js";
 import { sha256Hex } from "../auth/crypto.js";
+import { loadCapabilities } from "./crm_intelligence.js";
 
 const MAX_LIMIT = 200;
 const CRM_OBJECT_TYPES = new Set(["CRM_LEAD", "CRM_INTERACTION", "CRM_CASE", "CRM_OPPORTUNITY"]);
@@ -26,7 +27,15 @@ const CRM_PERMISSIONS = [
   "CRM_TASK_WRITE",
   "CRM_DASHBOARD_READ",
   "CRM_TIMELINE_READ",
-  "CRM_NOTE_WRITE"
+  "CRM_NOTE_WRITE",
+  "CRM_SEGMENT_READ",
+  "CRM_SEGMENT_WRITE",
+  "CRM_CAMPAIGN_READ",
+  "CRM_CAMPAIGN_WRITE",
+  "CRM_SIGNAL_READ",
+  "CRM_SIGNAL_WRITE",
+  "CRM_INTELLIGENCE_READ",
+  "CRM_CONNECTOR_READ"
 ];
 
 function normalizeText(value) {
@@ -246,6 +255,18 @@ export default async function registerCrmCompletionRoutes(app) {
             "CRM_TASK_TYPE",
             "CRM_SOURCE",
             "CRM_REASON_LOST",
+            "CRM_SEGMENT_TYPE",
+            "CRM_SEGMENT_PRIORITY",
+            "CRM_SEGMENT_MATURITY",
+            "CRM_CAMPAIGN_STATUS",
+            "CRM_CAMPAIGN_OBJECTIVE",
+            "CRM_CAMPAIGN_CHANNEL",
+            "CRM_CHANNEL_VARIANT_STATUS",
+            "CRM_SIGNAL_TYPE",
+            "CRM_SIGNAL_PROVIDER_CATEGORY",
+            "CRM_SIGNAL_SOURCE_CHANNEL",
+            "CRM_CONNECTOR_READINESS_STATUS",
+            "CRM_CONNECTOR_PROVIDER",
             "TASK_STATUS"
           ]
         ]
@@ -259,7 +280,12 @@ export default async function registerCrmCompletionRoutes(app) {
       for (const code of CRM_PERMISSIONS) {
         if (await hasPermission(app, session.tenant_id, session.identity_id, code)) permissions.push(code);
       }
-      return reply.send({ ok: true, options, permissions });
+      return reply.send({
+        ok: true,
+        options,
+        permissions,
+        capabilities: await loadCapabilities(app.db, session.tenant_id)
+      });
     }
   );
 

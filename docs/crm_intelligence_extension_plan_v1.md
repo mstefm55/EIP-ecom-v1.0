@@ -4,6 +4,8 @@ Status: planning baseline
 Date: 2026-06-01
 Scope: EIP Core V1 CRM continuation only
 
+Implementation note: the controlled foundation described in Section 10 is implemented by migration `0101_crm_intelligence_foundation.sql`, route module `services/api/src/routes/crm_intelligence.js`, and the reusable CRM dashboard workspace. See `docs/crm_intelligence_foundation_v1.md` for the operational contract and deferred adapter scope.
+
 ## Purpose
 
 This document records the current CRM state after the completion wave and defines the smallest safe continuation toward a more intelligence-aware CRM module. It is a gap analysis and implementation plan, not a request to replace the existing operational CRM.

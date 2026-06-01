@@ -2,6 +2,7 @@
 import { hasPermission } from "../auth/perm.js";
 import { sha256Hex } from "../auth/crypto.js";
 import registerCrmCompletionRoutes from "./crm_completion.js";
+import registerCrmIntelligenceRoutes from "./crm_intelligence.js";
 
 const MAX_LIMIT = 200;
 
@@ -2098,7 +2099,7 @@ export default async function crmRoutes(app) {
         await client.query("BEGIN");
 
         const segment = await ensureAgent(client, tenantId, req.params.id);
-        if (!segment || String(segment.agent_type || "").toUpperCase() !== "SEGMENT") {
+        if (!segment || !["SEGMENT", "MARKET_GROUP"].includes(String(segment.agent_type || "").toUpperCase())) {
           await client.query("ROLLBACK");
           return reply.code(404).send({ ok: false, error: "SEGMENT_NOT_FOUND" });
         }
@@ -2207,4 +2208,5 @@ export default async function crmRoutes(app) {
   });
 
   await registerCrmCompletionRoutes(app);
+  await registerCrmIntelligenceRoutes(app);
 }
