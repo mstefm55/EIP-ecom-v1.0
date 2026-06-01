@@ -13,25 +13,25 @@ RETURNS void
 LANGUAGE plpgsql
 AS $$
 DECLARE
-  list_id uuid;
+  target_list_id uuid;
   item jsonb;
 BEGIN
-  SELECT id INTO list_id
+  SELECT id INTO target_list_id
   FROM eip_core.dropdown_list
   WHERE tenant_id IS NULL AND module='crm' AND code=list_code AND version=1
   ORDER BY created_at ASC
   LIMIT 1;
 
-  IF list_id IS NULL THEN
+  IF target_list_id IS NULL THEN
     INSERT INTO eip_core.dropdown_list
       (tenant_id, module, code, name, version, is_active, attrs)
     VALUES
       (NULL, 'crm', list_code, list_name, 1, true, '{"ui":{"module":"crm"}}'::jsonb)
-    RETURNING id INTO list_id;
+    RETURNING id INTO target_list_id;
   ELSE
     UPDATE eip_core.dropdown_list
     SET name=list_name, is_active=true, updated_at=now()
-    WHERE id=list_id;
+    WHERE id=target_list_id;
   END IF;
 
   FOR item IN SELECT value FROM jsonb_array_elements(values_json)
@@ -40,7 +40,7 @@ BEGIN
       (list_id, code, label, sort_order, is_active, attrs)
     VALUES
       (
-        list_id,
+        target_list_id,
         item->>'code',
         item->>'label',
         COALESCE((item->>'sort_order')::integer, 100),

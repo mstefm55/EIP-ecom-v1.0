@@ -80,6 +80,8 @@ test("migration seeds tenant-scoped CRM processes, bindings, task templates, dro
   }
   assert.match(migration, /INSERT INTO eip_core\.process_binding/);
   assert.match(migration, /INSERT INTO eip_core\.task_template/);
+  assert.match(migration, /target_list_id uuid/);
+  assert.doesNotMatch(migration, /^\s*list_id uuid;/m);
 });
 
 test("lead conversion remains process-governed", () => {
