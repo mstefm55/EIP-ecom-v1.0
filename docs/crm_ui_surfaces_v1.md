@@ -83,3 +83,15 @@ npm run build
 ```
 
 On Windows PowerShell with script execution disabled, use `npm.cmd run build`.
+
+## Module visibility
+
+The tenant shell loads `/api/eip/user/dashboard/modules` before showing
+module-gated menu items. The endpoint is intentionally narrower than the live
+dashboard KPI summary so an unrelated report or task metric failure cannot hide
+an enabled module.
+
+Run `npm run migrate` after deploying the API. Migration
+`0100_crm_dashboard_descriptor_repair.sql` restores the reusable CRM menu item
+and workspace panel on published dashboard descriptors that were created or
+cloned before CRM registration.

@@ -83,8 +83,8 @@ function moduleFromSurface(row) {
   return normalizeText(attrs.module || attrs.surface_group || attrs.area || row.code);
 }
 
-async function buildDashboardSummary(app, tenantId) {
-  const [moduleSettingsRes, surfacesRes, openTasksRes, reportsRes, recentTasksRes, recentReportsRes] = await Promise.all([
+async function buildActiveModules(app, tenantId) {
+  const [moduleSettingsRes, surfacesRes] = await Promise.all([
     app.db.query(
       `
       SELECT DISTINCT module
@@ -103,7 +103,19 @@ async function buildDashboardSummary(app, tenantId) {
         AND (tenant_id = $1 OR tenant_id IS NULL)
       `,
       [tenantId]
-    ),
+    )
+  ]);
+
+  const modulesFromSettings = moduleSettingsRes.rows.map((row) => row.module);
+  const modulesFromSurfaces = surfacesRes.rows.map(moduleFromSurface);
+  return uniqueStrings([...modulesFromSettings, ...modulesFromSurfaces])
+    .map((module) => module.toLowerCase())
+    .sort((a, b) => a.localeCompare(b));
+}
+
+async function buildDashboardSummary(app, tenantId) {
+  const [activeModules, openTasksRes, reportsRes, recentTasksRes, recentReportsRes] = await Promise.all([
+    buildActiveModules(app, tenantId),
     app.db.query(
       `
       SELECT COUNT(*)::int AS total
@@ -154,10 +166,6 @@ async function buildDashboardSummary(app, tenantId) {
       [tenantId]
     )
   ]);
-
-  const modulesFromSettings = moduleSettingsRes.rows.map((row) => row.module);
-  const modulesFromSurfaces = surfacesRes.rows.map(moduleFromSurface);
-  const activeModules = uniqueStrings([...modulesFromSettings, ...modulesFromSurfaces]).sort((a, b) => a.localeCompare(b));
 
   return {
     ok: true,
@@ -225,6 +233,14 @@ export default async function uiSurfaceRoutes(app, opts = {}) {
 
     const summary = await buildDashboardSummary(app, s.session.tenant_id);
     return reply.send(summary);
+  });
+
+  app.get("/user/dashboard/modules", async (req, reply) => {
+    const s = await app.requireSession(req, { realm: "EIP" });
+    if (!s.ok) return reply.code(s.status).send({ ok: false, error: s.error });
+
+    const activeModules = await buildActiveModules(app, s.session.tenant_id);
+    return reply.send({ ok: true, active_modules: activeModules });
   });
 
   // Authenticated surfaces

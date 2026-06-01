@@ -8,6 +8,8 @@ const completion = read("../src/routes/crm_completion.js");
 const engine = read("../src/core/core_process_engine.js");
 const processRoutes = read("../src/routes/process/core_process.js");
 const migration = read("../db/migrations/0099_crm_module_completion.sql");
+const descriptorRepair = read("../db/migrations/0100_crm_dashboard_descriptor_repair.sql");
+const uiSurfaceRoutes = read("../src/routes/ui_surface.js");
 const registry = read("../../../apps/dashboard/src/engine/registry.jsx");
 const surface = read("../../../apps/dashboard/src/engine/surfaces/dashboard.js");
 const userShell = read("../../../apps/dashboard/src/components/user/UserShell.jsx");
@@ -94,15 +96,25 @@ test("CRM dashboard is descriptor registered, module gated, and backed by a reus
   assert.match(registry, /CrmWorkspace,/);
   assert.match(surface, /\{ code: "crm", label: "CRM", icon: "Users", module: "crm" \}/);
   assert.match(surface, /type: "CrmWorkspace"/);
-  assert.match(userShell, /activeModules\?\.includes\(item\.module\)/);
+  assert.match(userShell, /activeModules\?\.includes\(String\(item\.module\)\.trim\(\)\.toLowerCase\(\)\)/);
   assert.match(workspace, /export default function CrmWorkspace/);
   assert.match(workspace, /CRM_LEAD_STATUS/);
   assert.match(workspace, /WRITE_PERMISSIONS/);
   assert.match(completion, /return reply\.send\(\{ ok: true, options, permissions \}\)/);
 });
 
+test("CRM module visibility uses a narrow entitlement endpoint and repairs older dashboard descriptors", () => {
+  assert.match(uiSurfaceRoutes, /app\.get\("\/user\/dashboard\/modules"/);
+  assert.match(uiSurfaceRoutes, /buildActiveModules\(app, s\.session\.tenant_id\)/);
+  assert.match(userShell, /apiFetch\("\/api\/eip\/user\/dashboard\/modules"\)/);
+  assert.match(userShell, /apiFetch\("\/api\/eip\/user\/dashboard\/summary"\)/);
+  assert.match(descriptorRepair, /item->>'code' = 'crm'/);
+  assert.match(descriptorRepair, /item->>'id' = 'user-crm-panel'/);
+  assert.doesNotMatch(descriptorRepair, /CREATE\s+TABLE/i);
+});
+
 test("CRM completion remains tenant agnostic", () => {
-  const touched = `${completion}\n${workspace}\n${migration}`;
+  const touched = `${completion}\n${workspace}\n${migration}\n${descriptorRepair}`;
   assert.doesNotMatch(touched, /samarapattern|samara-web-storefront|samara/i);
 });
 

@@ -4,6 +4,12 @@ import { apiFetch } from "../../services/apiClient";
 import { useIdleLogout } from "../../hooks/useIdleLogout";
 import SidebarNav from "../engine/SidebarNav";
 
+function normalizeModules(values) {
+  return Array.isArray(values)
+    ? values.map((value) => String(value || "").trim().toLowerCase()).filter(Boolean)
+    : [];
+}
+
 export default function UserShell({ node, children, ctx }) {
   const {
     brand = "EIP Core",
@@ -33,7 +39,7 @@ export default function UserShell({ node, children, ctx }) {
       icon: item.icon,
       module: item.module,
     };
-  }).filter((item) => !item.module || activeModules?.includes(item.module));
+  }).filter((item) => !item.module || activeModules?.includes(String(item.module).trim().toLowerCase()));
 
   const [profileOpen, setProfileOpen] = useState(false);
   const [user, setUser] = useState({
@@ -48,12 +54,14 @@ export default function UserShell({ node, children, ctx }) {
 
     async function load() {
       try {
-        const [result, dashboard] = await Promise.all([
+        const [result, modules] = await Promise.all([
           apiFetch("/api/eip/auth/whoami"),
-          apiFetch("/api/eip/user/dashboard/summary").catch(() => null),
+          apiFetch("/api/eip/user/dashboard/modules").catch(() =>
+            apiFetch("/api/eip/user/dashboard/summary").catch(() => null)
+          ),
         ]);
         if (!active) return;
-        setActiveModules(Array.isArray(dashboard?.active_modules) ? dashboard.active_modules : []);
+        setActiveModules(normalizeModules(modules?.active_modules));
         const email = result?.login || "";
         const name = email ? email.split("@")[0] : "User";
         setUser({
