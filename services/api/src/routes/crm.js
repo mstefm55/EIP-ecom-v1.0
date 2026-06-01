@@ -1,6 +1,7 @@
 // services/api/src/routes/crm.js
 import { hasPermission } from "../auth/perm.js";
-import { sha256Hex, timingSafeEqual } from "../auth/crypto.js";
+import { sha256Hex } from "../auth/crypto.js";
+import registerCrmCompletionRoutes from "./crm_completion.js";
 
 const MAX_LIMIT = 200;
 
@@ -621,7 +622,8 @@ export default async function crmRoutes(app) {
             priority: { type: "string", enum: ["LOW", "MEDIUM", "HIGH"] },
             occurred_at: { type: "string", maxLength: 40 },
             external_ref: { type: "string", maxLength: 200 },
-            attachments: { type: "array", maxItems: 50, items: { type: "object" } }
+            attachments: { type: "array", maxItems: 50, items: { type: "object" } },
+            idempotency_key: { type: "string", maxLength: 200 }
           }
         }
       }
@@ -846,7 +848,8 @@ export default async function crmRoutes(app) {
             priority: { type: "string", enum: ["LOW", "MEDIUM", "HIGH"] },
             occurred_at: { type: "string", maxLength: 40 },
             external_ref: { type: "string", maxLength: 200 },
-            attachments: { type: "array", maxItems: 50, items: { type: "object" } }
+            attachments: { type: "array", maxItems: 50, items: { type: "object" } },
+            idempotency_key: { type: "string", maxLength: 200 }
           }
         }
       }
@@ -948,7 +951,8 @@ export default async function crmRoutes(app) {
             assigned_agent_id: { type: "string", minLength: 36, maxLength: 36 },
             due_at: { type: "string", maxLength: 40 },
             payload: { type: "object" },
-            attrs: { type: "object" }
+            attrs: { type: "object" },
+            idempotency_key: { type: "string", maxLength: 200 }
           }
         }
       }
@@ -1020,7 +1024,7 @@ export default async function crmRoutes(app) {
 
         await client.query("COMMIT");
         const created = (result.entry?.effects_applied || []).filter(
-          (effect) => effect.type === "task_create"
+          (effect) => effect.type === "TASK_CREATE"
         );
         return reply.send({ ok: true, created, reused: result.reused === true });
       } catch (e) {
@@ -1231,7 +1235,8 @@ export default async function crmRoutes(app) {
           properties: {
             to_status: { type: "string", minLength: 1, maxLength: 50 },
             reason_code: { type: "string", maxLength: 50 },
-            note: { type: "string", maxLength: 500 }
+            note: { type: "string", maxLength: 500 },
+            idempotency_key: { type: "string", maxLength: 200 }
           }
         }
       }
@@ -1321,7 +1326,8 @@ export default async function crmRoutes(app) {
             assigned_agent_id: { type: "string", minLength: 36, maxLength: 36 },
             due_at: { type: "string", maxLength: 40 },
             payload: { type: "object" },
-            attrs: { type: "object" }
+            attrs: { type: "object" },
+            idempotency_key: { type: "string", maxLength: 200 }
           }
         }
       }
@@ -1348,19 +1354,55 @@ export default async function crmRoutes(app) {
         if (!agent) return reply.code(404).send({ ok: false, error: "ASSIGNEE_NOT_FOUND" });
       }
 
-      const task = await insertTask(app.db, tenantId, {
-        service_object_id: serviceObjectId,
-        task_type: normalizeText(req.body.task_type),
-        status: normalizeOptionalText(req.body.status),
-        title: normalizeOptionalText(req.body.title),
-        description: normalizeOptionalText(req.body.description),
-        assigned_agent_id: normalizeOptionalText(req.body.assigned_agent_id),
-        due_at: normalizeOptionalText(req.body.due_at),
-        payload: req.body.payload || {},
-        attrs: req.body.attrs || {}
-      });
+      const client = await app.db.connect();
+      try {
+        await client.query("BEGIN");
+        const instanceRes = await ensureProcessInstance(client, app, {
+          tenantId,
+          identityId: session.identity_id,
+          serviceObjectId,
+          objectType: "CRM_CASE"
+        });
+        if (!instanceRes.ok) {
+          await client.query("ROLLBACK");
+          return reply.code(409).send({ ok: false, error: instanceRes.error });
+        }
 
-      return reply.send({ ok: true, item: task });
+        const payload = {
+          task_type: normalizeText(req.body.task_type),
+          status: normalizeOptionalText(req.body.status),
+          title: normalizeOptionalText(req.body.title),
+          description: normalizeOptionalText(req.body.description),
+          assigned_agent_id: normalizeOptionalText(req.body.assigned_agent_id),
+          due_at: normalizeOptionalText(req.body.due_at),
+          payload: req.body.payload || {},
+          attrs: req.body.attrs || {}
+        };
+        const idempotencyKey =
+          normalizeOptionalText(req.body?.idempotency_key) ||
+          buildIdempotencyKey("crm_task_create", { serviceObjectId, payload });
+        const result = await app.coreProcess.advanceInstance(client, {
+          tenantId,
+          identityId: session.identity_id,
+          instanceId: instanceRes.instance.id,
+          action: "task.create",
+          payload,
+          idempotencyKey
+        });
+        if (!result.ok) {
+          await client.query("ROLLBACK");
+          return reply.code(409).send({ ok: false, error: result.error });
+        }
+
+        await client.query("COMMIT");
+        return reply.send({ ok: true, created: result.entry?.effects_applied || [], reused: result.reused === true });
+      } catch (e) {
+        await client.query("ROLLBACK");
+        app.log.error({ event: "crm_task_create_error", tenantId, error: e.message });
+        return reply.code(500).send({ ok: false });
+      } finally {
+        client.release();
+      }
     }
   );
 
@@ -1567,7 +1609,8 @@ export default async function crmRoutes(app) {
           properties: {
             to_status: { type: "string", minLength: 1, maxLength: 50 },
             reason_code: { type: "string", maxLength: 50 },
-            note: { type: "string", maxLength: 500 }
+            note: { type: "string", maxLength: 500 },
+            idempotency_key: { type: "string", maxLength: 200 }
           }
         }
       }
@@ -1657,7 +1700,8 @@ export default async function crmRoutes(app) {
             assigned_agent_id: { type: "string", minLength: 36, maxLength: 36 },
             due_at: { type: "string", maxLength: 40 },
             payload: { type: "object" },
-            attrs: { type: "object" }
+            attrs: { type: "object" },
+            idempotency_key: { type: "string", maxLength: 200 }
           }
         }
       }
@@ -1692,7 +1736,7 @@ export default async function crmRoutes(app) {
           tenantId,
           identityId: session.identity_id,
           serviceObjectId,
-          objectType: "CRM_CASE"
+          objectType: "CRM_OPPORTUNITY"
         });
         if (!instanceRes.ok) {
           await client.query("ROLLBACK");
@@ -1729,7 +1773,7 @@ export default async function crmRoutes(app) {
 
         await client.query("COMMIT");
         const created = (result.entry?.effects_applied || []).filter(
-          (effect) => effect.type === "task_create"
+          (effect) => effect.type === "TASK_CREATE"
         );
         return reply.send({ ok: true, created, reused: result.reused === true });
       } catch (e) {
@@ -1825,7 +1869,8 @@ export default async function crmRoutes(app) {
             assigned_agent_id: { type: "string", minLength: 36, maxLength: 36 },
             due_at: { type: "string", maxLength: 40 },
             payload: { type: "object" },
-            attrs: { type: "object" }
+            attrs: { type: "object" },
+            idempotency_key: { type: "string", maxLength: 200 }
           }
         }
       }
@@ -1897,7 +1942,7 @@ export default async function crmRoutes(app) {
 
         await client.query("COMMIT");
         const created = (result.entry?.effects_applied || []).filter(
-          (effect) => effect.type === "task_create"
+          (effect) => effect.type === "TASK_CREATE"
         );
         return reply.send({ ok: true, created, reused: result.reused === true });
       } catch (e) {
@@ -1926,7 +1971,8 @@ export default async function crmRoutes(app) {
           properties: {
             to_status: { type: "string", minLength: 1, maxLength: 50 },
             reason_code: { type: "string", maxLength: 50 },
-            note: { type: "string", maxLength: 500 }
+            note: { type: "string", maxLength: 500 },
+            idempotency_key: { type: "string", maxLength: 200 }
           }
         }
       }
@@ -2159,4 +2205,6 @@ export default async function crmRoutes(app) {
       tasks: taskCounts.rows[0] || { open: 0, overdue: 0 }
     });
   });
+
+  await registerCrmCompletionRoutes(app);
 }

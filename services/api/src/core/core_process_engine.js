@@ -67,6 +67,7 @@ const EFFECT_ALIASES = {
   LINK: "LINK_CREATE",
   LINK_CREATE: "LINK_CREATE",
   LINK_REMOVE: "LINK_REMOVE",
+  PARTY_LINK_CREATE: "PARTY_LINK_CREATE",
   ATTRS_MERGE: "JSON_MERGE",
   JSON_MERGE: "JSON_MERGE",
   API_CALL: "HTTP_REQUEST",
@@ -91,6 +92,7 @@ const EFFECT_HANDLER_REGISTRY = {
   TASK_UPDATE: "taskUpdate",
   LINK_CREATE: "linkCreate",
   LINK_REMOVE: "linkRemove",
+  PARTY_LINK_CREATE: "partyLinkCreate",
   JSON_MERGE: "jsonMerge",
   HTTP_REQUEST: "httpRequest",
   INFO_RECORD_WRITE: "infoRecordWrite",
@@ -1372,6 +1374,45 @@ async function applyEffects(client, ctx, effects, payload) {
       continue;
     }
 
+    if (type === "PARTY_LINK_CREATE") {
+      const serviceObjectId =
+        normalizeOptionalText(resolveDynamicValue(effect?.service_object_id, ctx, payload)) ||
+        ctx.serviceObjectId;
+      const agentId = normalizeOptionalText(resolveDynamicValue(effect?.agent_id, ctx, payload));
+      const role = normalizeOptionalText(resolveDynamicValue(effect?.role, ctx, payload));
+      const attrs = resolveDynamicValue(effect?.attrs || {}, ctx, payload);
+
+      if (!serviceObjectId || !agentId || !role) throw new Error("PARTY_LINK_FIELDS_REQUIRED");
+
+      const targetRes = await client.query(
+        `
+        SELECT EXISTS (
+          SELECT 1 FROM eip_core.service_object WHERE tenant_id=$1 AND id=$2
+        ) AS service_object_exists,
+        EXISTS (
+          SELECT 1 FROM eip_core.agent WHERE tenant_id=$1 AND id=$3
+        ) AS agent_exists
+        `,
+        [ctx.tenantId, serviceObjectId, agentId]
+      );
+      if (!targetRes.rows[0]?.service_object_exists) throw new Error("SERVICE_OBJECT_NOT_FOUND");
+      if (!targetRes.rows[0]?.agent_exists) throw new Error("AGENT_NOT_FOUND");
+
+      await client.query(
+        `
+        INSERT INTO eip_core.service_object_party
+          (tenant_id, service_object_id, agent_id, role, attrs)
+        VALUES
+          ($1,$2,$3,$4,$5::jsonb)
+        ON CONFLICT DO NOTHING
+        `,
+        [ctx.tenantId, serviceObjectId, agentId, role, JSON.stringify(attrs)]
+      );
+
+      applied.push({ type, service_object_id: serviceObjectId, agent_id: agentId, role });
+      continue;
+    }
+
     if (type === "SO_UPDATE") {
       const title = normalizeOptionalText(
         resolveDynamicValue(effect?.title, ctx, payload)
@@ -1381,21 +1422,33 @@ async function applyEffects(client, ctx, effects, payload) {
         attrsValue && typeof attrsValue === "object" && !Array.isArray(attrsValue)
           ? attrsValue
           : null;
+      const ownerAgentId = normalizeOptionalText(
+        resolveDynamicValue(effect?.owner_agent_id, ctx, payload)
+      );
 
-      if (!title && !attrs) throw new Error("SO_UPDATE_EMPTY");
+      if (!title && !attrs && !ownerAgentId) throw new Error("SO_UPDATE_EMPTY");
+
+      if (ownerAgentId) {
+        const ownerRes = await client.query(
+          `SELECT 1 FROM eip_core.agent WHERE tenant_id=$1 AND id=$2`,
+          [ctx.tenantId, ownerAgentId]
+        );
+        if (ownerRes.rowCount === 0) throw new Error("AGENT_NOT_FOUND");
+      }
 
       await client.query(
         `
         UPDATE eip_core.service_object
         SET title = COALESCE($3, title),
             attrs = COALESCE(attrs,'{}'::jsonb) || COALESCE($4::jsonb, '{}'::jsonb),
+            owner_agent_id = COALESCE($5, owner_agent_id),
             updated_at = now()
         WHERE tenant_id=$1 AND id=$2
         `,
-        [ctx.tenantId, ctx.serviceObjectId, title, attrs ? JSON.stringify(attrs) : null]
+        [ctx.tenantId, ctx.serviceObjectId, title, attrs ? JSON.stringify(attrs) : null, ownerAgentId]
       );
 
-      applied.push({ type });
+      applied.push({ type, owner_agent_id: ownerAgentId });
       continue;
     }
 
@@ -1413,18 +1466,29 @@ async function applyEffects(client, ctx, effects, payload) {
         assignedAgentId = resolveDynamicValue(effect.assigned_agent_id, ctx, payload);
       }
 
-      let dueAt = null;
+      let dueAt = normalizeOptionalText(resolveDynamicValue(effect?.due_at, ctx, payload));
       const dueInDays = Number(resolveDynamicValue(effect?.due_in_days, ctx, payload));
-      if (Number.isFinite(dueInDays)) {
+      if (!dueAt && Number.isFinite(dueInDays)) {
         dueAt = new Date(Date.now() + dueInDays * 24 * 60 * 60 * 1000).toISOString();
       }
 
       const taskPayload = resolveDynamicValue(effect?.payload || {}, ctx, payload);
       const taskAttrs = resolveDynamicValue(effect?.attrs || {}, ctx, payload);
+      const taskServiceObjectId =
+        normalizeOptionalText(resolveDynamicValue(effect?.service_object_id, ctx, payload)) ||
+        ctx.serviceObjectId;
+
+      if (taskServiceObjectId !== ctx.serviceObjectId) {
+        const serviceObjectRes = await client.query(
+          `SELECT 1 FROM eip_core.service_object WHERE tenant_id=$1 AND id=$2`,
+          [ctx.tenantId, taskServiceObjectId]
+        );
+        if (serviceObjectRes.rowCount === 0) throw new Error("SERVICE_OBJECT_NOT_FOUND");
+      }
 
       const taskRow = await insertTask(client, ctx.tenantId, {
-        service_object_id: ctx.serviceObjectId,
-        process_def_id: ctx.processDefId,
+        service_object_id: taskServiceObjectId,
+        process_def_id: taskServiceObjectId === ctx.serviceObjectId ? ctx.processDefId : null,
         task_type: taskType,
         status: "open",
         title: normalizeOptionalText(resolveDynamicValue(effect?.title, ctx, payload)),

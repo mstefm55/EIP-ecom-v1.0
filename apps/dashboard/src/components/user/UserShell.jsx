@@ -15,6 +15,7 @@ export default function UserShell({ node, children, ctx }) {
   const activeTab = ctx?.user?.activeTab || "dashboard";
   const setActiveTab = ctx?.user?.setActiveTab;
   const [collapsed, setCollapsed] = useState(false);
+  const [activeModules, setActiveModules] = useState(null);
   const contentOffset = collapsed ? "6.5rem" : "17rem";
   const headerHeight = "5.75rem";
 
@@ -30,8 +31,9 @@ export default function UserShell({ node, children, ctx }) {
       code: item.code || String(item.label || "").toLowerCase().replace(/\s+/g, "-"),
       label: item.label || item.code,
       icon: item.icon,
+      module: item.module,
     };
-  });
+  }).filter((item) => !item.module || activeModules?.includes(item.module));
 
   const [profileOpen, setProfileOpen] = useState(false);
   const [user, setUser] = useState({
@@ -46,8 +48,12 @@ export default function UserShell({ node, children, ctx }) {
 
     async function load() {
       try {
-        const result = await apiFetch("/api/eip/auth/whoami");
+        const [result, dashboard] = await Promise.all([
+          apiFetch("/api/eip/auth/whoami"),
+          apiFetch("/api/eip/user/dashboard/summary").catch(() => null),
+        ]);
         if (!active) return;
+        setActiveModules(Array.isArray(dashboard?.active_modules) ? dashboard.active_modules : []);
         const email = result?.login || "";
         const name = email ? email.split("@")[0] : "User";
         setUser({

@@ -11,6 +11,7 @@
 - Agents: `eip_core.agent` (agent_type PERSON/ORG/SEGMENT/etc).
 - Contacts/addresses/bank accounts: `eip_core.entity_contact`, `eip_core.entity_address`, `eip_core.entity_bank_account`.
 - Interactions: `service_object.object_type='CRM_INTERACTION'` + `service_object_party` links.
+- Leads: `service_object.object_type='CRM_LEAD'` + process-governed conversion.
 - Cases: `service_object.object_type='CRM_CASE'` + status events.
 - Opportunities: `service_object.object_type='CRM_OPPORTUNITY'` + status events.
 - Tasks: `eip_core.task` + task status events.
@@ -25,6 +26,8 @@ CRM permissions are separate from core process permissions:
 - `CRM_OPPORTUNITY_READ`, `CRM_OPPORTUNITY_WRITE`
 - `CRM_TASK_READ`, `CRM_TASK_WRITE`
 - `CRM_DASHBOARD_READ`
+- `CRM_LEAD_READ`, `CRM_LEAD_WRITE`, `CRM_LEAD_CONVERT`
+- `CRM_TIMELINE_READ`, `CRM_NOTE_WRITE`
 
 Core process permissions:
 - `PROCESS_DEF_READ`, `PROCESS_DEF_WRITE`
@@ -58,6 +61,7 @@ Cases:
 - GET /cases/:id
 - POST /cases/:id/status
 - POST /cases/:id/tasks
+- PATCH /cases/:id
 
 Opportunities:
 - POST /opportunities
@@ -65,6 +69,16 @@ Opportunities:
 - GET /opportunities/:id
 - POST /opportunities/:id/status
 - POST /opportunities/:id/tasks
+- PATCH /opportunities/:id
+
+Leads:
+- POST /leads
+- GET /leads
+- GET /leads/:id
+- PATCH /leads/:id
+- POST /leads/:id/status
+- POST /leads/:id/tasks
+- POST /leads/:id/convert
 
 Tasks:
 - GET /tasks
@@ -76,6 +90,13 @@ Process engine (core, shared):
 
 Dashboard:
 - GET /dashboard/summary
+- GET /dashboard/overview
+
+Governance and timeline:
+- GET /governance/options
+- GET /timeline?object_kind=agent|service_object|task&object_id=...
+- POST /notes
+- GET /agents/:id/overview
 
 Segment notes:
 - POST /segments/:id/notes
@@ -84,6 +105,7 @@ Segment notes:
 - CRM statuses are stored in `SERVICE_OBJECT_STATUS` (core list) with scoped attrs.
 - Case values: new, in_progress, on_hold, resolved, closed, cancelled.
 - Opportunity values: new, qualified, proposal, negotiation, won, lost.
+- Lead values: new, contacted, qualified, unqualified, converted, archived.
 - `TASK_STATUS` exists in core; validation enforced on task status changes.
 - Case/opportunity status endpoints require an active process instance and dispatch to the core engine.
 
@@ -98,6 +120,9 @@ Segment notes:
   - Adds core process permissions
 - `db/migrations/0042_dropdown_values_patch.sql`
   - Adds missing dropdown values to existing lists (no new lists)
+- `db/migrations/0099_crm_module_completion.sql`
+  - Adds governed CRM dropdown lists, lead status values, additive permissions, reusable process definitions, process bindings, follow-up templates, and dashboard UI descriptors.
+  - Adds no CRM-specific persistence table.
 
 ## Scripts
 - `scripts/crm_happy_path.sh`
@@ -107,3 +132,5 @@ Segment notes:
 - All endpoints require session + CSRF + permission checks (including GET).
 - All queries are tenant-scoped using session.tenant_id.
 - Status transitions insert into event tables through the core engine.
+- Lead conversion is a core process transition. It creates a linked opportunity, links the customer party, creates the opportunity follow-up task, records an activity note, and starts the opportunity process.
+- Dashboard visibility is descriptor-driven and gated by the active `crm` tenant module setting.

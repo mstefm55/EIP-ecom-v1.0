@@ -151,47 +151,65 @@ TASK_RESP=$(curl -s -X POST "${API_URL}/api/eip/crm/cases/${CASE_ID}/tasks" \
 echo "${TASK_RESP}"
 require_ok "${TASK_RESP}" "Create task"
 
-echo "== Step 10: create core process_def for opportunity =="
-OPP_DEF_CODE="CRM_OPP_FLOW_$(date +%s)"
-OPP_DEF_PAYLOAD=$(cat <<EOF
-{"module":"crm","code":"${OPP_DEF_CODE}","name":"CRM Opportunity Flow","graph":{"name":"Opportunity Flow","object_type":"CRM_OPPORTUNITY","initial_node":"new","nodes":{"new":{},"proposal":{}},"transitions":[{"from":"new","action":"proposal","to":"proposal","effects":[{"type":"so_status","to":"proposal","list_code":"SERVICE_OBJECT_STATUS"}]}]}}
-EOF
-)
-
-DEF_RESP=$(curl -s -X POST "${API_URL}/api/eip/core/process/defs" \
+echo "== Step 10: create lead =="
+LEAD_RESP=$(curl -s -X POST "${API_URL}/api/eip/crm/leads" \
   -H "Content-Type: application/json" \
   -H "x-csrf: ${CSRF}" \
-  -d "${OPP_DEF_PAYLOAD}" \
+  -d "{\"customer_agent_id\":\"${CUSTOMER_ID}\",\"title\":\"New website enquiry\",\"source\":\"WEBFORM\",\"priority\":\"HIGH\"}" \
   -b crm_cookies.txt -c crm_cookies.txt)
-echo "${DEF_RESP}"
-require_ok "${DEF_RESP}" "Create process_def"
-DEF_ID=$(printf '%s' "${DEF_RESP}" | json_id)
+echo "${LEAD_RESP}"
+require_ok "${LEAD_RESP}" "Create lead"
+LEAD_ID=$(printf '%s' "${LEAD_RESP}" | json_id)
 
-if [ -z "${DEF_ID}" ]; then
-  echo "No process_def id returned"; exit 1
+if [ -z "${LEAD_ID}" ]; then
+  echo "No lead id returned"; exit 1
 fi
 
-echo "== Step 11: create process instance for opportunity =="
-INSTANCE_RESP=$(curl -s -X POST "${API_URL}/api/eip/core/process/instances" \
+echo "== Step 11: contact and qualify lead =="
+CONTACTED_RESP=$(curl -s -X POST "${API_URL}/api/eip/crm/leads/${LEAD_ID}/status" \
   -H "Content-Type: application/json" \
   -H "x-csrf: ${CSRF}" \
-  -d "{\"service_object_id\":\"${OPP_ID}\",\"process_def_id\":\"${DEF_ID}\",\"idempotency_key\":\"${OPP_ID}-${DEF_ID}\"}" \
+  -d '{"to_status":"contacted"}' \
   -b crm_cookies.txt -c crm_cookies.txt)
-echo "${INSTANCE_RESP}"
-require_ok "${INSTANCE_RESP}" "Create process instance"
+echo "${CONTACTED_RESP}"
+require_ok "${CONTACTED_RESP}" "Contact lead"
 
-echo "== Step 12: move opportunity status to proposal =="
-STATUS_RESP=$(curl -s -X POST "${API_URL}/api/eip/crm/opportunities/${OPP_ID}/status" \
+QUALIFIED_RESP=$(curl -s -X POST "${API_URL}/api/eip/crm/leads/${LEAD_ID}/status" \
   -H "Content-Type: application/json" \
   -H "x-csrf: ${CSRF}" \
-  -d '{"to_status":"proposal","note":"Proposal sent"}' \
+  -d '{"to_status":"qualified"}' \
   -b crm_cookies.txt -c crm_cookies.txt)
-echo "${STATUS_RESP}"
-require_ok "${STATUS_RESP}" "Opportunity status"
+echo "${QUALIFIED_RESP}"
+require_ok "${QUALIFIED_RESP}" "Qualify lead"
 
-echo "== Step 13: dashboard summary =="
-DASH_RESP=$(curl -s "${API_URL}/api/eip/crm/dashboard/summary" \
+echo "== Step 12: convert lead =="
+CONVERT_RESP=$(curl -s -X POST "${API_URL}/api/eip/crm/leads/${LEAD_ID}/convert" \
+  -H "Content-Type: application/json" \
+  -H "x-csrf: ${CSRF}" \
+  -d "{\"customer_agent_id\":\"${CUSTOMER_ID}\",\"opportunity_title\":\"Website enquiry\",\"value\":5000,\"currency\":\"EUR\",\"probability\":0.5,\"note\":\"Qualified through happy path\"}" \
+  -b crm_cookies.txt -c crm_cookies.txt)
+echo "${CONVERT_RESP}"
+require_ok "${CONVERT_RESP}" "Convert lead"
+
+echo "== Step 13: add lead timeline note =="
+NOTE_RESP=$(curl -s -X POST "${API_URL}/api/eip/crm/notes" \
+  -H "Content-Type: application/json" \
+  -H "x-csrf: ${CSRF}" \
+  -d "{\"object_kind\":\"service_object\",\"object_id\":\"${LEAD_ID}\",\"title\":\"Happy path\",\"description\":\"Lead conversion verified\"}" \
+  -b crm_cookies.txt -c crm_cookies.txt)
+echo "${NOTE_RESP}"
+require_ok "${NOTE_RESP}" "Create note"
+
+echo "== Step 14: dashboard overview =="
+DASH_RESP=$(curl -s "${API_URL}/api/eip/crm/dashboard/overview" \
   -H "x-csrf: ${CSRF}" \
   -b crm_cookies.txt)
 echo "${DASH_RESP}"
 require_ok "${DASH_RESP}" "Dashboard"
+
+echo "== Step 15: lead timeline =="
+TIMELINE_RESP=$(curl -s "${API_URL}/api/eip/crm/timeline?object_kind=service_object&object_id=${LEAD_ID}" \
+  -H "x-csrf: ${CSRF}" \
+  -b crm_cookies.txt)
+echo "${TIMELINE_RESP}"
+require_ok "${TIMELINE_RESP}" "Timeline"

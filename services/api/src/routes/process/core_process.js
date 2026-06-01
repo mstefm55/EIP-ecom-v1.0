@@ -366,6 +366,11 @@ async function validateProcessGraph(app, tenantId, processDefId, graph, attrs) {
         if (!normalizeOptionalText(effect?.src_id)) errors.push("LINK_SRC_ID_REQUIRED");
         if (!normalizeOptionalText(effect?.dst_id)) errors.push("LINK_DST_ID_REQUIRED");
       }
+      if (type === "PARTY_LINK_CREATE") {
+        if (!normalizeOptionalText(effect?.service_object_id)) errors.push("PARTY_LINK_SERVICE_OBJECT_ID_REQUIRED");
+        if (!normalizeOptionalText(effect?.agent_id)) errors.push("PARTY_LINK_AGENT_ID_REQUIRED");
+        if (!normalizeOptionalText(effect?.role)) errors.push("PARTY_LINK_ROLE_REQUIRED");
+      }
       if (type === "JSON_MERGE" || type === "ATTRS_MERGE") {
         if (!normalizeOptionalText(effect?.target)) errors.push("JSON_MERGE_TARGET_REQUIRED");
         const value = effect?.value ?? effect?.attrs;

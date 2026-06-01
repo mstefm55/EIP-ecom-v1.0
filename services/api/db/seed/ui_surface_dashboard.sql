@@ -21,6 +21,7 @@ SELECT
       { "code": "catalog", "label": "Product Studio", "icon": "Package" },
       { "code": "content", "label": "Content Studio", "icon": "LayoutTemplate" },
       { "code": "commerce", "label": "Orders & Payments", "icon": "CreditCard" },
+      { "code": "crm", "label": "CRM", "icon": "Users", "module": "crm" },
       { "code": "tasks", "label": "Tasks", "icon": "Activity" },
       { "code": "reports", "label": "Reports", "icon": "BarChart3" },
       { "code": "settings", "label": "Settings", "icon": "Settings" }
@@ -283,6 +284,31 @@ SELECT
                 }
               }
             }
+          }
+        }
+      ]
+    },
+    {
+      "id": "user-crm-panel",
+      "type": "UserPanel",
+      "props": { "tab": "crm" },
+      "children": [
+        {
+          "id": "crm-workspace",
+          "type": "CrmWorkspace",
+          "props": {
+            "module": "crm",
+            "title": "CRM",
+            "subtitle": "Customers, leads, opportunities, cases, interactions, and follow-ups.",
+            "tabs": [
+              { "id": "overview", "label": "Overview", "kind": "overview" },
+              { "id": "leads", "label": "Leads", "kind": "service_object", "endpoint": "/api/eip/crm/leads", "permission": "CRM_LEAD_READ" },
+              { "id": "agents", "label": "Customers", "kind": "agent", "endpoint": "/api/eip/crm/agents", "permission": "CRM_AGENT_READ" },
+              { "id": "opportunities", "label": "Opportunities", "kind": "service_object", "endpoint": "/api/eip/crm/opportunities", "permission": "CRM_OPPORTUNITY_READ" },
+              { "id": "cases", "label": "Cases", "kind": "service_object", "endpoint": "/api/eip/crm/cases", "permission": "CRM_CASE_READ" },
+              { "id": "interactions", "label": "Interactions", "kind": "service_object", "endpoint": "/api/eip/crm/interactions", "permission": "CRM_INTERACTION_READ" },
+              { "id": "tasks", "label": "Follow-ups", "kind": "task", "endpoint": "/api/eip/crm/tasks", "permission": "CRM_TASK_READ" }
+            ]
           }
         }
       ]
