@@ -20,6 +20,8 @@
 - Segments and market groups: `agent.agent_type='SEGMENT'|'MARKET_GROUP'`.
 - Master campaigns: `service_object.object_type='CRM_CAMPAIGN'`.
 - Normalized CRM intelligence signals: `info_record.record_type='CRM_SIGNAL'|'CRM_CAMPAIGN_SIGNAL'`.
+- CRM intake ledger: `info_record.record_type='CRM_INTAKE_RAW'|'CRM_INTAKE_PROPOSAL'|'CRM_INTAKE_DECISION'`.
+- CRM intake review work: `service_object.object_type='CRM_INTAKE_REVIEW'`.
 
 ## Permissions
 CRM permissions are separate from core process permissions:
@@ -35,6 +37,7 @@ CRM permissions are separate from core process permissions:
 - `CRM_CAMPAIGN_READ`, `CRM_CAMPAIGN_WRITE`
 - `CRM_SIGNAL_READ`, `CRM_SIGNAL_WRITE`
 - `CRM_INTELLIGENCE_READ`, `CRM_CONNECTOR_READ`
+- `CRM_INTAKE_READ`, `CRM_INTAKE_WRITE`, `CRM_INTAKE_APPROVE`, `CRM_INTAKE_CONVERT`
 
 Core process permissions:
 - `PROCESS_DEF_READ`, `PROCESS_DEF_WRITE`
@@ -136,6 +139,18 @@ CRM Intelligence foundation:
 - GET /intelligence/overview
 - GET /intelligence/connectors
 
+CRM Intake foundation:
+- GET /intake
+- POST /intake/manual
+- GET /intake/overview
+- GET /intake/:id
+- PATCH /intake/:id
+- POST /intake/:id/approve
+- POST /intake/:id/ignore
+- POST /intake/:id/convert
+- POST /intake/:id/tasks
+- GET /intake/:id/timeline
+
 ## Status Governance
 - CRM statuses are stored in `SERVICE_OBJECT_STATUS` (core list) with scoped attrs.
 - Case values: new, in_progress, on_hold, resolved, closed, cancelled.
@@ -162,6 +177,9 @@ CRM Intelligence foundation:
   - Adds governed segment, campaign, signal, and connector-readiness vocabularies.
   - Adds `CRM_CAMPAIGN_FLOW_V1`, `CRM_SEGMENT_REVIEW_FLOW_V1`, bindings, task templates, additive permissions, capability defaults, and descriptor tabs.
   - Adds no CRM-specific persistence table.
+- `db/migrations/0102_crm_intake_foundation.sql`
+  - Adds governed CRM intake vocabularies, permissions, review process binding, follow-up template, safe policy metadata, indexes, and dashboard descriptor repair.
+  - Adds no CRM-specific persistence table.
 
 ## Scripts
 - `scripts/crm_happy_path.sh`
@@ -176,3 +194,5 @@ CRM Intelligence foundation:
 - CRM Intelligence tabs are descriptor-driven and gated by capabilities under the active `crm` subscription setting.
 - CRM Signals are sanitized append-only information records. External references are hashed by default.
 - Connector readiness is secret-free metadata derived from existing connection profiles. Technical setup remains in Admin Console.
+- CRM Intake stores sanitized raw facts, structured proposals, review decisions, and lineage without adding a CRM-specific table.
+- CRM Intake defaults to human review and uses a local rule-based extractor. External AI adapters remain disabled until explicitly governed.

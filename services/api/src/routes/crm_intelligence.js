@@ -34,7 +34,8 @@ const CRM_INTELLIGENCE_CAPABILITIES = [
   "campaigns",
   "signals",
   "intelligence",
-  "connectors"
+  "connectors",
+  "intake"
 ];
 const SENSITIVE_KEY_PATTERN =
   /(authorization|cookie|credential|password|secret|session|signature|token|api[_-]?key|email|phone|address)/i;
@@ -139,7 +140,8 @@ async function loadCapabilities(client, tenantId) {
     campaigns: row?.is_active === true && configured.campaigns === true,
     signals: row?.is_active === true && configured.signals === true,
     intelligence: row?.is_active === true && configured.intelligence === true,
-    connectors: row?.is_active === true && configured.connectors === true
+    connectors: row?.is_active === true && configured.connectors === true,
+    intake: row?.is_active === true && configured.intake === true
   };
 }
 

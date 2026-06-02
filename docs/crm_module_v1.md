@@ -104,6 +104,23 @@ It continues the same kernel model:
 - connector readiness is secret-free metadata derived from existing connection profiles
 - dashboard tabs are descriptor-driven and capability-gated
 
+## CRM Intake Foundation
+
+The additive CRM Intake foundation is documented in:
+
+```text
+docs/crm_intake_foundation_v1.md
+```
+
+It adds a review-based intake inbox over existing kernel primitives:
+
+- sanitized source facts, proposals, and decisions are `info_record` rows
+- review work is a process-bound `CRM_INTAKE_REVIEW` service object
+- lineage is preserved with `object_link`
+- target leads, opportunities, cases, interactions, signals, notes, and tasks reuse existing governed models
+- the local rule-based extractor works without an external provider
+- future AI extractors remain behind a disabled-by-default adapter policy
+
 ## Railway Restore
 
 After deploying the API commit, run:

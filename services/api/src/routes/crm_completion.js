@@ -35,7 +35,11 @@ const CRM_PERMISSIONS = [
   "CRM_SIGNAL_READ",
   "CRM_SIGNAL_WRITE",
   "CRM_INTELLIGENCE_READ",
-  "CRM_CONNECTOR_READ"
+  "CRM_CONNECTOR_READ",
+  "CRM_INTAKE_READ",
+  "CRM_INTAKE_WRITE",
+  "CRM_INTAKE_APPROVE",
+  "CRM_INTAKE_CONVERT"
 ];
 
 function normalizeText(value) {
@@ -267,6 +271,9 @@ export default async function registerCrmCompletionRoutes(app) {
             "CRM_SIGNAL_SOURCE_CHANNEL",
             "CRM_CONNECTOR_READINESS_STATUS",
             "CRM_CONNECTOR_PROVIDER",
+            "CRM_INTAKE_SOURCE_TYPE",
+            "CRM_INTAKE_PROPOSAL_STATUS",
+            "CRM_INTAKE_SUGGESTED_OBJECT_TYPE",
             "TASK_STATUS"
           ]
         ]

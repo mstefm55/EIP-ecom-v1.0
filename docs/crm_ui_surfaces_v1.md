@@ -59,6 +59,7 @@ DB dropdown governance supplies:
 - normalized signal review, linking, and explicit task promotion
 - CRM Intelligence KPI cards
 - read-only connector readiness
+- CRM Intake Inbox with review counts, manual validation capture, proposal detail, timeline, approval, ignore, conversion, and review-task actions
 
 It contains no tenant-specific condition and no tenant code.
 
@@ -101,6 +102,23 @@ Each tab is permission-gated and capability-gated. The capability source is the 
 ```
 
 The Connectors tab is intentionally read-only. Admin Console remains the technical connection-management surface.
+
+## CRM Intake Inbox
+
+Migration `0102_crm_intake_foundation.sql` registers:
+
+```text
+Intake Inbox
+```
+
+The tab is descriptor-driven, permission-gated by `CRM_INTAKE_READ`, and
+capability-gated by `crm.intake`. It appears near the operational CRM overview
+and frames incoming communication as reviewable proposals rather than immediate
+business truth.
+
+The reusable React primitive provides a lean manual validation form and real
+backend actions for approve, ignore, convert, and add review task. The default
+policy requires human review before conversion.
 
 ## Process Compliance
 
