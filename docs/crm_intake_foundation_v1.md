@@ -146,6 +146,10 @@ CRM_INTAKE_SUGGESTED_OBJECT_TYPE
 Existing `CRM_PRIORITY`, `CRM_TASK_TYPE`, `SERVICE_OBJECT_STATUS`, and
 `PROCESS_ACTION` governance is reused.
 
+Migration `0103_crm_intake_role_template_backfill.sql` keeps these intake
+permissions in the governed role templates and repairs existing tenant roles.
+Read-only access remains read-only.
+
 ## Permissions
 
 ```text

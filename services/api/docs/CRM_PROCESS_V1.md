@@ -180,6 +180,9 @@ CRM Intake foundation:
 - `db/migrations/0102_crm_intake_foundation.sql`
   - Adds governed CRM intake vocabularies, permissions, review process binding, follow-up template, safe policy metadata, indexes, and dashboard descriptor repair.
   - Adds no CRM-specific persistence table.
+- `db/migrations/0103_crm_intake_role_template_backfill.sql`
+  - Adds CRM intake grants to governed role templates and repairs existing tenant role permissions.
+  - Preserves read-only access without granting intake writes.
 
 ## Scripts
 - `scripts/crm_happy_path.sh`

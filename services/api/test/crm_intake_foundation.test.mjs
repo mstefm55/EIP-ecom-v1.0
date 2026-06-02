@@ -15,6 +15,7 @@ const intake = read("../src/routes/crm_intake.js");
 const intelligence = read("../src/routes/crm_intelligence.js");
 const completion = read("../src/routes/crm_completion.js");
 const migration = read("../db/migrations/0102_crm_intake_foundation.sql");
+const roleTemplateBackfill = read("../db/migrations/0103_crm_intake_role_template_backfill.sql");
 const seed = read("../db/seed/ui_surface_dashboard.sql");
 const surface = read("../../../apps/dashboard/src/engine/surfaces/dashboard.js");
 const workspace = read("../../../apps/dashboard/src/components/crm/CrmWorkspace.jsx");
@@ -130,6 +131,15 @@ test("migration seeds intake dropdowns, permissions, process binding, policy met
   assert.match(migration, /INSERT INTO eip_core\.task_template/);
   assert.match(migration, /UPDATE eip_core\.tenant_module_setting/);
   assert.match(migration, /jsonb_build_array\(intake_tab\) \|\| tabs/);
+});
+
+test("intake permissions remain available when tenant roles are provisioned after foundation migration", () => {
+  assert.match(roleTemplateBackfill, /INSERT INTO eip_authz\.role_template_permission/);
+  assert.match(roleTemplateBackfill, /INSERT INTO eip_authz\.role_permission/);
+  assert.match(roleTemplateBackfill, /\('CRM_USER','CRM_INTAKE_WRITE'\)/);
+  assert.match(roleTemplateBackfill, /\('ACCESS_CRM_FULL','CRM_INTAKE_WRITE'\)/);
+  assert.match(roleTemplateBackfill, /\('ACCESS_READ_ONLY','CRM_INTAKE_READ'\)/);
+  assert.doesNotMatch(roleTemplateBackfill, /\('ACCESS_READ_ONLY','CRM_INTAKE_WRITE'\)/);
 });
 
 test("intake Inbox is descriptor and capability gated in the reusable CRM workspace", () => {
