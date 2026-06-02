@@ -87,6 +87,25 @@ No route accepts tenant scope from the browser.
 
 The dashboard surface includes a CRM descriptor node. Its menu item is shown only when the tenant has an active `crm` module setting. Use the existing Admin Modules panel to enable CRM for a tenant.
 
+## Canonical Template Clone
+
+Future tenants receive the CRM baseline through the existing governed template
+path:
+
+```text
+canonical eip_ecom template
+-> Admin > Templates clone
+-> tenant process defs, task templates, bindings, module capability metadata,
+   and DB-owned role grants
+-> inherited published dashboard descriptor and global CRM dropdown governance
+```
+
+`services/api/db/seed/template_crm_canonical_v1.sql` refreshes all reusable CRM
+process metadata onto `eip_ecom` during the controlled `template-tenant` reseed
+stage. The Admin clone route then copies tenant-scoped metadata and reapplies
+`role_template_permission` grants. Global dropdowns and dashboard descriptors
+remain inherited so tenant clones do not freeze stale copies.
+
 ## CRM Intelligence Foundation
 
 The additive CRM Intelligence foundation is documented in:

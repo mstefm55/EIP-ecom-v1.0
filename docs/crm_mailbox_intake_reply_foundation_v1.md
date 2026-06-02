@@ -149,6 +149,13 @@ CRM_MAILBOX_MESSAGE_FLOW_V1
 CRM_REPLY_REVIEW_FLOW_V1
 ```
 
+The controlled template reseed stage runs
+`services/api/db/seed/template_crm_canonical_v1.sql` after the ecommerce
+canonical seed. That refreshes both mailbox flows, their related task templates
+and bindings, and the `crm.mailbox` capability onto `eip_ecom`. New tenants then
+receive tenant-scoped metadata through Admin > Templates while inheriting the
+published global CRM descriptor and global dropdown lists.
+
 Message review:
 
 ```text
@@ -184,7 +191,7 @@ Technical provider secrets remain outside the tenant CRM workspace.
 
 ```bash
 cd services/api
-node --test test/crm_mailbox_foundation.test.mjs
+node --test test/crm_mailbox_foundation.test.mjs test/crm_template_clone_path.test.mjs
 
 cd ../../apps/dashboard
 npm run build
@@ -197,6 +204,7 @@ After API deploy:
 ```bash
 cd services/api
 npm run migrate
+npm run reseed:post-migration -- --stage template-tenant
 ```
 
 Then open the tenant dashboard CRM workspace:

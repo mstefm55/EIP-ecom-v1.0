@@ -8,7 +8,7 @@ The controlled reseed path is intentionally narrow:
 2. Seed the first owner admin from explicit env vars.
 3. Seed global UI surfaces only when missing.
 4. Verify process/effect taxonomy, including child service object creation support.
-5. Seed the ecommerce template tenant and canonical clone-ready process metadata.
+5. Seed the canonical ecommerce template tenant and its clone-ready ecommerce and CRM metadata.
 
 Samara tenant onboarding and connection setup are intentionally not part of this reseed runner. Use the Admin UI tenant onboarding, template clone, and Connections panels for that operational path.
 
@@ -33,7 +33,7 @@ npm run reseed:post-migration -- --stage ui-surfaces --stage process-engine --st
 | `owner-admin` | Runs `services/api/scripts/seed_first_admin.mjs` with `OWNER_TENANT_CODE`, `OWNER_TENANT_NAME`, `OWNER_ADMIN_EMAIL`, `OWNER_ADMIN_PASSWORD`, and optional `OWNER_ADMIN_NAME` / `OWNER_ADMIN_RESET_PASSWORD=true`. It creates or resolves the live owner/admin tenant and grants `ADMIN_SUPER` there. | Safe auto-run when env vars are supplied. |
 | `ui-surfaces` | Applies `ui_surface_admin.sql` and `ui_surface_dashboard.sql` only if a published global surface for that code is missing. | Safe auto-run with guards. |
 | `process-engine` | Verifies process tables, governed effect taxonomy, child service object effect support, and static UI/process action alignment using API-local files. | Safe verification only. |
-| `template-tenant` | Applies `tenant_template_ecom.sql`, `jurisdiction_iso_seed.sql`, `template_ecom_process.sql`, and `template_ecom_canonical_v1.sql`, then verifies canonical processes, bindings, task templates, and template-scoped effect governance. | Safe auto-run/idempotent. |
+| `template-tenant` | Applies `tenant_template_ecom.sql`, `jurisdiction_iso_seed.sql`, `template_ecom_process.sql`, `template_ecom_canonical_v1.sql`, and `template_crm_canonical_v1.sql`, then verifies canonical ecommerce and CRM processes, bindings, task templates, dropdown governance, capability metadata, and template-scoped effect governance. | Safe auto-run/idempotent. |
 
 ## Category Legend
 
@@ -54,6 +54,7 @@ npm run reseed:post-migration -- --stage ui-surfaces --stage process-engine --st
 | `services/api/db/seed/jurisdiction_iso_seed.sql` | Seeds global ISO country jurisdictions generated from public country/timezone sources. | safe auto-run | `eip_core.jurisdiction`, migration `0052`. | No | No | Yes | Indirect |
 | `services/api/db/seed/template_ecom_process.sql` | Seeds ecommerce template process actions, process definitions, task templates, and process bindings for `eip_ecom`. Includes product, order, return, refund, and payment flows. | safe auto-run | `eip_ecom` tenant, process/task/binding tables, governed dropdowns. | No | Yes | Yes | Indirect |
 | `services/api/db/seed/template_ecom_canonical_v1.sql` | Rebuilds the definitive V1 `eip_ecom` template baseline after the base seed. It upserts canonical product, sales order, payment, return, refund, and storefront content processes; task templates; process bindings; and template-scoped effect governance, including child service object creation for order return/refund requests. | safe auto-run | `eip_ecom` tenant, process/task/binding tables, dropdown governance, migrated effect handlers. | No | Yes | Yes | Indirect |
+| `services/api/db/seed/template_crm_canonical_v1.sql` | Refreshes the reusable CRM kernel baseline onto the canonical `eip_ecom` clone source after migrations. It materializes all nine CRM process definitions, related task templates and bindings, and CRM subscription capability metadata including intake and mailbox. Global CRM dropdowns and the published dashboard descriptor remain inherited governed metadata so clones do not receive stale copies. | safe auto-run | `eip_ecom`, one post-migration tenant carrying the migrated CRM baseline, process/task/binding tables, global CRM dropdowns, role templates, and published dashboard descriptor. | No | Yes | Yes | Indirect |
 | `services/api/db/seed/ui_surface_admin.sql` | Seeds published global Admin UI surface. File itself increments versions on each run, so the runner guards it. | safe auto-run with guard | `eip_core.ui_surface`, migration `0046`. | Yes | Yes | No | No |
 | `services/api/db/seed/ui_surface_dashboard.sql` | Seeds published global Dashboard UI surface. File itself increments versions on each run, so the runner guards it. | safe auto-run with guard | `eip_core.ui_surface`, migration `0046`. | Yes | Yes | No | No |
 | `services/api/db/seed/clone_template_to_tenant.sql` | Legacy manual clone SQL. It hardcodes `source_code='eip_ecom'` and `target_code='t_ed6019735b2f'`. Do not use it for Samara onboarding; use Admin > Templates instead. | skip for Samara | Manual SQL review only. | No | Yes | Yes | No |

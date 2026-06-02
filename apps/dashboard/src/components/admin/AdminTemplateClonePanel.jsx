@@ -5,7 +5,7 @@ import { apiFetch } from "../../services/apiClient";
 const DEFAULT_LAYOUT = {
   title: "Template cloning",
   subtitle:
-    "Clone a template tenant (processes, UI surfaces, schemas, and dropdowns) into a live tenant.",
+    "Clone a template tenant (modules, processes, UI surfaces, schemas, dropdowns, and governed role bundles) into a live tenant.",
   source: {
     title: "Template tenant",
     placeholder: "Search template tenant...",
@@ -188,11 +188,14 @@ export default function AdminTemplateClonePanel({ node }) {
     { key: "dropdown_values", label: "Dropdown values" },
     { key: "schema_registry", label: "Schema registry" },
     { key: "schema_bundles", label: "Schema bundles" },
+    { key: "module_settings", label: "Module settings" },
     { key: "process_defs", label: "Process definitions" },
     { key: "task_templates", label: "Task templates" },
     { key: "process_bindings", label: "Process bindings" },
     { key: "ui_surfaces", label: "UI surfaces" },
     { key: "commercial_conditions", label: "Commercial conditions" },
+    { key: "roles", label: "Governed roles" },
+    { key: "role_permissions", label: "Role grants" },
   ];
 
   return (

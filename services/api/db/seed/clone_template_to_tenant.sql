@@ -75,7 +75,26 @@ BEGIN
       etag = EXCLUDED.etag,
       updated_at = now();
 
-  -- 5) Process definitions
+  -- 5) Tenant module settings. Fill absent template defaults while preserving
+  -- existing tenant-specific attrs and capability choices.
+  INSERT INTO eip_core.tenant_module_setting
+    (tenant_id, module, code, attrs, is_active)
+  SELECT
+    target_id, module, code, attrs, is_active
+  FROM eip_core.tenant_module_setting
+  WHERE tenant_id = source_id
+  ON CONFLICT (tenant_id, module, code) DO UPDATE
+  SET attrs =
+        COALESCE(EXCLUDED.attrs, '{}'::jsonb)
+        || COALESCE(eip_core.tenant_module_setting.attrs, '{}'::jsonb)
+        || jsonb_build_object(
+          'capabilities',
+          COALESCE(EXCLUDED.attrs->'capabilities', '{}'::jsonb)
+          || COALESCE(eip_core.tenant_module_setting.attrs->'capabilities', '{}'::jsonb)
+        ),
+      updated_at = now();
+
+  -- 6) Process definitions
   INSERT INTO eip_core.process_def
     (tenant_id, code, name, version, is_active, graph, attrs)
   SELECT
@@ -89,7 +108,7 @@ BEGIN
       attrs = EXCLUDED.attrs,
       updated_at = now();
 
-  -- 6) Task templates (mapped by process_def code/version)
+  -- 7) Task templates (mapped by process_def code/version)
   INSERT INTO eip_core.task_template
     (tenant_id, process_def_id, service_object_type, task_type, title, description, is_active, sort_order, attrs)
   SELECT
@@ -118,7 +137,7 @@ BEGIN
       attrs = EXCLUDED.attrs,
       updated_at = now();
 
-  -- 7) Process bindings (mapped by process_def code/version)
+  -- 8) Process bindings (mapped by process_def code/version)
   INSERT INTO eip_core.process_binding
     (tenant_id, service_object_type, process_def_id, is_active, priority, task_type, attrs)
   SELECT
@@ -143,7 +162,7 @@ BEGIN
       attrs = EXCLUDED.attrs,
       updated_at = now();
 
-  -- 8) UI surfaces
+  -- 9) UI surfaces
   INSERT INTO eip_core.ui_surface
     (tenant_id, code, title, version, is_active, is_published, is_public, tree, attrs)
   SELECT
@@ -159,7 +178,7 @@ BEGIN
       attrs = EXCLUDED.attrs,
       updated_at = now();
 
-  -- 9) Commercial conditions
+  -- 10) Commercial conditions
   INSERT INTO eip_core.commercial_condition
     (tenant_id, code, label, condition_type, condition_category, priority, valid_from, valid_to, is_active, scope, effect, attrs)
   SELECT
@@ -178,4 +197,25 @@ BEGIN
       effect = EXCLUDED.effect,
       attrs = EXCLUDED.attrs,
       updated_at = now();
+
+  -- 11) Governed tenant roles and template-owned grants
+  INSERT INTO eip_authz.role(tenant_id, code, label, surface_code, is_system, is_active)
+  SELECT target_id, template.code, template.label, template.surface_code, template.is_system, true
+  FROM eip_authz.role_template template
+  WHERE template.is_active = true
+  ON CONFLICT (tenant_id, code) DO UPDATE
+  SET label = EXCLUDED.label,
+      surface_code = EXCLUDED.surface_code,
+      is_system = EXCLUDED.is_system,
+      is_active = true;
+
+  INSERT INTO eip_authz.role_permission(role_id, permission_code)
+  SELECT role.id, template_permission.permission_code
+  FROM eip_authz.role role
+  JOIN eip_authz.role_template_permission template_permission
+    ON template_permission.role_code = role.code
+  JOIN eip_authz.permission permission
+    ON permission.code = template_permission.permission_code
+  WHERE role.tenant_id = target_id
+  ON CONFLICT DO NOTHING;
 END $$;

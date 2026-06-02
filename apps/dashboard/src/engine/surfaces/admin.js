@@ -190,7 +190,7 @@ const dbExplorerLayout = {
 const templateCloneLayout = {
   title: "Template cloning",
   subtitle:
-    "Clone a template tenant (processes, UI surfaces, schemas, and dropdowns) into a live tenant.",
+    "Clone a template tenant (modules, processes, UI surfaces, schemas, dropdowns, and governed role bundles) into a live tenant.",
   source: {
     title: "Template tenant",
     placeholder: "Search template tenant...",

@@ -44,6 +44,13 @@ The canonical seed `services/api/db/seed/template_ecom_canonical_v1.sql` runs af
 
 The seed is idempotent and updates process defs, task templates, bindings, tenant attrs, and template-scoped effect dropdown values.
 
+The controlled template stage also runs `services/api/db/seed/template_crm_canonical_v1.sql`.
+That seed refreshes the reusable CRM kernel metadata onto `eip_ecom` so Admin >
+Templates remains the single governed clone path for future tenants. Global CRM
+dropdowns and the published dashboard descriptor stay globally governed and are
+inherited at read time. Tenant-scoped CRM capability metadata is cloned from the
+canonical template.
+
 ## Smoke Clone Validation
 
 Use `services/api/scripts/smoke_clone_ecom_template.mjs` through `npm run template:smoke-clone` to prove clone-path readiness without using the hardcoded manual clone SQL.

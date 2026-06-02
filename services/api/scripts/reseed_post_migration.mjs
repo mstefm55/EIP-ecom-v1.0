@@ -74,6 +74,25 @@ const TEMPLATE_EFFECT_TYPES = [
   "VARIANT_INVENTORY_VALIDATE"
 ];
 
+const CRM_TEMPLATE_PROCESS_CODES = [
+  "CRM_INTERACTION_FLOW_V1",
+  "CRM_CASE_FLOW_V1",
+  "CRM_OPPORTUNITY_FLOW_V1",
+  "CRM_LEAD_FLOW_V1",
+  "CRM_CAMPAIGN_FLOW_V1",
+  "CRM_SEGMENT_REVIEW_FLOW_V1",
+  "CRM_INTAKE_REVIEW_FLOW_V1",
+  "CRM_MAILBOX_MESSAGE_FLOW_V1",
+  "CRM_REPLY_REVIEW_FLOW_V1"
+];
+
+const CRM_MAILBOX_DROPDOWN_CODES = [
+  "CRM_MAILBOX_PROVIDER",
+  "CRM_MAILBOX_MESSAGE_STATUS",
+  "CRM_MAILBOX_DIRECTION",
+  "CRM_REPLY_STATUS"
+];
+
 function parseArgs(argv) {
   const out = {
     stages: [],
@@ -369,6 +388,7 @@ async function stageTemplateTenant(client) {
   await executeSqlFile(client, "jurisdiction_iso_seed.sql");
   await executeSqlFile(client, "template_ecom_process.sql");
   await executeSqlFile(client, "template_ecom_canonical_v1.sql");
+  await executeSqlFile(client, "template_crm_canonical_v1.sql");
 
   const templateCount = await tableCount(
     client,
@@ -453,7 +473,92 @@ async function stageTemplateTenant(client) {
     throw new Error("Template tenant is missing one or more governed ecommerce effect types");
   }
 
-  console.log("Verified eip_ecom canonical template tenant, processes, bindings, tasks, and effect governance");
+  const crmProcessCount = await tableCount(
+    client,
+    `
+    SELECT count(DISTINCT pd.code)::int AS count
+    FROM eip_core.process_def pd
+    JOIN eip_core.tenant t ON t.id = pd.tenant_id
+    WHERE t.code = 'eip_ecom'
+      AND pd.code = ANY($1::text[])
+      AND pd.is_active = true
+    `,
+    [CRM_TEMPLATE_PROCESS_CODES]
+  );
+  if (crmProcessCount < CRM_TEMPLATE_PROCESS_CODES.length) {
+    throw new Error("Template tenant is missing one or more CRM process definitions");
+  }
+
+  const crmBindingCount = await tableCount(
+    client,
+    `
+    SELECT count(DISTINCT pd.code)::int AS count
+    FROM eip_core.process_binding pb
+    JOIN eip_core.process_def pd ON pd.id = pb.process_def_id
+    JOIN eip_core.tenant t ON t.id = pb.tenant_id
+    WHERE t.code = 'eip_ecom'
+      AND pd.code = ANY($1::text[])
+      AND pb.is_active = true
+      AND pd.is_active = true
+    `,
+    [CRM_TEMPLATE_PROCESS_CODES]
+  );
+  if (crmBindingCount < CRM_TEMPLATE_PROCESS_CODES.length) {
+    throw new Error("Template tenant is missing one or more CRM process bindings");
+  }
+
+  const crmMailboxTaskCount = await tableCount(
+    client,
+    `
+    SELECT count(DISTINCT pd.code)::int AS count
+    FROM eip_core.task_template tt
+    JOIN eip_core.process_def pd ON pd.id = tt.process_def_id
+    JOIN eip_core.tenant t ON t.id = tt.tenant_id
+    WHERE t.code = 'eip_ecom'
+      AND pd.code = ANY($1::text[])
+      AND tt.is_active = true
+      AND pd.is_active = true
+    `,
+    [["CRM_MAILBOX_MESSAGE_FLOW_V1", "CRM_REPLY_REVIEW_FLOW_V1"]]
+  );
+  if (crmMailboxTaskCount < 2) {
+    throw new Error("Template tenant is missing one or more CRM mailbox task templates");
+  }
+
+  const crmMailboxDropdownCount = await tableCount(
+    client,
+    `
+    SELECT count(DISTINCT code)::int AS count
+    FROM eip_core.dropdown_list
+    WHERE tenant_id IS NULL
+      AND module = 'crm'
+      AND code = ANY($1::text[])
+      AND is_active = true
+    `,
+    [CRM_MAILBOX_DROPDOWN_CODES]
+  );
+  if (crmMailboxDropdownCount < CRM_MAILBOX_DROPDOWN_CODES.length) {
+    throw new Error("Global CRM governance is missing one or more mailbox dropdowns");
+  }
+
+  const crmMailboxCapabilityCount = await tableCount(
+    client,
+    `
+    SELECT count(*)::int AS count
+    FROM eip_core.tenant_module_setting setting
+    JOIN eip_core.tenant tenant ON tenant.id = setting.tenant_id
+    WHERE tenant.code = 'eip_ecom'
+      AND setting.module = 'crm'
+      AND setting.code = 'subscription'
+      AND setting.is_active = true
+      AND setting.attrs->'capabilities'->>'mailbox' = 'true'
+    `
+  );
+  if (crmMailboxCapabilityCount === 0) {
+    throw new Error("Template tenant is missing CRM mailbox capability metadata");
+  }
+
+  console.log("Verified eip_ecom canonical template tenant, ecommerce and CRM processes, bindings, tasks, dropdown governance, and CRM capability metadata");
 }
 
 async function run() {

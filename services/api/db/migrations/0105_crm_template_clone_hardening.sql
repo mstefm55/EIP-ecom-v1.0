@@ -1,0 +1,66 @@
+-- Keep post-template CRM permissions in DB-owned role templates so future
+-- tenant clones receive the same governed role baseline as existing tenants.
+
+BEGIN;
+
+WITH bundles(role_code, permission_code) AS (
+  VALUES
+    ('ADMIN_SUPER','CRM_LEAD_READ'), ('ADMIN_SUPER','CRM_LEAD_WRITE'),
+    ('ADMIN_SUPER','CRM_LEAD_CONVERT'), ('ADMIN_SUPER','CRM_TIMELINE_READ'),
+    ('ADMIN_SUPER','CRM_NOTE_WRITE'),
+    ('ACCESS_UNIVERSAL','CRM_LEAD_READ'), ('ACCESS_UNIVERSAL','CRM_LEAD_WRITE'),
+    ('ACCESS_UNIVERSAL','CRM_LEAD_CONVERT'), ('ACCESS_UNIVERSAL','CRM_TIMELINE_READ'),
+    ('ACCESS_UNIVERSAL','CRM_NOTE_WRITE'),
+    ('CRM_ADMIN','CRM_LEAD_READ'), ('CRM_ADMIN','CRM_LEAD_WRITE'),
+    ('CRM_ADMIN','CRM_LEAD_CONVERT'), ('CRM_ADMIN','CRM_TIMELINE_READ'),
+    ('CRM_ADMIN','CRM_NOTE_WRITE'),
+    ('CRM_USER','CRM_LEAD_READ'), ('CRM_USER','CRM_LEAD_WRITE'),
+    ('CRM_USER','CRM_LEAD_CONVERT'), ('CRM_USER','CRM_TIMELINE_READ'),
+    ('CRM_USER','CRM_NOTE_WRITE'),
+    ('ACCESS_CRM_FULL','CRM_LEAD_READ'), ('ACCESS_CRM_FULL','CRM_LEAD_WRITE'),
+    ('ACCESS_CRM_FULL','CRM_LEAD_CONVERT'), ('ACCESS_CRM_FULL','CRM_TIMELINE_READ'),
+    ('ACCESS_CRM_FULL','CRM_NOTE_WRITE'),
+    ('ACCESS_READ_ONLY','CRM_LEAD_READ'), ('ACCESS_READ_ONLY','CRM_TIMELINE_READ'),
+
+    ('ADMIN_SUPER','CRM_SEGMENT_READ'), ('ADMIN_SUPER','CRM_SEGMENT_WRITE'),
+    ('ADMIN_SUPER','CRM_CAMPAIGN_READ'), ('ADMIN_SUPER','CRM_CAMPAIGN_WRITE'),
+    ('ADMIN_SUPER','CRM_SIGNAL_READ'), ('ADMIN_SUPER','CRM_SIGNAL_WRITE'),
+    ('ADMIN_SUPER','CRM_INTELLIGENCE_READ'), ('ADMIN_SUPER','CRM_CONNECTOR_READ'),
+    ('ACCESS_UNIVERSAL','CRM_SEGMENT_READ'), ('ACCESS_UNIVERSAL','CRM_SEGMENT_WRITE'),
+    ('ACCESS_UNIVERSAL','CRM_CAMPAIGN_READ'), ('ACCESS_UNIVERSAL','CRM_CAMPAIGN_WRITE'),
+    ('ACCESS_UNIVERSAL','CRM_SIGNAL_READ'), ('ACCESS_UNIVERSAL','CRM_SIGNAL_WRITE'),
+    ('ACCESS_UNIVERSAL','CRM_INTELLIGENCE_READ'), ('ACCESS_UNIVERSAL','CRM_CONNECTOR_READ'),
+    ('CRM_ADMIN','CRM_SEGMENT_READ'), ('CRM_ADMIN','CRM_SEGMENT_WRITE'),
+    ('CRM_ADMIN','CRM_CAMPAIGN_READ'), ('CRM_ADMIN','CRM_CAMPAIGN_WRITE'),
+    ('CRM_ADMIN','CRM_SIGNAL_READ'), ('CRM_ADMIN','CRM_SIGNAL_WRITE'),
+    ('CRM_ADMIN','CRM_INTELLIGENCE_READ'), ('CRM_ADMIN','CRM_CONNECTOR_READ'),
+    ('CRM_USER','CRM_SEGMENT_READ'), ('CRM_USER','CRM_SEGMENT_WRITE'),
+    ('CRM_USER','CRM_CAMPAIGN_READ'), ('CRM_USER','CRM_CAMPAIGN_WRITE'),
+    ('CRM_USER','CRM_SIGNAL_READ'), ('CRM_USER','CRM_SIGNAL_WRITE'),
+    ('CRM_USER','CRM_INTELLIGENCE_READ'), ('CRM_USER','CRM_CONNECTOR_READ'),
+    ('ACCESS_CRM_FULL','CRM_SEGMENT_READ'), ('ACCESS_CRM_FULL','CRM_SEGMENT_WRITE'),
+    ('ACCESS_CRM_FULL','CRM_CAMPAIGN_READ'), ('ACCESS_CRM_FULL','CRM_CAMPAIGN_WRITE'),
+    ('ACCESS_CRM_FULL','CRM_SIGNAL_READ'), ('ACCESS_CRM_FULL','CRM_SIGNAL_WRITE'),
+    ('ACCESS_CRM_FULL','CRM_INTELLIGENCE_READ'), ('ACCESS_CRM_FULL','CRM_CONNECTOR_READ'),
+    ('ACCESS_READ_ONLY','CRM_SEGMENT_READ'), ('ACCESS_READ_ONLY','CRM_CAMPAIGN_READ'),
+    ('ACCESS_READ_ONLY','CRM_SIGNAL_READ'), ('ACCESS_READ_ONLY','CRM_INTELLIGENCE_READ'),
+    ('ACCESS_READ_ONLY','CRM_CONNECTOR_READ')
+)
+INSERT INTO eip_authz.role_template_permission(role_code, permission_code)
+SELECT role_template.code, bundles.permission_code
+FROM eip_authz.role_template role_template
+JOIN bundles ON bundles.role_code=role_template.code
+JOIN eip_authz.permission permission ON permission.code=bundles.permission_code
+ON CONFLICT DO NOTHING;
+
+-- Reapply the complete governed template bundle to roles that already exist.
+INSERT INTO eip_authz.role_permission(role_id, permission_code)
+SELECT role.id, role_template_permission.permission_code
+FROM eip_authz.role role
+JOIN eip_authz.role_template_permission role_template_permission
+  ON role_template_permission.role_code=role.code
+JOIN eip_authz.permission permission
+  ON permission.code=role_template_permission.permission_code
+ON CONFLICT DO NOTHING;
+
+COMMIT;

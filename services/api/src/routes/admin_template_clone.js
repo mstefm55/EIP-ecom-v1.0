@@ -251,6 +251,29 @@ export default async function adminTemplateCloneRoutes(app) {
 
       r = await client.query(
         `
+        INSERT INTO eip_core.tenant_module_setting
+          (tenant_id, module, code, attrs, is_active)
+        SELECT
+          $1, module, code, attrs, is_active
+        FROM eip_core.tenant_module_setting
+        WHERE tenant_id = $2
+        ON CONFLICT (tenant_id, module, code) DO UPDATE SET
+          attrs =
+            COALESCE(EXCLUDED.attrs, '{}'::jsonb)
+            || COALESCE(eip_core.tenant_module_setting.attrs, '{}'::jsonb)
+            || jsonb_build_object(
+              'capabilities',
+              COALESCE(EXCLUDED.attrs->'capabilities', '{}'::jsonb)
+              || COALESCE(eip_core.tenant_module_setting.attrs->'capabilities', '{}'::jsonb)
+            ),
+          updated_at = now()
+        `,
+        [targetId, sourceId]
+      );
+      summary.module_settings = r.rowCount;
+
+      r = await client.query(
+        `
         INSERT INTO eip_core.process_def
           (tenant_id, code, name, version, is_active, graph, attrs)
         SELECT
@@ -344,6 +367,38 @@ export default async function adminTemplateCloneRoutes(app) {
         [targetId, sourceId]
       );
       summary.commercial_conditions = r.rowCount;
+
+      r = await client.query(
+        `
+        INSERT INTO eip_authz.role(tenant_id, code, label, surface_code, is_system, is_active)
+        SELECT $1, role_template.code, role_template.label, role_template.surface_code, role_template.is_system, true
+        FROM eip_authz.role_template role_template
+        WHERE role_template.is_active = true
+        ON CONFLICT (tenant_id, code) DO UPDATE SET
+          label = EXCLUDED.label,
+          surface_code = EXCLUDED.surface_code,
+          is_system = EXCLUDED.is_system,
+          is_active = true
+        `,
+        [targetId]
+      );
+      summary.roles = r.rowCount;
+
+      r = await client.query(
+        `
+        INSERT INTO eip_authz.role_permission(role_id, permission_code)
+        SELECT role.id, role_template_permission.permission_code
+        FROM eip_authz.role
+        JOIN eip_authz.role_template_permission role_template_permission
+          ON role_template_permission.role_code = role.code
+        JOIN eip_authz.permission permission
+          ON permission.code = role_template_permission.permission_code
+        WHERE role.tenant_id = $1
+        ON CONFLICT DO NOTHING
+        `,
+        [targetId]
+      );
+      summary.role_permissions = r.rowCount;
 
       await client.query("COMMIT");
       auditSecurityEvent(app, "template.clone_completed", {
