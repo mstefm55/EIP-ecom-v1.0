@@ -39,7 +39,11 @@ const CRM_PERMISSIONS = [
   "CRM_INTAKE_READ",
   "CRM_INTAKE_WRITE",
   "CRM_INTAKE_APPROVE",
-  "CRM_INTAKE_CONVERT"
+  "CRM_INTAKE_CONVERT",
+  "CRM_MAILBOX_READ",
+  "CRM_MAILBOX_WRITE",
+  "CRM_MAILBOX_REPLY_DRAFT",
+  "CRM_MAILBOX_REPLY_SEND"
 ];
 
 function normalizeText(value) {
@@ -274,6 +278,10 @@ export default async function registerCrmCompletionRoutes(app) {
             "CRM_INTAKE_SOURCE_TYPE",
             "CRM_INTAKE_PROPOSAL_STATUS",
             "CRM_INTAKE_SUGGESTED_OBJECT_TYPE",
+            "CRM_MAILBOX_PROVIDER",
+            "CRM_MAILBOX_MESSAGE_STATUS",
+            "CRM_MAILBOX_DIRECTION",
+            "CRM_REPLY_STATUS",
             "TASK_STATUS"
           ]
         ]

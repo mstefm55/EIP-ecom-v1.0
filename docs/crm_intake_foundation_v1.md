@@ -10,6 +10,9 @@ model. Manual object creation remains available, but incoming communication can
 now be captured as sanitized facts, structured as proposals, reviewed by a
 human, and converted into governed CRM work.
 
+Mailbox imports now feed the same intake primitive. See
+`docs/crm_mailbox_intake_reply_foundation_v1.md`.
+
 No CRM-specific persistence table was added.
 
 ## Intake Flow
@@ -111,6 +114,11 @@ directly.
 
 Conversion is idempotent and preserves raw fact, proposal, decision, and created
 object lineage through `object_link`.
+
+The optional linked customer/contact value is normalized defensively. Omitted,
+null, empty, and whitespace-only values become `null`, so a lead can be created
+without an existing linked agent. A malformed non-empty UUID returns a clear
+HTTP `400` error rather than reaching a PostgreSQL UUID cast.
 
 ## Security Boundary
 
@@ -258,6 +266,10 @@ timeline
 ```
 
 The existing manual CRM object tabs remain available.
+
+The intake conversion modal uses an existing customer/contact lookup and an
+explicit `No linked contact yet` option. Operators no longer type raw agent
+UUIDs into the modal.
 
 ## Gateway Boundary
 

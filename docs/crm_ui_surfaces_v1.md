@@ -60,6 +60,8 @@ DB dropdown governance supplies:
 - CRM Intelligence KPI cards
 - read-only connector readiness
 - CRM Intake Inbox with review counts, manual validation capture, proposal detail, timeline, approval, ignore, conversion, and review-task actions
+- Mailbox with protected message detail, redacted list snippets, manual provider import, intake creation, and reply-draft creation
+- Reply Drafts with edit, approve, and guarded send-request actions
 
 It contains no tenant-specific condition and no tenant code.
 
@@ -119,6 +121,29 @@ business truth.
 The reusable React primitive provides a lean manual validation form and real
 backend actions for approve, ignore, convert, and add review task. The default
 policy requires human review before conversion.
+
+The intake conversion modal searches existing customers and contacts and offers
+`No linked contact yet`. It does not expose a raw agent UUID field. Provisional
+contact creation remains a separate explicit CRM action.
+
+## CRM Mailbox Tabs
+
+Migration `0104_crm_mailbox_intake_reply_foundation.sql` registers:
+
+```text
+Mailbox
+Reply Drafts
+```
+
+Both tabs are descriptor-driven, permission-gated by `CRM_MAILBOX_READ`, and
+capability-gated by `crm.mailbox`. The mailbox workspace is operational, not a
+technical secrets editor. Provider credentials and transport setup remain in
+the governed technical connection surface.
+
+The Mailbox tab shows redacted snippets in lists and protected readable content
+only after the authorized detail route is opened. Reply drafts require explicit
+approval before a user with the separate send permission can request provider
+delivery. The manual validation adapter never sends externally.
 
 ## Process Compliance
 

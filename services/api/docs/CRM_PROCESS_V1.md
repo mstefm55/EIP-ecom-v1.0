@@ -22,6 +22,8 @@
 - Normalized CRM intelligence signals: `info_record.record_type='CRM_SIGNAL'|'CRM_CAMPAIGN_SIGNAL'`.
 - CRM intake ledger: `info_record.record_type='CRM_INTAKE_RAW'|'CRM_INTAKE_PROPOSAL'|'CRM_INTAKE_DECISION'`.
 - CRM intake review work: `service_object.object_type='CRM_INTAKE_REVIEW'`.
+- CRM mailbox evidence: `info_record.record_type='CRM_MAILBOX_MESSAGE'|'CRM_MAILBOX_THREAD'|'CRM_MAILBOX_REPLY_DRAFT'|'CRM_MAILBOX_REPLY_DECISION'`.
+- CRM mailbox review work: `service_object.object_type='CRM_MAILBOX_MESSAGE_REVIEW'|'CRM_MAILBOX_REPLY_REVIEW'`.
 
 ## Permissions
 CRM permissions are separate from core process permissions:
@@ -38,6 +40,7 @@ CRM permissions are separate from core process permissions:
 - `CRM_SIGNAL_READ`, `CRM_SIGNAL_WRITE`
 - `CRM_INTELLIGENCE_READ`, `CRM_CONNECTOR_READ`
 - `CRM_INTAKE_READ`, `CRM_INTAKE_WRITE`, `CRM_INTAKE_APPROVE`, `CRM_INTAKE_CONVERT`
+- `CRM_MAILBOX_READ`, `CRM_MAILBOX_WRITE`, `CRM_MAILBOX_REPLY_DRAFT`, `CRM_MAILBOX_REPLY_SEND`
 
 Core process permissions:
 - `PROCESS_DEF_READ`, `PROCESS_DEF_WRITE`
@@ -151,6 +154,20 @@ CRM Intake foundation:
 - POST /intake/:id/tasks
 - GET /intake/:id/timeline
 
+CRM Mailbox intake and reply foundation:
+- GET /mailbox/readiness
+- GET /mailbox/messages
+- POST /mailbox/messages/import-manual
+- GET /mailbox/messages/:id
+- POST /mailbox/messages/:id/create-intake
+- GET /mailbox/threads/:threadId
+- GET /mailbox/replies
+- POST /mailbox/replies/draft
+- GET /mailbox/replies/:id
+- PATCH /mailbox/replies/:id
+- POST /mailbox/replies/:id/approve
+- POST /mailbox/replies/:id/send
+
 ## Status Governance
 - CRM statuses are stored in `SERVICE_OBJECT_STATUS` (core list) with scoped attrs.
 - Case values: new, in_progress, on_hold, resolved, closed, cancelled.
@@ -183,6 +200,9 @@ CRM Intake foundation:
 - `db/migrations/0103_crm_intake_role_template_backfill.sql`
   - Adds CRM intake grants to governed role templates and repairs existing tenant role permissions.
   - Preserves read-only access without granting intake writes.
+- `db/migrations/0104_crm_mailbox_intake_reply_foundation.sql`
+  - Adds mailbox dropdowns, provider adapter readiness, protected mailbox evidence types, governed message/reply process definitions, bindings, approval template, permissions, capability defaults, indexes, and descriptor tabs.
+  - Reuses kernel tables and adds no CRM-specific persistence table.
 
 ## Scripts
 - `scripts/crm_happy_path.sh`
@@ -199,3 +219,5 @@ CRM Intake foundation:
 - Connector readiness is secret-free metadata derived from existing connection profiles. Technical setup remains in Admin Console.
 - CRM Intake stores sanitized raw facts, structured proposals, review decisions, and lineage without adding a CRM-specific table.
 - CRM Intake defaults to human review and uses a local rule-based extractor. External AI adapters remain disabled until explicitly governed.
+- Mailbox import reuses CRM Intake and stores protected readable detail with redacted list snippets. EIP orchestrates review and reply decisions; external providers remain responsible for mail transport.
+- Mailbox send requests require approved drafts and a separate send permission. The manual test provider stops safely at `send_pending`.

@@ -40,6 +40,7 @@ const CONVERSION_TYPES = new Set([
   "IGNORE"
 ]);
 const PROCESS_OBJECT_TYPES = new Set(["CRM_LEAD", "CRM_OPPORTUNITY", "CRM_CASE", "CRM_INTERACTION"]);
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function normalizeText(value) {
   return String(value || "").trim();
@@ -48,6 +49,14 @@ function normalizeText(value) {
 function normalizeOptionalText(value, maxLength = 500) {
   const text = normalizeText(value);
   return text ? text.slice(0, maxLength) : null;
+}
+
+function normalizeOptionalUuid(value) {
+  const text = normalizeOptionalText(value, 80);
+  if (!text) return { ok: true, value: null };
+  return UUID_PATTERN.test(text)
+    ? { ok: true, value: text }
+    : { ok: false, error: "AGENT_ID_INVALID" };
 }
 
 function normalizeStatus(value) {
@@ -448,6 +457,95 @@ async function ensureIntakeReviewContext(client, app, session, raw, proposal) {
   return { ok: true, service_object: started.service_object };
 }
 
+async function createIntakeProposal(client, app, session, body = {}, lineage = {}) {
+  const sourceType = normalizeStatus(body.source_type) || "manual";
+  if (!INTAKE_SOURCE_TYPES.has(sourceType)) return { ok: false, status: 400, error: "INTAKE_SOURCE_TYPE_INVALID" };
+  if (!normalizeOptionalText(body.subject || body.title || body.body || body.message, 4000)) {
+    return { ok: false, status: 400, error: "INTAKE_CONTENT_REQUIRED" };
+  }
+  const governed = await validateDropdownValue(client, session.tenant_id, "CRM_INTAKE_SOURCE_TYPE", sourceType);
+  if (!governed.ok) return { ok: false, status: 400, ...governed };
+  const actorAgentId = await getPrimaryAgentId(client, session.tenant_id, session.identity_id);
+  const sourceRefHash = sha256Hex(normalizeOptionalText(body.source_ref, 1000) || JSON.stringify({
+    source_type: sourceType,
+    subject: normalizeOptionalText(body.subject || body.title, 200),
+    body: normalizeOptionalText(body.body || body.message, 4000),
+    from_email: normalizeOptionalText(body.from_email, 254),
+    from_phone: normalizeOptionalText(body.from_phone, 40)
+  }));
+  const duplicate = await client.query(
+    `SELECT proposal.id, proposal.record_type, proposal.title, proposal.description, proposal.payload, proposal.attrs, proposal.created_at, proposal.updated_at
+     FROM eip_core.info_record raw
+     JOIN eip_core.object_link link ON link.tenant_id=raw.tenant_id AND link.src_kind='info_record' AND link.src_id=raw.id
+       AND link.dst_kind='info_record' AND link.relation_type='STRUCTURED_AS' AND link.is_active=true
+     JOIN eip_core.info_record proposal ON proposal.tenant_id=link.tenant_id AND proposal.id=link.dst_id
+       AND proposal.record_type='CRM_INTAKE_PROPOSAL' AND proposal.is_active=true
+     WHERE raw.tenant_id=$1 AND raw.record_type='CRM_INTAKE_RAW' AND raw.is_active=true
+       AND raw.payload->>'source_ref_hash'=$2 LIMIT 1`,
+    [session.tenant_id, sourceRefHash]
+  );
+  if (duplicate.rowCount) return { ok: true, reused: true, item: duplicate.rows[0] };
+  const policies = await loadIntakePolicies(client, session.tenant_id);
+  const rawPayload = {
+    source_type: sourceType,
+    source_channel: normalizeStatus(body.source_channel) || "manual",
+    source_ref_hash: sourceRefHash,
+    subject: sanitizeIntakeText(body.subject || body.title, 200),
+    body: sanitizeIntakeText(body.body || body.message, 4000),
+    detected_contact: buildDetectedContact(body),
+    received_at: normalizeOptionalText(body.received_at, 50) || new Date().toISOString(),
+    redacted: true
+  };
+  const raw = await insertInfoRecord(client, session.tenant_id, actorAgentId, {
+    record_type: "CRM_INTAKE_RAW",
+    title: rawPayload.subject || "Incoming CRM intake",
+    description: rawPayload.body,
+    payload: rawPayload,
+    attrs: { source: normalizeOptionalText(lineage.source, 80) || "crm_intake" }
+  });
+  const extraction = runIntakeExtraction({
+    adapter: normalizeStatus(body.extractor_type) || "rule_based",
+    input: { ...body, source_type: sourceType, source_ref: sourceRefHash, raw_record_id: raw.id },
+    policies
+  });
+  if (!extraction.ok) return { ok: false, status: 400, ...extraction };
+  const proposalPayload = { ...extraction.proposal, source_ref_hash: sourceRefHash, raw_record_id: raw.id };
+  const proposal = await insertInfoRecord(client, session.tenant_id, actorAgentId, {
+    record_type: "CRM_INTAKE_PROPOSAL",
+    title: proposalPayload.suggested_title,
+    description: proposalPayload.suggested_summary,
+    payload: proposalPayload,
+    attrs: { extractor_type: extraction.adapter, source: normalizeOptionalText(lineage.source, 80) || "crm_intake" }
+  });
+  await insertLink(client, session.tenant_id, {
+    src_kind: "info_record",
+    src_id: raw.id,
+    dst_kind: "info_record",
+    dst_id: proposal.id,
+    relation_type: "STRUCTURED_AS"
+  });
+  if (lineage.source_info_record_id) {
+    await insertLink(client, session.tenant_id, {
+      src_kind: "info_record",
+      src_id: lineage.source_info_record_id,
+      dst_kind: "info_record",
+      dst_id: raw.id,
+      relation_type: normalizeOptionalText(lineage.raw_relation_type, 80) || "INTAKE_SOURCE_FOR"
+    });
+    await insertLink(client, session.tenant_id, {
+      src_kind: "info_record",
+      src_id: lineage.source_info_record_id,
+      dst_kind: "info_record",
+      dst_id: proposal.id,
+      relation_type: normalizeOptionalText(lineage.proposal_relation_type, 80) || "STRUCTURED_AS"
+    });
+  }
+  const review = await ensureIntakeReviewContext(client, app, session, raw, proposal);
+  if (!review.ok) return { ok: false, status: 409, error: review.error };
+  const updated = await updateProposalPayload(client, session.tenant_id, proposal.id, { review_object_id: review.service_object.id });
+  return { ok: true, reused: false, item: updated, raw_record_id: raw.id, review_object_id: review.service_object.id };
+}
+
 async function createTaskForObject(client, app, session, serviceObjectId, task, keyPrefix) {
   const serviceObject = await ensureServiceObject(client, session.tenant_id, serviceObjectId);
   if (!serviceObject) return { ok: false, error: "TASK_TARGET_NOT_FOUND" };
@@ -479,7 +577,9 @@ async function convertProposal(client, app, session, context, body = {}) {
   if (targetType === "IGNORE") return { ok: false, status: 400, error: "USE_INTAKE_IGNORE" };
 
   const actorAgentId = await getPrimaryAgentId(client, session.tenant_id, session.identity_id);
-  const linkedAgentId = normalizeOptionalText(body.agent_id || proposal.payload?.detected_agent_id, 36);
+  const normalizedLinkedAgentId = normalizeOptionalUuid(body.agent_id || proposal.payload?.detected_agent_id);
+  if (!normalizedLinkedAgentId.ok) return { ok: false, status: 400, error: normalizedLinkedAgentId.error };
+  const linkedAgentId = normalizedLinkedAgentId.value;
   const linkedAgent = linkedAgentId ? await ensureAgent(client, session.tenant_id, linkedAgentId) : null;
   if (linkedAgentId && !linkedAgent) return { ok: false, status: 404, error: "DETECTED_AGENT_NOT_FOUND" };
   let convertedKind = null;
@@ -673,92 +773,16 @@ export default async function registerCrmIntakeRoutes(app) {
   app.post("/intake/manual", async (req, reply) => {
     const session = await requirePerm(app, req, reply, "CRM_INTAKE_WRITE");
     if (!session || !(await requireIntakeCapability(app, session, reply))) return;
-    const body = req.body || {};
-    const sourceType = normalizeStatus(body.source_type) || "manual";
-    if (!INTAKE_SOURCE_TYPES.has(sourceType)) return reply.code(400).send({ ok: false, error: "INTAKE_SOURCE_TYPE_INVALID" });
-    if (!normalizeOptionalText(body.subject || body.title || body.body || body.message, 4000)) {
-      return reply.code(400).send({ ok: false, error: "INTAKE_CONTENT_REQUIRED" });
-    }
     const client = await app.db.connect();
     try {
       await client.query("BEGIN");
-      const governed = await validateDropdownValue(client, session.tenant_id, "CRM_INTAKE_SOURCE_TYPE", sourceType);
-      if (!governed.ok) {
+      const result = await createIntakeProposal(client, app, session, req.body || {});
+      if (!result.ok) {
         await client.query("ROLLBACK");
-        return reply.code(400).send({ ok: false, ...governed });
+        return reply.code(result.status || 400).send({ ok: false, error: result.error, ...result });
       }
-      const actorAgentId = await getPrimaryAgentId(client, session.tenant_id, session.identity_id);
-      const sourceRefHash = sha256Hex(normalizeOptionalText(body.source_ref, 1000) || JSON.stringify({
-        source_type: sourceType,
-        subject: normalizeOptionalText(body.subject || body.title, 200),
-        body: normalizeOptionalText(body.body || body.message, 4000),
-        from_email: normalizeOptionalText(body.from_email, 254),
-        from_phone: normalizeOptionalText(body.from_phone, 40)
-      }));
-      const duplicate = await client.query(
-        `SELECT proposal.id, proposal.record_type, proposal.title, proposal.description, proposal.payload, proposal.attrs, proposal.created_at, proposal.updated_at
-         FROM eip_core.info_record raw
-         JOIN eip_core.object_link link ON link.tenant_id=raw.tenant_id AND link.src_kind='info_record' AND link.src_id=raw.id
-           AND link.dst_kind='info_record' AND link.relation_type='STRUCTURED_AS' AND link.is_active=true
-         JOIN eip_core.info_record proposal ON proposal.tenant_id=link.tenant_id AND proposal.id=link.dst_id
-           AND proposal.record_type='CRM_INTAKE_PROPOSAL' AND proposal.is_active=true
-         WHERE raw.tenant_id=$1 AND raw.record_type='CRM_INTAKE_RAW' AND raw.is_active=true
-           AND raw.payload->>'source_ref_hash'=$2 LIMIT 1`,
-        [session.tenant_id, sourceRefHash]
-      );
-      if (duplicate.rowCount) {
-        await client.query("ROLLBACK");
-        return reply.send({ ok: true, reused: true, item: duplicate.rows[0] });
-      }
-      const policies = await loadIntakePolicies(client, session.tenant_id);
-      const rawPayload = {
-        source_type: sourceType,
-        source_channel: normalizeStatus(body.source_channel) || "manual",
-        source_ref_hash: sourceRefHash,
-        subject: sanitizeIntakeText(body.subject || body.title, 200),
-        body: sanitizeIntakeText(body.body || body.message, 4000),
-        detected_contact: buildDetectedContact(body),
-        received_at: new Date().toISOString(),
-        redacted: true
-      };
-      const raw = await insertInfoRecord(client, session.tenant_id, actorAgentId, {
-        record_type: "CRM_INTAKE_RAW",
-        title: rawPayload.subject || "Incoming CRM intake",
-        description: rawPayload.body,
-        payload: rawPayload
-      });
-      const extraction = runIntakeExtraction({
-        adapter: normalizeStatus(body.extractor_type) || "rule_based",
-        input: { ...body, source_type: sourceType, source_ref: sourceRefHash, raw_record_id: raw.id },
-        policies
-      });
-      if (!extraction.ok) {
-        await client.query("ROLLBACK");
-        return reply.code(400).send(extraction);
-      }
-      const proposalPayload = { ...extraction.proposal, source_ref_hash: sourceRefHash, raw_record_id: raw.id };
-      const proposal = await insertInfoRecord(client, session.tenant_id, actorAgentId, {
-        record_type: "CRM_INTAKE_PROPOSAL",
-        title: proposalPayload.suggested_title,
-        description: proposalPayload.suggested_summary,
-        payload: proposalPayload,
-        attrs: { extractor_type: extraction.adapter }
-      });
-      await insertLink(client, session.tenant_id, {
-        src_kind: "info_record",
-        src_id: raw.id,
-        dst_kind: "info_record",
-        dst_id: proposal.id,
-        relation_type: "STRUCTURED_AS"
-      });
-      const review = await ensureIntakeReviewContext(client, app, session, raw, proposal);
-      if (!review.ok) {
-        await client.query("ROLLBACK");
-        return reply.code(409).send({ ok: false, error: review.error });
-      }
-      const updated = await updateProposalPayload(client, session.tenant_id, proposal.id, { review_object_id: review.service_object.id });
       await client.query("COMMIT");
-      return reply.send({ ok: true, reused: false, item: updated, raw_record_id: raw.id, review_object_id: review.service_object.id });
+      return reply.send(result);
     } catch (error) {
       await client.query("ROLLBACK");
       app.log.error({ event: "crm_intake_manual_error", tenantId: session.tenant_id, error: error.message });
@@ -960,7 +984,9 @@ export default async function registerCrmIntakeRoutes(app) {
 export {
   DEFAULT_AI_EXTRACTION_POLICY,
   DEFAULT_AUTOMATION_POLICY,
+  createIntakeProposal,
   extractRuleBasedProposal,
+  normalizeOptionalUuid,
   registerIntakeExtractionAdapter,
   runIntakeExtraction,
   sanitizeIntakeText

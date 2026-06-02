@@ -4,6 +4,7 @@ import { sha256Hex } from "../auth/crypto.js";
 import registerCrmCompletionRoutes from "./crm_completion.js";
 import registerCrmIntelligenceRoutes from "./crm_intelligence.js";
 import registerCrmIntakeRoutes from "./crm_intake.js";
+import registerCrmMailboxRoutes from "./crm_mailbox.js";
 
 const MAX_LIMIT = 200;
 
@@ -2211,4 +2212,5 @@ export default async function crmRoutes(app) {
   await registerCrmCompletionRoutes(app);
   await registerCrmIntelligenceRoutes(app);
   await registerCrmIntakeRoutes(app);
+  await registerCrmMailboxRoutes(app);
 }

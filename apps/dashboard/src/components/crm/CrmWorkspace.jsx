@@ -11,6 +11,7 @@ import {
   FileText,
   Inbox,
   Link2,
+  Mail,
   Megaphone,
   PlugZap,
   Plus,
@@ -27,6 +28,8 @@ import { apiFetch } from "../../services/apiClient";
 const FALLBACK_TABS = [
   { id: "overview", label: "Overview", kind: "overview" },
   { id: "intake", label: "Intake Inbox", kind: "intake", endpoint: "/api/eip/crm/intake", permission: "CRM_INTAKE_READ", capability: "intake" },
+  { id: "mailbox", label: "Mailbox", kind: "mailbox", endpoint: "/api/eip/crm/mailbox/messages", permission: "CRM_MAILBOX_READ", capability: "mailbox" },
+  { id: "mailbox_replies", label: "Reply Drafts", kind: "mailbox_reply", endpoint: "/api/eip/crm/mailbox/replies", permission: "CRM_MAILBOX_READ", capability: "mailbox" },
   { id: "leads", label: "Leads", kind: "service_object", endpoint: "/api/eip/crm/leads", permission: "CRM_LEAD_READ" },
   { id: "agents", label: "Customers", kind: "agent", endpoint: "/api/eip/crm/agents", permission: "CRM_AGENT_READ" },
   { id: "opportunities", label: "Opportunities", kind: "service_object", endpoint: "/api/eip/crm/opportunities", permission: "CRM_OPPORTUNITY_READ" },
@@ -70,6 +73,7 @@ const WRITE_PERMISSIONS = {
   interactions: "CRM_INTERACTION_WRITE",
   tasks: "CRM_TASK_WRITE",
   intake: "CRM_INTAKE_WRITE",
+  mailbox: "CRM_MAILBOX_WRITE",
   segments: "CRM_SEGMENT_WRITE",
   campaigns: "CRM_CAMPAIGN_WRITE",
   signals: "CRM_SIGNAL_WRITE",
@@ -85,6 +89,18 @@ const CREATE_FORMS = {
     ["from_email", "From email", "email"],
     ["from_phone", "From phone", "text"],
     ["source_ref", "Source reference", "text"],
+  ],
+  mailbox: [
+    ["provider", "Provider", "governed", "CRM_MAILBOX_PROVIDER"],
+    ["connection_code", "Connection code", "text"],
+    ["provider_message_id", "Provider message reference", "text"],
+    ["provider_thread_id", "Thread reference", "text"],
+    ["direction", "Direction", "governed", "CRM_MAILBOX_DIRECTION"],
+    ["subject", "Subject", "text"],
+    ["body_text", "Message body", "textarea"],
+    ["from_name", "From name", "text"],
+    ["from_email", "From email", "email"],
+    ["received_at", "Received at", "datetime-local"],
   ],
   agents: [
     ["agent_type", "Customer type", "select", ["ORG", "PERSON"]],
@@ -167,6 +183,8 @@ const CREATE_FORMS = {
 const ICONS = {
   overview: Activity,
   intake: Inbox,
+  mailbox: Mail,
+  mailbox_replies: FileText,
   leads: ArrowRightLeft,
   agents: Building2,
   opportunities: BriefcaseBusiness,
@@ -198,6 +216,11 @@ const INTAKE_KPIS = [
 
 function parseCsv(value) {
   return String(value || "").split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+function normalizeOptionalUuidText(value) {
+  const text = String(value || "").trim();
+  return text || null;
 }
 
 function formatValue(value, format) {
@@ -326,6 +349,8 @@ export default function CrmWorkspace({ node }) {
   const [message, setMessage] = useState("");
   const [modal, setModal] = useState(null);
   const [form, setForm] = useState({});
+  const [agentOptions, setAgentOptions] = useState([]);
+  const [agentQuery, setAgentQuery] = useState("");
   const visibleTabs = useMemo(() => tabs.filter((item) =>
     (!item.permission || permissions.includes(item.permission)) &&
     (!item.capability || capabilities[item.capability] === true)
@@ -381,6 +406,21 @@ export default function CrmWorkspace({ node }) {
     return () => window.clearTimeout(timer);
   }, [refresh]);
 
+  useEffect(() => {
+    if (modal !== "intake_convert") return undefined;
+    const timer = window.setTimeout(async () => {
+      try {
+        const suffix = agentQuery.trim() ? `?q=${encodeURIComponent(agentQuery.trim())}` : "";
+        const result = await apiFetch(`/api/eip/crm/agents${suffix}`);
+        setAgentOptions(result.items || []);
+      } catch (error) {
+        setAgentOptions([]);
+        setMessage(error.message);
+      }
+    }, 180);
+    return () => window.clearTimeout(timer);
+  }, [agentQuery, modal]);
+
   function selectTab(tabId) {
     setActiveTab(tabId);
     setSelected(null);
@@ -397,7 +437,7 @@ export default function CrmWorkspace({ node }) {
       const detailPath = tab.id === "agents" ? `${tab.endpoint}/${item.id}/overview` : `${tab.endpoint}/${item.id}`;
       const result = await apiFetch(detailPath);
       setDetail({ ...result.item, parties: result.parties, contacts: result.contacts, addresses: result.addresses, bank_accounts: result.bank_accounts, service_objects: result.service_objects, links: result.links });
-      if (tab.id === "signals") return;
+      if (["signals", "mailbox", "mailbox_replies"].includes(tab.id)) return;
       const timelinePath = tab.id === "intake"
         ? `${tab.endpoint}/${item.id}/timeline`
         : ["segments", "campaigns"].includes(tab.id)
@@ -438,7 +478,7 @@ export default function CrmWorkspace({ node }) {
             : tab.id === "campaigns"
               ? { ...form, target_segment_ids: parseCsv(form.target_segment_ids_csv) }
               : form;
-        await apiFetch(tab.id === "intake" ? `${tab.endpoint}/manual` : tab.endpoint, { method: "POST", body });
+        await apiFetch(tab.id === "intake" ? `${tab.endpoint}/manual` : tab.id === "mailbox" ? `${tab.endpoint}/import-manual` : tab.endpoint, { method: "POST", body });
       } else if (modal === "note") {
         const notePath = tab.id === "campaigns" ? `/api/eip/crm/campaigns/${selected.id}/notes` : "/api/eip/crm/notes";
         await apiFetch(notePath, {
@@ -483,9 +523,19 @@ export default function CrmWorkspace({ node }) {
       } else if (modal === "intake_ignore") {
         await apiFetch(`/api/eip/crm/intake/${selected.id}/ignore`, { method: "POST", body: form });
       } else if (modal === "intake_convert") {
-        await apiFetch(`/api/eip/crm/intake/${selected.id}/convert`, { method: "POST", body: form });
+        await apiFetch(`/api/eip/crm/intake/${selected.id}/convert`, { method: "POST", body: { ...form, agent_id: normalizeOptionalUuidText(form.agent_id) } });
       } else if (modal === "intake_task") {
         await apiFetch(`/api/eip/crm/intake/${selected.id}/tasks`, { method: "POST", body: form });
+      } else if (modal === "mailbox_intake") {
+        await apiFetch(`/api/eip/crm/mailbox/messages/${selected.id}/create-intake`, { method: "POST", body: {} });
+      } else if (modal === "mailbox_reply_draft") {
+        await apiFetch("/api/eip/crm/mailbox/replies/draft", { method: "POST", body: { ...form, message_id: selected.id } });
+      } else if (modal === "mailbox_reply_edit") {
+        await apiFetch(`/api/eip/crm/mailbox/replies/${selected.id}`, { method: "PATCH", body: form });
+      } else if (modal === "mailbox_reply_approve") {
+        await apiFetch(`/api/eip/crm/mailbox/replies/${selected.id}/approve`, { method: "POST", body: form });
+      } else if (modal === "mailbox_reply_send") {
+        await apiFetch(`/api/eip/crm/mailbox/replies/${selected.id}/send`, { method: "POST", body: {} });
       } else if (modal === "edit") {
         const body = tab.id === "agents"
           ? form
@@ -681,6 +731,11 @@ export default function CrmWorkspace({ node }) {
                   {tab.id === "intake" && detail.payload?.proposal_status === "approved" && can("CRM_INTAKE_CONVERT") ? <button type="button" onClick={() => openModal("intake_convert", { suggested_object_type: detail.payload?.suggested_object_type || "" })} className="rounded-lg bg-ink-900 px-2 py-1 text-xs text-white">Convert proposal</button> : null}
                   {tab.id === "intake" && !["ignored", "converted"].includes(detail.payload?.proposal_status) && can("CRM_INTAKE_APPROVE") ? <button type="button" onClick={() => openModal("intake_ignore")} className="rounded-lg border border-rose-200 bg-white px-2 py-1 text-xs text-rose-600">Ignore</button> : null}
                   {tab.id === "intake" && !["ignored", "converted"].includes(detail.payload?.proposal_status) && can("CRM_INTAKE_WRITE") ? <button type="button" onClick={() => openModal("intake_task")} className="rounded-lg border border-ink-200 bg-white px-2 py-1 text-xs text-ink-600">Add review task</button> : null}
+                  {tab.id === "mailbox" && !detail.payload?.proposal_id && can("CRM_MAILBOX_WRITE") ? <button type="button" onClick={() => openModal("mailbox_intake")} className="rounded-lg border border-ink-200 bg-white px-2 py-1 text-xs text-ink-600">Create intake</button> : null}
+                  {tab.id === "mailbox" && can("CRM_MAILBOX_REPLY_DRAFT") ? <button type="button" onClick={() => openModal("mailbox_reply_draft", { subject: `Re: ${detail.payload?.subject || detail.title || ""}` })} className="rounded-lg bg-ink-900 px-2 py-1 text-xs text-white">Draft reply</button> : null}
+                  {tab.id === "mailbox_replies" && ["draft", "review"].includes(detail.payload?.reply_status) && can("CRM_MAILBOX_REPLY_DRAFT") ? <button type="button" onClick={() => openModal("mailbox_reply_edit", { subject: detail.payload?.subject || detail.title || "", body_text: detail.payload?.body_text || "" })} className="rounded-lg border border-ink-200 bg-white px-2 py-1 text-xs text-ink-600">Edit draft</button> : null}
+                  {tab.id === "mailbox_replies" && ["draft", "review"].includes(detail.payload?.reply_status) && can("CRM_MAILBOX_REPLY_DRAFT") ? <button type="button" onClick={() => openModal("mailbox_reply_approve")} className="rounded-lg bg-brand-700 px-2 py-1 text-xs text-white">Approve reply</button> : null}
+                  {tab.id === "mailbox_replies" && detail.payload?.reply_status === "approved" && can("CRM_MAILBOX_REPLY_SEND") ? <button type="button" onClick={() => openModal("mailbox_reply_send")} className="rounded-lg bg-ink-900 px-2 py-1 text-xs text-white">Request send</button> : null}
                   {tab.id === "leads" && detail.status === "qualified" && can("CRM_LEAD_CONVERT") ? <button type="button" onClick={() => openModal("convert")} className="rounded-lg bg-brand-700 px-2 py-1 text-xs text-white">{actions.convert}</button> : null}
                   {tab.id === "agents" && can("CRM_AGENT_WRITE") ? <button type="button" onClick={() => openModal("contact")} className="rounded-lg border border-ink-200 bg-white px-2 py-1 text-xs text-ink-600">Add contact</button> : null}
                   {tab.id === "agents" && can("CRM_AGENT_WRITE") ? <button type="button" onClick={() => openModal("address")} className="rounded-lg border border-ink-200 bg-white px-2 py-1 text-xs text-ink-600">Add address</button> : null}
@@ -692,7 +747,7 @@ export default function CrmWorkspace({ node }) {
                   ))}
                 </dl>
                 {detail.attrs ? <pre className="max-h-44 overflow-auto rounded-lg bg-ink-950 p-3 text-[0.65rem] text-ink-100">{JSON.stringify(detail.attrs, null, 2)}</pre> : null}
-                {tab.id === "intake" && detail.payload ? <pre className="max-h-64 overflow-auto rounded-lg bg-ink-950 p-3 text-[0.65rem] text-ink-100">{JSON.stringify(detail.payload, null, 2)}</pre> : null}
+                {["intake", "mailbox", "mailbox_replies"].includes(tab.id) && detail.payload ? <pre className="max-h-64 overflow-auto rounded-lg bg-ink-950 p-3 text-[0.65rem] text-ink-100">{JSON.stringify(detail.payload, null, 2)}</pre> : null}
                 {tab.id === "campaigns" && detail.attrs?.channel_variants?.length ? <div><h3 className="mb-2 text-xs font-semibold uppercase text-ink-500">Channel variants</h3><div className="space-y-2">{detail.attrs.channel_variants.map((variant) => <div key={variant.variant_id} className="flex items-center justify-between gap-3 rounded-lg border border-ink-100 bg-white px-3 py-2 text-xs"><span><strong>{variant.channel}</strong><span className="ml-2 text-ink-400">{variant.variant_status}</span></span>{can("CRM_CAMPAIGN_WRITE") ? <button type="button" onClick={() => openModal("channel_variant", variant)} className="rounded border border-ink-200 px-2 py-1 text-ink-500">Edit</button> : null}</div>)}</div></div> : null}
                 {detail.links?.length ? <div><h3 className="mb-2 text-xs font-semibold uppercase text-ink-500">Links</h3><div className="space-y-1 text-xs text-ink-500">{detail.links.map((link) => <p key={link.id}>{link.relation_type}: {link.dst_kind === "info_record" && link.src_kind !== "info_record" ? link.dst_id : link.src_kind === "info_record" ? `${link.dst_kind} ${link.dst_id}` : `${link.src_kind} ${link.src_id}`}</p>)}</div></div> : null}
                 <div>
@@ -721,8 +776,27 @@ export default function CrmWorkspace({ node }) {
             {modal === "signal_promote" ? <FormFields fields={[["service_object_id", "Review object id", "text"], ["task_type", "Task type", "governed", "CRM_TASK_TYPE"], ["title", "Task title", "text"], ["assigned_agent_id", "Assignee id", "text"], ["due_at", "Due at", "datetime-local"], ["description", "Description", "textarea"]]} form={form} options={options} onChange={(key, value) => setForm((current) => ({ ...current, [key]: value }))} /> : null}
             {modal === "intake_approve" ? <FormFields fields={[["note", "Review note", "textarea"]]} form={form} options={options} onChange={(key, value) => setForm((current) => ({ ...current, [key]: value }))} /> : null}
             {modal === "intake_ignore" ? <FormFields fields={[["note", "Reason", "textarea"]]} form={form} options={options} onChange={(key, value) => setForm((current) => ({ ...current, [key]: value }))} /> : null}
-            {modal === "intake_convert" ? <FormFields fields={[["suggested_object_type", "Create as", "governed", "CRM_INTAKE_SUGGESTED_OBJECT_TYPE"], ["title", "Title override", "text"], ["agent_id", "Linked agent id", "text"], ["note", "Conversion note", "textarea"]]} form={form} options={options} onChange={(key, value) => setForm((current) => ({ ...current, [key]: value }))} /> : null}
+            {modal === "intake_convert" ? <>
+              <FormFields fields={[["suggested_object_type", "Create as", "governed", "CRM_INTAKE_SUGGESTED_OBJECT_TYPE"], ["title", "Title override", "text"], ["note", "Conversion note", "textarea"]]} form={form} options={options} onChange={(key, value) => setForm((current) => ({ ...current, [key]: value }))} />
+              <div className="rounded-lg border border-ink-100 bg-ink-50/60 p-3">
+                <label>
+                  <span className="mb-1 block text-[0.65rem] font-semibold uppercase text-ink-400">Find existing customer or contact</span>
+                  <input value={agentQuery} onChange={(event) => setAgentQuery(event.target.value)} placeholder="Search by name or reference" className="w-full rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm text-ink-700" />
+                </label>
+                <label className="mt-3 block">
+                  <span className="mb-1 block text-[0.65rem] font-semibold uppercase text-ink-400">Linked customer or contact</span>
+                  <select value={form.agent_id || ""} onChange={(event) => setForm((current) => ({ ...current, agent_id: event.target.value }))} className="w-full rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm text-ink-700">
+                    <option value="">No linked contact yet</option>
+                    {agentOptions.map((agent) => <option key={agent.id} value={agent.id}>{agent.name || agent.code || "Unnamed contact"}{agent.agent_type ? ` (${agent.agent_type})` : ""}</option>)}
+                  </select>
+                </label>
+              </div>
+            </> : null}
             {modal === "intake_task" ? <FormFields fields={CREATE_FORMS.tasks.filter(([name]) => name !== "service_object_id")} form={form} options={options} onChange={(key, value) => setForm((current) => ({ ...current, [key]: value }))} /> : null}
+            {modal === "mailbox_intake" ? <p className="text-sm text-ink-600">Create a governed intake proposal from this protected mailbox message?</p> : null}
+            {modal === "mailbox_reply_draft" || modal === "mailbox_reply_edit" ? <FormFields fields={[["subject", "Subject", "text"], ["body_text", "Reply", "textarea"]]} form={form} options={options} onChange={(key, value) => setForm((current) => ({ ...current, [key]: value }))} /> : null}
+            {modal === "mailbox_reply_approve" ? <FormFields fields={[["note", "Approval note", "textarea"]]} form={form} options={options} onChange={(key, value) => setForm((current) => ({ ...current, [key]: value }))} /> : null}
+            {modal === "mailbox_reply_send" ? <p className="text-sm text-ink-600">Request provider delivery for this approved reply. The foundation keeps delivery pending until a governed provider adapter is configured.</p> : null}
             {modal === "edit" ? <FormFields fields={tab.id === "agents" ? CREATE_FORMS.agents : tab.id === "segments" ? CREATE_FORMS.segments : tab.id === "interactions" ? [["subject", "Subject", "text"], ["body_text", "Notes", "textarea"], ["priority", "Priority", "governed", "CRM_PRIORITY"]] : [["title", "Title", "text"], ["owner_agent_id", "Owner agent id", "text"], ["attrs_json", "Attributes", "textarea"]]} form={form} options={options} onChange={(key, value) => setForm((current) => ({ ...current, [key]: value }))} /> : null}
             <button disabled={loading} type="submit" className="flex items-center gap-2 rounded-lg bg-ink-900 px-4 py-2 text-xs font-semibold text-white disabled:opacity-50">
               <CheckCircle2 className="h-4 w-4" /> Save

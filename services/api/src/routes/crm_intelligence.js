@@ -35,7 +35,8 @@ const CRM_INTELLIGENCE_CAPABILITIES = [
   "signals",
   "intelligence",
   "connectors",
-  "intake"
+  "intake",
+  "mailbox"
 ];
 const SENSITIVE_KEY_PATTERN =
   /(authorization|cookie|credential|password|secret|session|signature|token|api[_-]?key|email|phone|address)/i;
@@ -141,7 +142,8 @@ async function loadCapabilities(client, tenantId) {
     signals: row?.is_active === true && configured.signals === true,
     intelligence: row?.is_active === true && configured.intelligence === true,
     connectors: row?.is_active === true && configured.connectors === true,
-    intake: row?.is_active === true && configured.intake === true
+    intake: row?.is_active === true && configured.intake === true,
+    mailbox: row?.is_active === true && configured.mailbox === true
   };
 }
 
@@ -1349,4 +1351,4 @@ async function loadConnectorReadiness(client, tenantId) {
   };
 }
 
-export { CRM_INTELLIGENCE_CAPABILITIES, loadCapabilities, sanitizeMetadata };
+export { CRM_INTELLIGENCE_CAPABILITIES, loadCapabilities, loadConnectorReadiness, sanitizeMetadata };

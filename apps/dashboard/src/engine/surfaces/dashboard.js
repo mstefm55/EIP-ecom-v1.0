@@ -328,6 +328,8 @@ export const dashboardSurface = {
             tabs: [
               { id: "overview", label: "Overview", kind: "overview" },
               { id: "intake", label: "Intake Inbox", kind: "intake", endpoint: "/api/eip/crm/intake", permission: "CRM_INTAKE_READ", capability: "intake" },
+              { id: "mailbox", label: "Mailbox", kind: "mailbox", endpoint: "/api/eip/crm/mailbox/messages", permission: "CRM_MAILBOX_READ", capability: "mailbox" },
+              { id: "mailbox_replies", label: "Reply Drafts", kind: "mailbox_reply", endpoint: "/api/eip/crm/mailbox/replies", permission: "CRM_MAILBOX_READ", capability: "mailbox" },
               { id: "leads", label: "Leads", kind: "service_object", endpoint: "/api/eip/crm/leads", permission: "CRM_LEAD_READ" },
               { id: "agents", label: "Customers", kind: "agent", endpoint: "/api/eip/crm/agents", permission: "CRM_AGENT_READ" },
               { id: "opportunities", label: "Opportunities", kind: "service_object", endpoint: "/api/eip/crm/opportunities", permission: "CRM_OPPORTUNITY_READ" },
