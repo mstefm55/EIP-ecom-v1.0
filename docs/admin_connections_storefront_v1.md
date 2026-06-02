@@ -18,6 +18,7 @@ loader enablement
 public API enablement
 public storefront read scopes
 connection diagnostics
+payment provider credentials and webhook secrets
 ```
 
 **Tenant Dashboard > Content Studio > Storefront Mapping** owns business mapping:
@@ -38,6 +39,19 @@ Do not move business content decisions into Admin Connections.
 ## API Key Safety
 
 Raw API keys are displayed once after creation or rotation. After refresh, save, copy/hide, or navigation, the UI shows safe status metadata only. Stored key records expose a short hash fingerprint, never the raw key.
+
+## Payment Provider Boundary
+
+Checkout.com, PayPal, Google Pay merchant configuration, webhook secrets, and provider credentials belong in Admin Console > Connections. Tenant Commerce Settings may enable methods and select an existing payment connection, but it must not collect raw provider secrets.
+
+Payment readiness is exposed as redacted status only:
+
+```text
+configured / provider_not_configured / sandbox_ready
+connection code
+environment
+wallet yes/no
+```
 
 ## Storefront Capability Metadata
 

@@ -12,6 +12,10 @@ GET /api/public/commerce/:suffix/storefront/mapping
 GET /api/public/commerce/:suffix/content?slot=home.hero
 GET /api/public/commerce/:suffix/content/list
 GET /api/public/commerce/:suffix/catalog
+GET /api/public/commerce/:suffix/meta/checkout-config
+POST /api/public/commerce/:suffix/checkout/session
+GET /api/public/commerce/:suffix/checkout/session/:id
+POST /api/public/commerce/:suffix/checkout/confirm
 ```
 
 Manifest responses expose approved public mappings only:
@@ -79,6 +83,8 @@ Use renderer metadata or `VITE_EIP_WORTH_RENDERER=product_carousel`. The histori
 ## Security
 
 - Public routes are read-only except existing governed commerce intake routes.
+- Checkout session creation is an intake route. It creates a governed payment service object and never stores raw card data.
+- `checkout-config` exposes only method readiness, not provider secrets or raw connection credentials.
 - Query-string API keys remain forbidden.
 - Use `X-API-Key` or the configured verification header.
 - Connection CORS origin allowlists remain enforced.

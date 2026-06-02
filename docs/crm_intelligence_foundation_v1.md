@@ -36,6 +36,8 @@ input validation
 
 Signals are append-only records. Their metadata is sanitized recursively. Credential-like keys are replaced with `[REDACTED]`. External references are stored as SHA-256 hashes by default.
 
+Payment checkout contributes `CRM_PAYMENT_SIGNAL` records when a payment session is created, authorized, paid, captured, cancelled, failed, or a refund request is created. CRM consumes those facts for timeline and intelligence; CRM does not configure payment providers and does not store payment secrets.
+
 Connector readiness never returns secrets, tokens, raw provider payloads, or verification credentials. Admin Console remains responsible for technical connection setup and secret lifecycle.
 
 The gateway remains border control. It may append normalized intake facts through controlled orchestration later, but it must not directly create leads, opportunities, campaigns, or tasks.

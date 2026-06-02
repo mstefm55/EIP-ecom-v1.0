@@ -41,7 +41,8 @@ const REFUND_ACTIONS = [
 const TAB_ICON_MAP = {
   ClipboardList,
   RotateCcw,
-  DollarSign
+  DollarSign,
+  CreditCard
 };
 
 const TRACK_ICON_MAP = {
@@ -62,7 +63,8 @@ const DEFAULT_LAYOUT = {
   tabs: [
     { id: "orders", label: "Orders", icon: "ClipboardList" },
     { id: "returns", label: "Returns", icon: "RotateCcw" },
-    { id: "refunds", label: "Refunds", icon: "DollarSign" }
+    { id: "refunds", label: "Refunds", icon: "DollarSign" },
+    { id: "payments", label: "Payments", icon: "CreditCard" }
   ],
   list: {
     title: "Queue",
@@ -94,7 +96,7 @@ const DEFAULT_LAYOUT = {
     contactLabel: "Contact us",
     statusLabel: "Order status",
     trackTitle: "Track order",
-    paymentTitle: "Payment details",
+    orderPaymentTitle: "Payment details",
     paymentMethodLabel: "Payment method",
     paymentPendingLabel: "Pending",
     billingTitle: "Billing information",
@@ -156,6 +158,7 @@ const DEFAULT_LAYOUT = {
     paymentsEmpty: "No payments yet.",
     returnTitle: "Return",
     refundTitle: "Refund",
+    paymentTitle: "Payment",
     orderLabel: "Order",
     amountLabel: "Amount",
     actionLabels: {
@@ -182,12 +185,15 @@ const DEFAULT_LAYOUT = {
       loadingOrder: "Loading order...",
       loadingReturn: "Loading return...",
       loadingRefund: "Loading refund...",
+      loadingPayment: "Loading payment...",
       selectOrder: "Select an order to see details.",
       selectReturn: "Select a return to see details.",
       selectRefund: "Select a refund to see details.",
+      selectPayment: "Select a payment to see details.",
       orderUpdated: "Order updated.",
       returnRequestCreated: "Return request created.",
-      refundRequestCreated: "Refund request created."
+      refundRequestCreated: "Refund request created.",
+      paymentUpdated: "Payment updated."
     },
     skeleton: {
       enabled: true,
@@ -370,9 +376,20 @@ export default function EcomOrderManagementPanel({ node }) {
   const [refundDetail, setRefundDetail] = useState(null);
   const [refundDetailLoading, setRefundDetailLoading] = useState(false);
 
+  const [payments, setPayments] = useState([]);
+  const [paymentsLoading, setPaymentsLoading] = useState(false);
+  const [paymentsError, setPaymentsError] = useState("");
+  const [paymentRefresh, setPaymentRefresh] = useState(0);
+  const [selectedPaymentId, setSelectedPaymentId] = useState(null);
+  const [paymentDetail, setPaymentDetail] = useState(null);
+  const [paymentDetailLoading, setPaymentDetailLoading] = useState(false);
+  const [paymentNotice, setPaymentNotice] = useState("");
+
   const [returnReason, setReturnReason] = useState("");
   const [refundReason, setRefundReason] = useState("");
   const [refundAmount, setRefundAmount] = useState("");
+  const [paymentRefundReason, setPaymentRefundReason] = useState("");
+  const [paymentRefundAmount, setPaymentRefundAmount] = useState("");
   const [actionPending, setActionPending] = useState(false);
 
   const orderTotals = useMemo(() => {
@@ -725,6 +742,57 @@ export default function EcomOrderManagementPanel({ node }) {
     if (activeTab === "refunds") fetchRefundDetail(selectedRefundId);
   }, [selectedRefundId, activeTab]);
 
+  useEffect(() => {
+    let active = true;
+    async function loadPayments() {
+      setPaymentsLoading(true);
+      setPaymentsError("");
+      try {
+        const data = await apiFetch("/api/eip/commerce/payments");
+        if (!active) return;
+        const items = data?.items || [];
+        setPayments(items);
+        setSelectedPaymentId((prev) => {
+          if (!items.length) return null;
+          if (!prev) return items[0].id;
+          if (!items.some((item) => item.id === prev)) return items[0].id;
+          return prev;
+        });
+      } catch (err) {
+        if (active) setPaymentsError(formatApiError(err, "Failed to load payments."));
+      } finally {
+        if (active) setPaymentsLoading(false);
+      }
+    }
+
+    if (activeTab === "payments") loadPayments();
+    return () => {
+      active = false;
+    };
+  }, [activeTab, paymentRefresh]);
+
+  async function fetchPaymentDetail(id) {
+    if (!id) {
+      setPaymentDetail(null);
+      return;
+    }
+    setPaymentDetailLoading(true);
+    setPaymentNotice("");
+    try {
+      const data = await apiFetch(`/api/eip/commerce/payments/${id}`);
+      setPaymentDetail(data?.item || null);
+    } catch (err) {
+      setPaymentsError(formatApiError(err, "Failed to load payment."));
+      setPaymentDetail(null);
+    } finally {
+      setPaymentDetailLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (activeTab === "payments") fetchPaymentDetail(selectedPaymentId);
+  }, [selectedPaymentId, activeTab]);
+
   async function runOrderAction(action) {
     if (!orderDetail?.order?.id) return;
     setActionPending(true);
@@ -823,20 +891,83 @@ export default function EcomOrderManagementPanel({ node }) {
     }
   }
 
-  const activeList = activeTab === "orders" ? filteredOrders : activeTab === "returns" ? returns : refunds;
+  async function runPaymentAction(kind) {
+    if (!paymentDetail?.id) return;
+    setActionPending(true);
+    setPaymentNotice("");
+    try {
+      const endpoint =
+        kind === "capture"
+          ? `/api/eip/commerce/payments/${paymentDetail.id}/capture`
+          : `/api/eip/commerce/payments/${paymentDetail.id}/cancel`;
+      await apiFetch(endpoint, { method: "POST", body: {} });
+      setPaymentNotice(layout.detail.messages.paymentUpdated);
+      setPaymentRefresh((tick) => tick + 1);
+      await fetchPaymentDetail(paymentDetail.id);
+    } catch (err) {
+      setPaymentNotice(formatApiError(err, "Payment action failed."));
+    } finally {
+      setActionPending(false);
+    }
+  }
+
+  async function requestPaymentRefund() {
+    if (!paymentDetail?.id) return;
+    setActionPending(true);
+    setPaymentNotice("");
+    try {
+      const payload = { reason: paymentRefundReason };
+      if (paymentRefundAmount) payload.amount = Number(paymentRefundAmount);
+      await apiFetch(`/api/eip/commerce/payments/${paymentDetail.id}/refund-request`, {
+        method: "POST",
+        body: payload
+      });
+      setPaymentNotice(layout.detail.messages.refundRequestCreated);
+      setPaymentRefundReason("");
+      setPaymentRefundAmount("");
+      setPaymentRefresh((tick) => tick + 1);
+      await fetchPaymentDetail(paymentDetail.id);
+    } catch (err) {
+      setPaymentNotice(formatApiError(err, "Payment refund request failed."));
+    } finally {
+      setActionPending(false);
+    }
+  }
+
+  const activeList =
+    activeTab === "orders" ? filteredOrders : activeTab === "returns" ? returns : activeTab === "payments" ? payments : refunds;
   const listItems = activeTab === "orders" ? pagedOrders : activeList;
 
   const listLoading =
-    activeTab === "orders" ? ordersLoading : activeTab === "returns" ? returnsLoading : refundsLoading;
+    activeTab === "orders"
+      ? ordersLoading
+      : activeTab === "returns"
+        ? returnsLoading
+        : activeTab === "payments"
+          ? paymentsLoading
+          : refundsLoading;
   const listError =
-    activeTab === "orders" ? ordersError : activeTab === "returns" ? returnsError : refundsError;
+    activeTab === "orders"
+      ? ordersError
+      : activeTab === "returns"
+        ? returnsError
+        : activeTab === "payments"
+          ? paymentsError
+          : refundsError;
   const selectedId =
-    activeTab === "orders" ? selectedOrderId : activeTab === "returns" ? selectedReturnId : selectedRefundId;
+    activeTab === "orders"
+      ? selectedOrderId
+      : activeTab === "returns"
+        ? selectedReturnId
+        : activeTab === "payments"
+          ? selectedPaymentId
+          : selectedRefundId;
 
   function handleSelect(id) {
     if (activeTab === "orders") setSelectedOrderId(id);
     if (activeTab === "returns") setSelectedReturnId(id);
     if (activeTab === "refunds") setSelectedRefundId(id);
+    if (activeTab === "payments") setSelectedPaymentId(id);
   }
 
   return (
@@ -1000,6 +1131,43 @@ export default function EcomOrderManagementPanel({ node }) {
                             {formatMoney(totalValue, currency)}
                           </div>
                         </div>
+                      </div>
+                    </button>
+                  );
+                }
+
+                if (activeTab === "payments") {
+                  const attrs = item.attrs || {};
+                  const status = attrs.payment_status || item.status || layout.list.stageFallback;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => handleSelect(item.id)}
+                      className={`w-full rounded-2xl border px-4 py-3 text-left transition ${
+                        isActive
+                          ? "border-ink-900 bg-ink-900 text-white"
+                          : "border-ink-100 bg-white/70 text-ink-700 hover:border-ink-300"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className={`text-[0.55rem] uppercase tracking-[0.25em] ${isActive ? "text-white/70" : "text-ink-400"}`}>
+                            {item.code || layout.list.untitledFallback}
+                          </div>
+                          <div className="truncate text-sm font-semibold">
+                            {attrs.method || attrs.provider || item.title || layout.detail.paymentTitle}
+                          </div>
+                        </div>
+                        <span className={`rounded-full px-3 py-1 text-[0.55rem] font-semibold uppercase tracking-[0.3em] ${
+                          isActive ? "bg-white/20 text-white" : "bg-ink-100 text-ink-600"
+                        }`}>
+                          {status}
+                        </span>
+                      </div>
+                      <div className="mt-2 flex items-center justify-between text-[0.65rem] opacity-80">
+                        <span>{item.order_code ? `${layout.list.orderLabel} ${item.order_code}` : attrs.order_code || ""}</span>
+                        <span>{formatMoney(attrs.amount, attrs.currency)}</span>
                       </div>
                     </button>
                   );
@@ -1188,7 +1356,7 @@ export default function EcomOrderManagementPanel({ node }) {
                     <div className="space-y-4">
                       <div className="rounded-2xl border border-ink-100 bg-white/70 p-4">
                         <p className="text-xs font-semibold uppercase tracking-[0.3em] text-ink-400">
-                          {layout.detail.paymentTitle}
+                          {layout.detail.orderPaymentTitle}
                         </p>
                         <div className="mt-3 flex items-center justify-between gap-3">
                           <div className="flex items-center gap-3">
@@ -1492,7 +1660,7 @@ export default function EcomOrderManagementPanel({ node }) {
                     <div className="space-y-4">
                       <div className="rounded-2xl border border-ink-100 bg-white/70 p-4">
                         <p className="text-xs font-semibold uppercase tracking-[0.3em] text-ink-300">
-                          {layout.detail.paymentTitle}
+                          {layout.detail.orderPaymentTitle}
                         </p>
                         <div className="mt-3 flex items-center justify-between gap-3">
                           <div className="flex items-center gap-3">
@@ -1713,6 +1881,114 @@ export default function EcomOrderManagementPanel({ node }) {
               ) : (
                 <div className="rounded-2xl border border-ink-100 bg-white/70 px-4 py-3 text-sm text-ink-500">
                   {layout.detail.messages.selectRefund}
+                </div>
+              )}
+            </div>
+          ) : null}
+
+          {activeTab === "payments" ? (
+            <div className="glass-panel p-5">
+              {paymentDetailLoading ? (
+                <div className="flex items-center gap-2 text-sm text-ink-500">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  {layout.detail.messages.loadingPayment}
+                </div>
+              ) : paymentDetail ? (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.3em] text-ink-400">
+                        {layout.detail.paymentTitle}
+                      </p>
+                      <h3 className="text-xl font-semibold text-ink-900">{paymentDetail.code}</h3>
+                    </div>
+                    <span className="rounded-full border border-ink-200 bg-white/70 px-4 py-2 text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-ink-500">
+                      {paymentDetail.attrs?.payment_status || paymentDetail.status}
+                    </span>
+                  </div>
+                  {paymentNotice ? (
+                    <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-700">
+                      {paymentNotice}
+                    </div>
+                  ) : null}
+                  <div className="grid gap-3 rounded-2xl border border-ink-100 bg-white/70 px-4 py-3 text-sm text-ink-600 md:grid-cols-2">
+                    <div>
+                      <span className="font-semibold text-ink-800">{layout.detail.orderLabel}:</span>{" "}
+                      {paymentDetail.order_code || paymentDetail.attrs?.order_code || "-"}
+                    </div>
+                    <div>
+                      <span className="font-semibold text-ink-800">{layout.detail.amountLabel}:</span>{" "}
+                      {formatMoney(paymentDetail.attrs?.amount, paymentDetail.attrs?.currency)}
+                    </div>
+                    <div>
+                      <span className="font-semibold text-ink-800">Method:</span>{" "}
+                      {paymentDetail.attrs?.method || "-"}
+                    </div>
+                    <div>
+                      <span className="font-semibold text-ink-800">Provider:</span>{" "}
+                      {paymentDetail.attrs?.provider || "-"}
+                    </div>
+                    <div>
+                      <span className="font-semibold text-ink-800">Environment:</span>{" "}
+                      {paymentDetail.attrs?.environment || "-"}
+                    </div>
+                    <div>
+                      <span className="font-semibold text-ink-800">Capture:</span>{" "}
+                      {paymentDetail.attrs?.capture_mode || "-"}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => runPaymentAction("capture")}
+                      disabled={actionPending}
+                      className="rounded-full bg-emerald-100 px-4 py-2 text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-emerald-700 disabled:opacity-60"
+                    >
+                      Capture
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => runPaymentAction("cancel")}
+                      disabled={actionPending}
+                      className="rounded-full bg-rose-100 px-4 py-2 text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-rose-700 disabled:opacity-60"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+
+                  <div className="grid gap-2 rounded-2xl border border-ink-100 bg-white/70 p-4">
+                    <label className="text-xs font-semibold uppercase tracking-[0.2em] text-ink-400">
+                      {layout.detail.refundLabel}
+                    </label>
+                    <textarea
+                      value={paymentRefundReason}
+                      onChange={(event) => setPaymentRefundReason(event.target.value)}
+                      rows={2}
+                      className="w-full rounded-2xl border border-ink-200 bg-white/80 px-4 py-2 text-sm text-ink-700"
+                      placeholder={layout.detail.refundReasonPlaceholder}
+                    />
+                    <input
+                      type="number"
+                      value={paymentRefundAmount}
+                      onChange={(event) => setPaymentRefundAmount(event.target.value)}
+                      className="w-full rounded-2xl border border-ink-200 bg-white/80 px-4 py-2 text-sm text-ink-700"
+                      placeholder={layout.detail.refundAmountPlaceholder}
+                    />
+                    <button
+                      type="button"
+                      onClick={requestPaymentRefund}
+                      disabled={actionPending}
+                      className="inline-flex w-fit items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-4 py-2 text-xs font-semibold uppercase tracking-[0.25em] text-indigo-700 disabled:opacity-60"
+                    >
+                      <DollarSign className="h-4 w-4" />
+                      {layout.detail.requestRefundLabel}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-ink-100 bg-white/70 px-4 py-3 text-sm text-ink-500">
+                  {layout.detail.messages.selectPayment}
                 </div>
               )}
             </div>

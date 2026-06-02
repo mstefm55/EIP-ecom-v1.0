@@ -6,7 +6,8 @@ import { getCountryCallingCode } from "libphonenumber-js";
 import {
   createBlogPost,
   deleteBlogPost,
-  createPayment,
+  createCheckoutSession,
+  confirmCheckoutSession,
   createOrder,
   createProductReview,
   createSubscriber,
@@ -268,17 +269,14 @@ const DEFAULT_COUNTRY_ISO = DEFAULT_COUNTRY_OPTIONS[0]?.iso || "US";
 const DEFAULT_CHECKOUT_METHODS = [
   { code: "card", label: "Credit card", enabled: true },
   { code: "paypal", label: "PayPal", enabled: false },
-  { code: "app", label: "App payment", enabled: false },
+  { code: "google_pay", label: "Google Pay", enabled: false },
+  { code: "manual_test", label: "Sandbox manual test", enabled: false },
 ];
 const DEFAULT_CHECKOUT_CONFIG = {
   payment: {
     methods: DEFAULT_CHECKOUT_METHODS,
     enabled_methods: ["card"],
-    providers: {
-      card: { mode: "manual", public_key: "" },
-      paypal: { mode: "manual", client_id: "" },
-      app: { mode: "manual", app_id: "" },
-    },
+    ready_methods: [],
   },
 };
 
@@ -287,7 +285,8 @@ function normalizePaymentMethodCode(value) {
   if (!normalized) return "";
   if (["card", "credit_card", "creditcard", "bank_card"].includes(normalized)) return "card";
   if (["paypal", "pay_pal"].includes(normalized)) return "paypal";
-  if (["app", "app_pay", "apple_pay", "google_pay", "wallet"].includes(normalized)) return "app";
+  if (["app", "app_pay", "apple_pay", "googlepay", "google_pay", "wallet"].includes(normalized)) return "google_pay";
+  if (["manual", "manual_test", "test"].includes(normalized)) return "manual_test";
   return normalized;
 }
 
@@ -319,29 +318,18 @@ function normalizeCheckoutConfig(input) {
     }
   }
 
-  const enabledMethods = methods.filter((item) => item.enabled).map((item) => item.code);
-  const providers = payment.providers && typeof payment.providers === "object"
-    ? payment.providers
-    : DEFAULT_CHECKOUT_CONFIG.payment.providers;
+  const enabledMethods = Array.isArray(payment.enabled_methods) && payment.enabled_methods.length
+    ? payment.enabled_methods.map(normalizePaymentMethodCode).filter(Boolean)
+    : methods.filter((item) => item.enabled).map((item) => item.code);
+  const readyMethods = Array.isArray(payment.ready_methods)
+    ? payment.ready_methods.map(normalizePaymentMethodCode).filter(Boolean)
+    : [];
 
   return {
     payment: {
       methods,
       enabled_methods: enabledMethods,
-      providers: {
-        card: {
-          mode: String(providers.card?.mode || "manual"),
-          public_key: String(providers.card?.public_key || ""),
-        },
-        paypal: {
-          mode: String(providers.paypal?.mode || "manual"),
-          client_id: String(providers.paypal?.client_id || ""),
-        },
-        app: {
-          mode: String(providers.app?.mode || "manual"),
-          app_id: String(providers.app?.app_id || ""),
-        },
-      },
+      ready_methods: readyMethods,
     },
   };
 }
@@ -365,29 +353,12 @@ function buildCheckoutFormDefaults(countryIso = DEFAULT_COUNTRY_ISO) {
     billing_region: "",
     billing_postcode: "",
     payment_method: "card",
-    card_name: "",
-    card_number: "",
-    card_expiry: "",
-    card_cvc: "",
-    paypal_email: "",
     app_handle: "",
   };
 }
 
-function maskCardBrand(numberValue) {
-  const digits = String(numberValue || "").replace(/\D/g, "");
-  if (!digits) return "Card";
-  if (/^4/.test(digits)) return "VISA";
-  if (/^(5[1-5]|2[2-7])/.test(digits)) return "Mastercard";
-  if (/^3[47]/.test(digits)) return "AMEX";
-  return "Card";
-}
-
 const PHONE_DIGITS_REGEX = /^[0-9]{7,15}$/;
 const PHONE_ALLOWED_REGEX = /^[0-9+\s().-]*$/;
-const CARD_NUMBER_REGEX = /^[0-9]{12,19}$/;
-const CARD_EXPIRY_REGEX = /^(0[1-9]|1[0-2])\/([0-9]{2})$/;
-const CARD_CVC_REGEX = /^[0-9]{3,4}$/;
 
 function sanitizePhoneWithOptionalPlus(value) {
   const raw = String(value || "");
@@ -413,40 +384,6 @@ function isValidPhone(value) {
   if (!normalized) return true;
   if (!PHONE_ALLOWED_REGEX.test(normalized)) return false;
   return PHONE_DIGITS_REGEX.test(phoneDigits(normalized));
-}
-
-function formatCardNumberInput(value) {
-  const digits = String(value || "").replace(/\D/g, "").slice(0, 19);
-  return digits.replace(/(\d{4})(?=\d)/g, "$1 ").trim();
-}
-
-function formatCardExpiryInput(value) {
-  const digits = String(value || "").replace(/\D/g, "").slice(0, 4);
-  if (digits.length <= 2) return digits;
-  return `${digits.slice(0, 2)}/${digits.slice(2)}`;
-}
-
-function isValidCardNumber(value) {
-  const digits = String(value || "").replace(/\D/g, "");
-  return CARD_NUMBER_REGEX.test(digits);
-}
-
-function isValidCardExpiry(value) {
-  const text = String(value || "").trim();
-  const match = text.match(CARD_EXPIRY_REGEX);
-  if (!match) return false;
-  const month = Number(match[1]);
-  const year = 2000 + Number(match[2]);
-  const now = new Date();
-  const currentMonth = now.getMonth() + 1;
-  const currentYear = now.getFullYear();
-  if (year < currentYear) return false;
-  if (year === currentYear && month < currentMonth) return false;
-  return true;
-}
-
-function isValidCardCvc(value) {
-  return CARD_CVC_REGEX.test(String(value || "").trim());
 }
 
 function toNumericAmount(...values) {
@@ -643,7 +580,9 @@ const COPY = {
       paymentMethod: "Payment method",
       paymentMethodCard: "Credit card",
       paymentMethodPaypal: "PayPal",
-      paymentMethodApp: "App payment",
+      paymentMethodGooglePay: "Google Pay",
+      paymentMethodManualTest: "Sandbox manual test",
+      paymentProviderNotice: "This method opens a governed checkout session. No raw card details are collected by EIP.",
       cardName: "Name on card",
       cardNumber: "Card number",
       cardExpiry: "Expiry (MM/YY)",
@@ -5584,7 +5523,8 @@ function CartModal({
   const paymentMethodLabel = (code) => {
     const normalized = normalizePaymentMethodCode(code);
     if (normalized === "paypal") return resolveCopy(t, "cart.paymentMethodPaypal", "PayPal");
-    if (normalized === "app") return resolveCopy(t, "cart.paymentMethodApp", "App payment");
+    if (normalized === "google_pay") return resolveCopy(t, "cart.paymentMethodGooglePay", "Google Pay");
+    if (normalized === "manual_test") return resolveCopy(t, "cart.paymentMethodManualTest", "Sandbox manual test");
     return resolveCopy(t, "cart.paymentMethodCard", "Credit card");
   };
   const subtotalLabel =
@@ -5805,73 +5745,13 @@ function CartModal({
                     ))}
                   </select>
                 </label>
-                {selectedPaymentMethod === "card" ? (
-                  <>
-                    <label>
-                      {resolveCopy(t, "cart.cardName", "Name on card")}
-                      <input
-                        value={form.card_name}
-                        onChange={(event) => onFormChange("card_name", event.target.value)}
-                      />
-                    </label>
-                    <div className="field-grid-equal">
-                      <label>
-                        {resolveCopy(t, "cart.cardNumber", "Card number")}
-                        <input
-                          value={form.card_number}
-                          onChange={(event) => onFormChange("card_number", event.target.value)}
-                          placeholder="4111 1111 1111 1111"
-                          inputMode="numeric"
-                          pattern="[0-9 ]{12,23}"
-                          maxLength={23}
-                        />
-                      </label>
-                      <div className="field-grid-card">
-                        <label>
-                          {resolveCopy(t, "cart.cardExpiry", "Expiry (MM/YY)")}
-                          <input
-                            value={form.card_expiry}
-                            onChange={(event) => onFormChange("card_expiry", event.target.value)}
-                            placeholder="MM/YY"
-                            inputMode="numeric"
-                            pattern="(0[1-9]|1[0-2])/[0-9]{2}"
-                            maxLength={5}
-                          />
-                        </label>
-                        <label>
-                          {resolveCopy(t, "cart.cardCvc", "CVC")}
-                          <input
-                            value={form.card_cvc}
-                            onChange={(event) => onFormChange("card_cvc", event.target.value)}
-                            placeholder="CVC"
-                            inputMode="numeric"
-                            pattern="[0-9]{3,4}"
-                            maxLength={4}
-                          />
-                        </label>
-                      </div>
-                    </div>
-                  </>
-                ) : null}
-                {selectedPaymentMethod === "paypal" ? (
-                  <label>
-                    {resolveCopy(t, "cart.paypalEmail", "PayPal email")}
-                    <input
-                      type="email"
-                      value={form.paypal_email}
-                      onChange={(event) => onFormChange("paypal_email", event.target.value)}
-                    />
-                  </label>
-                ) : null}
-                {selectedPaymentMethod === "app" ? (
-                  <label>
-                    {resolveCopy(t, "cart.appHandle", "Wallet / app handle")}
-                    <input
-                      value={form.app_handle}
-                      onChange={(event) => onFormChange("app_handle", event.target.value)}
-                    />
-                  </label>
-                ) : null}
+                <p className="modal-alert">
+                  {resolveCopy(
+                    t,
+                    "cart.paymentProviderNotice",
+                    "This method opens a governed checkout session. No raw card details are collected by EIP."
+                  )}
+                </p>
               </div>
               {status?.error ? <p className="modal-alert error">{status.error}</p> : null}
               {status?.success ? (
@@ -6557,12 +6437,14 @@ export default function App() {
         if (cancelled) return;
         const normalized = normalizeCheckoutConfig({ payment: res?.payment || {} });
         setCheckoutConfig(normalized);
-        const enabledMethods = normalized.payment.enabled_methods || [];
-        if (!enabledMethods.length) return;
+        const readyMethods = normalized.payment.ready_methods?.length
+          ? normalized.payment.ready_methods
+          : normalized.payment.enabled_methods || [];
+        if (!readyMethods.length) return;
         setCheckoutForm((prev) => {
           const currentMethod = normalizePaymentMethodCode(prev.payment_method);
-          if (enabledMethods.includes(currentMethod)) return prev;
-          return { ...prev, payment_method: enabledMethods[0] };
+          if (readyMethods.includes(currentMethod)) return prev;
+          return { ...prev, payment_method: readyMethods[0] };
         });
       })
       .catch(() => {
@@ -7261,7 +7143,13 @@ export default function App() {
   );
   const checkoutPaymentMethods = useMemo(() => {
     const methods = checkoutConfig?.payment?.methods || [];
-    return methods.filter((item) => item?.enabled !== false);
+    const ready = Array.isArray(checkoutConfig?.payment?.ready_methods)
+      ? checkoutConfig.payment.ready_methods.map(normalizePaymentMethodCode).filter(Boolean)
+      : [];
+    const enabled = methods.filter((item) => item?.enabled !== false);
+    return ready.length
+      ? enabled.filter((item) => ready.includes(normalizePaymentMethodCode(item.code)))
+      : enabled.filter((item) => item?.available !== false);
   }, [checkoutConfig]);
 
   const addToCart = (item, quantity = 1) => {
@@ -7353,9 +7241,6 @@ export default function App() {
     setCheckoutForm((prev) => {
       let normalizedValue = value;
       if (field === "phone") normalizedValue = sanitizePhoneWithOptionalPlus(value);
-      if (field === "card_number") normalizedValue = formatCardNumberInput(value);
-      if (field === "card_expiry") normalizedValue = formatCardExpiryInput(value);
-      if (field === "card_cvc") normalizedValue = String(value || "").replace(/\D/g, "").slice(0, 4);
 
       const next = { ...prev, [field]: normalizedValue };
       if (field === "billing_same_as_delivery") {
@@ -7494,69 +7379,6 @@ export default function App() {
         return;
       }
     }
-    if (selectedMethod === "card") {
-      if (!String(checkoutForm.card_name || "").trim()) {
-        setCheckoutStatus({
-          loading: false,
-          error: "Card holder name is required.",
-          success: false,
-          orderCode: "",
-          paymentCode: "",
-        });
-        return;
-      }
-      if (!isValidCardNumber(checkoutForm.card_number)) {
-        setCheckoutStatus({
-          loading: false,
-          error: "Card number format is invalid.",
-          success: false,
-          orderCode: "",
-          paymentCode: "",
-        });
-        return;
-      }
-      if (!isValidCardExpiry(checkoutForm.card_expiry)) {
-        setCheckoutStatus({
-          loading: false,
-          error: "Card expiry must be MM/YY and not expired.",
-          success: false,
-          orderCode: "",
-          paymentCode: "",
-        });
-        return;
-      }
-      if (!isValidCardCvc(checkoutForm.card_cvc)) {
-        setCheckoutStatus({
-          loading: false,
-          error: "CVC format is invalid.",
-          success: false,
-          orderCode: "",
-          paymentCode: "",
-        });
-        return;
-      }
-    }
-    if (selectedMethod === "paypal" && !String(checkoutForm.paypal_email || "").trim()) {
-      setCheckoutStatus({
-        loading: false,
-        error: "PayPal email is required.",
-        success: false,
-        orderCode: "",
-        paymentCode: "",
-      });
-      return;
-    }
-    if (selectedMethod === "app" && !String(checkoutForm.app_handle || "").trim()) {
-      setCheckoutStatus({
-        loading: false,
-        error: "Wallet / app handle is required.",
-        success: false,
-        orderCode: "",
-        paymentCode: "",
-      });
-      return;
-    }
-
     setCheckoutStatus({ loading: true, error: "", success: false, orderCode: "", paymentCode: "" });
     try {
       const currency = currencies[0] || "USD";
@@ -7663,24 +7485,7 @@ export default function App() {
           billing_same_as_delivery: checkoutForm.billing_same_as_delivery,
         },
       };
-      if (selectedMethod === "card") {
-        const digits = String(checkoutForm.card_number || "").replace(/\D/g, "");
-        paymentMetadata.card = {
-          holder_name: checkoutForm.card_name,
-          expiry: checkoutForm.card_expiry,
-          brand: maskCardBrand(digits),
-          card_last4: digits.slice(-4),
-        };
-      } else if (selectedMethod === "paypal") {
-        paymentMetadata.paypal = {
-          email: checkoutForm.paypal_email,
-        };
-      } else if (selectedMethod === "app") {
-        paymentMetadata.app = {
-          handle: checkoutForm.app_handle,
-        };
-      }
-      const paymentResult = await createPayment({
+      const paymentResult = await createCheckoutSession({
         payload: {
           order_code: orderCode || undefined,
           order_id: orderId || undefined,
@@ -7690,12 +7495,25 @@ export default function App() {
           metadata: paymentMetadata,
         },
       });
+      const payment = paymentResult?.payment || {};
+      let finalPayment = payment;
+      if (payment?.client_action === "manual_test_confirm") {
+        const confirmResult = await confirmCheckoutSession({
+          payload: {
+            payment_id: payment.id,
+            payment_code: payment.code,
+            metadata: { source: clientSource, locale: language }
+          },
+        });
+        finalPayment = confirmResult?.payment || payment;
+      }
       const confirmedOrderCode =
         String(
           paymentResult?.order_code ||
           paymentResult?.orderCode ||
-          paymentResult?.payment?.attrs?.order_code ||
-          paymentResult?.payment?.attrs?.orderCode ||
+          finalPayment?.order_code ||
+          finalPayment?.attrs?.order_code ||
+          finalPayment?.attrs?.orderCode ||
           orderCode ||
           orderId ||
           ""
@@ -7705,7 +7523,7 @@ export default function App() {
         error: "",
         success: true,
         orderCode: confirmedOrderCode,
-        paymentCode: paymentResult?.payment?.code || "",
+        paymentCode: finalPayment?.code || "",
       });
       if (instantCheckoutItem) {
         setInstantCheckoutItem(null);

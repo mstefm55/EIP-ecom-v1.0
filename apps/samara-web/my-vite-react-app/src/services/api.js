@@ -195,10 +195,28 @@ export async function createOrder({ payload } = {}) {
 }
 
 export async function createPayment({ payload } = {}) {
+  return createCheckoutSession({ payload });
+}
+
+export async function createCheckoutSession({ payload } = {}) {
   const eventIdHeader = EIP_CONFIG.eventIdHeader || "X-Event-Id";
-  return callEndpoint(buildPublicCommercePath("/payment"), {
+  return callEndpoint(buildPublicCommercePath("/checkout/session"), {
     method: "POST",
     headers: { [eventIdHeader]: buildEventId("payment") },
+    body: payload || {},
+  });
+}
+
+export async function fetchCheckoutSession({ paymentId } = {}) {
+  if (!paymentId) throw new Error("Payment reference required.");
+  return callEndpoint(buildPublicCommercePath(`/checkout/session/${encodeURIComponent(paymentId)}`));
+}
+
+export async function confirmCheckoutSession({ payload } = {}) {
+  const eventIdHeader = EIP_CONFIG.eventIdHeader || "X-Event-Id";
+  return callEndpoint(buildPublicCommercePath("/checkout/confirm"), {
+    method: "POST",
+    headers: { [eventIdHeader]: buildEventId("payment-confirm") },
     body: payload || {},
   });
 }

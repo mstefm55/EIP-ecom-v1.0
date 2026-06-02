@@ -6,12 +6,20 @@ const DEFAULT_PAYMENT_SETTINGS = {
   methods: [
     { code: "card", label: "Credit card", enabled: true },
     { code: "paypal", label: "PayPal", enabled: false },
-    { code: "app", label: "App payment", enabled: false }
+    { code: "google_pay", label: "Google Pay", enabled: false },
+    { code: "manual_test", label: "Sandbox manual test", enabled: false }
   ],
+  default_currency: "USD",
+  capture_mode: "automatic",
+  allowed_countries: [],
+  display_order: ["card", "paypal", "google_pay", "manual_test"],
+  refund_approval_threshold: null,
+  manual_review_rules: { enabled: true, high_value_threshold: null },
   providers: {
-    card: { mode: "manual", public_key: "" },
-    paypal: { mode: "manual", client_id: "" },
-    app: { mode: "manual", app_id: "" }
+    card: { provider_code: "checkout_com", environment: "production", connection_code: null },
+    paypal: { provider_code: "paypal", environment: "production", connection_code: null },
+    google_pay: { provider_code: "checkout_com", environment: "production", connection_code: null },
+    manual_test: { provider_code: "manual_test", environment: "sandbox", connection_code: null }
   }
 };
 
@@ -251,14 +259,44 @@ function normalizePaymentMethodCode(value) {
   if (!normalized) return "";
   if (["card", "credit_card", "creditcard", "bank_card"].includes(normalized)) return "card";
   if (["paypal", "pay_pal"].includes(normalized)) return "paypal";
-  if (["app", "app_pay", "apple_pay", "google_pay", "wallet"].includes(normalized)) return "app";
+  if (["app", "app_pay", "apple_pay", "googlepay", "google_pay", "wallet"].includes(normalized)) return "google_pay";
+  if (["manual", "manual_test", "test"].includes(normalized)) return "manual_test";
   return normalized;
 }
 
-function normalizeProviderMode(value) {
+function normalizePaymentProviderCode(value, method = "") {
+  const normalized = String(value || "").trim().toLowerCase().replace(/[-.\s]+/g, "_");
+  if (["checkout", "checkoutcom", "checkout_com"].includes(normalized)) return "checkout_com";
+  if (["paypal", "pay_pal"].includes(normalized)) return "paypal";
+  if (["manual", "manual_test", "test"].includes(normalized)) return "manual_test";
+  const normalizedMethod = normalizePaymentMethodCode(method);
+  if (normalizedMethod === "paypal") return "paypal";
+  if (normalizedMethod === "manual_test") return "manual_test";
+  if (normalizedMethod === "card" || normalizedMethod === "google_pay") return "checkout_com";
+  return normalized || "checkout_com";
+}
+
+function normalizePaymentEnvironment(value, fallback = "production") {
   const normalized = String(value || "").trim().toLowerCase();
-  if (normalized === "live" || normalized === "sandbox") return normalized;
-  return "manual";
+  if (normalized === "live" || normalized === "production") return "production";
+  if (normalized === "sandbox" || normalized === "test" || normalized === "manual") return "sandbox";
+  return fallback;
+}
+
+function normalizeCaptureMode(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return ["automatic", "manual"].includes(normalized) ? normalized : "automatic";
+}
+
+function normalizeCountryList(value) {
+  const source = Array.isArray(value) ? value : [];
+  return [...new Set(source.map((item) => String(item || "").trim().toUpperCase()).filter((item) => /^[A-Z]{2}$/.test(item)))];
+}
+
+function normalizeOptionalAmount(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount >= 0 ? amount : null;
 }
 
 function normalizePaymentSettings(input, fallback = DEFAULT_PAYMENT_SETTINGS) {
@@ -296,14 +334,28 @@ function normalizePaymentSettings(input, fallback = DEFAULT_PAYMENT_SETTINGS) {
     const baseProvider = baseProviders[code] && typeof baseProviders[code] === "object" ? baseProviders[code] : {};
     const sourceProvider = sourceProviders[code] && typeof sourceProviders[code] === "object" ? sourceProviders[code] : {};
     providers[code] = {
-      mode: normalizeProviderMode(sourceProvider.mode || baseProvider.mode || "manual"),
-      public_key: String(sourceProvider.public_key || baseProvider.public_key || "").trim(),
-      client_id: String(sourceProvider.client_id || baseProvider.client_id || "").trim(),
-      app_id: String(sourceProvider.app_id || baseProvider.app_id || "").trim()
+      provider_code: normalizePaymentProviderCode(sourceProvider.provider_code || sourceProvider.provider || baseProvider.provider_code, code),
+      environment: normalizePaymentEnvironment(
+        sourceProvider.environment || sourceProvider.mode || baseProvider.environment || baseProvider.mode,
+        code === "manual_test" ? "sandbox" : "production"
+      ),
+      connection_code: String(sourceProvider.connection_code || baseProvider.connection_code || "").trim() || null
     };
   }
 
-  return { methods, providers };
+  return {
+    methods,
+    default_currency: normalizeCurrency(source.default_currency || base.default_currency || "USD", "USD"),
+    capture_mode: normalizeCaptureMode(source.capture_mode || base.capture_mode),
+    allowed_countries: normalizeCountryList(source.allowed_countries || base.allowed_countries),
+    display_order: Array.isArray(source.display_order) ? source.display_order.map(normalizePaymentMethodCode).filter(Boolean) : base.display_order || [],
+    refund_approval_threshold: normalizeOptionalAmount(source.refund_approval_threshold ?? base.refund_approval_threshold),
+    manual_review_rules: {
+      enabled: normalizeBoolean(source.manual_review_rules?.enabled, normalizeBoolean(base.manual_review_rules?.enabled, true)),
+      high_value_threshold: normalizeOptionalAmount(source.manual_review_rules?.high_value_threshold ?? base.manual_review_rules?.high_value_threshold)
+    },
+    providers
+  };
 }
 
 function normalizeTranslationSettings(input, fallback) {
@@ -487,6 +539,7 @@ export default function EcomCommerceSettingsPanel() {
   const [fxStatus, setFxStatus] = useState(DEFAULT_FX_STATUS);
   const [syncingFx, setSyncingFx] = useState(false);
   const [savingConnectionScope, setSavingConnectionScope] = useState("");
+  const [paymentReadiness, setPaymentReadiness] = useState(null);
 
   const normalizeVariantHeaderRows = (items) =>
     (Array.isArray(items) ? items : [])
@@ -510,11 +563,12 @@ export default function EcomCommerceSettingsPanel() {
       setVariantHeaderLoading(true);
       setError("");
       try {
-        const [settingsData, catalogData, variantHeaderData, fxData] = await Promise.all([
+        const [settingsData, catalogData, variantHeaderData, fxData, paymentReadinessData] = await Promise.all([
           apiFetch("/api/eip/commerce/settings"),
           apiFetch("/api/eip/commerce/translation/catalog"),
           apiFetch("/api/eip/ecom/variant-headers"),
-          apiFetch("/api/eip/commerce/fx/status")
+          apiFetch("/api/eip/commerce/fx/status"),
+          apiFetch("/api/eip/commerce/payment-readiness")
         ]);
         if (!active) return;
         setSettings(mergeSettings(DEFAULT_SETTINGS, settingsData?.settings || {}));
@@ -538,6 +592,7 @@ export default function EcomCommerceSettingsPanel() {
           ...DEFAULT_FX_STATUS,
           ...(fxData?.fx || {})
         });
+        setPaymentReadiness(paymentReadinessData?.readiness || null);
       } catch (err) {
         if (active) setError(formatApiError(err, "Failed to load settings."));
       } finally {
@@ -998,6 +1053,13 @@ export default function EcomCommerceSettingsPanel() {
   const providerOptions = translationCatalog.providers?.length
     ? translationCatalog.providers
     : DEFAULT_TRANSLATION_CATALOG.providers;
+  const paymentReadinessByMethod = useMemo(() => {
+    const map = new Map();
+    for (const item of paymentReadiness?.methods || []) {
+      map.set(normalizePaymentMethodCode(item.code), item);
+    }
+    return map;
+  }, [paymentReadiness]);
   const selectedProvider = providerOptions.find(
     (provider) => String(provider?.code || "").toLowerCase() === String(translationEngine.provider_code || "").toLowerCase()
   );
@@ -1191,19 +1253,72 @@ export default function EcomCommerceSettingsPanel() {
         <div>
           <div className="text-xs font-semibold uppercase tracking-[0.2em] text-ink-400">Checkout payments</div>
           <p className="mt-1 text-xs text-ink-500">
-            Configure payment methods shown on storefront checkout and provider mode per method.
+            Configure storefront method preferences. Provider secrets and rotations stay in Admin Console &gt; Connections.
           </p>
+        </div>
+
+        <div className="grid gap-3 rounded-xl border border-ink-100 bg-white/80 p-3 md:grid-cols-3">
+          <label className="flex flex-col gap-1 text-[0.7rem] font-semibold uppercase tracking-[0.2em] text-ink-400">
+            Default currency
+            <select
+              value={payment.default_currency || "USD"}
+              onChange={(event) => updatePayment((current) => ({ ...current, default_currency: event.target.value }))}
+              className="rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs text-ink-700"
+            >
+              {currencyOptions.map((currencyCode) => (
+                <option key={currencyCode} value={currencyCode}>
+                  {currencyCode}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-[0.7rem] font-semibold uppercase tracking-[0.2em] text-ink-400">
+            Capture mode
+            <select
+              value={payment.capture_mode || "automatic"}
+              onChange={(event) => updatePayment((current) => ({ ...current, capture_mode: event.target.value }))}
+              className="rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs text-ink-700"
+            >
+              <option value="automatic">Automatic</option>
+              <option value="manual">Manual</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-[0.7rem] font-semibold uppercase tracking-[0.2em] text-ink-400">
+            Review threshold
+            <input
+              type="number"
+              min="0"
+              value={payment.manual_review_rules?.high_value_threshold ?? ""}
+              onChange={(event) =>
+                updatePayment((current) => ({
+                  ...current,
+                  manual_review_rules: {
+                    ...(current.manual_review_rules || {}),
+                    high_value_threshold: event.target.value === "" ? null : Number(event.target.value)
+                  }
+                }))
+              }
+              placeholder="Optional"
+              className="rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs text-ink-700"
+            />
+          </label>
         </div>
 
         <div className="grid gap-3">
           {payment.methods.map((method) => {
             const code = normalizePaymentMethodCode(method.code);
             const provider = payment.providers?.[code] || {};
-            const keyField = code === "card" ? "public_key" : code === "paypal" ? "client_id" : "app_id";
-            const keyLabel = code === "card" ? "Public key" : code === "paypal" ? "Client ID" : "App ID";
+            const readiness = paymentReadinessByMethod.get(code);
+            const providerCode = normalizePaymentProviderCode(provider.provider_code, code);
+            const connectionOptionsForProvider = connectionOptions.filter((conn) => {
+              const value = `${conn.connection_code || ""} ${conn.connection_kind || ""} ${conn.connection_name || ""}`.toLowerCase();
+              if (providerCode === "checkout_com") return value.includes("checkout") || !value.includes("paypal");
+              if (providerCode === "paypal") return value.includes("paypal");
+              return true;
+            });
             return (
               <div key={code} className="rounded-xl border border-ink-100 bg-white/80 p-3">
-                <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px_1fr]">
+                <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_150px_150px_minmax(0,1fr)]">
                   <label className="flex flex-col gap-1 text-[0.7rem] font-semibold uppercase tracking-[0.2em] text-ink-400">
                     Method
                     <div className="flex items-center gap-3">
@@ -1222,27 +1337,54 @@ export default function EcomCommerceSettingsPanel() {
                   </label>
 
                   <label className="flex flex-col gap-1 text-[0.7rem] font-semibold uppercase tracking-[0.2em] text-ink-400">
-                    Mode
+                    Provider
                     <select
-                      value={normalizeProviderMode(provider.mode || "manual")}
-                      onChange={(event) => updatePaymentProvider(code, { mode: event.target.value })}
+                      value={providerCode}
+                      onChange={(event) => updatePaymentProvider(code, { provider_code: event.target.value })}
                       className="rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs text-ink-700"
                     >
-                      <option value="manual">Manual</option>
-                      <option value="sandbox">Sandbox</option>
-                      <option value="live">Live</option>
+                      <option value="checkout_com">Checkout.com</option>
+                      <option value="paypal">PayPal</option>
+                      <option value="manual_test">Manual test</option>
                     </select>
                   </label>
 
                   <label className="flex flex-col gap-1 text-[0.7rem] font-semibold uppercase tracking-[0.2em] text-ink-400">
-                    {keyLabel}
-                    <input
-                      value={provider[keyField] || ""}
-                      onChange={(event) => updatePaymentProvider(code, { [keyField]: event.target.value })}
-                      placeholder={code === "paypal" ? "paypal-client-id" : code === "app" ? "wallet-app-id" : "pk_live_or_pk_test"}
+                    Environment
+                    <select
+                      value={normalizePaymentEnvironment(provider.environment || provider.mode, code === "manual_test" ? "sandbox" : "production")}
+                      onChange={(event) => updatePaymentProvider(code, { environment: event.target.value })}
                       className="rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs text-ink-700"
-                    />
+                    >
+                      <option value="production">Production</option>
+                      <option value="sandbox">Sandbox</option>
+                    </select>
                   </label>
+
+                  <label className="flex flex-col gap-1 text-[0.7rem] font-semibold uppercase tracking-[0.2em] text-ink-400">
+                    Admin connection
+                    <select
+                      value={provider.connection_code || ""}
+                      onChange={(event) => updatePaymentProvider(code, { connection_code: event.target.value || null })}
+                      disabled={providerCode === "manual_test"}
+                      className="rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs text-ink-700 disabled:opacity-50"
+                    >
+                      <option value="">Auto-match configured provider</option>
+                      {connectionOptionsForProvider.map((conn) => (
+                        <option key={`${code}-${conn.connection_code}`} value={conn.connection_code}>
+                          {conn.connection_name} ({conn.connection_code})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <div className="mt-3 rounded-lg border border-ink-100 bg-ink-50/70 px-3 py-2 text-xs text-ink-500">
+                  Readiness:{" "}
+                  <span className={readiness?.available ? "font-semibold text-emerald-700" : "font-semibold text-amber-700"}>
+                    {readiness?.status || "not checked"}
+                  </span>
+                  {readiness?.connection_code ? ` via ${readiness.connection_code}` : ""}
+                  {code === "manual_test" ? " - sandbox-only development path." : ""}
                 </div>
               </div>
             );

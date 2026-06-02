@@ -151,6 +151,7 @@ export const dashboardSurface = {
                 { id: "orders", label: "Orders", icon: "ClipboardList" },
                 { id: "returns", label: "Returns", icon: "RotateCcw" },
                 { id: "refunds", label: "Refunds", icon: "DollarSign" },
+                { id: "payments", label: "Payments", icon: "CreditCard" },
               ],
               list: {
                 title: "Queue",
