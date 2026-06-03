@@ -32,7 +32,8 @@ The product should feel like a practical operating system, not an enterprise pla
 The Inventory & Reorder Foundation adds the lightweight stock layer needed before purchase orders:
 
 ```text
-material.attrs.inventory
+commercial_condition reorder/supply policy
+-> material.attrs.inventory state, item overrides, and output snapshot
 -> INVENTORY_STOCK_MOVEMENT info_record
 -> days-of-cover and stockout recommendation
 -> INVENTORY_REORDER_SUGGESTION service_object
@@ -51,6 +52,8 @@ stock profile
 ```
 
 Machine actions may detect stockout risk, calculate suggested quantity, warn about cash impact, flag supplier risk, and prepare purchase-requisition metadata. Human approval remains required for purchase commitment, supplier changes, high-value reorders, risky supplier decisions, and cash-impacting actions.
+
+Reorder, supplier, trade, and purchasing policy belongs in governed `eip_core.commercial_condition` rows. Material attrs keep current stock quantities, item-specific overrides, and calculated recommendation snapshots so tenant policy can be cloned, governed, and changed without turning product stock records into the policy authority.
 
 This deliberately avoids:
 

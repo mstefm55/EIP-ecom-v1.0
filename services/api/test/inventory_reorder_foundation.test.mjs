@@ -7,7 +7,8 @@ import {
   mergeInventoryPolicy,
   normalizeInventoryProfile,
   normalizeInventoryTaskType,
-  normalizeMovement
+  normalizeMovement,
+  resolveInventoryPolicy
 } from "../src/services/inventory/inventoryFoundation.js";
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
@@ -16,7 +17,10 @@ const route = read("../src/routes/inventory.js");
 const server = read("../src/server.js");
 const migration = read("../db/migrations/0108_inventory_reorder_foundation.sql");
 const recommendationMigration = read("../db/migrations/0109_inventory_recommendation_policy_addendum.sql");
+const commercialConditionMigration = read("../db/migrations/0110_inventory_commercial_condition_policy.sql");
 const surfaceSeed = read("../db/seed/ui_surface_dashboard.sql");
+const cloneSql = read("../db/seed/clone_template_to_tenant.sql");
+const adminCloneRoute = read("../src/routes/admin_template_clone.js");
 const registry = read("../../../apps/dashboard/src/engine/registry.jsx");
 const dashboardSurface = read("../../../apps/dashboard/src/engine/surfaces/dashboard.js");
 const workspace = read("../../../apps/dashboard/src/components/inventory/InventoryWorkspace.jsx");
@@ -85,6 +89,81 @@ test("policy merge preserves existing quantity source while adding reorder gover
   assert.equal(next.inventory.preferred_supplier_agent_id, "supplier-agent");
 });
 
+test("commercial condition reorder policy resolves defaults, scoped overrides, and allowed material overrides", () => {
+  const conditions = [
+    {
+      code: "INV_REORDER_DEFAULT",
+      condition_type: "INVENTORY_REORDER_POLICY",
+      condition_category: "INVENTORY",
+      priority: 100,
+      scope: {},
+      effect: {
+        planning_method: "reorder_point",
+        service_level_target: 0.9,
+        reorder_point_qty: 10,
+        reorder_qty: 25,
+        lead_time_days: 10,
+        safety_lead_time_days: 2,
+        minimum_order_qty: 10,
+        order_multiple: 5,
+        approval_required: true,
+        approval_threshold_value: 500,
+        currency: "EUR"
+      },
+      attrs: {},
+      created_at: "2026-01-01T00:00:00Z"
+    },
+    {
+      code: "INV_REORDER_SKU",
+      condition_type: "SUPPLY_REORDER_CONDITION",
+      condition_category: "SUPPLY",
+      priority: 10,
+      scope: { material_codes: ["SKU-1"] },
+      effect: {
+        reorder_qty: 30,
+        supplier_risk_level: "high",
+        freight_cost_estimate: 12
+      },
+      attrs: {},
+      created_at: "2026-01-02T00:00:00Z"
+    }
+  ];
+  const material = {
+    id: "mat-1",
+    code: "SKU-1",
+    material_type: "PRODUCT",
+    attrs: {
+      inventory: {
+        track_stock: true,
+        stock_on_hand: 12,
+        available_qty: 8,
+        reorder_qty: 35,
+        daily_consumption_rate: 1,
+        ungoverned_note: "not a policy override"
+      }
+    }
+  };
+
+  const resolution = resolveInventoryPolicy(material, conditions);
+  assert.equal(resolution.policy_source, "commercial_condition");
+  assert.deepEqual(resolution.condition_codes, ["INV_REORDER_DEFAULT", "INV_REORDER_SKU"]);
+  assert.equal(resolution.effective_policy.reorder_point_qty, 10);
+  assert.equal(resolution.effective_policy.reorder_qty, 35);
+  assert.equal(resolution.effective_policy.lead_time_days, 10);
+  assert.equal(resolution.effective_policy.supplier_risk_level, "high");
+  assert.equal(resolution.effective_policy.currency, "EUR");
+  assert.ok(resolution.material_override_fields.includes("reorder_qty"));
+  assert.ok(!resolution.material_override_fields.includes("ungoverned_note"));
+
+  const profile = normalizeInventoryProfile(material, { conditions });
+  assert.equal(profile.policy_source, "commercial_condition");
+  assert.deepEqual(profile.policy_condition_codes, ["INV_REORDER_DEFAULT", "INV_REORDER_SKU"]);
+  assert.equal(profile.reorder_point, 10);
+  assert.equal(profile.reorder_qty, 35);
+  assert.equal(profile.target_service_level, 0.9);
+  assert.equal(profile.supplier_risk_level, "high");
+});
+
 test("reorder suggestion payload stays service_object-based and human-review oriented", () => {
   const material = { id: "mat-1", code: "SKU-1", name: "Oak board", material_type: "PRODUCT" };
   const profile = normalizeInventoryProfile({
@@ -96,6 +175,11 @@ test("reorder suggestion payload stays service_object-based and human-review ori
   assert.equal(payload.status, "open");
   assert.equal(payload.source, "low_stock_detection");
   assert.equal(payload.suggested_qty, 20);
+  assert.equal(payload.policy_source, "material_attrs_legacy");
+  assert.deepEqual(payload.policy_condition_codes, []);
+  assert.equal(payload.process_parameters.object_type, "INVENTORY_REORDER_SUGGESTION");
+  assert.equal(payload.process_parameters.effect, "CREATE_PURCHASE_REQUISITION_DRAFT");
+  assert.equal(payload.process_parameters.parameters.recommended_qty, 20);
   assert.equal(normalizeInventoryTaskType("supplier_check"), "SUPPLIER_CHECK");
 });
 
@@ -144,6 +228,8 @@ test("inventory profile produces professional recommendation and decision-card o
   assert.equal(profile.recommendation.action, "create_reorder_suggestion");
   assert.equal(profile.recommendation.requires_human_approval, true);
   assert.ok(profile.recommendation.approval_reasons.includes("cash_threshold_exceeded"));
+  assert.equal(profile.recommendation.process_parameters.effect, "CREATE_PURCHASE_REQUISITION_DRAFT");
+  assert.deepEqual(profile.recommendation.process_parameters.parameters.policy_condition_codes, []);
   assert.ok(profile.action_proposals.includes("create_purchase_requisition_draft"));
   assert.ok(profile.action_proposals.includes("recommend_alternative_supplier"));
   assert.equal(profile.purchase_requisition_bridge.ready_for_draft, true);
@@ -153,6 +239,7 @@ test("inventory profile produces professional recommendation and decision-card o
   assert.equal(payload.risk_status, "stockout_predicted");
   assert.equal(payload.cash_required_for_reorder, 255);
   assert.equal(payload.purchase_requisition_bridge.draft_object_type, "PURCHASE_REQUISITION_DRAFT");
+  assert.equal(payload.process_parameters.parameters.material_id, "mat-1");
   assert.ok(payload.decision_card.headline.includes("Oak board"));
 });
 
@@ -178,6 +265,8 @@ test("inventory route registers all required endpoints and enforces session, CSR
   assert.match(route, /app\.requireCsrf\(req\)/);
   assert.match(route, /hasPermission\(/);
   assert.match(route, /tenant_id=\$1/);
+  assert.match(route, /FROM eip_core\.commercial_condition/);
+  assert.match(route, /listInventoryPolicyConditions/);
 });
 
 test("reorder approval and ignore remain process governed", () => {
@@ -232,6 +321,34 @@ test("inventory recommendation addendum is additive and seeds professional polic
   }
 });
 
+test("inventory commercial condition migration is additive, clone-ready, and preserves material attrs compatibility", () => {
+  assert.doesNotMatch(commercialConditionMigration, /CREATE\s+TABLE/i);
+  for (const value of [
+    "eip_core.commercial_condition",
+    "INV_REORDER_DEFAULT",
+    "SUPPLY_REORDER_STANDARD",
+    "SUPPLIER_PURCHASE_STANDARD",
+    "INVENTORY_REORDER_POLICY",
+    "SUPPLY_REORDER_CONDITION",
+    "SUPPLIER_PURCHASE_CONDITION",
+    "condition_category",
+    "INVENTORY",
+    "SUPPLY",
+    "PURCHASING",
+    "policy_governance",
+    "reorder_policy_source",
+    "material_attrs_role",
+    "state_override_snapshot"
+  ]) {
+    assert.match(commercialConditionMigration, new RegExp(value));
+  }
+  assert.match(commercialConditionMigration, /effect=EXCLUDED\.effect \|\| COALESCE\(eip_core\.commercial_condition\.effect/);
+  assert.match(adminCloneRoute, /INSERT INTO eip_core\.commercial_condition/);
+  assert.match(adminCloneRoute, /FROM eip_core\.commercial_condition/);
+  assert.match(cloneSql, /INSERT INTO eip_core\.commercial_condition/);
+  assert.match(cloneSql, /FROM eip_core\.commercial_condition/);
+});
+
 test("inventory dashboard is descriptor registered and module gated", () => {
   assert.match(registry, /import InventoryWorkspace/);
   assert.match(registry, /InventoryWorkspace,/);
@@ -243,6 +360,10 @@ test("inventory dashboard is descriptor registered and module gated", () => {
   assert.match(workspace, /export default function InventoryWorkspace/);
   assert.ok(workspace.includes("apiFetch(`${endpoints.suggestions}/run`"));
   assert.match(workspace, /decision_card/);
+  assert.match(workspace, /Governed policy source/);
+  assert.match(workspace, /Material overrides/);
+  assert.match(workspace, /Current stock state/);
+  assert.match(workspace, /Calculated recommendation/);
   assert.match(workspace, /Explain recommendation/);
   assert.match(workspace, /Approve requisition/);
 });

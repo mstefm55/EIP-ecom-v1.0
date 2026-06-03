@@ -36,6 +36,12 @@ const REORDER_STATUSES = new Set([
 ]);
 
 const SUPPLIER_RISK_LEVELS = new Set(["low", "medium", "high", "critical"]);
+const INVENTORY_CONDITION_TYPES = new Set([
+  "INVENTORY_REORDER_POLICY",
+  "SUPPLY_REORDER_CONDITION",
+  "SUPPLIER_PURCHASE_CONDITION"
+]);
+const INVENTORY_CONDITION_CATEGORIES = new Set(["INVENTORY", "SUPPLY", "PURCHASING"]);
 const TASK_TYPES = new Set([
   "STOCK_REVIEW",
   "REORDER_REVIEW",
@@ -125,14 +131,288 @@ function sourceInventory(attrs = {}) {
     : {};
 }
 
+function normalizeUpper(value) {
+  return normalizeText(value).toUpperCase();
+}
+
+function normalizeScopeArray(value) {
+  if (Array.isArray(value)) return value.map((item) => normalizeUpper(item)).filter(Boolean);
+  const text = normalizeUpper(value);
+  return text ? [text] : [];
+}
+
+function conditionKindMatches(condition = {}) {
+  const type = normalizeUpper(condition.condition_type);
+  const category = normalizeUpper(condition.condition_category);
+  if (INVENTORY_CONDITION_TYPES.has(type)) return true;
+  if (INVENTORY_CONDITION_CATEGORIES.has(category) && /(INVENTORY|REORDER|SUPPLY|SUPPLIER|PURCHASE|PURCHAS)/.test(type)) {
+    return true;
+  }
+  return false;
+}
+
+function conditionScopeScore(scope = {}) {
+  if (!scope || typeof scope !== "object" || Array.isArray(scope)) return 0;
+  return [
+    "material_id",
+    "material_ids",
+    "material_code",
+    "material_codes",
+    "materials",
+    "material_type",
+    "material_types",
+    "supplier_agent_id",
+    "supplier_agent_ids",
+    "preferred_supplier_agent_id",
+    "abc_class",
+    "abc_classes",
+    "abc_classification",
+    "category",
+    "categories",
+    "material_category"
+  ].reduce((score, key) => (scope[key] === undefined || scope[key] === null ? score : score + 1), 0);
+}
+
+function commercialConditionScopeMatches(scope = {}, material = {}, inventory = {}) {
+  if (!scope || typeof scope !== "object" || Array.isArray(scope)) return true;
+
+  const materialCodes = normalizeScopeArray(scope.material_codes || scope.materials || scope.material_code);
+  if (materialCodes.length && !materialCodes.includes(normalizeUpper(material.code))) return false;
+
+  const materialIds = Array.isArray(scope.material_ids)
+    ? scope.material_ids.map((item) => normalizeText(item)).filter(Boolean)
+    : normalizeText(scope.material_id)
+      ? [normalizeText(scope.material_id)]
+      : [];
+  if (materialIds.length && !materialIds.includes(normalizeText(material.id))) return false;
+
+  const materialTypes = normalizeScopeArray(scope.material_types || scope.material_type);
+  if (materialTypes.length && !materialTypes.includes(normalizeUpper(material.material_type))) return false;
+
+  const supplierIds = Array.isArray(scope.supplier_agent_ids)
+    ? scope.supplier_agent_ids.map((item) => normalizeText(item)).filter(Boolean)
+    : normalizeText(scope.supplier_agent_id || scope.preferred_supplier_agent_id)
+      ? [normalizeText(scope.supplier_agent_id || scope.preferred_supplier_agent_id)]
+      : [];
+  const preferredSupplier = normalizeText(inventory.preferred_supplier_agent_id);
+  if (supplierIds.length && !supplierIds.includes(preferredSupplier)) return false;
+
+  const abcClasses = normalizeScopeArray(scope.abc_classes || scope.abc_class || scope.abc_classification);
+  const materialAbc = normalizeUpper(inventory.abc_classification || inventory.abc_class);
+  if (abcClasses.length && !abcClasses.includes(materialAbc)) return false;
+
+  const categories = normalizeScopeArray(scope.categories || scope.category || scope.material_category);
+  const materialCategory = normalizeUpper(material.category || material.attrs?.category || material.attrs?.ecom?.category || material.attrs?.product?.category);
+  if (categories.length && !categories.includes(materialCategory)) return false;
+
+  return true;
+}
+
+const POLICY_ALIASES = {
+  planning_method: ["planning_method", "reorder_method", "default_reorder_method"],
+  service_level_target: ["service_level_target", "target_service_level"],
+  reorder_point_qty: ["reorder_point_qty", "reorder_point"],
+  reorder_qty: ["reorder_qty", "reorder_quantity"],
+  minimum_stock_qty: ["minimum_stock_qty", "minimum_stock"],
+  maximum_stock_qty: ["maximum_stock_qty", "maximum_stock"],
+  safety_stock_qty: ["safety_stock_qty", "safety_stock"],
+  lead_time_days: ["lead_time_days", "supplier_lead_time_days"],
+  safety_lead_time_days: ["safety_lead_time_days"],
+  minimum_order_qty: ["minimum_order_qty", "moq"],
+  order_multiple: ["order_multiple"],
+  approval_required: ["approval_required"],
+  approval_threshold_value: ["approval_threshold_value"],
+  currency: ["currency"],
+  unit_of_measure: ["unit_of_measure", "uom"],
+  preferred_supplier_agent_id: ["preferred_supplier_agent_id", "supplier_agent_id"],
+  fallback_supplier_agent_ids: ["fallback_supplier_agent_ids"],
+  review_frequency_days: ["review_frequency_days"],
+  auto_reorder_enabled: ["auto_reorder_enabled"],
+  abc_classification: ["abc_classification", "abc_class"],
+  supplier_risk_level: ["supplier_risk_level"],
+  single_source_risk: ["single_source_risk"],
+  lead_time_variability: ["lead_time_variability"],
+  supply_disruption_flag: ["supply_disruption_flag"],
+  alternative_supplier_available: ["alternative_supplier_available"],
+  supplier_reliability_score: ["supplier_reliability_score"],
+  unit_cost: ["unit_cost"],
+  average_cost: ["average_cost"],
+  holding_cost_percent: ["holding_cost_percent"],
+  reorder_transaction_cost: ["reorder_transaction_cost"],
+  freight_cost_estimate: ["freight_cost_estimate"],
+  landed_cost_estimate: ["landed_cost_estimate"],
+  stockout_cost_estimate: ["stockout_cost_estimate"],
+  daily_consumption_rate: ["daily_consumption_rate", "consumption_rate_daily", "recent_sales_velocity_daily"],
+  weekly_consumption_rate: ["weekly_consumption_rate", "consumption_rate_weekly"],
+  open_customer_demand: ["open_customer_demand"],
+  target_service_level: ["target_service_level", "service_level_target"],
+  actual_service_level: ["actual_service_level"],
+  otif_target: ["otif_target", "otif_target_percent"],
+  otif_actual: ["otif_actual", "otif_actual_percent"]
+};
+
+const MATERIAL_POLICY_OVERRIDE_FIELDS = new Set(Object.values(POLICY_ALIASES).flat());
+
+function readAliased(source = {}, key) {
+  for (const alias of POLICY_ALIASES[key] || [key]) {
+    if (source[alias] !== undefined && source[alias] !== null && source[alias] !== "") return source[alias];
+  }
+  return undefined;
+}
+
+function normalizePolicyEnvelope(source = {}) {
+  const policy = {};
+  for (const key of Object.keys(POLICY_ALIASES)) {
+    const value = readAliased(source, key);
+    if (value !== undefined) policy[key] = value;
+  }
+  return policy;
+}
+
+function policyFromCondition(condition = {}) {
+  return normalizePolicyEnvelope({
+    ...(condition.effect?.reorder_policy || {}),
+    ...(condition.effect?.inventory_policy || {}),
+    ...(condition.effect?.supply_policy || {}),
+    ...(condition.effect || {}),
+    ...(condition.attrs?.reorder_policy || {}),
+    ...(condition.attrs?.inventory_policy || {}),
+    ...(condition.attrs?.supply_policy || {})
+  });
+}
+
+function normalizeEffectivePolicy(policy = {}) {
+  return {
+    planning_method: normalizeOptionalText(policy.planning_method) || "reorder_point",
+    service_level_target: finiteNumber(policy.service_level_target ?? policy.target_service_level, null),
+    target_service_level: finiteNumber(policy.target_service_level ?? policy.service_level_target, null),
+    reorder_point_qty: nonNegativeNumber(policy.reorder_point_qty, 0),
+    reorder_qty: nonNegativeNumber(policy.reorder_qty, 0),
+    minimum_stock_qty: nonNegativeNumber(policy.minimum_stock_qty, 0),
+    maximum_stock_qty: nonNegativeNumber(policy.maximum_stock_qty, 0),
+    safety_stock_qty: nonNegativeNumber(policy.safety_stock_qty, 0),
+    lead_time_days: Math.round(nonNegativeNumber(policy.lead_time_days, 0)),
+    safety_lead_time_days: Math.round(nonNegativeNumber(policy.safety_lead_time_days, 0)),
+    minimum_order_qty: nonNegativeNumber(policy.minimum_order_qty, 0),
+    order_multiple: nonNegativeNumber(policy.order_multiple, 0),
+    approval_required: normalizeBoolean(policy.approval_required, true),
+    approval_threshold_value: nonNegativeNumber(policy.approval_threshold_value, 0),
+    currency: normalizeOptionalText(policy.currency) || null,
+    unit_of_measure: normalizeOptionalText(policy.unit_of_measure) || "pcs",
+    preferred_supplier_agent_id: normalizeOptionalText(policy.preferred_supplier_agent_id),
+    fallback_supplier_agent_ids: normalizeTextArray(policy.fallback_supplier_agent_ids),
+    review_frequency_days: Math.round(nonNegativeNumber(policy.review_frequency_days, 30)),
+    auto_reorder_enabled: normalizeBoolean(policy.auto_reorder_enabled, false),
+    abc_classification: normalizeEnum(policy.abc_classification, ABC_CLASSES, null, { upper: true }),
+    supplier_risk_level: normalizeEnum(policy.supplier_risk_level, SUPPLIER_RISK_LEVELS, "medium"),
+    single_source_risk: normalizeBoolean(policy.single_source_risk, false),
+    lead_time_variability: finiteNumber(policy.lead_time_variability, null),
+    supply_disruption_flag: normalizeBoolean(policy.supply_disruption_flag, false),
+    alternative_supplier_available: normalizeBoolean(policy.alternative_supplier_available, false),
+    supplier_reliability_score: finiteNumber(policy.supplier_reliability_score, null),
+    unit_cost: nonNegativeNumber(policy.unit_cost, 0),
+    average_cost: nonNegativeNumber(policy.average_cost, nonNegativeNumber(policy.unit_cost, 0)),
+    holding_cost_percent: nonNegativeNumber(policy.holding_cost_percent, 0),
+    reorder_transaction_cost: roundMoney(policy.reorder_transaction_cost),
+    freight_cost_estimate: roundMoney(policy.freight_cost_estimate),
+    landed_cost_estimate: nonNegativeNumber(policy.landed_cost_estimate, 0),
+    stockout_cost_estimate: roundMoney(policy.stockout_cost_estimate),
+    daily_consumption_rate: finiteNumber(policy.daily_consumption_rate, null),
+    weekly_consumption_rate: finiteNumber(policy.weekly_consumption_rate, null),
+    open_customer_demand: nonNegativeNumber(policy.open_customer_demand, 0),
+    actual_service_level: finiteNumber(policy.actual_service_level, null),
+    otif_target: finiteNumber(policy.otif_target, null),
+    otif_actual: finiteNumber(policy.otif_actual, null)
+  };
+}
+
+function policyToInventory(policy = {}) {
+  return {
+    reorder_point: policy.reorder_point_qty,
+    reorder_qty: policy.reorder_qty,
+    minimum_stock: policy.minimum_stock_qty,
+    maximum_stock: policy.maximum_stock_qty,
+    safety_stock: policy.safety_stock_qty,
+    lead_time_days: policy.lead_time_days,
+    safety_lead_time_days: policy.safety_lead_time_days,
+    minimum_order_qty: policy.minimum_order_qty,
+    order_multiple: policy.order_multiple,
+    approval_required: policy.approval_required,
+    approval_threshold_value: policy.approval_threshold_value,
+    unit_of_measure: policy.unit_of_measure,
+    preferred_supplier_agent_id: policy.preferred_supplier_agent_id,
+    fallback_supplier_agent_ids: policy.fallback_supplier_agent_ids,
+    review_frequency_days: policy.review_frequency_days,
+    auto_reorder_enabled: policy.auto_reorder_enabled,
+    abc_classification: policy.abc_classification,
+    supplier_risk_level: policy.supplier_risk_level,
+    single_source_risk: policy.single_source_risk,
+    lead_time_variability: policy.lead_time_variability,
+    supply_disruption_flag: policy.supply_disruption_flag,
+    alternative_supplier_available: policy.alternative_supplier_available,
+    supplier_reliability_score: policy.supplier_reliability_score,
+    unit_cost: policy.unit_cost,
+    average_cost: policy.average_cost,
+    holding_cost_percent: policy.holding_cost_percent,
+    reorder_transaction_cost: policy.reorder_transaction_cost,
+    freight_cost_estimate: policy.freight_cost_estimate,
+    landed_cost_estimate: policy.landed_cost_estimate,
+    stockout_cost_estimate: policy.stockout_cost_estimate,
+    daily_consumption_rate: policy.daily_consumption_rate,
+    weekly_consumption_rate: policy.weekly_consumption_rate,
+    open_customer_demand: policy.open_customer_demand,
+    target_service_level: policy.target_service_level ?? policy.service_level_target,
+    actual_service_level: policy.actual_service_level,
+    otif_target: policy.otif_target,
+    otif_actual: policy.otif_actual
+  };
+}
+
+export function resolveInventoryPolicy(material = {}, conditions = []) {
+  const attrs = material?.attrs && typeof material.attrs === "object" ? material.attrs : {};
+  const inventory = sourceInventory(attrs);
+  const applicable = (conditions || [])
+    .filter(conditionKindMatches)
+    .filter((condition) => commercialConditionScopeMatches(condition.scope || {}, material, inventory))
+    .map((condition) => ({ ...condition, _scopeScore: conditionScopeScore(condition.scope || {}) }))
+    .sort((a, b) => {
+      if (a._scopeScore !== b._scopeScore) return a._scopeScore - b._scopeScore;
+      const pa = Number.isFinite(Number(a.priority)) ? Number(a.priority) : 100;
+      const pb = Number.isFinite(Number(b.priority)) ? Number(b.priority) : 100;
+      if (pa !== pb) return pb - pa;
+      return new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime();
+    });
+
+  const conditionPolicy = {};
+  for (const condition of applicable) Object.assign(conditionPolicy, policyFromCondition(condition));
+
+  const materialOverride = {};
+  for (const key of MATERIAL_POLICY_OVERRIDE_FIELDS) {
+    if (inventory[key] !== undefined && inventory[key] !== null && inventory[key] !== "") materialOverride[key] = inventory[key];
+  }
+  const normalizedOverride = normalizePolicyEnvelope(materialOverride);
+  const effectivePolicy = normalizeEffectivePolicy({ ...conditionPolicy, ...normalizedOverride });
+  const conditionCodes = applicable.map((condition) => condition.code).filter(Boolean);
+
+  return {
+    policy_source: conditionCodes.length ? "commercial_condition" : "material_attrs_legacy",
+    condition_codes: conditionCodes,
+    effective_policy: effectivePolicy,
+    policy_inventory: policyToInventory(effectivePolicy),
+    material_override_fields: Object.keys(normalizedOverride)
+  };
+}
+
 function resolveTracked(inventory) {
   if ("track_stock" in inventory) return normalizeBoolean(inventory.track_stock, false);
   return normalizeBoolean(inventory.track_inventory, false);
 }
 
-export function normalizeInventoryProfile(material = {}) {
+export function normalizeInventoryProfile(material = {}, options = {}) {
   const attrs = material?.attrs && typeof material.attrs === "object" ? material.attrs : {};
-  const inventory = sourceInventory(attrs);
+  const stateInventory = sourceInventory(attrs);
+  const policyResolution = resolveInventoryPolicy(material, options.conditions || options.commercialConditions || []);
+  const inventory = { ...stateInventory, ...policyResolution.policy_inventory };
   const trackStock = resolveTracked(inventory);
   const reservedQty = nonNegativeNumber(inventory.reserved_qty ?? inventory.reserved, 0);
   const onHandCandidate =
@@ -331,6 +611,22 @@ export function normalizeInventoryProfile(material = {}) {
     projected_cash_impact: projectedCashImpact,
     requires_human_approval: requiresHumanApproval,
     approval_reasons: approvalReasons,
+    policy_source: policyResolution.policy_source,
+    policy_condition_codes: policyResolution.condition_codes,
+    process_parameters: {
+      object_type: "INVENTORY_REORDER_SUGGESTION",
+      effect: "CREATE_PURCHASE_REQUISITION_DRAFT",
+      parameters: {
+        material_id: material.id || null,
+        recommended_qty: suggestedQty,
+        supplier_agent_id: preferredSupplierAgentId,
+        currency: policyResolution.effective_policy.currency,
+        estimated_total_cost: cashRequiredForReorder,
+        approval_required: requiresHumanApproval,
+        trigger_reason: reason,
+        policy_condition_codes: policyResolution.condition_codes
+      }
+    },
     confidence: Number.isFinite(dailyConsumptionRate) ? "medium" : "policy_only",
     explanation
   };
@@ -373,6 +669,10 @@ export function normalizeInventoryProfile(material = {}) {
     approval_threshold_value: approvalThresholdValue,
     abc_classification: abcClassification,
     unit_of_measure: unitOfMeasure,
+    policy_source: policyResolution.policy_source,
+    policy_condition_codes: policyResolution.condition_codes,
+    effective_policy: policyResolution.effective_policy,
+    material_override_fields: policyResolution.material_override_fields,
     stock_status: stockStatus,
     risk_status: riskStatus,
     signals,
@@ -419,13 +719,14 @@ export function normalizeInventoryProfile(material = {}) {
       future_commitment_object_type: "PURCHASE_ORDER",
       bridge_status: suggestedQty > 0 ? "proposal_ready" : "not_needed",
       commitment_required: true,
+      process_parameters: recommendation.process_parameters,
       future_transmission_modes: ["email", "api_json", "edi_webhook"]
     },
     last_movement_at: normalizeOptionalText(inventory.last_movement_at)
   };
 }
 
-export function mergeInventoryPolicy(attrs = {}, patch = {}) {
+export function mergeInventoryPolicy(attrs = {}, patch = {}, options = {}) {
   const currentAttrs = attrs && typeof attrs === "object" ? { ...attrs } : {};
   const inventory = sourceInventory(currentAttrs);
   const next = { ...inventory };
@@ -489,12 +790,19 @@ export function mergeInventoryPolicy(attrs = {}, patch = {}) {
     next.allow_negative_stock = normalizeBoolean(patch.allow_negative_stock, false);
   }
 
-  const profile = normalizeInventoryProfile({ attrs: { inventory: next } });
+  const profile = normalizeInventoryProfile({ ...(options.material || {}), attrs: { inventory: next } }, {
+    conditions: options.conditions || []
+  });
   next.stock_status = profile.stock_status;
   next.risk_status = profile.risk_status;
   next.days_of_cover = profile.days_of_cover;
   next.predicted_out_of_stock_date = profile.predicted_out_of_stock_date;
   next.cash_required_for_reorder = profile.cash_required_for_reorder;
+  next.policy_source = profile.policy_source;
+  next.policy_condition_codes = profile.policy_condition_codes;
+  next.effective_policy = profile.effective_policy;
+  next.material_override_fields = profile.material_override_fields;
+  next.recommendation_snapshot = profile.recommendation;
   currentAttrs.inventory = next;
   return currentAttrs;
 }
@@ -534,10 +842,12 @@ export function normalizeMovement(input = {}) {
   };
 }
 
-export function applyInventoryMovement(attrs = {}, movement = {}) {
+export function applyInventoryMovement(attrs = {}, movement = {}, options = {}) {
   const currentAttrs = attrs && typeof attrs === "object" ? { ...attrs } : {};
   const inventory = sourceInventory(currentAttrs);
-  const current = normalizeInventoryProfile({ attrs: { inventory } });
+  const current = normalizeInventoryProfile({ ...(options.material || {}), attrs: { inventory } }, {
+    conditions: options.conditions || []
+  });
   const qty = finiteNumber(movement.quantity, 0);
   let stockOnHand = current.stock_on_hand;
   let reservedQty = current.reserved_qty;
@@ -575,12 +885,19 @@ export function applyInventoryMovement(attrs = {}, movement = {}) {
     unit_of_measure: movement.unit_of_measure || current.unit_of_measure,
     last_movement_at: new Date().toISOString()
   };
-  const nextProfile = normalizeInventoryProfile({ attrs: { inventory: nextInventory } });
+  const nextProfile = normalizeInventoryProfile({ ...(options.material || {}), attrs: { inventory: nextInventory } }, {
+    conditions: options.conditions || []
+  });
   nextInventory.stock_status = nextProfile.stock_status;
   nextInventory.risk_status = nextProfile.risk_status;
   nextInventory.days_of_cover = nextProfile.days_of_cover;
   nextInventory.predicted_out_of_stock_date = nextProfile.predicted_out_of_stock_date;
   nextInventory.cash_required_for_reorder = nextProfile.cash_required_for_reorder;
+  nextInventory.policy_source = nextProfile.policy_source;
+  nextInventory.policy_condition_codes = nextProfile.policy_condition_codes;
+  nextInventory.effective_policy = nextProfile.effective_policy;
+  nextInventory.material_override_fields = nextProfile.material_override_fields;
+  nextInventory.recommendation_snapshot = nextProfile.recommendation;
   currentAttrs.inventory = nextInventory;
 
   return {
@@ -638,6 +955,10 @@ export function buildReorderSuggestionPayload(material, profile, source = "low_s
     decision_card: profile.decision_card,
     action_proposals: profile.action_proposals,
     purchase_requisition_bridge: profile.purchase_requisition_bridge,
+    policy_source: profile.policy_source,
+    policy_condition_codes: profile.policy_condition_codes,
+    effective_policy: profile.effective_policy,
+    process_parameters: profile.recommendation?.process_parameters || profile.purchase_requisition_bridge?.process_parameters || null,
     stock_status: profile.stock_status,
     status: "open",
     source

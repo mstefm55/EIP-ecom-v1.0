@@ -24,7 +24,8 @@ No new persistence table was added.
 
 | Capability | Kernel storage |
 | --- | --- |
-| Material/product stock profile | `eip_core.material.attrs.inventory` |
+| Governed reorder/supply/purchase policy | `eip_core.commercial_condition` |
+| Material/product stock state, item override, and output snapshot | `eip_core.material.attrs.inventory` |
 | Physical lot/batch support | Existing `eip_core.material_lot` and status events |
 | Stock movement/audit evidence | `eip_core.info_record` with `record_type='INVENTORY_STOCK_MOVEMENT'` |
 | Reorder suggestion | `eip_core.service_object` with `object_type='INVENTORY_REORDER_SUGGESTION'` |
@@ -35,7 +36,7 @@ No new persistence table was added.
 
 ## Stock Profile
 
-Flexible policy and current stock are stored under `material.attrs.inventory`:
+Governed reorder, supply, and purchasing policy lives in `eip_core.commercial_condition`. `material.attrs.inventory` stores current stock state, material-specific overrides, and the latest calculated output snapshot:
 
 ```json
 {
@@ -45,29 +46,17 @@ Flexible policy and current stock are stored under `material.attrs.inventory`:
   "on_hand": 12,
   "reserved_qty": 2,
   "available_qty": 10,
-  "reorder_point": 5,
   "reorder_qty": 20,
   "minimum_stock": 3,
-  "maximum_stock": 50,
-  "safety_stock": 5,
   "unit_of_measure": "pcs",
   "preferred_supplier_agent_id": null,
-  "fallback_supplier_agent_ids": [],
-  "lead_time_days": 7,
-  "safety_lead_time_days": 2,
   "daily_consumption_rate": 0.75,
-  "minimum_order_qty": 10,
-  "order_multiple": 5,
-  "unit_cost": 12,
-  "average_cost": 12,
-  "freight_cost_estimate": 15,
-  "approval_required": true,
-  "approval_threshold_value": 200,
-  "target_service_level": 0.95,
-  "supplier_risk_level": "medium",
-  "abc_classification": "A",
   "stock_status": "in_stock",
-  "risk_status": "healthy"
+  "risk_status": "healthy",
+  "policy_source": "commercial_condition",
+  "policy_condition_codes": ["INV_REORDER_DEFAULT"],
+  "effective_policy": {},
+  "recommendation_snapshot": {}
 }
 ```
 
@@ -78,12 +67,13 @@ Flexible policy and current stock are stored under `material.attrs.inventory`:
 The policy envelope supports professional supply-chain methods without forcing a heavy planning screen on the owner:
 
 ```text
-ABC classification: abc_classification
-Stock policy: track_stock, stock_on_hand, reserved_qty, available_qty, reorder_point, reorder_qty,
-  minimum_stock, maximum_stock, safety_stock, safety_lead_time_days, lead_time_days, unit_of_measure,
-  preferred_supplier_agent_id, fallback_supplier_agent_ids, review_frequency_days,
-  auto_reorder_enabled, approval_required, approval_threshold_value
-Service policy: target_service_level, actual_service_level, otif_target, otif_actual,
+Stock state and material overrides: track_stock, stock_on_hand, reserved_qty, available_qty,
+  unit_of_measure, preferred_supplier_agent_id, daily_consumption_rate
+Governed reorder policy: planning_method, abc_classification, service_level_target,
+  reorder_point_qty, reorder_qty, minimum_stock_qty, maximum_stock_qty, safety_stock_qty,
+  safety_lead_time_days, lead_time_days, review_frequency_days, auto_reorder_enabled,
+  approval_required, approval_threshold_value
+Service policy signals: target_service_level, actual_service_level, otif_target, otif_actual,
   out_of_stock_count, missed_sales_opportunity_count, missed_sales_opportunity_value
 Supply risk: supplier_risk_level, single_source_risk, lead_time_variability, supply_disruption_flag,
   alternative_supplier_available, minimum_order_qty, order_multiple, supplier_reliability_score
@@ -94,7 +84,39 @@ Demand/risk: daily_consumption_rate, weekly_consumption_rate, open_customer_dema
   days_of_cover, predicted_out_of_stock_date, risk_status
 ```
 
-These values live in `material.attrs.inventory`. No table was added.
+These values are resolved from governed commercial conditions first. Material attrs can still carry item-specific overrides for allowed policy fields and remain backward-compatible for tenants that already stored reorder values there.
+
+## Governed Policy Resolution
+
+Migration `0110_inventory_commercial_condition_policy.sql` seeds default commercial conditions without adding tables:
+
+```text
+INVENTORY_REORDER_POLICY / INVENTORY
+SUPPLY_REORDER_CONDITION / SUPPLY
+SUPPLIER_PURCHASE_CONDITION / PURCHASING
+```
+
+At runtime, inventory resolves policy in this order:
+
+```text
+tenant commercial_condition defaults
+-> scoped category/supplier/material commercial_condition
+-> allowed material inventory override
+-> normalized effective policy
+-> reorder recommendation
+-> process-engine-ready parameters
+```
+
+The resolver returns:
+
+```text
+policy_source
+condition_codes
+effective_policy
+material_override_fields
+```
+
+This keeps `commercial_condition` as the governed business/trade/supply policy authority while preserving existing `material.attrs.inventory` data as state, overrides, and calculated snapshots.
 
 ## Stock Status
 
@@ -196,6 +218,7 @@ service-level placeholders
 purchase requisition bridge metadata
 decision-card-ready text
 action proposals
+structured process parameters
 ```
 
 Example decision card:
@@ -281,6 +304,8 @@ INVENTORY_RECOMMENDED_ACTION
 PURCHASE_REQUISITION_REVIEW
 recommendations / decision cards / cash impact / supplier risk capabilities
 ```
+
+Migration `0110_inventory_commercial_condition_policy.sql` adds governed commercial-condition defaults for inventory reorder, supply, and purchasing policy. Future template clones already receive these rows because `eip_core.commercial_condition` is part of the canonical tenant clone path.
 
 The API creates reorder suggestions and starts the governed process. Approve/ignore routes advance the active process instance with idempotency keys.
 

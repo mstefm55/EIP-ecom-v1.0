@@ -226,6 +226,7 @@ export default function InventoryWorkspace({ node } = {}) {
 
   const stockAlerts = overview?.stock_alerts || [];
   const recentMovements = selectedDetail?.movements || overview?.recent_movements || [];
+  const selectedProfile = selectedDetail?.item?.stock_profile || selectedMaterial?.stock_profile || {};
 
   const loadAll = async () => {
     setLoading(true);
@@ -629,6 +630,15 @@ export default function InventoryWorkspace({ node } = {}) {
                 Reorder policy
               </h3>
               <p className="mt-1 text-sm text-ink-500">{selectedMaterial?.name || "Select a material"}</p>
+              <div className="mt-3 grid gap-2 rounded-2xl border border-white/70 bg-white/70 p-3 text-xs text-ink-500">
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <span>Governed policy source <strong className="block text-ink-800">{formatLabel(selectedProfile.policy_source || "not resolved")}</strong></span>
+                  <span>Condition codes <strong className="block text-ink-800">{selectedProfile.policy_condition_codes?.length ? selectedProfile.policy_condition_codes.join(", ") : "-"}</strong></span>
+                  <span>Material overrides <strong className="block text-ink-800">{selectedProfile.material_override_fields?.length ? selectedProfile.material_override_fields.join(", ") : "-"}</strong></span>
+                  <span>Current stock state <strong className="block text-ink-800">{formatLabel(selectedProfile.stock_status || selectedProfile.risk_status || "unknown")}</strong></span>
+                  <span>Calculated recommendation <strong className="block text-ink-800">{formatLabel(selectedProfile.recommendation?.action || "monitor")}</strong></span>
+                </div>
+              </div>
               <div className="mt-4 grid gap-3">
                 <Field label="Track stock" type="checkbox" value={policyForm.track_stock} onChange={(value) => setPolicyForm((current) => ({ ...current, track_stock: value }))} />
                 <Field label="Reorder point" type="number" value={policyForm.reorder_point} onChange={(value) => setPolicyForm((current) => ({ ...current, reorder_point: value }))} />

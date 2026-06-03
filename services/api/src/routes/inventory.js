@@ -47,9 +47,9 @@ function buildIdempotencyKey(prefix, payload) {
   return sha256Hex(`${prefix}:${JSON.stringify(payload || {})}`);
 }
 
-function serializeMaterial(row) {
+function serializeMaterial(row, conditions = []) {
   if (!row) return null;
-  const profile = normalizeInventoryProfile(row);
+  const profile = normalizeInventoryProfile(row, { conditions });
   return {
     id: row.id,
     code: row.code,
@@ -89,6 +89,10 @@ function serializeSuggestion(row) {
     decision_card: attrs.decision_card || null,
     action_proposals: Array.isArray(attrs.action_proposals) ? attrs.action_proposals : [],
     purchase_requisition_bridge: attrs.purchase_requisition_bridge || null,
+    policy_source: attrs.policy_source || null,
+    policy_condition_codes: Array.isArray(attrs.policy_condition_codes) ? attrs.policy_condition_codes : [],
+    effective_policy: attrs.effective_policy || null,
+    process_parameters: attrs.process_parameters || attrs.recommendation?.process_parameters || null,
     created_at: row.created_at,
     updated_at: row.updated_at
   };
@@ -199,8 +203,30 @@ async function fetchMaterial(client, tenantId, materialId, { lock = false } = {}
   return result.rows[0] || null;
 }
 
-async function listMaterials(client, tenantId, query = {}) {
+async function listInventoryPolicyConditions(client, tenantId) {
+  const result = await client.query(
+    `
+    SELECT id, code, label, condition_type, condition_category, priority,
+           valid_from, valid_to, scope, effect, attrs, created_at, updated_at
+    FROM eip_core.commercial_condition
+    WHERE tenant_id=$1
+      AND is_active=true
+      AND (valid_from IS NULL OR valid_from <= now())
+      AND (valid_to IS NULL OR valid_to > now())
+      AND (
+        UPPER(COALESCE(condition_type,'')) IN ('INVENTORY_REORDER_POLICY','SUPPLY_REORDER_CONDITION','SUPPLIER_PURCHASE_CONDITION')
+        OR UPPER(COALESCE(condition_category,'')) IN ('INVENTORY','SUPPLY','PURCHASING')
+      )
+    ORDER BY priority ASC, created_at DESC
+    `,
+    [tenantId]
+  );
+  return result.rows || [];
+}
+
+async function listMaterials(client, tenantId, query = {}, options = {}) {
   const q = normalizeOptionalText(query.q);
+  const conditions = options.conditions || await listInventoryPolicyConditions(client, tenantId);
   const params = [tenantId];
   const filters = ["m.tenant_id=$1", "m.is_active=true"];
   if (q) {
@@ -221,7 +247,7 @@ async function listMaterials(client, tenantId, query = {}) {
     `,
     params
   );
-  return result.rows.map(serializeMaterial);
+  return result.rows.map((row) => serializeMaterial(row, conditions));
 }
 
 async function listMovements(client, tenantId, materialId, limit = 50) {
@@ -449,10 +475,13 @@ export default async function inventoryRoutes(app) {
   app.get("/materials/:id", async (req, reply) => {
     const session = await requireRead(app, req, reply, "INVENTORY_READ");
     if (!session) return;
-    const material = await fetchMaterial(app.db, session.tenant_id, req.params.id);
+    const [material, conditions] = await Promise.all([
+      fetchMaterial(app.db, session.tenant_id, req.params.id),
+      listInventoryPolicyConditions(app.db, session.tenant_id)
+    ]);
     if (!material) return reply.code(404).send({ ok: false, error: "NOT_FOUND" });
     const movements = await listMovements(app.db, session.tenant_id, material.id, 20);
-    return reply.send({ ok: true, item: serializeMaterial(material), movements });
+    return reply.send({ ok: true, item: serializeMaterial(material, conditions), movements });
   });
 
   app.patch("/materials/:id/policy", async (req, reply) => {
@@ -466,7 +495,8 @@ export default async function inventoryRoutes(app) {
         await client.query("ROLLBACK");
         return reply.code(404).send({ ok: false, error: "NOT_FOUND" });
       }
-      const nextAttrs = mergeInventoryPolicy(material.attrs || {}, req.body || {});
+      const conditions = await listInventoryPolicyConditions(client, session.tenant_id);
+      const nextAttrs = mergeInventoryPolicy(material.attrs || {}, req.body || {}, { material, conditions });
       const updated = await client.query(
         `
         UPDATE eip_core.material
@@ -493,7 +523,7 @@ export default async function inventoryRoutes(app) {
         ]
       );
       await client.query("COMMIT");
-      return reply.send({ ok: true, item: serializeMaterial(updated.rows[0]) });
+      return reply.send({ ok: true, item: serializeMaterial(updated.rows[0], conditions) });
     } catch (error) {
       await client.query("ROLLBACK");
       app.log.error({ event: "inventory_policy_update_error", tenantId: session.tenant_id, error: error.message });
@@ -526,7 +556,8 @@ export default async function inventoryRoutes(app) {
         await client.query("ROLLBACK");
         return reply.code(404).send({ ok: false, error: "NOT_FOUND" });
       }
-      const applied = applyInventoryMovement(material.attrs || {}, normalized.movement);
+      const conditions = await listInventoryPolicyConditions(client, session.tenant_id);
+      const applied = applyInventoryMovement(material.attrs || {}, normalized.movement, { material, conditions });
       const updated = await client.query(
         `
         UPDATE eip_core.material
@@ -565,7 +596,7 @@ export default async function inventoryRoutes(app) {
       return reply.send({
         ok: true,
         item: movementRecord.rows[0],
-        material: serializeMaterial(updated.rows[0])
+        material: serializeMaterial(updated.rows[0], conditions)
       });
     } catch (error) {
       await client.query("ROLLBACK");
@@ -630,6 +661,7 @@ export default async function inventoryRoutes(app) {
         return reply.code(404).send({ ok: false, error: "MATERIAL_NOT_FOUND" });
       }
 
+      const conditions = await listInventoryPolicyConditions(client, session.tenant_id);
       const created = [];
       const existing = [];
       const skipped = [];
@@ -641,7 +673,7 @@ export default async function inventoryRoutes(app) {
           material_type: item.material_type,
           attrs: item.attrs || {}
         } : item;
-        const profile = item.stock_profile || normalizeInventoryProfile(material);
+        const profile = item.stock_profile || normalizeInventoryProfile(material, { conditions });
         if (!profile.needs_reorder && !force) {
           skipped.push({
             material_id: material.id,
