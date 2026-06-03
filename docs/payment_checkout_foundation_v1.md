@@ -15,7 +15,8 @@ storefront order
 -> payment event + CRM signal
 ```
 
-It does not implement inventory, accounting ledger, settlement reconciliation, or provider SDK UI.
+It does not implement accounting ledger, settlement reconciliation, provider SDK UI, or payment-driven stock issue.
+Inventory/reorder is now handled by the separate Inventory foundation and must remain governed by stock/order/fulfillment flows rather than payment confirmation alone.
 
 ## Provider Strategy
 
@@ -186,6 +187,16 @@ allowed_countries
 
 Storefronts should show only `ready_methods` when present. Samara now creates checkout sessions and does not collect or post raw card details to EIP.
 
+## Inventory Boundary
+
+Payment confirmation is not stock authority. Inventory V1 now exposes:
+
+```text
+Dashboard -> Inventory
+```
+
+for stock profiles, movements, low-stock detection, and reorder suggestions. The existing order intake path may continue to consume tracked inventory where already implemented, but payment records must not create irreversible stock issue by themselves. Purchase and receiving automation belongs to a future purchase-order wave.
+
 ## Webhook Behavior
 
 Webhook routes remain behind connection verification. Provider-specific webhook normalization is staged behind adapters. Until real provider verification is implemented, Checkout.com and PayPal webhook adapters fail closed and store only sanitized rejected summaries.
@@ -236,7 +247,7 @@ Checkout.com live session creation is not implemented yet.
 PayPal live order/approval flow is not implemented yet.
 Provider webhook normalization is not implemented yet.
 Google Pay is modeled as a wallet method through Checkout.com but has no browser SDK integration yet.
-No accounting ledger, settlement reconciliation, chargeback workflow, or inventory demand automation is included in this wave.
+No accounting ledger, settlement reconciliation, chargeback workflow, payment-provider SDK UI, or payment-driven stock issue is included in this wave.
 ```
 
 ## Next Recommended Wave

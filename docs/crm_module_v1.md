@@ -123,6 +123,20 @@ It continues the same kernel model:
 - connector readiness is secret-free metadata derived from existing connection profiles
 - dashboard tabs are descriptor-driven and capability-gated
 
+## Inventory Signal Boundary
+
+Inventory and reorder operations are documented in:
+
+```text
+docs/inventory_reorder_foundation_v1.md
+```
+
+CRM may consume stock/reorder facts later through `info_record` signals and
+`object_link` relationships, but CRM does not own inventory quantities or
+purchase commitment. Products and materials remain in `eip_core.material`;
+stock movements remain inventory evidence; reorder suggestions remain
+inventory service objects.
+
 ## CRM Intake Foundation
 
 The additive CRM Intake foundation is documented in:
