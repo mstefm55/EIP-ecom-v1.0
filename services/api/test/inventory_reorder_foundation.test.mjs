@@ -15,6 +15,7 @@ const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 const route = read("../src/routes/inventory.js");
 const server = read("../src/server.js");
 const migration = read("../db/migrations/0108_inventory_reorder_foundation.sql");
+const recommendationMigration = read("../db/migrations/0109_inventory_recommendation_policy_addendum.sql");
 const surfaceSeed = read("../db/seed/ui_surface_dashboard.sql");
 const registry = read("../../../apps/dashboard/src/engine/registry.jsx");
 const dashboardSurface = read("../../../apps/dashboard/src/engine/surfaces/dashboard.js");
@@ -98,6 +99,63 @@ test("reorder suggestion payload stays service_object-based and human-review ori
   assert.equal(normalizeInventoryTaskType("supplier_check"), "SUPPLIER_CHECK");
 });
 
+test("inventory profile produces professional recommendation and decision-card outputs", () => {
+  const material = {
+    id: "mat-1",
+    code: "SKU-1",
+    name: "Oak board",
+    material_type: "PRODUCT",
+    attrs: {
+      inventory: {
+        track_stock: true,
+        stock_on_hand: 8,
+        reserved_qty: 2,
+        available_qty: 6,
+        reorder_point: 4,
+        reorder_qty: 10,
+        minimum_stock: 4,
+        maximum_stock: 30,
+        safety_stock: 5,
+        lead_time_days: 10,
+        safety_lead_time_days: 2,
+        daily_consumption_rate: 0.75,
+        minimum_order_qty: 20,
+        order_multiple: 5,
+        unit_cost: 12,
+        freight_cost_estimate: 15,
+        approval_threshold_value: 200,
+        target_service_level: 0.95,
+        supplier_risk_level: "high",
+        single_source_risk: true,
+        abc_classification: "A"
+      }
+    }
+  };
+
+  const profile = normalizeInventoryProfile(material);
+  assert.equal(profile.days_of_cover, 8);
+  assert.equal(profile.risk_status, "stockout_predicted");
+  assert.equal(profile.predicted_out_of_stock_date.length, 10);
+  assert.equal(profile.suggested_qty, 20);
+  assert.equal(profile.cash_required_for_reorder, 255);
+  assert.equal(profile.supplier_risk_level, "high");
+  assert.equal(profile.target_service_level, 0.95);
+  assert.equal(profile.abc_classification, "A");
+  assert.equal(profile.recommendation.action, "create_reorder_suggestion");
+  assert.equal(profile.recommendation.requires_human_approval, true);
+  assert.ok(profile.recommendation.approval_reasons.includes("cash_threshold_exceeded"));
+  assert.ok(profile.action_proposals.includes("create_purchase_requisition_draft"));
+  assert.ok(profile.action_proposals.includes("recommend_alternative_supplier"));
+  assert.equal(profile.purchase_requisition_bridge.ready_for_draft, true);
+  assert.match(profile.decision_card.headline, /Oak board will run out/);
+
+  const payload = buildReorderSuggestionPayload(material, profile);
+  assert.equal(payload.risk_status, "stockout_predicted");
+  assert.equal(payload.cash_required_for_reorder, 255);
+  assert.equal(payload.purchase_requisition_bridge.draft_object_type, "PURCHASE_REQUISITION_DRAFT");
+  assert.ok(payload.decision_card.headline.includes("Oak board"));
+});
+
 test("inventory route registers all required endpoints and enforces session, CSRF, RBAC, and tenant scope", () => {
   for (const path of [
     '"/overview"',
@@ -154,6 +212,26 @@ test("inventory migration is additive and seeds governed clone-ready metadata", 
   assert.match(migration, /"capabilities":\{"overview":true,"materials":true,"movements":true,"reorder":true\}/);
 });
 
+test("inventory recommendation addendum is additive and seeds professional policy governance", () => {
+  assert.doesNotMatch(recommendationMigration, /CREATE\s+TABLE/i);
+  for (const value of [
+    "INVENTORY_ABC_CLASS",
+    "INVENTORY_RISK_STATUS",
+    "INVENTORY_SUPPLIER_RISK_LEVEL",
+    "INVENTORY_RECOMMENDED_ACTION",
+    "PURCHASE_REQUISITION_REVIEW",
+    "decision_cards",
+    "stockout_prediction",
+    "purchase_requisition_bridge",
+    "cash_impact",
+    "supplier_risk",
+    "service_level_policy",
+    "auto_create_purchase_requisition_drafts"
+  ]) {
+    assert.match(recommendationMigration, new RegExp(value));
+  }
+});
+
 test("inventory dashboard is descriptor registered and module gated", () => {
   assert.match(registry, /import InventoryWorkspace/);
   assert.match(registry, /InventoryWorkspace,/);
@@ -164,6 +242,9 @@ test("inventory dashboard is descriptor registered and module gated", () => {
   assert.match(surfaceSeed, /"type": "InventoryWorkspace"/);
   assert.match(workspace, /export default function InventoryWorkspace/);
   assert.ok(workspace.includes("apiFetch(`${endpoints.suggestions}/run`"));
+  assert.match(workspace, /decision_card/);
+  assert.match(workspace, /Explain recommendation/);
+  assert.match(workspace, /Approve requisition/);
 });
 
 test("inventory workspace remains tenant agnostic and separate from payment operations", () => {

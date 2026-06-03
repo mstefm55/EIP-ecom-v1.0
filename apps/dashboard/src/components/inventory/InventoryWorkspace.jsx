@@ -59,6 +59,12 @@ function formatQty(value, unit) {
   return `${rounded}${unit ? ` ${unit}` : ""}`;
 }
 
+function formatMoney(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) return "-";
+  return number.toLocaleString("en-US", { maximumFractionDigits: 2 });
+}
+
 function formatDate(value) {
   if (!value) return "-";
   const date = new Date(value);
@@ -184,9 +190,26 @@ export default function InventoryWorkspace({ node } = {}) {
     track_stock: true,
     reorder_point: "",
     reorder_qty: "",
+    minimum_stock: "",
+    maximum_stock: "",
+    safety_stock: "",
     unit_of_measure: "pcs",
     lead_time_days: "",
-    preferred_supplier_agent_id: ""
+    safety_lead_time_days: "",
+    preferred_supplier_agent_id: "",
+    abc_classification: "",
+    daily_consumption_rate: "",
+    minimum_order_qty: "",
+    order_multiple: "",
+    unit_cost: "",
+    average_cost: "",
+    freight_cost_estimate: "",
+    approval_threshold_value: "",
+    target_service_level: "",
+    supplier_risk_level: "medium",
+    single_source_risk: false,
+    auto_reorder_enabled: false,
+    approval_required: true
   });
   const [movementForm, setMovementForm] = useState({
     movement_type: "manual_adjustment",
@@ -236,9 +259,26 @@ export default function InventoryWorkspace({ node } = {}) {
         track_stock: profile.track_stock === true,
         reorder_point: profile.reorder_point ?? "",
         reorder_qty: profile.reorder_qty ?? "",
+        minimum_stock: profile.minimum_stock ?? "",
+        maximum_stock: profile.maximum_stock ?? "",
+        safety_stock: profile.safety_stock ?? "",
         unit_of_measure: profile.unit_of_measure || "pcs",
         lead_time_days: profile.lead_time_days ?? "",
-        preferred_supplier_agent_id: profile.preferred_supplier_agent_id || ""
+        safety_lead_time_days: profile.safety_lead_time_days ?? "",
+        preferred_supplier_agent_id: profile.preferred_supplier_agent_id || "",
+        abc_classification: profile.abc_classification || "",
+        daily_consumption_rate: profile.daily_consumption_rate ?? "",
+        minimum_order_qty: profile.minimum_order_qty ?? "",
+        order_multiple: profile.order_multiple ?? "",
+        unit_cost: profile.unit_cost ?? "",
+        average_cost: profile.average_cost ?? "",
+        freight_cost_estimate: profile.freight_cost_estimate ?? "",
+        approval_threshold_value: profile.approval_threshold_value ?? "",
+        target_service_level: profile.target_service_level ?? "",
+        supplier_risk_level: profile.supplier_risk_level || "medium",
+        single_source_risk: profile.single_source_risk === true,
+        auto_reorder_enabled: profile.auto_reorder_enabled === true,
+        approval_required: profile.approval_required !== false
       });
       setMovementForm((current) => ({ ...current, unit_of_measure: profile.unit_of_measure || "pcs" }));
     } catch (err) {
@@ -280,7 +320,19 @@ export default function InventoryWorkspace({ node } = {}) {
           ...policyForm,
           reorder_point: policyForm.reorder_point === "" ? 0 : Number(policyForm.reorder_point),
           reorder_qty: policyForm.reorder_qty === "" ? 0 : Number(policyForm.reorder_qty),
-          lead_time_days: policyForm.lead_time_days === "" ? 0 : Number(policyForm.lead_time_days)
+          minimum_stock: policyForm.minimum_stock === "" ? 0 : Number(policyForm.minimum_stock),
+          maximum_stock: policyForm.maximum_stock === "" ? 0 : Number(policyForm.maximum_stock),
+          safety_stock: policyForm.safety_stock === "" ? 0 : Number(policyForm.safety_stock),
+          lead_time_days: policyForm.lead_time_days === "" ? 0 : Number(policyForm.lead_time_days),
+          safety_lead_time_days: policyForm.safety_lead_time_days === "" ? 0 : Number(policyForm.safety_lead_time_days),
+          daily_consumption_rate: policyForm.daily_consumption_rate === "" ? 0 : Number(policyForm.daily_consumption_rate),
+          minimum_order_qty: policyForm.minimum_order_qty === "" ? 0 : Number(policyForm.minimum_order_qty),
+          order_multiple: policyForm.order_multiple === "" ? 0 : Number(policyForm.order_multiple),
+          unit_cost: policyForm.unit_cost === "" ? 0 : Number(policyForm.unit_cost),
+          average_cost: policyForm.average_cost === "" ? 0 : Number(policyForm.average_cost),
+          freight_cost_estimate: policyForm.freight_cost_estimate === "" ? 0 : Number(policyForm.freight_cost_estimate),
+          approval_threshold_value: policyForm.approval_threshold_value === "" ? 0 : Number(policyForm.approval_threshold_value),
+          target_service_level: policyForm.target_service_level === "" ? 0 : Number(policyForm.target_service_level)
         }
       });
       setNotice("Inventory policy saved.");
@@ -425,8 +477,8 @@ export default function InventoryWorkspace({ node } = {}) {
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <Metric label="Low stock" value={overview?.stats?.low_stock} icon={TrendingDown} tone="text-amber-600" />
           <Metric label="Out of stock" value={overview?.stats?.out_of_stock} icon={AlertTriangle} tone="text-rose-600" />
-          <Metric label="Reorder suggestions" value={overview?.stats?.open_reorder_suggestions} icon={ClipboardList} tone="text-indigo-600" />
-          <Metric label="Active materials" value={overview?.stats?.total_active_materials} icon={Package} tone="text-ink-500" />
+          <Metric label="Stockout risk" value={overview?.stats?.stockout_predicted} icon={AlertTriangle} tone="text-orange-600" />
+          <Metric label="Cash needed" value={formatMoney(overview?.stats?.estimated_cash_required_for_reorder)} icon={ClipboardList} tone="text-indigo-600" />
         </div>
       ) : null}
 
@@ -450,6 +502,8 @@ export default function InventoryWorkspace({ node } = {}) {
           <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {stockAlerts.length ? stockAlerts.map((item) => {
               const profile = item.stock_profile || {};
+              const card = profile.decision_card || {};
+              const recommendation = profile.recommendation || {};
               return (
                 <div key={item.id} className="rounded-2xl border border-white/70 bg-white/75 p-4 shadow-soft">
                   <div className="flex items-start justify-between gap-3">
@@ -457,21 +511,44 @@ export default function InventoryWorkspace({ node } = {}) {
                       <p className="text-sm font-semibold text-ink-900">{item.name || item.code}</p>
                       <p className="text-xs text-ink-400">{item.code || item.material_type || "-"}</p>
                     </div>
-                    <StatusPill status={profile.stock_status} />
+                    <StatusPill status={profile.risk_status || profile.stock_status} />
                   </div>
+                  <p className="mt-3 text-sm font-semibold text-ink-800">{card.headline || "Inventory policy needs review."}</p>
+                  <p className="mt-1 text-xs text-ink-500">{card.lead_time || "Lead time policy is not complete."}</p>
                   <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-ink-500">
                     <span>Available <strong className="block text-ink-800">{formatQty(profile.available_qty, profile.unit_of_measure)}</strong></span>
-                    <span>Reorder <strong className="block text-ink-800">{formatQty(profile.reorder_point, profile.unit_of_measure)}</strong></span>
+                    <span>Cover <strong className="block text-ink-800">{profile.days_of_cover ?? "-"}</strong></span>
                     <span>Suggest <strong className="block text-ink-800">{formatQty(profile.suggested_qty, profile.unit_of_measure)}</strong></span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => runReorder(item.id, true)}
-                    disabled={actionLoading}
-                    className="mt-4 rounded-full border border-ink-100 bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-ink-600 disabled:opacity-60"
-                  >
-                    {actions.createSuggestion}
-                  </button>
+                  <p className="mt-2 text-xs text-ink-500">{card.cash_impact || `Estimated cash needed: ${formatMoney(recommendation.cash_required_for_reorder)}.`}</p>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => runReorder(item.id, true)}
+                      disabled={actionLoading}
+                      className="rounded-full border border-ink-100 bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-ink-600 disabled:opacity-60"
+                    >
+                      Review
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => runReorder(item.id, true)}
+                      disabled={actionLoading || !profile.suggested_qty}
+                      className="rounded-full bg-ink-900 px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-white disabled:opacity-60"
+                    >
+                      Approve requisition
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedMaterialId(item.id);
+                        setActiveTab("materials");
+                      }}
+                      className="rounded-full border border-ink-100 bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-ink-600"
+                    >
+                      Adjust policy
+                    </button>
+                  </div>
                 </div>
               );
             }) : (
@@ -556,8 +633,47 @@ export default function InventoryWorkspace({ node } = {}) {
                 <Field label="Track stock" type="checkbox" value={policyForm.track_stock} onChange={(value) => setPolicyForm((current) => ({ ...current, track_stock: value }))} />
                 <Field label="Reorder point" type="number" value={policyForm.reorder_point} onChange={(value) => setPolicyForm((current) => ({ ...current, reorder_point: value }))} />
                 <Field label="Reorder quantity" type="number" value={policyForm.reorder_qty} onChange={(value) => setPolicyForm((current) => ({ ...current, reorder_qty: value }))} />
+                <Field label="Safety stock" type="number" value={policyForm.safety_stock} onChange={(value) => setPolicyForm((current) => ({ ...current, safety_stock: value }))} />
                 <Field label="Unit" value={policyForm.unit_of_measure} onChange={(value) => setPolicyForm((current) => ({ ...current, unit_of_measure: value }))} />
                 <Field label="Lead time days" type="number" value={policyForm.lead_time_days} onChange={(value) => setPolicyForm((current) => ({ ...current, lead_time_days: value }))} />
+                <Field label="Safety lead days" type="number" value={policyForm.safety_lead_time_days} onChange={(value) => setPolicyForm((current) => ({ ...current, safety_lead_time_days: value }))} />
+                <Field label="Daily use/sales rate" type="number" value={policyForm.daily_consumption_rate} onChange={(value) => setPolicyForm((current) => ({ ...current, daily_consumption_rate: value }))} />
+                <Field label="Minimum stock" type="number" value={policyForm.minimum_stock} onChange={(value) => setPolicyForm((current) => ({ ...current, minimum_stock: value }))} />
+                <Field label="Maximum stock" type="number" value={policyForm.maximum_stock} onChange={(value) => setPolicyForm((current) => ({ ...current, maximum_stock: value }))} />
+                <Field label="Minimum order quantity" type="number" value={policyForm.minimum_order_qty} onChange={(value) => setPolicyForm((current) => ({ ...current, minimum_order_qty: value }))} />
+                <Field label="Order multiple" type="number" value={policyForm.order_multiple} onChange={(value) => setPolicyForm((current) => ({ ...current, order_multiple: value }))} />
+                <Field label="Unit cost" type="number" value={policyForm.unit_cost} onChange={(value) => setPolicyForm((current) => ({ ...current, unit_cost: value }))} />
+                <Field label="Average cost" type="number" value={policyForm.average_cost} onChange={(value) => setPolicyForm((current) => ({ ...current, average_cost: value }))} />
+                <Field label="Freight estimate" type="number" value={policyForm.freight_cost_estimate} onChange={(value) => setPolicyForm((current) => ({ ...current, freight_cost_estimate: value }))} />
+                <Field label="Approval threshold" type="number" value={policyForm.approval_threshold_value} onChange={(value) => setPolicyForm((current) => ({ ...current, approval_threshold_value: value }))} />
+                <Field label="Target service level" type="number" value={policyForm.target_service_level} onChange={(value) => setPolicyForm((current) => ({ ...current, target_service_level: value }))} />
+                <Field
+                  label="ABC class"
+                  type="select"
+                  value={policyForm.abc_classification}
+                  onChange={(value) => setPolicyForm((current) => ({ ...current, abc_classification: value }))}
+                  options={[
+                    { value: "", label: "Not set" },
+                    { value: "A", label: "A" },
+                    { value: "B", label: "B" },
+                    { value: "C", label: "C" }
+                  ]}
+                />
+                <Field
+                  label="Supplier risk"
+                  type="select"
+                  value={policyForm.supplier_risk_level}
+                  onChange={(value) => setPolicyForm((current) => ({ ...current, supplier_risk_level: value }))}
+                  options={[
+                    { value: "low", label: "Low" },
+                    { value: "medium", label: "Medium" },
+                    { value: "high", label: "High" },
+                    { value: "critical", label: "Critical" }
+                  ]}
+                />
+                <Field label="Single source risk" type="checkbox" value={policyForm.single_source_risk} onChange={(value) => setPolicyForm((current) => ({ ...current, single_source_risk: value }))} />
+                <Field label="Auto reorder proposals" type="checkbox" value={policyForm.auto_reorder_enabled} onChange={(value) => setPolicyForm((current) => ({ ...current, auto_reorder_enabled: value }))} />
+                <Field label="Approval required" type="checkbox" value={policyForm.approval_required} onChange={(value) => setPolicyForm((current) => ({ ...current, approval_required: value }))} />
                 <Field label="Preferred supplier agent id" value={policyForm.preferred_supplier_agent_id} onChange={(value) => setPolicyForm((current) => ({ ...current, preferred_supplier_agent_id: value }))} />
                 <button
                   type="button"
@@ -639,11 +755,25 @@ export default function InventoryWorkspace({ node } = {}) {
                   <div>
                     <p className="text-sm font-semibold text-ink-900">{item.material_name || item.title || item.code}</p>
                     <p className="text-xs text-ink-400">
-                      {formatQty(item.suggested_qty, item.attrs?.unit_of_measure)} · {item.reason || "Review stock policy"}
+                      {item.decision_card?.headline || item.reason || "Review stock policy"}
                     </p>
                   </div>
                   <StatusPill status={item.status} />
                 </div>
+                <div className="mt-3 grid gap-2 text-xs text-ink-500 sm:grid-cols-4">
+                  <span>Suggest <strong className="block text-ink-800">{formatQty(item.suggested_qty, item.attrs?.unit_of_measure)}</strong></span>
+                  <span>Cover <strong className="block text-ink-800">{item.days_of_cover ?? "-"}</strong></span>
+                  <span>Stockout <strong className="block text-ink-800">{item.predicted_out_of_stock_date || "-"}</strong></span>
+                  <span>Cash <strong className="block text-ink-800">{formatMoney(item.cash_required_for_reorder)}</strong></span>
+                </div>
+                {item.recommendation?.explanation?.length ? (
+                  <details className="mt-3 rounded-xl border border-ink-100 bg-white/70 px-3 py-2 text-xs text-ink-500">
+                    <summary className="cursor-pointer font-semibold text-ink-700">Explain recommendation</summary>
+                    <ul className="mt-2 list-disc space-y-1 pl-4">
+                      {item.recommendation.explanation.map((line) => <li key={line}>{line}</li>)}
+                    </ul>
+                  </details>
+                ) : null}
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button type="button" onClick={() => suggestionAction(item.id, "approve")} disabled={actionLoading || item.status === "approved"} className="rounded-full bg-emerald-100 px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700 disabled:opacity-60">{actions.approve}</button>
                   <button type="button" onClick={() => suggestionAction(item.id, "ignore")} disabled={actionLoading || item.status === "ignored"} className="rounded-full bg-rose-100 px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-rose-700 disabled:opacity-60">{actions.ignore}</button>

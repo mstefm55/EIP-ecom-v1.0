@@ -23,7 +23,7 @@ The product should feel like a practical operating system, not an enterprise pla
 | --- | --- | --- |
 | CRM | Customers, leads, interactions, cases, opportunities, intake, mailbox, CRM signals | Stock quantities, payment credentials, purchase orders |
 | Orders & Payments | Sales orders, payment records, returns, refunds, operational actions | Payment provider secrets, tenant payment preferences, stock planning |
-| Inventory | Material stock profile, stock movements, low-stock alerts, reorder suggestions, stock review tasks | Purchase order commitment, accounting valuation, MRP |
+| Inventory | Material stock profile, stock movements, stockout prediction, decision cards, reorder suggestions, stock review tasks | Purchase order commitment, accounting valuation, MRP |
 | Settings | Tenant-local business preferences and readiness panels | Provider secrets, raw credentials, operational queues |
 | Admin Console -> Connections | Technical connector setup, provider credentials, keys, webhook secrets, rotation, health checks | Operational payment/refund/order work |
 
@@ -34,10 +34,23 @@ The Inventory & Reorder Foundation adds the lightweight stock layer needed befor
 ```text
 material.attrs.inventory
 -> INVENTORY_STOCK_MOVEMENT info_record
+-> days-of-cover and stockout recommendation
 -> INVENTORY_REORDER_SUGGESTION service_object
 -> governed review task
 -> approved purchase preparation later
 ```
+
+Inventory is recommendation-led rather than table-led:
+
+```text
+stock profile
+-> decision card
+-> reorder suggestion
+-> purchase requisition bridge
+-> human approval before commitment
+```
+
+Machine actions may detect stockout risk, calculate suggested quantity, warn about cash impact, flag supplier risk, and prepare purchase-requisition metadata. Human approval remains required for purchase commitment, supplier changes, high-value reorders, risky supplier decisions, and cash-impacting actions.
 
 This deliberately avoids:
 

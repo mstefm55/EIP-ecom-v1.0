@@ -79,6 +79,16 @@ function serializeSuggestion(row) {
     supplier_name: row.supplier_name || null,
     suggested_qty: Number(attrs.suggested_qty || 0),
     reason: attrs.reason || null,
+    risk_status: attrs.risk_status || null,
+    days_of_cover: attrs.days_of_cover ?? null,
+    predicted_out_of_stock_date: attrs.predicted_out_of_stock_date || null,
+    cash_required_for_reorder: Number(attrs.cash_required_for_reorder || 0),
+    projected_cash_impact: Number(attrs.projected_cash_impact || 0),
+    supplier_risk_level: attrs.supplier_risk_level || null,
+    recommendation: attrs.recommendation || attrs.reorder_recommendation || null,
+    decision_card: attrs.decision_card || null,
+    action_proposals: Array.isArray(attrs.action_proposals) ? attrs.action_proposals : [],
+    purchase_requisition_bridge: attrs.purchase_requisition_bridge || null,
     created_at: row.created_at,
     updated_at: row.updated_at
   };
@@ -381,7 +391,10 @@ export default async function inventoryRoutes(app) {
     ]);
 
     const profiles = materials.map((item) => item.stock_profile);
-    const stockAlerts = materials.filter((item) => item.stock_profile.needs_reorder);
+    const stockAlerts = materials.filter((item) => {
+      const profile = item.stock_profile || {};
+      return profile.needs_reorder || ["watch", "reorder_now", "stockout_predicted", "already_out_of_stock"].includes(profile.risk_status);
+    });
     const stats = {
       total_active_materials: materials.length,
       in_stock: profiles.filter((item) => item.stock_status === "in_stock").length,
@@ -389,14 +402,26 @@ export default async function inventoryRoutes(app) {
       out_of_stock: profiles.filter((item) => item.stock_status === "out_of_stock").length,
       negative_stock: profiles.filter((item) => item.stock_status === "negative_stock").length,
       untracked: profiles.filter((item) => item.stock_status === "untracked").length,
+      watch: profiles.filter((item) => item.risk_status === "watch").length,
+      reorder_now: profiles.filter((item) => item.risk_status === "reorder_now").length,
+      stockout_predicted: profiles.filter((item) => item.risk_status === "stockout_predicted").length,
+      already_out_of_stock: profiles.filter((item) => item.risk_status === "already_out_of_stock").length,
       items_needing_reorder: stockAlerts.length,
-      open_reorder_suggestions: Number(reorderRes.rows[0]?.total || 0)
+      open_reorder_suggestions: Number(reorderRes.rows[0]?.total || 0),
+      estimated_cash_required_for_reorder: profiles.reduce((sum, item) => sum + Number(item.cash_required_for_reorder || 0), 0)
     };
 
     return reply.send({
       ok: true,
       stats,
       stock_alerts: stockAlerts.slice(0, 12),
+      decision_cards: stockAlerts.slice(0, 12).map((item) => ({
+        material_id: item.id,
+        material_code: item.code,
+        material_name: item.name,
+        ...item.stock_profile.decision_card,
+        recommendation: item.stock_profile.recommendation
+      })),
       recent_movements: recentMovements.rows || []
     });
   });
@@ -618,7 +643,12 @@ export default async function inventoryRoutes(app) {
         } : item;
         const profile = item.stock_profile || normalizeInventoryProfile(material);
         if (!profile.needs_reorder && !force) {
-          skipped.push({ material_id: material.id, reason: "stock_not_below_reorder_point" });
+          skipped.push({
+            material_id: material.id,
+            reason: "stock_not_below_reorder_point",
+            risk_status: profile.risk_status,
+            days_of_cover: profile.days_of_cover
+          });
           continue;
         }
         const open = await findOpenSuggestion(client, session.tenant_id, material.id);
