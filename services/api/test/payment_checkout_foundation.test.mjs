@@ -22,6 +22,10 @@ const migration = fs.readFileSync(
   new URL("../db/migrations/0106_payment_checkout_foundation.sql", import.meta.url),
   "utf8"
 );
+const settingsOwnershipMigration = fs.readFileSync(
+  new URL("../db/migrations/0107_payment_settings_surface_ownership.sql", import.meta.url),
+  "utf8"
+);
 const samaraApi = fs.readFileSync(
   new URL("../../../apps/samara-web/my-vite-react-app/src/services/api.js", import.meta.url),
   "utf8"
@@ -32,6 +36,18 @@ const samaraApp = fs.readFileSync(
 );
 const dashboardSettings = fs.readFileSync(
   new URL("../../../apps/dashboard/src/components/ecom/EcomCommerceSettingsPanel.jsx", import.meta.url),
+  "utf8"
+);
+const dashboardOrdersPanel = fs.readFileSync(
+  new URL("../../../apps/dashboard/src/components/ecom/EcomOrderManagementPanel.jsx", import.meta.url),
+  "utf8"
+);
+const dashboardSurface = fs.readFileSync(
+  new URL("../../../apps/dashboard/src/engine/surfaces/dashboard.js", import.meta.url),
+  "utf8"
+);
+const dashboardSurfaceSeed = fs.readFileSync(
+  new URL("../db/seed/ui_surface_dashboard.sql", import.meta.url),
   "utf8"
 );
 
@@ -166,5 +182,29 @@ test("payment governance migration is additive and keeps future clones on role/t
 test("dashboard payment settings no longer render raw provider credential fields", () => {
   assert.doesNotMatch(dashboardSettings, /public_key|client_id|app_id/);
   assert.match(dashboardSettings, /payment-readiness/);
-  assert.match(dashboardSettings, /Provider secrets and rotations stay in Admin Console/);
+  assert.match(dashboardSettings, /Provider secrets stay in Admin Console/);
+  assert.match(dashboardSettings, /Commerce \/ Payments/);
+  assert.match(dashboardSettings, /Configured/);
+  assert.match(dashboardSettings, /Available/);
+  assert.match(dashboardSettings, /Capture mode/);
+  assert.match(dashboardSettings, /Default currency/);
+  assert.match(dashboardSettings, /Dashboard > Orders & Payments > Payments/);
+});
+
+test("payment settings are descriptor-owned by Settings, not the operational payments workspace", () => {
+  assert.match(dashboardSurface, /id: "commerce-payment-settings"/);
+  assert.match(dashboardSurface, /type: "EcomCommerceSettingsPanel"/);
+  assert.match(dashboardSurface, /placement: "settings"/);
+  assert.match(dashboardSurface, /capability: "payments"/);
+  assert.match(dashboardSurface, /title: "Commerce \/ Payments"/);
+  assert.match(dashboardSurfaceSeed, /"id": "commerce-payment-settings"/);
+  assert.match(dashboardSurfaceSeed, /"placement": "settings"/);
+  assert.match(settingsOwnershipMigration, /patch_payment_settings_surface_node/);
+  assert.match(settingsOwnershipMigration, /"id": "commerce-payment-settings"/);
+  assert.doesNotMatch(settingsOwnershipMigration, /CREATE\s+TABLE/i);
+
+  assert.match(dashboardOrdersPanel, /title: "Orders & payments"/);
+  assert.match(dashboardOrdersPanel, /\{ id: "payments", label: "Payments"/);
+  assert.doesNotMatch(dashboardOrdersPanel, /payment-readiness/);
+  assert.doesNotMatch(dashboardOrdersPanel, /Provider secrets stay in Admin Console/);
 });

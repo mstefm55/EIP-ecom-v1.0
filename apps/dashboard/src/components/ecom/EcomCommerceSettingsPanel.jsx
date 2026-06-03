@@ -2,6 +2,16 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Loader2, Settings } from "lucide-react";
 import { apiFetch } from "../../services/apiClient";
 
+const DEFAULT_LAYOUT = {
+  eyebrow: "Settings",
+  title: "Commerce / Payments",
+  subtitle: "Tenant-local commerce preferences and payment readiness. Provider secrets stay in Admin Console > Connections.",
+  paymentTitle: "Payment readiness & preferences",
+  paymentSubtitle: "Enable storefront payment methods, choose business policy, and verify provider readiness without exposing secrets.",
+  operationsPath: "Dashboard > Orders & Payments > Payments",
+  connectionsPath: "Admin Console > Connections"
+};
+
 const DEFAULT_PAYMENT_SETTINGS = {
   methods: [
     { code: "card", label: "Credit card", enabled: true },
@@ -264,6 +274,21 @@ function normalizePaymentMethodCode(value) {
   return normalized;
 }
 
+function mergeLayout(input) {
+  if (!input || typeof input !== "object") return DEFAULT_LAYOUT;
+  return { ...DEFAULT_LAYOUT, ...input };
+}
+
+function formatStatus(value, fallback = "unknown") {
+  return String(value || fallback)
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function yesNo(value) {
+  return value ? "Yes" : "No";
+}
+
 function normalizePaymentProviderCode(value, method = "") {
   const normalized = String(value || "").trim().toLowerCase().replace(/[-.\s]+/g, "_");
   if (["checkout", "checkoutcom", "checkout_com"].includes(normalized)) return "checkout_com";
@@ -517,7 +542,8 @@ function formatApiError(err, fallback) {
   return fallback || parsed.raw || "Request failed.";
 }
 
-export default function EcomCommerceSettingsPanel() {
+export default function EcomCommerceSettingsPanel({ node } = {}) {
+  const layout = mergeLayout(node?.props?.layout);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [translationCatalog, setTranslationCatalog] = useState(DEFAULT_TRANSLATION_CATALOG);
   const [localeDraft, setLocaleDraft] = useState("");
@@ -1185,11 +1211,11 @@ export default function EcomCommerceSettingsPanel() {
         <div>
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.3em] text-ink-400">
             <Settings className="h-4 w-4" />
-            Commerce settings
+            {layout.eyebrow}
           </div>
-          <h3 className="mt-2 text-lg font-semibold text-ink-900">Checkout, returns & refunds</h3>
+          <h3 className="mt-2 text-lg font-semibold text-ink-900">{layout.title}</h3>
           <p className="mt-1 text-sm text-ink-500">
-            Configure storefront payment methods, return handling, and refund approvals.
+            {layout.subtitle}
           </p>
         </div>
         <button
@@ -1251,10 +1277,31 @@ export default function EcomCommerceSettingsPanel() {
 
       <div className="grid gap-4 rounded-2xl border border-ink-100 bg-white/70 p-4 text-sm text-ink-600">
         <div>
-          <div className="text-xs font-semibold uppercase tracking-[0.2em] text-ink-400">Checkout payments</div>
+          <div className="text-xs font-semibold uppercase tracking-[0.2em] text-ink-400">
+            {layout.paymentTitle}
+          </div>
           <p className="mt-1 text-xs text-ink-500">
-            Configure storefront method preferences. Provider secrets and rotations stay in Admin Console &gt; Connections.
+            {layout.paymentSubtitle}
           </p>
+        </div>
+
+        <div className="grid gap-3 rounded-xl border border-ink-100 bg-white/80 p-3 md:grid-cols-4">
+          <div>
+            <div className="text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink-400">Default currency</div>
+            <div className="mt-1 text-sm font-semibold text-ink-800">{paymentReadiness?.default_currency || payment.default_currency || "USD"}</div>
+          </div>
+          <div>
+            <div className="text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink-400">Capture mode</div>
+            <div className="mt-1 text-sm font-semibold text-ink-800">{formatStatus(paymentReadiness?.capture_mode || payment.capture_mode)}</div>
+          </div>
+          <div>
+            <div className="text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink-400">Operations path</div>
+            <div className="mt-1 text-xs text-ink-600">{layout.operationsPath}</div>
+          </div>
+          <div>
+            <div className="text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink-400">Provider setup</div>
+            <div className="mt-1 text-xs text-ink-600">{layout.connectionsPath}</div>
+          </div>
         </div>
 
         <div className="grid gap-3 rounded-xl border border-ink-100 bg-white/80 p-3 md:grid-cols-3">
@@ -1310,6 +1357,13 @@ export default function EcomCommerceSettingsPanel() {
             const provider = payment.providers?.[code] || {};
             const readiness = paymentReadinessByMethod.get(code);
             const providerCode = normalizePaymentProviderCode(provider.provider_code, code);
+            const effectiveEnvironment =
+              readiness?.environment ||
+              normalizePaymentEnvironment(provider.environment || provider.mode, code === "manual_test" ? "sandbox" : "production");
+            const configured = providerCode === "manual_test"
+              ? effectiveEnvironment === "sandbox"
+              : Boolean(readiness?.connection_code || provider.connection_code || readiness?.available);
+            const available = Boolean(readiness?.available);
             const connectionOptionsForProvider = connectionOptions.filter((conn) => {
               const value = `${conn.connection_code || ""} ${conn.connection_kind || ""} ${conn.connection_name || ""}`.toLowerCase();
               if (providerCode === "checkout_com") return value.includes("checkout") || !value.includes("paypal");
@@ -1378,13 +1432,45 @@ export default function EcomCommerceSettingsPanel() {
                     </select>
                   </label>
                 </div>
-                <div className="mt-3 rounded-lg border border-ink-100 bg-ink-50/70 px-3 py-2 text-xs text-ink-500">
-                  Readiness:{" "}
-                  <span className={readiness?.available ? "font-semibold text-emerald-700" : "font-semibold text-amber-700"}>
-                    {readiness?.status || "not checked"}
-                  </span>
-                  {readiness?.connection_code ? ` via ${readiness.connection_code}` : ""}
-                  {code === "manual_test" ? " - sandbox-only development path." : ""}
+                <div className="mt-3 grid gap-2 rounded-lg border border-ink-100 bg-ink-50/70 px-3 py-2 text-xs text-ink-500 md:grid-cols-6">
+                  <div>
+                    <div className="text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-ink-400">Enabled</div>
+                    <div className={method.enabled !== false ? "font-semibold text-emerald-700" : "font-semibold text-ink-500"}>
+                      {yesNo(method.enabled !== false)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-ink-400">Configured</div>
+                    <div className={configured ? "font-semibold text-emerald-700" : "font-semibold text-amber-700"}>
+                      {yesNo(configured)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-ink-400">Available</div>
+                    <div className={available ? "font-semibold text-emerald-700" : "font-semibold text-amber-700"}>
+                      {yesNo(available)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-ink-400">Provider</div>
+                    <div className="font-semibold text-ink-700">{formatStatus(providerCode)}</div>
+                  </div>
+                  <div>
+                    <div className="text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-ink-400">Mode</div>
+                    <div className="font-semibold text-ink-700">{formatStatus(effectiveEnvironment)}</div>
+                  </div>
+                  <div>
+                    <div className="text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-ink-400">Readiness</div>
+                    <div className={available ? "font-semibold text-emerald-700" : "font-semibold text-amber-700"}>
+                      {formatStatus(readiness?.status, "not checked")}
+                    </div>
+                  </div>
+                  <div className="md:col-span-6">
+                    <span className="font-semibold text-ink-500">Connection:</span>{" "}
+                    {readiness?.connection_code || provider.connection_code || "No provider connection selected"}
+                    {code === "manual_test" ? " - sandbox-only development path." : ""}
+                    {readiness?.wallet ? " - wallet method." : ""}
+                  </div>
                 </div>
               </div>
             );

@@ -42,7 +42,9 @@ Raw API keys are displayed once after creation or rotation. After refresh, save,
 
 ## Payment Provider Boundary
 
-Checkout.com, PayPal, Google Pay merchant configuration, webhook secrets, and provider credentials belong in Admin Console > Connections. Tenant Commerce Settings may enable methods and select an existing payment connection, but it must not collect raw provider secrets.
+Checkout.com, PayPal, Google Pay merchant configuration, webhook secrets, and provider credentials belong in Admin Console > Connections. Dashboard > Settings > Commerce / Payments may enable methods and select an existing payment connection, but it must not collect raw provider secrets.
+
+Operational payment records and actions belong in Dashboard > Orders & Payments > Payments. That workspace is for capture, cancel, refund-request handoff, and payment follow-up only.
 
 Payment readiness is exposed as redacted status only:
 

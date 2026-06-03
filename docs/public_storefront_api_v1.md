@@ -85,6 +85,9 @@ Use renderer metadata or `VITE_EIP_WORTH_RENDERER=product_carousel`. The histori
 - Public routes are read-only except existing governed commerce intake routes.
 - Checkout session creation is an intake route. It creates a governed payment service object and never stores raw card data.
 - `checkout-config` exposes only method readiness, not provider secrets or raw connection credentials.
+- Tenant-local payment preferences and readiness are managed in Dashboard > Settings > Commerce / Payments.
+- Payment operations are managed in Dashboard > Orders & Payments > Payments.
+- Provider secrets, webhook secrets, and token rotation are managed only in Admin Console > Connections.
 - Query-string API keys remain forbidden.
 - Use `X-API-Key` or the configured verification header.
 - Connection CORS origin allowlists remain enforced.

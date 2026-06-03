@@ -371,8 +371,22 @@ SELECT
           }
         },
         {
-          "id": "commerce-settings",
-          "type": "EcomCommerceSettingsPanel"
+          "id": "commerce-payment-settings",
+          "type": "EcomCommerceSettingsPanel",
+          "props": {
+            "module": "ecom",
+            "capability": "payments",
+            "placement": "settings",
+            "layout": {
+              "eyebrow": "Settings",
+              "title": "Commerce / Payments",
+              "subtitle": "Tenant-local commerce preferences and payment readiness. Provider secrets stay in Admin Console > Connections.",
+              "paymentTitle": "Payment readiness & preferences",
+              "paymentSubtitle": "Enable storefront payment methods, choose business policy, and verify provider readiness without exposing secrets.",
+              "operationsPath": "Dashboard > Orders & Payments > Payments",
+              "connectionsPath": "Admin Console > Connections"
+            }
+          }
         }
       ]
     }

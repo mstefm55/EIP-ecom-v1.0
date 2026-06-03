@@ -42,7 +42,7 @@ rate limits
 secret rotation and revoke
 ```
 
-Tenant Commerce Settings owns business preferences:
+Dashboard > Settings > Commerce / Payments owns tenant-local business preferences:
 
 ```text
 enabled methods
@@ -63,6 +63,9 @@ poll/read payment status
 ```
 
 CRM consumes payment facts only through `CRM_PAYMENT_SIGNAL`.
+
+Dashboard > Orders & Payments > Payments owns operational payment work: payment records, capture, cancel,
+refund request handoff, and payment follow-up. It must not collect provider credentials or tenant policy setup.
 
 ## Kernel Model
 
@@ -215,7 +218,7 @@ npm run build
 
 3. Redeploy dashboard and Samara.
 4. In Admin Console > Connections, configure payment provider profiles as needed.
-5. In Tenant Dashboard > Commerce Settings, enable only methods intended for the storefront.
+5. In Dashboard > Settings > Commerce / Payments, enable only methods intended for the storefront and verify readiness.
 6. Verify:
 
    ```text
@@ -224,7 +227,7 @@ npm run build
 
    returns `ready_methods`.
 7. Create an order from the storefront, then create a checkout session.
-8. For `manual_test`, confirm the session and verify the operator Payments tab shows the payment.
+8. For `manual_test`, confirm the session and verify Dashboard > Orders & Payments > Payments shows the payment.
 
 ## Known Limitations
 
