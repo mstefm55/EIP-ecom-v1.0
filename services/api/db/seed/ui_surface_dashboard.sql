@@ -15,13 +15,14 @@ SELECT
   "type": "UserShell",
   "props": {
     "brand": "EIP Core",
-    "nav": ["Dashboard", "Product Studio", "Content Studio", "Orders & Payments", "Inventory", "Tasks", "Reports", "Settings"],
+    "nav": ["Dashboard", "Product Studio", "Content Studio", "Orders & Payments", "Inventory", "Procurement", "Tasks", "Reports", "Settings"],
     "menu": [
       { "code": "dashboard", "label": "Dashboard", "icon": "LayoutGrid" },
       { "code": "catalog", "label": "Product Studio", "icon": "Package" },
       { "code": "content", "label": "Content Studio", "icon": "LayoutTemplate" },
       { "code": "commerce", "label": "Orders & Payments", "icon": "CreditCard" },
       { "code": "inventory", "label": "Inventory", "icon": "Package", "module": "inventory" },
+      { "code": "procurement", "label": "Procurement", "icon": "ShoppingCart", "module": "procurement" },
       { "code": "crm", "label": "CRM", "icon": "Users", "module": "crm" },
       { "code": "tasks", "label": "Tasks", "icon": "Activity" },
       { "code": "reports", "label": "Reports", "icon": "BarChart3" },
@@ -358,6 +359,49 @@ SELECT
               { "id": "signals", "label": "Signals", "kind": "info_record", "endpoint": "/api/eip/crm/signals", "permission": "CRM_SIGNAL_READ", "capability": "signals" },
               { "id": "connectors", "label": "Connectors", "kind": "connector", "endpoint": "/api/eip/crm/intelligence/connectors", "permission": "CRM_CONNECTOR_READ", "capability": "connectors" }
             ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "user-procurement-panel",
+      "type": "UserPanel",
+      "props": { "tab": "procurement" },
+      "children": [
+        {
+          "id": "procurement-workspace",
+          "type": "ProcurementWorkspace",
+          "props": {
+            "module": "procurement",
+            "title": "Procurement",
+            "subtitle": "Supplier policy, purchase requisitions, RFQs, quote review, and cash/shop purchase capture.",
+            "endpoints": {
+              "overview": "/api/eip/procurement/overview",
+              "supplierLinks": "/api/eip/procurement/supplier-links",
+              "requisitions": "/api/eip/procurement/requisitions",
+              "rfqs": "/api/eip/procurement/rfqs",
+              "cashPurchases": "/api/eip/procurement/cash-purchases"
+            },
+            "tabs": [
+              { "id": "overview", "label": "Overview" },
+              { "id": "needs", "label": "Purchase Needs" },
+              { "id": "suppliers", "label": "Suppliers" },
+              { "id": "requisitions", "label": "Requisitions" },
+              { "id": "rfqs", "label": "RFQs" },
+              { "id": "cash", "label": "Cash Purchase" }
+            ],
+            "actions": {
+              "refresh": "Refresh",
+              "createRequisition": "Create requisition",
+              "approve": "Approve",
+              "ignore": "Ignore",
+              "createRfq": "Create RFQ",
+              "addQuote": "Add quote",
+              "compareQuotes": "Compare quotes",
+              "approveQuote": "Approve quote",
+              "saveSupplierLink": "Save supplier link",
+              "recordCashPurchase": "Record cash purchase"
+            }
           }
         }
       ]

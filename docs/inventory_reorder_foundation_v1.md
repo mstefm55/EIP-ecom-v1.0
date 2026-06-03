@@ -201,7 +201,7 @@ adjust
 
 Low-stock and predicted-stockout detection create idempotent suggestions as `INVENTORY_REORDER_SUGGESTION` service objects. Open/review/approved suggestions prevent duplicate open suggestions for the same material.
 
-Approval does not create a purchase order in this wave. It marks the suggestion as ready for the future Purchase Order Foundation.
+Approval does not create a purchase order in this wave. It marks the suggestion as ready for the Procurement Foundation, where it can become a requisition, RFQ, or cash/shop purchase receipt.
 
 Suggestion payloads include:
 
@@ -337,18 +337,18 @@ This foundation prepares an inventory bridge but does not make payment confirmat
 
 ## Purchase Requisition Bridge
 
-The system now prepares this path without creating final purchase orders:
+The procurement foundation now consumes this path without creating final purchase orders:
 
 ```text
 low stock / predicted stockout
 -> reorder suggestion
--> purchase requisition draft/proposal metadata
--> human review
+-> purchase requisition draft
+-> RFQ / quote review when policy requires
+-> cash/shop purchase capture for low-value purchases
 -> future purchase order generation
--> future supplier email / API JSON / EDI-like transmission
 ```
 
-Human approval is required for purchase commitment, supplier changes, high-value reorder, unusual quantities, risky suppliers, and cash-impacting actions.
+The policy bridge is documented in `docs/procurement_foundation_v1.md`. Human approval remains required for purchase commitment, supplier changes, high-value reorder, unusual quantities, risky suppliers, and cash-impacting actions.
 
 ## Settings Boundary
 
@@ -390,7 +390,7 @@ npm run build
 
 ```text
 No purchase order creation.
-No supplier quotation workflow.
+Supplier quotation is foundation-level through RFQ/quote comparison; final supplier transmission remains deferred.
 No accounting ledger or stock valuation.
 No advanced warehouse/location/bin model.
 No production consumption/output planning.
@@ -401,12 +401,13 @@ Cashflow forecast is represented as recommendation metadata only; no ledger or p
 
 ## Next Recommended Wave
 
-Purchase Order Foundation:
+Purchase Order Execution Foundation:
 
 ```text
 approved reorder suggestion
--> purchase request / purchase order service_object
--> supplier review task
+-> purchase requisition / selected quote
+-> purchase order draft
+-> supplier transmission adapter
 -> receiving movement
--> inventory update
+-> purchase_receipt inventory movement
 ```

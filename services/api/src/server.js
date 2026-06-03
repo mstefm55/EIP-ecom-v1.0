@@ -34,6 +34,7 @@ import coreProcessRoutes from "./routes/process/core_process.js";
 import crmRoutes from "./routes/crm.js";
 import commerceOrdersRoutes from "./routes/commerce_orders.js";
 import inventoryRoutes from "./routes/inventory.js";
+import procurementRoutes from "./routes/procurement.js";
 import ecomRoutes from "./routes/ecom.js";
 import gatewayRoutes from "./routes/gateway.js";
 import publicCommercePreflightRoutes from "./routes/public_commerce_preflight.js";
@@ -630,6 +631,7 @@ async function buildServer() {
   await app.register(crmRoutes, { prefix: "/api/eip/crm" });
   await app.register(commerceOrdersRoutes, { prefix: "/api/eip" });
   await app.register(inventoryRoutes, { prefix: "/api/eip/inventory" });
+  await app.register(procurementRoutes, { prefix: "/api/eip/procurement" });
   await app.register(ecomRoutes, { prefix: "/api/eip/ecom" });
   await app.register(ediRoutes, { prefix: "/api/edi" });
   await app.register(ediGatewayRoutes, { prefix: "/api/edi" });
