@@ -302,6 +302,35 @@ async function listServiceObjects(client, tenantId, objectType, query = {}) {
   return { items: result.rows || [], limit: params.at(-2), offset: params.at(-1) };
 }
 
+async function listPurchaseNeeds(client, tenantId, query = {}) {
+  const limit = clampLimit(query.limit || 25);
+  const result = await client.query(
+    `
+    SELECT id, code, title, status, object_type, attrs, owner_agent_id, created_at, updated_at
+    FROM eip_core.service_object
+    WHERE tenant_id=$1
+      AND object_type=$2
+      AND status IN ('open','review','approved')
+    ORDER BY
+      CASE COALESCE(attrs->>'risk_status', attrs->'recommendation'->>'risk_status')
+        WHEN 'already_out_of_stock' THEN 1
+        WHEN 'stockout_predicted' THEN 2
+        WHEN 'reorder_now' THEN 3
+        WHEN 'watch' THEN 4
+        ELSE 5
+      END,
+      CASE
+        WHEN COALESCE(attrs->>'days_of_cover','') ~ '^[0-9]+(\\.[0-9]+)?$' THEN (attrs->>'days_of_cover')::numeric
+        ELSE 999999
+      END ASC,
+      created_at DESC
+    LIMIT $3
+    `,
+    [tenantId, REORDER_OBJECT_TYPE, limit]
+  );
+  return result.rows || [];
+}
+
 async function linkObject(client, tenantId, srcKind, srcId, dstKind, dstId, relationType, attrs = {}) {
   await client.query(
     `
@@ -440,6 +469,353 @@ async function advanceObject(client, app, input) {
   return { ok: true, reused: result.reused === true, item: await fetchServiceObject(client, input.tenantId, item.id, input.objectType) };
 }
 
+function serializeMaterial(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    code: row.code,
+    name: row.name,
+    material_type: row.material_type,
+    attrs: row.attrs || {},
+    label: [row.code, row.name].filter(Boolean).join(" - ") || row.id
+  };
+}
+
+function serializeAgent(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    code: row.code,
+    name: row.name,
+    agent_type: row.agent_type,
+    label: [row.code, row.name].filter(Boolean).join(" - ") || row.id
+  };
+}
+
+function buildStockProfileFromNeed(need, material) {
+  const attrs = need?.attrs || {};
+  const inventory = material?.attrs?.inventory && typeof material.attrs.inventory === "object"
+    ? material.attrs.inventory
+    : {};
+  return {
+    ...inventory,
+    ...(attrs.stock_profile || {}),
+    ...attrs,
+    recommendation: attrs.recommendation || attrs.reorder_recommendation || inventory.recommendation || null,
+    material_id: attrs.material_id || material?.id || inventory.material_id || null,
+    material_code: attrs.material_code || material?.code || inventory.material_code || null,
+    material_name: attrs.material_name || material?.name || inventory.material_name || null,
+    suggested_qty: Number(attrs.suggested_qty ?? attrs.recommended_qty ?? attrs.reorder_qty ?? inventory.suggested_qty ?? inventory.reorder_qty ?? 0),
+    unit_of_measure: attrs.unit_of_measure || inventory.unit_of_measure || "pcs",
+    stock_on_hand: Number(inventory.stock_on_hand ?? inventory.on_hand ?? attrs.stock_on_hand ?? 0),
+    reserved_qty: Number(inventory.reserved_qty ?? attrs.reserved_qty ?? 0),
+    available_qty: Number(inventory.available_qty ?? attrs.available_qty ?? Math.max(0, Number(inventory.stock_on_hand ?? inventory.on_hand ?? 0) - Number(inventory.reserved_qty ?? 0))),
+    days_of_cover: attrs.days_of_cover ?? inventory.days_of_cover ?? null,
+    predicted_out_of_stock_date: attrs.predicted_out_of_stock_date || inventory.predicted_out_of_stock_date || null,
+    abc_classification: attrs.abc_classification || inventory.abc_classification || null,
+    risk_status: attrs.risk_status || inventory.risk_status || attrs.recommendation?.risk_status || null,
+    source_reason: attrs.reason || attrs.trigger_reason || attrs.recommendation?.reason || "inventory_reorder_need"
+  };
+}
+
+async function findRequisitionForNeed(client, tenantId, needId) {
+  const result = await client.query(
+    `
+    SELECT id, code, title, status, object_type, attrs, owner_agent_id, created_at, updated_at
+    FROM eip_core.service_object
+    WHERE tenant_id=$1
+      AND object_type=$2
+      AND attrs->>'source_reorder_suggestion_id'=$3
+    ORDER BY created_at DESC
+    LIMIT 1
+    `,
+    [tenantId, PURCHASE_REQUISITION_OBJECT_TYPE, needId]
+  );
+  return result.rows[0] || null;
+}
+
+async function findRfqForRequisition(client, tenantId, requisitionId) {
+  if (!requisitionId) return null;
+  const result = await client.query(
+    `
+    SELECT id, code, title, status, object_type, attrs, owner_agent_id, created_at, updated_at
+    FROM eip_core.service_object
+    WHERE tenant_id=$1
+      AND object_type=$2
+      AND attrs->>'source_requisition_id'=$3
+    ORDER BY created_at DESC
+    LIMIT 1
+    `,
+    [tenantId, PURCHASE_RFQ_OBJECT_TYPE, requisitionId]
+  );
+  return result.rows[0] || null;
+}
+
+async function listQuotesForRfq(client, tenantId, rfqId) {
+  if (!rfqId) return [];
+  const result = await client.query(
+    `
+    SELECT id, title, payload, attrs, created_at
+    FROM eip_core.info_record
+    WHERE tenant_id=$1
+      AND record_type=$2
+      AND payload->>'rfq_id'=$3
+      AND is_active=true
+    ORDER BY created_at DESC
+    `,
+    [tenantId, SUPPLIER_QUOTE_RECORD_TYPE, rfqId]
+  );
+  return result.rows || [];
+}
+
+async function latestQuoteComparisonForRfq(client, tenantId, rfqId) {
+  if (!rfqId) return null;
+  const result = await client.query(
+    `
+    SELECT id, title, payload, attrs, created_at
+    FROM eip_core.info_record
+    WHERE tenant_id=$1
+      AND record_type=$2
+      AND payload->>'rfq_id'=$3
+      AND is_active=true
+    ORDER BY created_at DESC
+    LIMIT 1
+    `,
+    [tenantId, QUOTE_COMPARISON_RECORD_TYPE, rfqId]
+  );
+  return result.rows[0] || null;
+}
+
+function buildCashPurchaseOption(recommendation, stockProfile) {
+  const cashAllowed = recommendation?.effective_policy?.cash_purchase_allowed === true;
+  const cashRoute = recommendation?.procurement_model === "cash_shop_purchase";
+  if (!cashAllowed && !cashRoute) return null;
+  return {
+    available: cashAllowed || cashRoute,
+    recommended: cashRoute,
+    reason: cashRoute ? "below_cash_purchase_limit" : "allowed_as_fallback",
+    quantity: recommendation?.requested_qty || stockProfile?.suggested_qty || 0,
+    unit_of_measure: stockProfile?.unit_of_measure || "pcs",
+    cash_required: recommendation?.cash_required || 0,
+    currency: recommendation?.currency || recommendation?.effective_policy?.currency || "EUR",
+    payment_terms_code: cashRoute ? "DUE_ON_RECEIPT" : recommendation?.payment_terms_code || "NET_30"
+  };
+}
+
+function buildProcessTimeline({ need, requisition, rfq, quotes, quoteComparison, recommendation }) {
+  return [
+    {
+      code: "need_detected",
+      label: "Need detected",
+      status: need?.status || "open",
+      timestamp: need?.created_at,
+      detail: need?.attrs?.reason || need?.attrs?.risk_status || "Inventory purchase need"
+    },
+    requisition ? {
+      code: "requisition_drafted",
+      label: "Requisition drafted",
+      status: requisition.status,
+      timestamp: requisition.created_at,
+      detail: requisition.code || requisition.title
+    } : {
+      code: "requisition_pending",
+      label: "Requisition not created yet",
+      status: "pending",
+      timestamp: null,
+      detail: recommendation?.procurement_model || null
+    },
+    rfq ? {
+      code: "rfq_created",
+      label: "Request quotes",
+      status: rfq.status,
+      timestamp: rfq.created_at,
+      detail: rfq.code || rfq.title
+    } : null,
+    quotes?.length ? {
+      code: "quotes_received",
+      label: "Supplier offers received",
+      status: "received",
+      timestamp: quotes[0]?.created_at,
+      detail: `${quotes.length} offer${quotes.length === 1 ? "" : "s"} recorded`
+    } : null,
+    quoteComparison ? {
+      code: "quotes_compared",
+      label: "Offers compared",
+      status: "comparison_ready",
+      timestamp: quoteComparison.created_at,
+      detail: quoteComparison.payload?.recommended_supplier_agent_id || null
+    } : null,
+    rfq?.status === "supplier_selected" ? {
+      code: "quote_approved",
+      label: "Offer approved",
+      status: "supplier_selected",
+      timestamp: rfq.updated_at,
+      detail: rfq.attrs?.quote_comparison?.recommended_supplier_agent_id || null
+    } : null
+  ].filter(Boolean);
+}
+
+function buildNextActions({ need, requisition, rfq, quotes, quoteComparison, recommendation, cashPurchaseOption }) {
+  if (!requisition) {
+    const actions = [{
+      code: "create_requisition",
+      label: "Create requisition",
+      tone: "primary",
+      endpoint: "/api/eip/procurement/requisitions/from-reorder",
+      body: { reorder_suggestion_id: need.id },
+      reason: "Start the governed buying review for this purchase need."
+    }];
+    if (cashPurchaseOption?.recommended) {
+      actions.unshift({
+        code: "record_cash_purchase",
+        label: "Record cash purchase",
+        tone: "primary",
+        endpoint: "/api/eip/procurement/cash-purchases",
+        body: {
+          material_id: recommendation?.material_id || need.attrs?.material_id,
+          quantity: cashPurchaseOption.quantity,
+          currency: cashPurchaseOption.currency
+        },
+        reason: "Policy allows a low-value cash/shop purchase."
+      });
+    }
+    return actions;
+  }
+
+  if (["draft", "review"].includes(requisition.status)) {
+    return [
+      {
+        code: "approve_requisition",
+        label: "Approve requisition",
+        tone: "primary",
+        endpoint: `/api/eip/procurement/requisitions/${requisition.id}/approve`,
+        body: {},
+        reason: "Approve the owner decision before quote or purchase preparation."
+      },
+      {
+        code: "ignore_requisition",
+        label: "Ignore",
+        tone: "danger",
+        endpoint: `/api/eip/procurement/requisitions/${requisition.id}/ignore`,
+        body: {},
+        reason: "Stop this buying path."
+      }
+    ];
+  }
+
+  if (requisition.status === "approved" && !rfq && ["request_for_quote", "multi_supplier_quote_comparison"].includes(recommendation?.procurement_model)) {
+    return [{
+      code: "create_rfq",
+      label: "Request quotes",
+      tone: "primary",
+      endpoint: "/api/eip/procurement/rfqs/from-requisition",
+      body: { requisition_id: requisition.id },
+      reason: "Policy recommends supplier offers before approval."
+    }];
+  }
+
+  if (rfq && quotes.length === 0) {
+    return [{
+      code: "add_quote",
+      label: "Add supplier offer",
+      tone: "primary",
+      endpoint: `/api/eip/procurement/rfqs/${rfq.id}/quotes`,
+      body: {},
+      reason: "Record the first supplier offer for comparison."
+    }];
+  }
+
+  if (rfq && quotes.length > 0 && !quoteComparison) {
+    return [{
+      code: "compare_quotes",
+      label: "Compare offers",
+      tone: "primary",
+      endpoint: `/api/eip/procurement/rfqs/${rfq.id}/compare`,
+      body: {},
+      reason: "Compare landed cost, lead time, payment terms, and supplier risk."
+    }];
+  }
+
+  if (rfq && quoteComparison && rfq.status !== "supplier_selected") {
+    return [{
+      code: "approve_quote",
+      label: "Approve recommended offer",
+      tone: "primary",
+      endpoint: `/api/eip/procurement/rfqs/${rfq.id}/approve-quote`,
+      body: {},
+      reason: "Approve the recommended supplier offer."
+    }];
+  }
+
+  return [{
+    code: "future_purchase_action",
+    label: "Ready for purchase action",
+    tone: "soft",
+    endpoint: null,
+    body: {},
+    reason: "Final purchase order execution is intentionally deferred in this foundation."
+  }];
+}
+
+async function buildPurchaseNeedWorkbench(client, tenantId, needId) {
+  const need = await fetchServiceObject(client, tenantId, needId, REORDER_OBJECT_TYPE);
+  if (!need) return { ok: false, status: 404, error: "PURCHASE_NEED_NOT_FOUND" };
+
+  const materialId = need.attrs?.material_id || need.attrs?.materialId || need.attrs?.process_parameters?.parameters?.material_id;
+  const material = await fetchMaterial(client, tenantId, materialId);
+  const [conditions, supplierLinks, requisition] = await Promise.all([
+    listProcurementConditions(client, tenantId),
+    materialId ? listSupplierLinks(client, tenantId, { material_id: materialId }) : Promise.resolve([]),
+    findRequisitionForNeed(client, tenantId, need.id)
+  ]);
+  const stockProfile = buildStockProfileFromNeed(need, material);
+  const recommendation = selectProcurementModel({
+    material,
+    stock_profile: stockProfile,
+    supplier_links: supplierLinks,
+    conditions,
+    requested_qty: stockProfile.suggested_qty
+  });
+  recommendation.material_id = material?.id || materialId || null;
+
+  const rfq = await findRfqForRequisition(client, tenantId, requisition?.id);
+  const [quotes, quoteComparison] = await Promise.all([
+    listQuotesForRfq(client, tenantId, rfq?.id),
+    latestQuoteComparisonForRfq(client, tenantId, rfq?.id)
+  ]);
+  const cashPurchaseOption = buildCashPurchaseOption(recommendation, stockProfile);
+  const timeline = buildProcessTimeline({ need, requisition, rfq, quotes, quoteComparison, recommendation });
+  const nextActions = buildNextActions({ need, requisition, rfq, quotes, quoteComparison, recommendation, cashPurchaseOption });
+
+  return {
+    ok: true,
+    purchase_need: {
+      id: need.id,
+      code: need.code,
+      title: need.title,
+      status: need.status,
+      attrs: need.attrs || {},
+      created_at: need.created_at,
+      updated_at: need.updated_at
+    },
+    source_reorder_suggestion: need,
+    material: serializeMaterial(material),
+    inventory_state: stockProfile,
+    effective_policy: recommendation.effective_policy,
+    supplier_candidates: recommendation.candidate_suppliers || [],
+    supplier_options: supplierLinks,
+    recommended_procurement_model: recommendation,
+    requisition,
+    rfq,
+    quotes,
+    quote_comparison: quoteComparison?.payload || rfq?.attrs?.quote_comparison || null,
+    quote_comparison_record: quoteComparison,
+    cash_purchase_option: cashPurchaseOption,
+    process_timeline: timeline,
+    next_actions: nextActions
+  };
+}
+
 export default async function procurementRoutes(app) {
   app.get("/overview", async (req, reply) => {
     const session = await requireRead(app, req, reply, "PROCUREMENT_READ");
@@ -449,19 +825,19 @@ export default async function procurementRoutes(app) {
       app.db.query("SELECT COUNT(*)::int AS total FROM eip_core.service_object WHERE tenant_id=$1 AND object_type=$2", [session.tenant_id, PURCHASE_RFQ_OBJECT_TYPE]),
       app.db.query("SELECT COUNT(*)::int AS total FROM eip_core.service_object WHERE tenant_id=$1 AND object_type=$2", [session.tenant_id, CASH_PURCHASE_OBJECT_TYPE]),
       listSupplierLinks(app.db, session.tenant_id, {}),
-      listServiceObjects(app.db, session.tenant_id, REORDER_OBJECT_TYPE, { status: "approved", limit: 10 })
+      listPurchaseNeeds(app.db, session.tenant_id, { limit: 25 })
     ]);
 
     return reply.send({
       ok: true,
       stats: {
         supplier_links: supplierLinks.length,
-        open_purchase_needs: needs.items.length,
+        open_purchase_needs: needs.length,
         purchase_requisitions: Number(requisitions.rows[0]?.total || 0),
         rfqs: Number(rfqs.rows[0]?.total || 0),
         cash_purchases: Number(cashPurchases.rows[0]?.total || 0)
       },
-      purchase_needs: needs.items.map((item) => ({
+      purchase_needs: needs.map((item) => ({
         id: item.id,
         code: item.code,
         title: item.title,
@@ -472,6 +848,52 @@ export default async function procurementRoutes(app) {
         process_parameters: item.attrs?.process_parameters || null
       }))
     });
+  });
+
+  app.get("/lookup", async (req, reply) => {
+    const session = await requireRead(app, req, reply, "PROCUREMENT_READ");
+    if (!session) return;
+    const kind = normalizeStatus(req.query?.kind || "material");
+    const q = normalizeOptionalText(req.query?.q);
+    const limit = clampLimit(req.query?.limit || 25);
+    const needle = q ? `%${q}%` : "%";
+    if (["supplier", "suppliers", "agent", "agents"].includes(kind)) {
+      const result = await app.db.query(
+        `
+        SELECT id, code, name, agent_type
+        FROM eip_core.agent
+        WHERE tenant_id=$1
+          AND is_active=true
+          AND (code ILIKE $2 OR name ILIKE $2 OR agent_type ILIKE $2)
+        ORDER BY name NULLS LAST, code NULLS LAST
+        LIMIT $3
+        `,
+        [session.tenant_id, needle, limit]
+      );
+      return reply.send({ ok: true, kind: "supplier", items: result.rows.map(serializeAgent) });
+    }
+
+    const result = await app.db.query(
+      `
+      SELECT id, code, name, material_type, attrs
+      FROM eip_core.material
+      WHERE tenant_id=$1
+        AND is_active=true
+        AND (code ILIKE $2 OR name ILIKE $2 OR material_type ILIKE $2)
+      ORDER BY name NULLS LAST, code NULLS LAST
+      LIMIT $3
+      `,
+      [session.tenant_id, needle, limit]
+    );
+    return reply.send({ ok: true, kind: "material", items: result.rows.map(serializeMaterial) });
+  });
+
+  app.get("/purchase-needs/:id/workbench", async (req, reply) => {
+    const session = await requireRead(app, req, reply, "PROCUREMENT_READ");
+    if (!session) return;
+    const result = await buildPurchaseNeedWorkbench(app.db, session.tenant_id, req.params.id);
+    if (!result.ok) return reply.code(result.status || 404).send({ ok: false, error: result.error });
+    return reply.send(result);
   });
 
   app.get("/supplier-links", async (req, reply) => {

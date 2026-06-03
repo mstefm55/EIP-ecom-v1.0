@@ -9,10 +9,12 @@ Procurement V1 closes the gap between approved inventory reorder need and suppli
 
 ```text
 approved reorder suggestion
--> procurement policy resolution
--> supplier candidates
+-> purchase need workbench
+-> supplier options
+-> procurement route recommendation
 -> purchase requisition
--> RFQ / quote comparison when required
+-> RFQ / supplier offer comparison when required
+-> owner approval
 -> cash/shop purchase receipt for low-value purchases
 ```
 
@@ -171,6 +173,8 @@ Authenticated procurement routes:
 
 ```text
 GET    /api/eip/procurement/overview
+GET    /api/eip/procurement/lookup
+GET    /api/eip/procurement/purchase-needs/:id/workbench
 
 GET    /api/eip/procurement/supplier-links
 POST   /api/eip/procurement/supplier-links
@@ -229,18 +233,38 @@ Procurement is a generic dashboard module:
 Dashboard -> Procurement
 ```
 
-Sections:
+The owner-facing surface is centered on the Purchase Need Workbench, not separate unrelated tables.
+
+Main zones:
 
 ```text
-Overview
-Purchase Needs
-Suppliers
-Requisitions
-RFQs
-Cash Purchase
+Left: Purchase Needs Queue
+Center: Selected Need Workbench
+Right: Recommended Actions / Process Timeline
 ```
 
-The menu item and workspace are descriptor registered and module-gated by active `procurement` tenant settings. The React component is a reusable renderer for descriptor-provided endpoints, tabs, labels, and actions.
+Workbench flow:
+
+```text
+need
+-> supplier options
+-> procurement route
+-> requisition
+-> RFQ / supplier offers when required
+-> comparison
+-> owner approval
+-> purchase action or deferred PO/cash receipt path
+```
+
+Tabs are supporting views only:
+
+```text
+Purchase Need Workbench
+Supplier Policy
+History
+```
+
+The menu item and workspace are descriptor registered and module-gated by active `procurement` tenant settings. The React component is a reusable renderer for descriptor-provided endpoints, tabs, labels, and actions. Business policy remains in `commercial_condition`, `object_link`, process definitions, task templates, and dropdown governance; React displays the resolved backend recommendation.
 
 ## Boundaries
 
@@ -282,12 +306,13 @@ npm run build
 3. Redeploy dashboard.
 4. Ensure the tenant has Inventory and Procurement modules enabled.
 5. Open Dashboard -> Procurement.
-6. Create or verify material-supplier links.
+6. In Supplier Policy, create or verify material-supplier links using the material and supplier selectors.
 7. Approve a reorder suggestion in Dashboard -> Inventory.
-8. In Dashboard -> Procurement -> Purchase Needs, create a requisition.
-9. Approve the requisition.
-10. Create an RFQ, add quotes, compare quotes, and approve the selected quote.
-11. Record a low-value cash/shop purchase and verify stock receipt movement is written.
+8. In Dashboard -> Procurement -> Purchase Need Workbench, select the purchase need.
+9. Confirm the selected need shows material context, supplier options, buying route, RFQ/cash option, next action, and process timeline together.
+10. Create and approve the requisition.
+11. Create an RFQ if recommended, add supplier offers, compare offers, and approve the selected offer.
+12. Record a low-value cash/shop purchase where policy allows it and verify stock receipt movement is written.
 
 ## Known Limitations
 
@@ -295,7 +320,7 @@ npm run build
 No final purchase order execution.
 No supplier outbound transmission.
 No invoice matching or accounting ledger.
-No supplier search picker yet; initial UI accepts IDs for material and supplier selection.
+Supplier Policy has material and supplier selectors, but full supplier onboarding/search remains outside this foundation.
 Cash purchase records a receipt and stock movement but does not create a finance ledger entry.
 ```
 

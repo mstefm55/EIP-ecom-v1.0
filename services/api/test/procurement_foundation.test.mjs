@@ -15,6 +15,7 @@ const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 const route = read("../src/routes/procurement.js");
 const server = read("../src/server.js");
 const migration = read("../db/migrations/0111_procurement_foundation.sql");
+const workbenchUiMigration = read("../db/migrations/0112_procurement_workbench_ui_correction.sql");
 const surfaceSeed = read("../db/seed/ui_surface_dashboard.sql");
 const cloneSql = read("../db/seed/clone_template_to_tenant.sql");
 const adminCloneRoute = read("../src/routes/admin_template_clone.js");
@@ -276,6 +277,8 @@ test("supplier links and quote comparisons normalize relationship policy without
 test("procurement routes are registered and enforce EIP session, CSRF, RBAC, and tenant scope", () => {
   for (const fragment of [
     '"/overview"',
+    '"/lookup"',
+    '"/purchase-needs/:id/workbench"',
     '"/supplier-links"',
     '"/requisitions"',
     '"/requisitions/from-reorder"',
@@ -300,6 +303,13 @@ test("procurement routes are registered and enforce EIP session, CSRF, RBAC, and
   assert.match(route, /FROM eip_core\.service_object/);
   assert.match(route, /eip_core\.info_record/);
   assert.match(route, /app\.coreProcess\.advanceInstance/);
+  assert.match(route, /buildPurchaseNeedWorkbench/);
+  assert.match(route, /supplier_candidates/);
+  assert.match(route, /cash_purchase_option/);
+  assert.match(route, /process_timeline/);
+  assert.match(route, /next_actions/);
+  assert.match(route, /findRfqForRequisition/);
+  assert.match(route, /listQuotesForRfq/);
 });
 
 test("procurement migration is additive and seeds clone-ready governance", () => {
@@ -365,20 +375,43 @@ test("canonical clone path already carries procurement-governed tables and metad
   assert.match(migration, /tenant\.code='eip_ecom'/);
 });
 
+test("procurement workbench UI migration is metadata-only and updates deployed dashboard surfaces", () => {
+  assert.doesNotMatch(workbenchUiMigration, /CREATE\s+TABLE/i);
+  assert.doesNotMatch(workbenchUiMigration, /ALTER\s+TABLE/i);
+  assert.match(workbenchUiMigration, /Purchase Need Workbench/);
+  assert.match(workbenchUiMigration, /\/api\/eip\/procurement\/purchase-needs/);
+  assert.match(workbenchUiMigration, /\/api\/eip\/procurement\/lookup/);
+  assert.match(workbenchUiMigration, /Supplier Policy/);
+  assert.match(workbenchUiMigration, /History/);
+  assert.match(workbenchUiMigration, /jsonb_array_elements\(next_children\)/);
+});
+
 test("procurement dashboard is descriptor registered, module gated, and tenant agnostic", () => {
   assert.match(registry, /import ProcurementWorkspace/);
   assert.match(registry, /ProcurementWorkspace,/);
   assert.match(dashboardSurface, /\{ code: "procurement", label: "Procurement", icon: "ShoppingCart", module: "procurement" \}/);
   assert.match(dashboardSurface, /type: "ProcurementWorkspace"/);
   assert.match(dashboardSurface, /\/api\/eip\/procurement\/overview/);
+  assert.match(dashboardSurface, /\/api\/eip\/procurement\/purchase-needs/);
+  assert.match(dashboardSurface, /\/api\/eip\/procurement\/lookup/);
+  assert.match(dashboardSurface, /Purchase Need Workbench/);
+  assert.match(dashboardSurface, /Supplier Policy/);
   assert.match(surfaceSeed, /"code": "procurement"/);
   assert.match(surfaceSeed, /"type": "ProcurementWorkspace"/);
+  assert.match(surfaceSeed, /"workbench": "\/api\/eip\/procurement\/purchase-needs"/);
+  assert.match(surfaceSeed, /"lookup": "\/api\/eip\/procurement\/lookup"/);
   assert.match(workspace, /export default function ProcurementWorkspace/);
-  assert.match(workspace, /Purchase Needs/);
-  assert.match(workspace, /supplierLinks/);
-  assert.match(workspace, /from-reorder/);
-  assert.match(workspace, /from-requisition/);
+  assert.match(workspace, /Purchase Need Workbench/);
+  assert.match(workspace, /Supplier options for this need/);
+  assert.match(workspace, /Request quotes and supplier offers/);
+  assert.match(workspace, /Cash\/shop purchase option/);
+  assert.match(workspace, /Next best action/);
+  assert.match(workspace, /Process timeline/);
+  assert.match(workspace, /SelectField label="Material"/);
+  assert.match(workspace, /SelectField label="Supplier"/);
   assert.match(workspace, /compareQuotes/);
+  assert.doesNotMatch(workspace, />Material id</i);
+  assert.doesNotMatch(workspace, />Supplier agent id</i);
   const touched = `${route}\n${migration}\n${workspace}\n${dashboardSurface}\n${surfaceSeed}`;
   assert.doesNotMatch(touched, /samara|samarapattern|samara-web-storefront/i);
 });
@@ -387,11 +420,13 @@ test("procurement docs preserve module boundaries and no-heavy-planning scope", 
   assert.match(procurementDocs, /No procurement-specific persistence table was added/);
   assert.match(procurementDocs, /commercial_condition/);
   assert.match(procurementDocs, /object_link/);
+  assert.match(procurementDocs, /Purchase Need Workbench/);
+  assert.match(procurementDocs, /need\s*-> supplier options\s*-> procurement route/s);
   assert.match(procurementDocs, /Dashboard -> Procurement/);
   assert.match(procurementDocs, /does not implement full purchase order execution/);
   assert.match(procurementDocs, /heavy MRP/i);
   assert.match(inventoryDocs, /Procurement Foundation/);
   assert.match(inventoryDocs, /RFQ \/ quote review/);
-  assert.match(smeDocs, /Procurement \| Supplier policy links/);
+  assert.match(smeDocs, /Procurement \| Purchase Need Workbench/);
   assert.match(smeDocs, /Supplier accreditation and supplier-material terms are relationship metadata on `object_link`/);
 });

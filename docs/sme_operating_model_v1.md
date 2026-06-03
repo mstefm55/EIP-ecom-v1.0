@@ -24,7 +24,7 @@ The product should feel like a practical operating system, not an enterprise pla
 | CRM | Customers, leads, interactions, cases, opportunities, intake, mailbox, CRM signals | Stock quantities, payment credentials, purchase orders |
 | Orders & Payments | Sales orders, payment records, returns, refunds, operational actions | Payment provider secrets, tenant payment preferences, stock planning |
 | Inventory | Material stock profile, stock movements, stockout prediction, decision cards, reorder suggestions, stock review tasks | Purchase order commitment, accounting valuation, MRP |
-| Procurement | Supplier policy links, purchase requisitions, RFQs, supplier quote comparison, low-value cash/shop purchase receipt | Full PO execution, supplier integrations, accounting ledger, MRP |
+| Procurement | Purchase Need Workbench, supplier options, governed buying-route recommendation, requisition review, RFQ/supplier offer comparison, low-value cash/shop purchase receipt | Full PO execution, supplier integrations, accounting ledger, MRP |
 | Settings | Tenant-local business preferences and readiness panels | Provider secrets, raw credentials, operational queues |
 | Admin Console -> Connections | Technical connector setup, provider credentials, keys, webhook secrets, rotation, health checks | Operational payment/refund/order work |
 
@@ -90,14 +90,18 @@ The Procurement Foundation continues the inventory approval path:
 
 ```text
 approved reorder suggestion
+-> purchase need workbench
 -> material-supplier object_link candidates
 -> commercial_condition procurement policy
+-> supplier options and buying-route recommendation
 -> purchase requisition
--> RFQ / quote review where needed
+-> RFQ / supplier offer review where needed
 -> cash/shop purchase receipt for low-value buys
 ```
 
 Supplier accreditation and supplier-material terms are relationship metadata on `object_link`; the business rules for how those relationships are selected live in `commercial_condition`.
+
+The owner UX is decision-first: EIP shows what needs buying, why, supplier options, expected cost/cash impact, the recommended procurement route, and the next governed action in one selected purchase need context.
 
 It deliberately avoids:
 
