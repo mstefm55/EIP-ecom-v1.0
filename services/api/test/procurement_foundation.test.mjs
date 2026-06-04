@@ -9,10 +9,14 @@ import {
   resolveProcurementPolicy,
   selectProcurementModel
 } from "../src/services/procurement/procurementFoundation.js";
+import {
+  composeProcurementNextActions
+} from "../src/services/procurement/procurementWorkbench.js";
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 
 const route = read("../src/routes/procurement.js");
+const workbenchService = read("../src/services/procurement/procurementWorkbench.js");
 const server = read("../src/server.js");
 const migration = read("../db/migrations/0111_procurement_foundation.sql");
 const workbenchUiMigration = read("../db/migrations/0112_procurement_workbench_ui_correction.sql");
@@ -298,18 +302,69 @@ test("procurement routes are registered and enforce EIP session, CSRF, RBAC, and
   assert.match(route, /app\.requireCsrf\(req\)/);
   assert.match(route, /hasPermission\(/);
   assert.match(route, /tenant_id=\$1/);
-  assert.match(route, /FROM eip_core\.commercial_condition/);
   assert.match(route, /FROM eip_core\.object_link/);
   assert.match(route, /FROM eip_core\.service_object/);
   assert.match(route, /eip_core\.info_record/);
   assert.match(route, /app\.coreProcess\.advanceInstance/);
   assert.match(route, /buildPurchaseNeedWorkbench/);
-  assert.match(route, /supplier_candidates/);
-  assert.match(route, /cash_purchase_option/);
-  assert.match(route, /process_timeline/);
-  assert.match(route, /next_actions/);
+  assert.match(route, /composePurchaseNeedWorkbench/);
   assert.match(route, /findRfqForRequisition/);
   assert.match(route, /listQuotesForRfq/);
+});
+
+test("procurement route is thinner while workbench action composition is service-owned", () => {
+  assert.match(workbenchService, /export async function listProcurementConditions/);
+  assert.match(workbenchService, /PROCUREMENT_CONDITION_TYPES/);
+  assert.match(workbenchService, /PROCUREMENT_CONDITION_CATEGORIES/);
+  assert.match(workbenchService, /export function composeProcurementNextActions/);
+  assert.match(workbenchService, /export function composePurchaseNeedWorkbench/);
+  assert.match(workbenchService, /supplier_candidates/);
+  assert.match(workbenchService, /cash_purchase_option/);
+  assert.match(workbenchService, /process_timeline/);
+  assert.match(workbenchService, /next_actions/);
+  assert.doesNotMatch(route, /function buildNextActions/);
+  assert.doesNotMatch(route, /function buildProcessTimeline/);
+  assert.doesNotMatch(route, /function buildCashPurchaseOption/);
+  assert.doesNotMatch(route, /FROM eip_core\.commercial_condition/);
+});
+
+test("procurement next actions remain transitional, process-aware, and do not expose PO execution", () => {
+  const noExecutablePo = composeProcurementNextActions({
+    need: { id: "need-1", attrs: { material_id: "mat-1" } },
+    requisition: { id: "req-1", status: "converted_to_rfq" },
+    rfq: { id: "rfq-1", status: "supplier_selected" },
+    quotes: [{ id: "quote-1" }],
+    quoteComparison: { id: "comparison-1", payload: { recommended_supplier_agent_id: "supplier-1" } },
+    recommendation: { procurement_model: "request_for_quote" },
+    cashPurchaseOption: null,
+    processState: { rfq: { status: "active" } }
+  });
+  assert.equal(noExecutablePo.length, 1);
+  assert.equal(noExecutablePo[0].code, "future_purchase_action");
+  assert.equal(noExecutablePo[0].endpoint, null);
+  assert.match(noExecutablePo[0].label, /future purchase action/i);
+  assert.match(noExecutablePo[0].reason, /Purchase order execution is not enabled yet/);
+
+  const pendingRfq = composeProcurementNextActions({
+    need: { id: "need-1", attrs: { material_id: "mat-1" } },
+    requisition: { id: "req-1", status: "approved" },
+    rfq: null,
+    quotes: [],
+    quoteComparison: null,
+    recommendation: { procurement_model: "request_for_quote" },
+    cashPurchaseOption: null,
+    processState: { requisition: { status: "active" } }
+  });
+  assert.equal(pendingRfq[0].code, "create_rfq");
+  assert.equal(pendingRfq[0].process_status, "active");
+});
+
+test("procurement foundation does not add final PO execution or supplier outbound routes", () => {
+  const touched = `${route}\n${workbenchService}\n${workspace}\n${dashboardSurface}\n${surfaceSeed}`;
+  assert.doesNotMatch(touched, /\/purchase-orders/i);
+  assert.doesNotMatch(touched, /supplierOutbound|supplier_outbound|transmitSupplier|supplierTransmit|sendToSupplier|\/edi\//i);
+  assert.doesNotMatch(touched, /PO completed|PO sent|PO processing ready/i);
+  assert.match(touched, /future purchase action|Purchase order execution is not enabled yet|purchase order execution is intentionally deferred/i);
 });
 
 test("procurement migration is additive and seeds clone-ready governance", () => {

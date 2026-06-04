@@ -115,13 +115,13 @@ heavy MRP
 
 ## Next Operating Wave
 
-Purchase Order Execution Foundation should build on approved requisitions and selected quotes:
+Purchase Order Execution Foundation should be designed later as its own governed wave. The current V1 foundation preserves future readiness from approved requisitions and selected quotes, but it does not enable final PO execution, supplier outbound transmission, invoice matching, or payment execution.
 
 ```text
 approved reorder suggestion
 -> purchase requisition / selected quote
--> purchase order draft
--> supplier transmission adapter
--> receiving
--> purchase_receipt inventory movement
+-> dedicated PO process and UI design
+-> supplier communication requirements
+-> receiving requirements
+-> invoice/evidence requirements
 ```

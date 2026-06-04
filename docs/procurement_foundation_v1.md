@@ -165,7 +165,60 @@ PURCHASE_ORDER_PREPARE
 CASH_PURCHASE_REVIEW
 ```
 
-The API creates service objects and starts the configured process binding. Approve/ignore/quote-approve actions advance the process engine. Full purchase order execution is seeded as a draft flow only and remains intentionally deferred.
+The API creates service objects and starts the configured process binding. Approve/ignore/quote-approve actions advance the process engine. Full purchase order execution is intentionally deferred.
+
+## Route Thinness / Process Governance
+
+`services/api/src/routes/procurement.js` is the transport and orchestration layer. It owns:
+
+```text
+session, CSRF, RBAC, and tenant scoping
+loading existing kernel records
+creating service_object and info_record evidence
+linking existing kernel objects
+starting and advancing process instances
+returning composed API responses
+```
+
+Reusable procurement calculation and workbench composition live in service helpers:
+
+```text
+services/api/src/services/procurement/procurementFoundation.js
+services/api/src/services/procurement/procurementWorkbench.js
+```
+
+Ownership boundaries:
+
+```text
+commercial_condition owns procurement policy and condition filtering
+process_def/process_binding/task_template/effects own approvals and transitions
+procurementWorkbench owns low-level derived workbench actions and timeline display hints
+React displays backend next_actions, recommendations, candidates, and timeline
+```
+
+The current `next_actions` composer is a transitional helper derived from object status, active process state, commercial policy, and procurement recommendation. The next maturity step is to expose available action metadata directly from process/effect governance so the route can ask the process engine what actions are available.
+
+## Purchase Order Boundary
+
+This foundation supports purchase need review, requisition preparation, RFQ preparation, supplier quote comparison, quote approval, and low-value cash/shop purchase receipt capture.
+
+It does not implement final Purchase Order execution.
+
+```text
+No PO lifecycle screens.
+No supplier sending or transmission.
+No email/API/EDI supplier outbound path.
+No invoice matching or accounting payment execution.
+No MRP or production planning.
+```
+
+Where a purchase need has reached the end of the current foundation, the UI/API may show:
+
+```text
+Ready for future purchase action.
+Purchase order execution is not enabled yet.
+PO processing will be added in a later governed wave.
+```
 
 ## Routes
 
@@ -253,7 +306,7 @@ need
 -> RFQ / supplier offers when required
 -> comparison
 -> owner approval
--> purchase action or deferred PO/cash receipt path
+-> future purchase action or cash receipt path
 ```
 
 Tabs are supporting views only:
@@ -330,9 +383,9 @@ Purchase Order Execution Foundation:
 
 ```text
 approved requisition or selected quote
--> PO draft
--> supplier transmission adapter
--> receipt confirmation
--> invoice/evidence link
--> governed receiving and accounting handoff
+-> dedicated PO process and UI design
+-> supplier communication requirements
+-> receiving requirements
+-> invoice/evidence requirements
+-> governed accounting handoff requirements
 ```
