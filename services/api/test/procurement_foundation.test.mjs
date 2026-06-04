@@ -16,6 +16,7 @@ import {
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 
 const route = read("../src/routes/procurement.js");
+const operationsService = read("../src/services/procurement/procurementOperations.js");
 const workbenchService = read("../src/services/procurement/procurementWorkbench.js");
 const server = read("../src/server.js");
 const migration = read("../db/migrations/0111_procurement_foundation.sql");
@@ -302,17 +303,22 @@ test("procurement routes are registered and enforce EIP session, CSRF, RBAC, and
   assert.match(route, /app\.requireCsrf\(req\)/);
   assert.match(route, /hasPermission\(/);
   assert.match(route, /tenant_id=\$1/);
-  assert.match(route, /FROM eip_core\.object_link/);
   assert.match(route, /FROM eip_core\.service_object/);
-  assert.match(route, /eip_core\.info_record/);
-  assert.match(route, /app\.coreProcess\.advanceInstance/);
   assert.match(route, /buildPurchaseNeedWorkbench/);
-  assert.match(route, /composePurchaseNeedWorkbench/);
-  assert.match(route, /findRfqForRequisition/);
   assert.match(route, /listQuotesForRfq/);
+  assert.match(route, /advanceObject/);
+  assert.match(operationsService, /app\.coreProcess\.advanceInstance/);
+  assert.match(operationsService, /ensureProcessInstance/);
+  assert.match(operationsService, /FROM eip_core\.object_link/);
+  assert.match(operationsService, /eip_core\.info_record/);
 });
 
-test("procurement route is thinner while workbench action composition is service-owned", () => {
+test("procurement route is thin while workbench and process adapters are service-owned", () => {
+  assert.match(route, /from "\.\.\/services\/procurement\/procurementOperations\.js"/);
+  assert.doesNotMatch(route, /from "\.\.\/services\/procurement\/procurementFoundation\.js"/);
+  assert.doesNotMatch(route, /from "\.\.\/services\/inventory\/inventoryFoundation\.js"/);
+  assert.doesNotMatch(route, /randomBytes|sha256Hex/);
+
   assert.match(workbenchService, /export async function listProcurementConditions/);
   assert.match(workbenchService, /PROCUREMENT_CONDITION_TYPES/);
   assert.match(workbenchService, /PROCUREMENT_CONDITION_CATEGORIES/);
@@ -322,9 +328,22 @@ test("procurement route is thinner while workbench action composition is service
   assert.match(workbenchService, /cash_purchase_option/);
   assert.match(workbenchService, /process_timeline/);
   assert.match(workbenchService, /next_actions/);
+
+  assert.match(operationsService, /export async function buildRequisitionFromReorder/);
+  assert.match(operationsService, /export async function createRfqFromRequisition/);
+  assert.match(operationsService, /export async function addSupplierQuote/);
+  assert.match(operationsService, /export async function compareRfqQuotes/);
+  assert.match(operationsService, /export async function recordCashPurchase/);
+  assert.match(operationsService, /selectProcurementModel/);
+  assert.match(operationsService, /compareSupplierQuotes/);
+
+  assert.doesNotMatch(route, /function buildRequisitionFromReorder/);
+  assert.doesNotMatch(route, /function advanceObject/);
   assert.doesNotMatch(route, /function buildNextActions/);
   assert.doesNotMatch(route, /function buildProcessTimeline/);
   assert.doesNotMatch(route, /function buildCashPurchaseOption/);
+  assert.doesNotMatch(route, /selectProcurementModel|compareSupplierQuotes|buildRfqPayload|normalizeSupplierQuote/);
+  assert.doesNotMatch(route, /applyInventoryMovement|normalizeMovement|status='comparison_ready'|cash_shop_purchase|DUE_ON_RECEIPT/);
   assert.doesNotMatch(route, /FROM eip_core\.commercial_condition/);
 });
 
@@ -360,7 +379,7 @@ test("procurement next actions remain transitional, process-aware, and do not ex
 });
 
 test("procurement foundation does not add final PO execution or supplier outbound routes", () => {
-  const touched = `${route}\n${workbenchService}\n${workspace}\n${dashboardSurface}\n${surfaceSeed}`;
+  const touched = `${route}\n${operationsService}\n${workbenchService}\n${workspace}\n${dashboardSurface}\n${surfaceSeed}`;
   assert.doesNotMatch(touched, /\/purchase-orders/i);
   assert.doesNotMatch(touched, /supplierOutbound|supplier_outbound|transmitSupplier|supplierTransmit|sendToSupplier|\/edi\//i);
   assert.doesNotMatch(touched, /PO completed|PO sent|PO processing ready/i);

@@ -169,22 +169,35 @@ The API creates service objects and starts the configured process binding. Appro
 
 ## Route Thinness / Process Governance
 
-`services/api/src/routes/procurement.js` is the transport and orchestration layer. It owns:
+`services/api/src/routes/procurement.js` is the transport and transaction wrapper. It owns:
 
 ```text
 session, CSRF, RBAC, and tenant scoping
-loading existing kernel records
-creating service_object and info_record evidence
-linking existing kernel objects
-starting and advancing process instances
+request-shape validation
+opening, committing, and rolling back transactions
+calling procurement service adapters
+calling process-engine-backed transition adapters
 returning composed API responses
 ```
 
-Reusable procurement calculation and workbench composition live in service helpers:
+It is not the authority for:
+
+```text
+business workflow sequence
+approval rules
+next business step
+RFQ/direct/cash/PO process flow
+transition validity
+supplier selection policy
+purchase commitment logic
+```
+
+Reusable procurement calculation, workbench composition, and temporary persistence/process adapters live in service helpers:
 
 ```text
 services/api/src/services/procurement/procurementFoundation.js
 services/api/src/services/procurement/procurementWorkbench.js
+services/api/src/services/procurement/procurementOperations.js
 ```
 
 Ownership boundaries:
@@ -193,8 +206,11 @@ Ownership boundaries:
 commercial_condition owns procurement policy and condition filtering
 process_def/process_binding/task_template/effects own approvals and transitions
 procurementWorkbench owns low-level derived workbench actions and timeline display hints
+procurementOperations owns temporary kernel-record adapter functions and delegates transitions to the process engine
 React displays backend next_actions, recommendations, candidates, and timeline
 ```
+
+Procurement business process authority now belongs to the process engine, not `procurement.js`.
 
 The current `next_actions` composer is a transitional helper derived from object status, active process state, commercial policy, and procurement recommendation. The next maturity step is to expose available action metadata directly from process/effect governance so the route can ask the process engine what actions are available.
 
