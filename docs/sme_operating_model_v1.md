@@ -23,7 +23,7 @@ The product should feel like a practical operating system, not an enterprise pla
 | --- | --- | --- |
 | CRM | Customers, leads, interactions, cases, opportunities, intake, mailbox, CRM signals | Stock quantities, payment credentials, purchase orders |
 | Orders & Payments | Sales orders, payment records, returns, refunds, operational actions | Payment provider secrets, tenant payment preferences, stock planning |
-| Inventory | Material stock profile, stock movements, stockout prediction, decision cards, reorder suggestions, stock review tasks | Purchase order commitment, accounting valuation, MRP |
+| Inventory | Stock Signals Queue, material stock profile, stock movements, stockout prediction, policy-backed reorder suggestions, stock review tasks, Procurement handoff | Purchase order commitment, supplier outbound transmission, accounting valuation, MRP |
 | Procurement | Purchase Need Workbench, supplier options, governed buying-route recommendation, requisition review, RFQ/supplier offer comparison, low-value cash/shop purchase receipt | Full PO execution, supplier integrations, accounting ledger, MRP |
 | Settings | Tenant-local business preferences and readiness panels | Provider secrets, raw credentials, operational queues |
 | Admin Console -> Connections | Technical connector setup, provider credentials, keys, webhook secrets, rotation, health checks | Operational payment/refund/order work |
@@ -39,20 +39,21 @@ commercial_condition reorder/supply policy
 -> days-of-cover and stockout recommendation
 -> INVENTORY_REORDER_SUGGESTION service_object
 -> governed review task
--> approved purchase preparation later
+-> Procurement Purchase Need Workbench handoff
 ```
 
 Inventory is recommendation-led rather than table-led:
 
 ```text
-stock profile
--> decision card
--> reorder suggestion
--> purchase requisition bridge
--> human approval before commitment
+stock signal
+-> material risk context
+-> effective commercial_condition policy
+-> reorder recommendation
+-> Action Rail
+-> Procurement Purchase Need Workbench handoff
 ```
 
-Machine actions may detect stockout risk, calculate suggested quantity, warn about cash impact, flag supplier risk, and prepare purchase-requisition metadata. Human approval remains required for purchase commitment, supplier changes, high-value reorders, risky supplier decisions, and cash-impacting actions.
+Machine actions may detect stockout risk, calculate suggested quantity, warn about cash impact, flag supplier risk, and prepare purchase-need metadata. Human approval remains required for purchase commitment, supplier changes, high-value reorders, risky supplier decisions, and cash-impacting actions. Inventory does not own supplier selection, RFQ/direct/cash route decisions, purchase order execution, or supplier outbound transmission; those belong to Procurement and later governed purchase execution waves.
 
 Reorder, supplier, trade, purchasing, payment, freight, and low-value cash purchase policy belongs in governed `eip_core.commercial_condition` rows. Material attrs keep current stock quantities, item-specific overrides, and calculated recommendation snapshots so tenant policy can be cloned, governed, and changed without turning product stock records into the policy authority.
 
@@ -66,6 +67,7 @@ finite capacity scheduling
 warehouse/bin complexity
 accounting ledger
 purchase order creation
+supplier outbound transmission
 ```
 
 ## Process Boundaries

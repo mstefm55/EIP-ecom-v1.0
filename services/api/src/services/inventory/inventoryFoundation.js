@@ -716,11 +716,11 @@ export function normalizeInventoryProfile(material = {}, options = {}) {
     purchase_requisition_bridge: {
       ready_for_draft: suggestedQty > 0,
       draft_object_type: "PURCHASE_REQUISITION_DRAFT",
-      future_commitment_object_type: "PURCHASE_ORDER",
       bridge_status: suggestedQty > 0 ? "proposal_ready" : "not_needed",
       commitment_required: true,
       process_parameters: recommendation.process_parameters,
-      future_transmission_modes: ["email", "api_json", "edi_webhook"]
+      handoff_module: "procurement",
+      handoff_boundary: "inventory_signal_to_procurement_workbench"
     },
     last_movement_at: normalizeOptionalText(inventory.last_movement_at)
   };

@@ -302,18 +302,18 @@ SELECT
           "props": {
             "module": "inventory",
             "title": "Inventory",
-            "subtitle": "Stock alerts, material balances, movements, and reorder suggestions for daily SME operations.",
+            "subtitle": "Stock signal queue, policy-backed recommendation, procurement handoff, and timeline.",
             "endpoints": {
               "overview": "/api/eip/inventory/overview",
               "materials": "/api/eip/inventory/materials",
-              "suggestions": "/api/eip/inventory/reorder-suggestions"
+              "suggestions": "/api/eip/inventory/reorder-suggestions",
+              "workbench": "/api/eip/inventory/reorder-suggestions"
             },
             "tabs": [
-              { "id": "overview", "label": "Overview" },
-              { "id": "alerts", "label": "Stock Alerts" },
-              { "id": "materials", "label": "Materials" },
-              { "id": "suggestions", "label": "Reorder Suggestions" },
-              { "id": "movements", "label": "Movements" }
+              { "id": "queue", "label": "Stock Signals Queue" },
+              { "id": "workbench", "label": "Inventory Signal Workbench" },
+              { "id": "actions", "label": "Action Rail" },
+              { "id": "tools", "label": "Material Policy Tools" }
             ],
             "actions": {
               "refresh": "Refresh",
@@ -324,7 +324,8 @@ SELECT
               "createSuggestion": "Create reorder suggestion",
               "approve": "Approve",
               "ignore": "Ignore",
-              "createTask": "Create task"
+              "createTask": "Create task",
+              "openProcurement": "Open in Procurement"
             }
           }
         }

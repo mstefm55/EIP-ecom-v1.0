@@ -10,6 +10,8 @@ import {
   normalizeMovement,
   normalizeReorderStatus
 } from "../services/inventory/inventoryFoundation.js";
+import { composeInventorySignalWorkbench } from "../services/inventory/inventoryWorkbench.js";
+import { findRequisitionForNeed, findRfqForRequisition } from "../services/procurement/procurementOperations.js";
 
 const MAX_LIMIT = 200;
 const REORDER_OBJECT_TYPE = "INVENTORY_REORDER_SUGGESTION";
@@ -263,6 +265,21 @@ async function listMovements(client, tenantId, materialId, limit = 50) {
     LIMIT $4
     `,
     [tenantId, MOVEMENT_RECORD_TYPE, materialId, clampLimit(limit)]
+  );
+  return result.rows || [];
+}
+
+async function listSuggestionTasks(client, tenantId, suggestionId, limit = 20) {
+  const result = await client.query(
+    `
+    SELECT id, task_type, status, title, due_at, created_at
+    FROM eip_core.task
+    WHERE tenant_id=$1
+      AND service_object_id=$2
+    ORDER BY created_at DESC
+    LIMIT $3
+    `,
+    [tenantId, suggestionId, clampLimit(limit)]
   );
   return result.rows || [];
 }
@@ -713,6 +730,45 @@ export default async function inventoryRoutes(app) {
     } finally {
       client.release();
     }
+  });
+
+  app.get("/reorder-suggestions/:id/workbench", async (req, reply) => {
+    const session = await requireRead(app, req, reply, "INVENTORY_REORDER_READ");
+    if (!session) return;
+
+    const suggestion = await fetchSuggestion(app.db, session.tenant_id, req.params.id);
+    if (!suggestion) return reply.code(404).send({ ok: false, error: "NOT_FOUND" });
+
+    const [material, conditions, movements, requisition, tasks, suggestionProcess] = await Promise.all([
+      suggestion.material_id ? fetchMaterial(app.db, session.tenant_id, suggestion.material_id) : Promise.resolve(null),
+      listInventoryPolicyConditions(app.db, session.tenant_id),
+      suggestion.material_id ? listMovements(app.db, session.tenant_id, suggestion.material_id, 12) : Promise.resolve([]),
+      findRequisitionForNeed(app.db, session.tenant_id, suggestion.id),
+      listSuggestionTasks(app.db, session.tenant_id, suggestion.id, 12),
+      app.coreProcess.findActiveInstance(app.db, session.tenant_id, suggestion.id).catch(() => null)
+    ]);
+    const [rfq, requisitionProcess] = await Promise.all([
+      requisition?.id ? findRfqForRequisition(app.db, session.tenant_id, requisition.id) : Promise.resolve(null),
+      requisition?.id ? app.coreProcess.findActiveInstance(app.db, session.tenant_id, requisition.id).catch(() => null) : Promise.resolve(null)
+    ]);
+    const rfqProcess = rfq?.id
+      ? await app.coreProcess.findActiveInstance(app.db, session.tenant_id, rfq.id).catch(() => null)
+      : null;
+
+    return reply.send(composeInventorySignalWorkbench({
+      suggestion,
+      material,
+      conditions,
+      movements,
+      requisition,
+      rfq,
+      tasks,
+      processState: {
+        suggestion: suggestionProcess,
+        requisition: requisitionProcess,
+        rfq: rfqProcess
+      }
+    }));
   });
 
   app.get("/reorder-suggestions/:id", async (req, reply) => {

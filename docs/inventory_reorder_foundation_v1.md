@@ -13,9 +13,10 @@ material stock profile
 -> stockout/reorder recommendation
 -> reorder suggestion service_object
 -> review task / approval workflow
+-> Procurement Purchase Need Workbench handoff
 ```
 
-It does not implement purchase orders, accounting ledger, MRP, warehouse management, production planning, IBP, or S&OP.
+It does not implement purchase orders, supplier outbound transmission, accounting ledger, MRP, warehouse management, production planning, IBP, or S&OP.
 It does establish the policy and recommendation foundation needed for those methods to be activated progressively.
 
 ## Kernel Model
@@ -154,7 +155,7 @@ already_out_of_stock
 
 ## Recommendation Logic
 
-The route runtime calculates recommendation-ready outputs from the stock profile:
+The inventory service helpers calculate recommendation-ready outputs from the stock profile. Routes enforce session, CSRF/RBAC where needed, tenant scope, transactions, and response orchestration; they do not own the business workflow sequence.
 
 ```text
 available_qty = stock_on_hand - reserved_qty unless explicitly supplied
@@ -170,6 +171,51 @@ cash_required_for_reorder = suggested_qty * landed/average/unit cost + transacti
 ```
 
 If there is no consumption rate yet, the system still produces policy-based recommendations from reorder point, minimum stock, and reorder quantity, and marks confidence as `policy_only`.
+
+## Inventory Signal Workbench
+
+The dashboard now uses a journey-first layout:
+
+```text
+Stock Signals Queue -> Inventory Signal Workbench -> Action Rail -> Timeline
+```
+
+The workbench starts from one stock signal or reorder suggestion and composes a read model from existing kernel data:
+
+```text
+material
+material.attrs.inventory current state and material overrides
+commercial_condition effective reorder/supply policy
+INVENTORY_REORDER_SUGGESTION service_object
+INVENTORY_STOCK_MOVEMENT info_records
+linked procurement requisition/RFQ records where present
+active process/task state
+```
+
+The route is:
+
+```text
+GET /api/eip/inventory/reorder-suggestions/:id/workbench
+```
+
+The response includes:
+
+```text
+signal
+material
+inventory_state
+risk_explanation
+effective_policy
+policy_source
+material_override
+reorder_recommendation
+procurement_bridge
+recent_movements
+process_timeline
+next_actions
+```
+
+`next_actions` is a display/action read model derived from the current suggestion status, active process state, open tasks, policy-backed recommendation, and linked procurement state. Inventory actions approve/ignore the reorder suggestion through the process engine, create follow-up tasks, or hand off to Procurement. Inventory does not execute PO lifecycle work or supplier outbound transmission.
 
 ## Stock Movements
 
@@ -244,6 +290,7 @@ POST   /api/eip/inventory/materials/:id/movements
 
 GET    /api/eip/inventory/reorder-suggestions
 POST   /api/eip/inventory/reorder-suggestions/run
+GET    /api/eip/inventory/reorder-suggestions/:id/workbench
 GET    /api/eip/inventory/reorder-suggestions/:id
 POST   /api/eip/inventory/reorder-suggestions/:id/approve
 POST   /api/eip/inventory/reorder-suggestions/:id/ignore
@@ -320,16 +367,17 @@ Dashboard -> Inventory
 Sections:
 
 ```text
-Overview
-Stock Alerts / Decision Cards
-Materials
-Reorder Suggestions
-Movements
+Stock Signals Queue
+Inventory Signal Workbench
+Action Rail
+Process timeline
+Recent stock movements
+Material lookup and policy tools
 ```
 
 The menu item is descriptor registered and module-gated by active `inventory` tenant settings. The React widget is a low-level reusable renderer for the descriptor-provided endpoints, tabs, labels, and actions.
 
-The default UI shows decision cards, not a technical planning table. Advanced fields appear in the selected material policy panel for operators who need to tune reorder behavior.
+The default UI is journey-led, not a technical planning table. It starts from one stock signal, explains the material risk, shows the governed policy source, separates material overrides from commercial-condition policy, presents one action rail, and hands the buying journey to Procurement. Advanced fields remain in the selected material policy tools for operators who need to tune reorder behavior. Raw UUIDs are not primary labels where material names, codes, suggestion titles, or condition codes exist.
 
 ## Payment And Order Boundary
 
@@ -345,10 +393,10 @@ low stock / predicted stockout
 -> purchase requisition draft
 -> RFQ / quote review when policy requires
 -> cash/shop purchase capture for low-value purchases
--> future purchase order generation
+-> future governed purchase commitment boundary
 ```
 
-The policy bridge is documented in `docs/procurement_foundation_v1.md`. Human approval remains required for purchase commitment, supplier changes, high-value reorder, unusual quantities, risky suppliers, and cash-impacting actions.
+The policy bridge is documented in `docs/procurement_foundation_v1.md`. Human approval remains required for purchase commitment, supplier changes, high-value reorder, unusual quantities, risky suppliers, and cash-impacting actions. Inventory itself does not expose final PO lifecycle UI, PO sending, supplier outbound transmission, invoice matching, ledger posting, or payment execution.
 
 ## Settings Boundary
 
@@ -380,11 +428,12 @@ npm run build
 3. Redeploy dashboard.
 4. Ensure the tenant has the Inventory module enabled.
 5. Open Dashboard -> Inventory.
-6. Verify overview, materials, and alerts load.
-7. Select a material, set reorder policy, and record a manual movement.
-8. Run low-stock scan.
+6. Verify Stock Signals Queue, Inventory Signal Workbench, Action Rail, and timeline load.
+7. Run low-stock scan if no signals exist.
+8. Select one stock signal and verify material context, effective policy, material overrides, recommendation, recent movements, and procurement bridge display.
 9. Approve or ignore the created reorder suggestion.
-10. Create a supplier check task from the suggestion.
+10. Use Open in Procurement to continue the purchase need journey.
+11. Open material lookup/policy tools only for policy tuning or stock movement recording.
 
 ## Known Limitations
 
