@@ -13,6 +13,7 @@ import { LRUCache } from "lru-cache";
 
 import dbPlugin from "./plugins/db.js";
 import { envSchema, parseRequiredAgreements } from "./config.js";
+import { sessionTouchIntervalMs } from "./auth/sessionPolicy.js";
 
 import healthRoutes from "./routes/health.js";
 import authRoutes from "./routes/auth.js";
@@ -391,7 +392,7 @@ async function buildServer() {
         return null;
       }
 
-      const touchIntervalMs = 5 * 60 * 1000;
+      const touchIntervalMs = sessionTouchIntervalMs(idleTtlMin);
       if (!req._sessionTouched && (!Number.isFinite(lastSeenMs) || Date.now() - lastSeenMs >= touchIntervalMs)) {
         const nowIso = new Date().toISOString();
         await app.db.query(

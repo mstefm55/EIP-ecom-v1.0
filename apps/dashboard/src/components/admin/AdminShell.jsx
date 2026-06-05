@@ -153,8 +153,12 @@ export default function AdminShell({ node, children, ctx }) {
     }
   }, [ctx]);
 
+  const keepSessionAlive = useCallback(() => {
+    return apiFetch("/api/eip/auth/whoami").catch(() => {});
+  }, []);
+
   const idleMinutes = Number(import.meta.env.VITE_SESSION_IDLE_MIN || 120);
-  useIdleLogout({ idleMinutes, enabled: true, onTimeout: handleSignOut });
+  useIdleLogout({ idleMinutes, enabled: true, onTimeout: handleSignOut, onActivityPing: keepSessionAlive });
 
   useEffect(() => {
     function handleStepUpEvent() {

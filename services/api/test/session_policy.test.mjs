@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildStepUpAttrs, evaluateStepUp } from "../src/auth/sessionPolicy.js";
+import { buildStepUpAttrs, evaluateStepUp, sessionTouchIntervalMs } from "../src/auth/sessionPolicy.js";
 
 test("step-up policy accepts recent OTP/TOTP assurance and rejects stale assurance", () => {
   const nowMs = Date.parse("2026-05-24T12:00:00.000Z");
@@ -76,4 +76,18 @@ test("step-up attrs mark passkeys as phishing-resistant", () => {
   const otp = buildStepUpAttrs("otp");
   assert.equal(otp.step_up_phishing_resistant, false);
   assert.equal(otp.assurance, "high");
+});
+
+test("session touch interval stays below short idle TTLs", () => {
+  const fiveMinuteIdleMs = 5 * 60 * 1000;
+  const touchMs = sessionTouchIntervalMs(5);
+  assert.ok(touchMs > 0);
+  assert.ok(touchMs < fiveMinuteIdleMs);
+  assert.ok(touchMs <= Math.floor(fiveMinuteIdleMs / 3));
+});
+
+test("session touch interval remains bounded for longer idle TTLs", () => {
+  assert.equal(sessionTouchIntervalMs(15), 5 * 60 * 1000);
+  assert.equal(sessionTouchIntervalMs(60), 5 * 60 * 1000);
+  assert.equal(sessionTouchIntervalMs(0), 0);
 });

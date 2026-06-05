@@ -43,4 +43,12 @@ function evaluateStepUp(session, opts = {}) {
   };
 }
 
-export { buildStepUpAttrs, evaluateStepUp };
+function sessionTouchIntervalMs(idleTtlMin) {
+  const idleMs = normalizeNumber(idleTtlMin, 0) * 60 * 1000;
+  if (!idleMs) return 0;
+  const minimum = 30 * 1000;
+  const maximum = 5 * 60 * 1000;
+  return Math.min(maximum, Math.max(minimum, Math.floor(idleMs / 3)));
+}
+
+export { buildStepUpAttrs, evaluateStepUp, sessionTouchIntervalMs };
