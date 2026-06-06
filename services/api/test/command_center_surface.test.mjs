@@ -34,6 +34,7 @@ test("command center dashboard UI is descriptor-driven and keeps the task browse
   const descriptor = read("apps/dashboard/src/engine/surfaces/dashboard.js");
   const seed = read("services/api/db/seed/ui_surface_dashboard.sql");
   const migration = read("services/api/db/migrations/0113_command_center_dashboard_descriptor.sql");
+  const refreshMigration = read("services/api/db/migrations/0114_command_center_theme_descriptor_refresh.sql");
 
   assert.match(component, /mergeConfig\(node\?\.props/);
   assert.match(component, /COMMAND_CENTER_THEMES/);
@@ -76,6 +77,9 @@ test("command center dashboard UI is descriptor-driven and keeps the task browse
   assert.match(migration, /"theme"/);
   assert.match(migration, /"density": "comfortable"/);
   assert.match(migration, /jsonb_set\(panel_child, '\{props\}', command_center_props, true\)/);
+  assert.match(refreshMigration, /command_center_theme_descriptor_refresh/);
+  assert.match(refreshMigration, /"command_center_theme_tokens":true/);
+  assert.match(refreshMigration, /"variant": "eip_v1"/);
 });
 
 test("command center category routing uses scored metadata instead of broad text includes", () => {

@@ -116,7 +116,7 @@ cd services/api
 npm run migrate
 ```
 
-Migration `0113_command_center_dashboard_descriptor.sql` is metadata-only. It patches active/published `dashboard` UI surface descriptors so Command Center labels, tabs, widgets, category presentation, and Task Browser settings come from persisted surface metadata rather than only React fallback defaults.
+Migration `0113_command_center_dashboard_descriptor.sql` is metadata-only. Migration `0114_command_center_theme_descriptor_refresh.sql` is the additive hosted refresh for environments where `0113` was already applied. It patches active/published `dashboard` UI surface descriptors so Command Center labels, tabs, widgets, category presentation, Task Browser settings, and theme tokens come from persisted surface metadata rather than only React fallback defaults.
 
 Manual dashboard check:
 
