@@ -17,7 +17,8 @@ The Command Center is the tenant dashboard landing surface for SME owners. It is
 - The center column shows compact business statistic cards with lightweight trend graphics above focused Burning Topics.
 - The right rail is a full-height Task Browser sized for roughly one quarter of the viewport.
 - Task Browser category cards are stacked. One category opens by default, and the task list inside that category is scroll bounded.
-- Bottom filters, sorting, pinning, and delegation controls are secondary and collapsible.
+- Task Browser filters, sorting, and category pinning are opened from a top header modal so the expanded task list remains readable.
+- Workload is the calendar scheduling tab. It keeps the task list available on the side, but the main interaction is day/week/month calendar planning.
 
 ## Backend Composition
 
@@ -76,8 +77,11 @@ React owns only reusable layout primitives:
 - tab switcher
 - Burning Topics panels
 - Task Browser category card
+- Task Browser filter modal
 - task row
 - delegation form
+- day/week/month calendar workbench
+- schedule modal
 
 Module approvals, replies, purchasing decisions, inventory decisions, and commerce operations are not implemented in React. The Command Center opens the relevant governed workspace for those actions.
 
@@ -142,9 +146,12 @@ Manual dashboard check:
 3. Confirm Command Center, Analytics, and Workload tabs render.
 4. Confirm right-side Task Browser appears.
 5. Open a category and verify the task list scrolls inside the category instead of expanding the whole page.
-6. Pin or unpin categories and verify Burning Topics only shows urgent tasks from pinned categories.
-7. Use Open on a task and confirm it routes to the governed module workspace.
-8. Delegate a task you own or an unassigned task and confirm the task assignment updates after refresh.
+6. Open the Task Browser filter button in the header and verify search, due, assignment, category, sort, and pinning live inside the modal.
+7. Pin or unpin categories and verify Burning Topics only shows urgent tasks from pinned categories.
+8. Open Workload and verify day/week/month calendar views, selected-day highlighting, side task list, and schedule/reschedule actions.
+9. Use Open on a task and confirm it routes to the governed module workspace.
+10. Delegate a task you own or an unassigned task and confirm the task assignment updates after refresh.
+11. Schedule a task on the 10th and confirm the date input remains the 10th in the local browser timezone.
 
 ## Known Limits
 

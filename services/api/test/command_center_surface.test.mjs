@@ -50,10 +50,15 @@ test("command center dashboard UI is descriptor-driven and keeps the task browse
   assert.match(component, /Workload/);
   assert.match(component, /TaskBrowser/);
   assert.match(component, /ScheduleTaskModal/);
+  assert.match(component, /CalendarWorkbench/);
+  assert.match(component, /CalendarTaskSideList/);
+  assert.match(component, /TaskBrowserFilterModal/);
+  assert.match(component, /formatLocalDateKey/);
   assert.match(component, /dueDateFilters/);
   assert.match(component, /assignmentFilters/);
   assert.match(component, /min-h-\[32vh\] max-h-\[46vh\]/);
-  assert.match(component, /sticky bottom-0/);
+  assert.doesNotMatch(component, /sticky bottom-0/);
+  assert.doesNotMatch(component, /toISOString\(\)\.slice\(0, 10\)/);
   assert.match(component, /Business statistics/);
   assert.match(component, /Burning topics/);
   assert.match(component, /text-3xl font-semibold/);

@@ -216,11 +216,32 @@ function formatDate(value) {
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+function parseLocalDate(value) {
+  if (!value) return null;
+  if (value instanceof Date) {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  const text = normalizeText(value);
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (match) {
+    return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  }
+  const date = new Date(text);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatLocalDateKey(value = new Date()) {
+  const date = parseLocalDate(value);
+  if (!date) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function toDateInputValue(value) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toISOString().slice(0, 10);
+  return formatLocalDateKey(value);
 }
 
 function startOfLocalDay(value = new Date()) {
@@ -235,14 +256,45 @@ function addDays(value, days) {
   return date;
 }
 
+function addMonths(value, months) {
+  const date = startOfLocalDay(value);
+  date.setMonth(date.getMonth() + months);
+  return date;
+}
+
+function startOfCalendarWeek(value = new Date()) {
+  const date = startOfLocalDay(value);
+  const day = date.getDay();
+  date.setDate(date.getDate() - day);
+  return date;
+}
+
+function startOfCalendarMonth(value = new Date()) {
+  const date = startOfLocalDay(value);
+  date.setDate(1);
+  return date;
+}
+
+function calendarRange(view, anchorDate) {
+  const anchor = parseLocalDate(anchorDate) || new Date();
+  if (view === "day") return [startOfLocalDay(anchor)];
+  if (view === "month") {
+    const monthStart = startOfCalendarMonth(anchor);
+    const gridStart = startOfCalendarWeek(monthStart);
+    return Array.from({ length: 42 }, (_, index) => addDays(gridStart, index));
+  }
+  const weekStart = startOfCalendarWeek(anchor);
+  return Array.from({ length: 7 }, (_, index) => addDays(weekStart, index));
+}
+
 function dueState(value, status) {
   const normalizedStatus = normalizeText(status).toLowerCase();
   if (["done", "closed", "completed", "cancelled"].includes(normalizedStatus)) {
     return { code: "complete", label: "Complete", className: "border-ink-100 bg-ink-50 text-ink-400" };
   }
   if (!value) return { code: "unscheduled", label: "No due date", className: "border-ink-100 bg-white text-ink-400" };
-  const due = new Date(value);
-  if (Number.isNaN(due.getTime())) return { code: "unscheduled", label: "No due date", className: "border-ink-100 bg-white text-ink-400" };
+  const due = parseLocalDate(value);
+  if (!due) return { code: "unscheduled", label: "No due date", className: "border-ink-100 bg-white text-ink-400" };
   const today = startOfLocalDay();
   const tomorrow = addDays(today, 1);
   const nextDay = addDays(today, 2);
@@ -776,18 +828,56 @@ function AnalyticsView({ loading, payload, labels, theme }) {
 }
 
 function WorkloadView({ loading, payload, labels, categories, pinnedCategories, theme, tasks, actorAgentId, onAction, onSchedule }) {
+  const [calendarView, setCalendarView] = useState("week");
+  const [anchorDate, setAnchorDate] = useState(() => startOfLocalDay());
+  const [selectedDate, setSelectedDate] = useState(() => formatLocalDateKey(new Date()));
   const [filter, setFilter] = useState("all");
-  const visibleTasks = useMemo(
-    () => (tasks || []).filter((task) => matchesDateFilter(task, filter)).slice(0, 24),
-    [filter, tasks]
-  );
+  const [urgency, setUrgency] = useState("all");
+  const [assignmentFilter, setAssignmentFilter] = useState("all");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [query, setQuery] = useState("");
+
+  const filteredTasks = useMemo(() => {
+    const q = normalizeText(query).toLowerCase();
+    return (tasks || [])
+      .filter((task) => {
+        const matchesQuery = !q || [task.title, task.context, task.status, task.task_type].join(" ").toLowerCase().includes(q);
+        const matchesUrgency = urgency === "all" || task.urgency === urgency;
+        const matchesDue = matchesDateFilter(task, filter);
+        const matchesAssignment = matchesAssignmentFilter(task, assignmentFilter, actorAgentId);
+        const matchesCategory = categoryFilter === "all" || task.category_code === categoryFilter;
+        return matchesQuery && matchesUrgency && matchesDue && matchesAssignment && matchesCategory;
+      })
+      .sort((a, b) => String(a.due_at || "9999").localeCompare(String(b.due_at || "9999")) || Number(b.urgency_score || 0) - Number(a.urgency_score || 0));
+  }, [actorAgentId, assignmentFilter, categoryFilter, filter, query, tasks, urgency]);
+
   const overdue = (tasks || []).filter((task) => dueState(task.due_at, task.status).code === "overdue").length;
   const today = (tasks || []).filter((task) => dueState(task.due_at, task.status).code === "today").length;
   const delegated = (tasks || []).filter((task) => task.delegated_at).length;
   const myTasks = (tasks || []).filter((task) => actorAgentId && task.assigned_agent_id === actorAgentId).length;
+
+  const moveCalendar = (direction) => {
+    setAnchorDate((current) => {
+      const next =
+        calendarView === "month"
+          ? addMonths(current, direction)
+          : addDays(current, calendarView === "week" ? direction * 7 : direction);
+      setSelectedDate(formatLocalDateKey(next));
+      return next;
+    });
+  };
+
+  const jumpToday = () => {
+    const todayDate = startOfLocalDay();
+    setAnchorDate(todayDate);
+    setSelectedDate(formatLocalDateKey(todayDate));
+  };
+
+  const openTask = (task) => onAction(task, task.actions?.find((action) => action.code === "open") || task.actions?.[0]);
+
   return (
     <div className="space-y-5">
-      <SectionHeader icon={LayoutGrid} title={labels.workload} subtitle="Pinned categories and delegation readiness for the current workspace." theme={theme} />
+      <SectionHeader icon={LayoutGrid} title={labels.workload} subtitle="Calendar scheduling, due dates, delegation, and workload distribution." theme={theme} />
       <div className="grid gap-3 md:grid-cols-4">
         <MiniMetric label="Open tasks" value={(tasks || []).length} theme={theme} />
         <MiniMetric label="Overdue" value={overdue} tone="rose" theme={theme} />
@@ -795,12 +885,24 @@ function WorkloadView({ loading, payload, labels, categories, pinnedCategories, 
         <MiniMetric label="Delegated" value={delegated} helper={`${myTasks} assigned to me`} theme={theme} />
       </div>
       <div className={theme.panelCompact}>
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div>
             <h3 className={`text-xl font-semibold ${theme.heading}`}>Schedule and due work</h3>
-            <p className={`text-sm ${theme.body}`}>Calendar-inspired agenda from existing task due dates.</p>
+            <p className={`text-sm ${theme.body}`}>Calendar workspace from existing task due dates, ownership, and category metadata.</p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {["day", "week", "month"].map((item) => (
+              <button key={item} type="button" onClick={() => setCalendarView(item)} className={`rounded-full px-3 py-1.5 text-xs font-semibold capitalize ${calendarView === item ? "bg-ink-900 text-white" : "border border-ink-100 bg-white text-ink-500"}`}>
+                {item}
+              </button>
+            ))}
+            <button type="button" onClick={() => moveCalendar(-1)} className="rounded-full border border-ink-100 bg-white px-3 py-1.5 text-xs font-semibold text-ink-500">Prev</button>
+            <button type="button" onClick={jumpToday} className="rounded-full border border-brand-100 bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-700">Today</button>
+            <button type="button" onClick={() => moveCalendar(1)} className="rounded-full border border-ink-100 bg-white px-3 py-1.5 text-xs font-semibold text-ink-500">Next</button>
+          </div>
+        </div>
+        <div className="mb-4 rounded-2xl border border-ink-100 bg-ink-50/60 p-3">
+          <div className="flex flex-wrap items-center gap-2">
             {DATE_FILTERS.map((item) => (
               <button
                 key={item}
@@ -814,21 +916,43 @@ function WorkloadView({ loading, payload, labels, categories, pinnedCategories, 
               </button>
             ))}
           </div>
-        </div>
-        <div className="grid gap-3 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-          <CalendarStrip tasks={tasks || []} />
-          <div className="max-h-[22rem] space-y-2 overflow-y-auto pr-1">
-            {visibleTasks.length ? visibleTasks.map((task) => (
-              <TaskAgendaRow
-                key={task.id}
-                task={task}
-                onOpen={() => onAction(task, task.actions?.find((action) => action.code === "open") || task.actions?.[0])}
-                onSchedule={() => onSchedule(task)}
+          <div className="mt-3 grid gap-3 md:grid-cols-[minmax(13rem,1.4fr)_minmax(9rem,0.8fr)_minmax(9rem,0.9fr)_minmax(9rem,0.9fr)]">
+            <label className="flex min-w-0 items-center gap-2 rounded-xl border border-ink-100 bg-white px-3 py-2">
+              <Search className="h-4 w-4 text-ink-300" />
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                className="w-full bg-transparent text-xs font-semibold text-ink-700 outline-none placeholder:text-ink-300"
+                placeholder="Search tasks"
               />
-            )) : (
-              <p className={theme.empty}>{loading ? "Loading..." : "No tasks match this schedule filter."}</p>
-            )}
+            </label>
+            <Select label="Priority" value={urgency} onChange={setUrgency} options={["all", "critical", "high", "medium", "normal"]} />
+            <Select label="Assignment" value={assignmentFilter} onChange={setAssignmentFilter} options={ASSIGNMENT_FILTERS} />
+            <Select label="Category" value={categoryFilter} onChange={setCategoryFilter} options={["all", ...categories.map((category) => category.code)]} />
           </div>
+        </div>
+        <div className="grid min-h-[34rem] gap-4 lg:grid-cols-[minmax(0,1fr)_24rem]">
+          <CalendarWorkbench
+            view={calendarView}
+            anchorDate={anchorDate}
+            selectedDate={selectedDate}
+            tasks={filteredTasks}
+            onSelectDate={(dateKey) => {
+              const next = parseLocalDate(dateKey) || new Date();
+              setSelectedDate(dateKey);
+              setAnchorDate(next);
+            }}
+            onOpenTask={openTask}
+            onSchedule={onSchedule}
+          />
+          <CalendarTaskSideList
+            selectedDate={selectedDate}
+            tasks={filteredTasks}
+            loading={loading}
+            onOpenTask={openTask}
+            onSchedule={onSchedule}
+            theme={theme}
+          />
         </div>
       </div>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -874,39 +998,134 @@ function MiniMetric({ label, value, helper, tone, theme }) {
   );
 }
 
-function CalendarStrip({ tasks }) {
-  const days = Array.from({ length: 7 }, (_, index) => addDays(new Date(), index));
+function CalendarWorkbench({ view, anchorDate, selectedDate, tasks, onSelectDate, onOpenTask, onSchedule }) {
+  const days = calendarRange(view, anchorDate);
+  const anchor = parseLocalDate(anchorDate) || new Date();
+  const title = view === "month"
+    ? anchor.toLocaleDateString(undefined, { month: "long", year: "numeric" })
+    : view === "day"
+      ? anchor.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })
+      : `${days[0].toLocaleDateString(undefined, { month: "short", day: "numeric" })} - ${days[days.length - 1].toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
   return (
-    <div className="grid grid-cols-7 gap-2 rounded-2xl border border-ink-100 bg-ink-50/60 p-3">
-      {days.map((day) => {
-        const dayKey = day.toISOString().slice(0, 10);
-        const count = (tasks || []).filter((task) => toDateInputValue(task.due_at) === dayKey).length;
-        return (
-          <div key={dayKey} className="min-h-[6.5rem] rounded-xl border border-ink-100 bg-white/85 p-2">
-            <p className="text-[0.58rem] font-semibold uppercase tracking-[0.16em] text-ink-400">
-              {day.toLocaleDateString(undefined, { weekday: "short" })}
-            </p>
-            <p className="mt-1 text-lg font-semibold text-ink-900">{day.getDate()}</p>
-            <div className="mt-2 space-y-1">
-              {count ? (
-                <span className="inline-flex rounded-full bg-brand-50 px-2 py-0.5 text-[0.58rem] font-semibold text-brand-700">
-                  {count} task{count === 1 ? "" : "s"}
-                </span>
-              ) : (
-                <span className="text-[0.58rem] text-ink-300">clear</span>
-              )}
+    <div className="rounded-[1.5rem] border border-ink-100 bg-ink-50/70 p-3">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <p className="text-[0.6rem] font-semibold uppercase tracking-[0.22em] text-ink-400">Calendar</p>
+          <h4 className="text-lg font-semibold text-ink-900">{title}</h4>
+        </div>
+        <span className="rounded-full border border-ink-100 bg-white px-3 py-1 text-xs font-semibold text-ink-500">
+          {(tasks || []).length} filtered
+        </span>
+      </div>
+      <div className={`grid gap-2 ${view === "day" ? "grid-cols-1" : "grid-cols-7"}`}>
+        {days.map((day) => {
+          const dayKey = formatLocalDateKey(day);
+          const selected = selectedDate === dayKey;
+          const today = formatLocalDateKey(new Date()) === dayKey;
+          const inMonth = day.getMonth() === anchor.getMonth();
+          const dayTasks = (tasks || []).filter((task) => toDateInputValue(task.due_at) === dayKey);
+          const visibleChips = view === "month" ? dayTasks.slice(0, 3) : dayTasks.slice(0, 6);
+          return (
+            <div
+              key={dayKey}
+              onClick={() => onSelectDate(dayKey)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  onSelectDate(dayKey);
+                }
+              }}
+              className={`min-h-[8.5rem] rounded-2xl border p-2 text-left transition ${
+                selected
+                  ? "border-brand-300 bg-brand-50 text-brand-900 shadow-soft ring-2 ring-brand-100"
+                  : today
+                    ? "border-ink-200 bg-white text-ink-800"
+                    : "border-ink-100 bg-white/85 text-ink-700"
+              } ${view === "month" && !inMonth ? "opacity-50" : ""}`}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="text-[0.58rem] font-semibold uppercase tracking-[0.16em] text-ink-400">
+                    {day.toLocaleDateString(undefined, { weekday: "short" })}
+                  </p>
+                  <p className="mt-1 text-lg font-semibold">{day.getDate()}</p>
+                </div>
+                {selected ? <span className="rounded-full bg-ink-900 px-2 py-0.5 text-[0.55rem] font-semibold uppercase tracking-[0.12em] text-white">Selected</span> : null}
+              </div>
+              <div className="mt-3 space-y-1">
+                {visibleChips.length ? visibleChips.map((task) => (
+                  <span
+                    key={`${dayKey}-${task.id}`}
+                    className={`block truncate rounded-full px-2 py-1 text-[0.58rem] font-semibold ${
+                      dueState(task.due_at, task.status).code === "overdue"
+                        ? "bg-rose-50 text-rose-700"
+                        : "bg-white text-ink-600"
+                    }`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onOpenTask(task);
+                    }}
+                  >
+                    {task.title}
+                  </span>
+                )) : (
+                  <span className="text-[0.6rem] text-ink-300">No due task</span>
+                )}
+                {dayTasks.length > visibleChips.length ? (
+                  <span className="block text-[0.58rem] font-semibold text-brand-700">+{dayTasks.length - visibleChips.length} more</span>
+                ) : null}
+              </div>
+              {view === "day" && dayTasks.length ? (
+                <div className="mt-4 grid gap-2 md:grid-cols-2">
+                  {dayTasks.slice(0, 8).map((task) => (
+                    <TaskAgendaRow key={`day-${task.id}`} task={task} onOpen={() => onOpenTask(task)} onSchedule={() => onSchedule(task)} compact />
+                  ))}
+                </div>
+              ) : null}
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   );
 }
 
-function TaskAgendaRow({ task, onOpen, onSchedule }) {
+function CalendarTaskSideList({ selectedDate, tasks, loading, onOpenTask, onSchedule, theme }) {
+  const selectedTasks = (tasks || []).filter((task) => toDateInputValue(task.due_at) === selectedDate);
+  const unscheduled = (tasks || []).filter((task) => !task.due_at);
+  const otherTasks = (tasks || []).filter((task) => toDateInputValue(task.due_at) !== selectedDate && task.due_at);
+  const list = [...selectedTasks, ...otherTasks, ...unscheduled].slice(0, 60);
+  const selectedLabel = parseLocalDate(selectedDate)?.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }) || "Selected date";
+  return (
+    <aside className="flex min-h-0 flex-col rounded-[1.5rem] border border-ink-100 bg-white p-3 shadow-soft">
+      <div className="rounded-2xl border border-ink-100 bg-ink-50/70 px-3 py-3">
+        <p className="text-[0.6rem] font-semibold uppercase tracking-[0.22em] text-ink-400">Selected day</p>
+        <h4 className="mt-1 text-lg font-semibold text-ink-900">{selectedLabel}</h4>
+        <p className="mt-1 text-xs text-ink-500">{selectedTasks.length} due here · {list.length} visible tasks</p>
+      </div>
+      <div className="mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+        {list.length ? list.map((task) => (
+          <TaskAgendaRow
+            key={`side-${task.id}`}
+            task={task}
+            selected={toDateInputValue(task.due_at) === selectedDate}
+            onOpen={() => onOpenTask(task)}
+            onSchedule={() => onSchedule(task)}
+          />
+        )) : (
+          <p className={theme.empty}>{loading ? "Loading..." : "No tasks match the calendar filters."}</p>
+        )}
+      </div>
+    </aside>
+  );
+}
+
+function TaskAgendaRow({ task, onOpen, onSchedule, selected, compact }) {
   const due = dueState(task.due_at, task.status);
   return (
-    <div className="rounded-2xl border border-ink-100 bg-white px-3 py-3 shadow-soft">
+    <div className={`rounded-2xl border px-3 py-3 shadow-soft ${selected ? "border-brand-200 bg-brand-50/60" : "border-ink-100 bg-white"} ${compact ? "shadow-none" : ""}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold text-ink-900">{task.title}</p>
@@ -917,10 +1136,10 @@ function TaskAgendaRow({ task, onOpen, onSchedule }) {
         </span>
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
-        <button type="button" onClick={onOpen} className="rounded-full bg-ink-900 px-3 py-1.5 text-xs font-semibold text-white">
+        <button type="button" onClick={(event) => { event.stopPropagation(); onOpen?.(); }} className="rounded-full bg-ink-900 px-3 py-1.5 text-xs font-semibold text-white">
           Open
         </button>
-        <button type="button" onClick={onSchedule} className="rounded-full border border-ink-100 bg-ink-50 px-3 py-1.5 text-xs font-semibold text-ink-600">
+        <button type="button" onClick={(event) => { event.stopPropagation(); onSchedule?.(); }} className="rounded-full border border-ink-100 bg-ink-50 px-3 py-1.5 text-xs font-semibold text-ink-600">
           Reschedule
         </button>
       </div>
@@ -1030,7 +1249,14 @@ function TaskBrowser({
           <p className={`mt-1 text-xs font-semibold ${theme.muted}`}>{labels.taskBrowserHint}</p>
         </div>
         <div className="flex items-center gap-2">
-          <LayoutGrid className="h-5 w-5 text-ink-400" />
+          <button
+            type="button"
+            onClick={() => setControlsOpen(true)}
+            className="inline-flex items-center gap-2 rounded-full border border-ink-100 bg-white px-3 py-2 text-xs font-semibold text-ink-600 transition hover:border-brand-200 hover:text-brand-700"
+          >
+            <SlidersHorizontal className="h-4 w-4" />
+            Filters
+          </button>
           <button
             type="button"
             onClick={() => setCollapsed(true)}
@@ -1050,7 +1276,7 @@ function TaskBrowser({
           return (
             <div
               key={category.code}
-              className={`${theme.cardRaised} transition ${isOpen ? `border-brand-300 bg-brand-50/70 ring-2 ring-brand-100` : ""}`}
+              className={`${theme.cardRaised} transition ${isOpen ? "border-ink-900 bg-ink-900 text-white shadow-strong ring-2 ring-brand-100" : ""}`}
             >
               <div className="flex items-center justify-between gap-3 px-4 py-3">
                 <button
@@ -1058,31 +1284,23 @@ function TaskBrowser({
                   onClick={() => toggleCategory(category.code)}
                   className="min-w-0 flex-1 text-left"
                 >
-                  <span className={`block truncate text-sm font-semibold ${isOpen ? "text-brand-800" : theme.heading}`}>{category.display_label}</span>
-                  <span className={`mt-1 block text-xs ${isOpen ? "text-brand-700" : theme.muted}`}>
+                  <span className={`block truncate text-sm font-semibold ${isOpen ? "text-white" : theme.heading}`}>{category.display_label}</span>
+                  <span className={`mt-1 block text-xs ${isOpen ? "text-white/70" : theme.muted}`}>
                     {category.count} tasks, {category.urgent_count} urgent
                   </span>
                 </button>
                 <div className="flex items-center gap-2">
-                  <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${isOpen ? category.tone.badge : "border border-ink-100 bg-white text-ink-500"}`}>
+                  <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${isOpen ? "bg-white text-ink-900" : "border border-ink-100 bg-white text-ink-500"}`}>
                     {category.count}
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => togglePin(category.code)}
-                    className={`rounded-full border px-2 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.14em] ${
-                      isPinned ? "border-brand-200 bg-brand-50 text-brand-700" : "border-ink-100 bg-white text-ink-400"
-                    }`}
-                  >
-                    {isPinned ? labels.pinned : "Pin"}
-                  </button>
+                  {isPinned ? <span className="rounded-full bg-brand-500 px-2 py-1 text-[0.6rem] font-semibold uppercase tracking-[0.14em] text-white">{labels.pinned}</span> : null}
                   <button
                     type="button"
                     onClick={() => toggleCategory(category.code)}
-                    className={`rounded-full border p-1 transition ${isOpen ? "border-brand-200 bg-white text-brand-700" : "border-transparent hover:bg-ink-50"}`}
+                    className={`rounded-full border p-1 transition ${isOpen ? "border-white/20 bg-white/10 text-white" : "border-transparent hover:bg-ink-50"}`}
                     aria-label={isOpen ? "Collapse category" : "Expand category"}
                   >
-                    <ChevronDown className={`h-4 w-4 transition ${isOpen ? "rotate-180 text-brand-700" : "text-ink-400"}`} />
+                    <ChevronDown className={`h-4 w-4 transition ${isOpen ? "rotate-180 text-white" : "text-ink-400"}`} />
                   </button>
                 </div>
               </div>
@@ -1091,7 +1309,7 @@ function TaskBrowser({
                 isOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
               }`}>
                 <div className="overflow-hidden">
-                  <div className="border-t border-ink-100 px-3 py-3">
+                  <div className={`${isOpen ? "border-t border-white/10 bg-white/95" : "border-t border-ink-100"} px-3 py-3`}>
                     <div className="min-h-[32vh] max-h-[46vh] space-y-2 overflow-y-auto overscroll-contain pr-2 scrollbar-thin">
                       {tasks.length ? (
                         tasks.map((task) => (
@@ -1125,46 +1343,119 @@ function TaskBrowser({
           );
         })}
       </div>
+      <TaskBrowserFilterModal
+        open={controlsOpen}
+        labels={labels}
+        taskBrowser={taskBrowser}
+        categories={categories}
+        pinnedCategories={pinnedCategories}
+        onTogglePin={togglePin}
+        query={query}
+        setQuery={setQuery}
+        urgency={urgency}
+        setUrgency={setUrgency}
+        dateFilter={dateFilter}
+        setDateFilter={setDateFilter}
+        assignmentFilter={assignmentFilter}
+        setAssignmentFilter={setAssignmentFilter}
+        categoryFilter={categoryFilter}
+        setCategoryFilter={setCategoryFilter}
+        sort={sort}
+        setSort={setSort}
+        onClose={() => setControlsOpen(false)}
+      />
+    </aside>
+  );
+}
 
-      <div className={`sticky bottom-0 mt-3 ${theme.cardRaised}`}>
-          <button
-            type="button"
-            onClick={() => setControlsOpen((value) => !value)}
-            className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm font-semibold text-ink-800"
-          >
-            <span className="inline-flex items-center gap-2">
-              <SlidersHorizontal className="h-4 w-4 text-ink-400" />
-              {labels.controls}
-            </span>
-            <ChevronDown className={`h-4 w-4 text-ink-400 transition ${controlsOpen ? "rotate-180" : ""}`} />
-          </button>
-          <div className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${controlsOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"}`}>
-          <div className="overflow-hidden">
-            <div className="space-y-3 border-t border-ink-100 px-4 py-3">
-              <label className="block text-xs font-semibold uppercase tracking-[0.16em] text-ink-400">
-                {labels.search}
-                <span className="mt-2 flex items-center gap-2 rounded-xl border border-ink-100 bg-white px-3 py-2">
-                  <Search className="h-4 w-4 text-ink-300" />
-                  <input
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                    className="w-full bg-transparent text-sm normal-case tracking-normal text-ink-800 outline-none"
-                    placeholder="Title, status, context"
-                  />
-                </span>
-              </label>
-              <div className="grid gap-2 sm:grid-cols-2">
-                <Select label={labels.urgency} value={urgency} onChange={setUrgency} options={taskBrowser.urgencyFilters || []} />
-                <Select label="Due" value={dateFilter} onChange={setDateFilter} options={taskBrowser.dueDateFilters || DATE_FILTERS} />
-                <Select label="Assignment" value={assignmentFilter} onChange={setAssignmentFilter} options={taskBrowser.assignmentFilters || ASSIGNMENT_FILTERS} />
-                <Select label="Category" value={categoryFilter} onChange={setCategoryFilter} options={["all", ...categories.map((category) => category.code)]} />
-                <Select label={labels.sort} value={sort} onChange={setSort} options={taskBrowser.sortOptions || []} />
-              </div>
-            </div>
+function TaskBrowserFilterModal({
+  open,
+  labels,
+  taskBrowser,
+  categories,
+  pinnedCategories,
+  onTogglePin,
+  query,
+  setQuery,
+  urgency,
+  setUrgency,
+  dateFilter,
+  setDateFilter,
+  assignmentFilter,
+  setAssignmentFilter,
+  categoryFilter,
+  setCategoryFilter,
+  sort,
+  setSort,
+  onClose
+}) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[95] flex items-start justify-center bg-ink-900/35 px-4 py-12 backdrop-blur-[2px]">
+      <div className="max-h-[82vh] w-full max-w-2xl overflow-y-auto rounded-[1.75rem] border border-ink-100 bg-white p-5 shadow-strong">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-[0.65rem] font-semibold uppercase tracking-[0.24em] text-ink-400">Task Browser</p>
+            <h3 className="mt-1 text-xl font-semibold text-ink-900">{labels.controls}</h3>
+            <p className="mt-1 text-sm text-ink-500">Filter the action queue and pin up to three categories into Burning Topics.</p>
           </div>
+          <button type="button" onClick={onClose} className="rounded-full border border-ink-100 bg-white p-2 text-ink-500">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <label className="mt-5 block text-xs font-semibold uppercase tracking-[0.16em] text-ink-400">
+          {labels.search}
+          <span className="mt-2 flex items-center gap-2 rounded-2xl border border-ink-100 bg-ink-50 px-3 py-2">
+            <Search className="h-4 w-4 text-ink-300" />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              className="w-full bg-transparent text-sm normal-case tracking-normal text-ink-800 outline-none"
+              placeholder="Title, status, context"
+            />
+          </span>
+        </label>
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <Select label={labels.urgency} value={urgency} onChange={setUrgency} options={taskBrowser.urgencyFilters || []} />
+          <Select label="Due" value={dateFilter} onChange={setDateFilter} options={taskBrowser.dueDateFilters || DATE_FILTERS} />
+          <Select label="Assignment" value={assignmentFilter} onChange={setAssignmentFilter} options={taskBrowser.assignmentFilters || ASSIGNMENT_FILTERS} />
+          <Select label="Category" value={categoryFilter} onChange={setCategoryFilter} options={["all", ...categories.map((category) => category.code)]} />
+          <Select label={labels.sort} value={sort} onChange={setSort} options={taskBrowser.sortOptions || []} />
+        </div>
+
+        <div className="mt-5">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-ink-400">{labels.pinned} categories</p>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+            {categories.map((category) => {
+              const pinned = pinnedCategories.includes(category.code);
+              return (
+                <button
+                  key={category.code}
+                  type="button"
+                  onClick={() => onTogglePin(category.code)}
+                  className={`rounded-2xl border px-3 py-3 text-left transition ${
+                    pinned ? "border-ink-900 bg-ink-900 text-white shadow-soft" : "border-ink-100 bg-white text-ink-700 hover:border-brand-200"
+                  }`}
+                >
+                  <span className="block text-sm font-semibold">{category.display_label}</span>
+                  <span className={`mt-1 block text-xs ${pinned ? "text-white/70" : "text-ink-400"}`}>
+                    {category.count} tasks · {category.urgent_count} urgent
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
-    </aside>
+
+        <div className="mt-5 flex justify-end">
+          <button type="button" onClick={onClose} className="rounded-full bg-ink-900 px-4 py-2 text-xs font-semibold text-white">
+            Apply filters
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1272,7 +1563,7 @@ function TaskRow({
 }
 
 function ScheduleTaskModal({ task, labels, onClose, onSubmit, theme }) {
-  const [view, setView] = useState("agenda");
+  const [view, setView] = useState("day");
   const [form, setForm] = useState({
     due_at: "",
     planned_start_at: "",
@@ -1294,14 +1585,14 @@ function ScheduleTaskModal({ task, labels, onClose, onSubmit, theme }) {
       priority: task.priority || task.urgency || "normal",
       status: ""
     });
-    setView("agenda");
+    setView("day");
     setError("");
   }, [task]);
 
   if (!task) return null;
 
   const setDue = (date) => {
-    setForm((current) => ({ ...current, due_at: date ? date.toISOString().slice(0, 10) : "" }));
+    setForm((current) => ({ ...current, due_at: date ? formatLocalDateKey(date) : "" }));
   };
 
   const submit = async () => {
@@ -1324,7 +1615,7 @@ function ScheduleTaskModal({ task, labels, onClose, onSubmit, theme }) {
   };
 
   const due = dueState(form.due_at || task.due_at, task.status);
-  const days = Array.from({ length: view === "month" ? 28 : 7 }, (_, index) => addDays(new Date(), index));
+  const days = Array.from({ length: view === "month" ? 28 : view === "week" ? 7 : 1 }, (_, index) => addDays(new Date(), index));
 
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-ink-900/35 p-4 backdrop-blur-[2px]">
@@ -1341,7 +1632,7 @@ function ScheduleTaskModal({ task, labels, onClose, onSubmit, theme }) {
         </div>
 
         <div className="mt-4 flex flex-wrap gap-2">
-          {["agenda", "week", "month"].map((item) => (
+          {["day", "week", "month"].map((item) => (
             <button
               key={item}
               type="button"
@@ -1357,9 +1648,9 @@ function ScheduleTaskModal({ task, labels, onClose, onSubmit, theme }) {
 
         <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
           <div className="rounded-2xl border border-ink-100 bg-ink-50/70 p-3">
-            <div className={`grid gap-2 ${view === "agenda" ? "grid-cols-1" : "grid-cols-7"}`}>
+            <div className={`grid gap-2 ${view === "day" ? "grid-cols-1" : "grid-cols-7"}`}>
               {days.map((day) => {
-                const dayValue = day.toISOString().slice(0, 10);
+                const dayValue = formatLocalDateKey(day);
                 const selected = form.due_at === dayValue;
                 return (
                   <button
