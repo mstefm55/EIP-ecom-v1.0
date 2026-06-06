@@ -18,6 +18,7 @@
 ## Permissions
 - `PROCESS_DEF_READ`, `PROCESS_DEF_WRITE`
 - `PROCESS_INSTANCE_READ`, `PROCESS_INSTANCE_WRITE`
+- User creation uses governed role templates. Migration `0117_process_transition_permission_backfill.sql` backfills these permissions into profile/access bundles such as `ADMIN_SUPER`, `ACCESS_UNIVERSAL`, `ECOM_ADMIN`, ECOM access bundles, and CRM bundles so newly created users inherit process/transition access through the selected profile and access type.
 
 ## Routes (prefix: /api/eip/core)
 Process definitions:
@@ -119,6 +120,11 @@ Notes:
 - `POST /instances/:id/advance` requires `idempotency_key`.
 - Engine reuses prior history entry when the same key is provided.
 - `POST /instances` accepts an optional `idempotency_key` (stored in cursor_json).
+
+## Invalid Transition Diagnostics
+- Transition lookup normalizes harmless whitespace/casing drift on the current node and requested action.
+- If an action is not valid for the current node, the API returns `409` with `error: "INVALID_TRANSITION"`, the current `node`, requested `action`, `process_def_id`, and `available_transitions`.
+- Clients should display those available actions rather than retrying a guessed transition name.
 
 ## Transactional Behavior
 - All state transitions use a single DB transaction with `FOR UPDATE` locks.

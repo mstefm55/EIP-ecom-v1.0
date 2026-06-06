@@ -1100,8 +1100,15 @@ export default async function coreProcessRoutes(app) {
 
         if (!result.ok) {
           await client.query("ROLLBACK");
-          const status = result.error === "NOT_FOUND" ? 404 : 409;
-          return reply.code(status).send({ ok: false, error: result.error });
+          const status = result.error === "NOT_FOUND" || result.error === "PROCESS_DEF_NOT_FOUND" ? 404 : 409;
+          return reply.code(status).send({
+            ok: false,
+            error: result.error,
+            node: result.node,
+            action: result.action,
+            process_def_id: result.process_def_id,
+            available_transitions: result.available_transitions
+          });
         }
 
         await client.query("COMMIT");

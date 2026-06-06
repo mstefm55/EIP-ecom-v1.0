@@ -2306,10 +2306,29 @@ async function advanceInstance(client, opts) {
   if (!node) return { ok: false, error: "NODE_MISSING" };
 
   const transitions = Array.isArray(graph.transitions) ? graph.transitions : [];
+  const currentNode = normalizeOptionalText(node);
+  const requestedAction = normalizeOptionalText(action);
+  const availableTransitions = transitions
+    .filter((t) => t && normalizeOptionalText(t.from) === currentNode)
+    .map((t) => ({
+      action: normalizeOptionalText(t.action),
+      to: normalizeOptionalText(t.to || t.target),
+      label: normalizeOptionalText(t.label)
+    }))
+    .filter((t) => t.action);
   const transition = transitions.find(
-    (t) => t && t.from === node && t.action === action
+    (t) => t && normalizeOptionalText(t.from) === currentNode && normalizeOptionalText(t.action) === requestedAction
   );
-  if (!transition) return { ok: false, error: "INVALID_TRANSITION" };
+  if (!transition) {
+    return {
+      ok: false,
+      error: "INVALID_TRANSITION",
+      node: currentNode,
+      action: requestedAction,
+      process_def_id: inst.process_def_id,
+      available_transitions: availableTransitions
+    };
+  }
 
   const soRes = await client.query(
     `

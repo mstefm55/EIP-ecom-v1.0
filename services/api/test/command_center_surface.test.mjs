@@ -51,15 +51,16 @@ test("command center dashboard UI is descriptor-driven and keeps the task browse
   assert.match(component, /TaskBrowser/);
   assert.match(component, /ScheduleTaskModal/);
   assert.match(component, /CalendarWorkbench/);
-  assert.match(component, /CalendarTaskSideList/);
+  assert.doesNotMatch(component, /function CalendarTaskSideList/);
   assert.match(component, /TaskBrowserFilterModal/);
   assert.match(component, /formatLocalDateKey/);
   assert.match(component, /dueDateFilters/);
   assert.match(component, /assignmentFilters/);
   assert.match(component, /category_surface: category\.surface/);
   assert.match(component, /const targetSurface = action\?\.surface \|\| task\?\.surface \|\| task\?\.category_surface \|\| task\?\.category_code/);
-  assert.match(component, /activeTab !== "workload"/);
-  assert.match(component, /Workload merges the task list into the calendar planner/);
+  assert.match(component, /dateFocus=\{activeTab === "workload" \? workloadDateFocus : ""\}/);
+  assert.match(component, /Focused on \{formatDate\(dateFocus\)\}/);
+  assert.match(component, /Workload calendar focuses the Task Browser by selected date instead of duplicating the task list/);
   assert.match(component, /max-h-\[42vh\] min-h-\[14rem\]/);
   assert.match(component, /max-h-\[calc\(100vh-16rem\)\]/);
   assert.doesNotMatch(component, /Delegation pool/);
@@ -74,6 +75,7 @@ test("command center dashboard UI is descriptor-driven and keeps the task browse
   assert.match(component, /grid-rows-\[1fr\]/);
   assert.match(component, /grid-rows-\[0fr\]/);
   assert.doesNotMatch(component, /!hasOpenCategory/);
+  assert.match(component, /border-brand-200 bg-brand-50\/80/);
   assert.match(component, /xl:grid-cols-\[minmax\(0,1fr\)_minmax\(330px,24vw\)\]/);
   assert.match(component, /onOpenDetail\?\.\(widget\)/);
   assert.match(component, /onDelegate/);

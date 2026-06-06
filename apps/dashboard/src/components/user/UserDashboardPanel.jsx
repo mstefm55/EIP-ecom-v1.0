@@ -395,6 +395,7 @@ export default function UserDashboardPanel({ node, ctx }) {
   const [globalSearch, setGlobalSearch] = useState("");
   const [taskBrowserCollapsed, setTaskBrowserCollapsed] = useState(false);
   const [schedulingTask, setSchedulingTask] = useState(null);
+  const [workloadDateFocus, setWorkloadDateFocus] = useState("");
 
   const loadCommandCenter = useCallback(async () => {
     setLoading(true);
@@ -478,8 +479,6 @@ export default function UserDashboardPanel({ node, ctx }) {
     ),
     [decoratedCategories]
   );
-  const showTaskBrowser = activeTab !== "workload";
-
   const handleAction = useCallback((task, action) => {
     const allowedSurfaces = new Set(["crm", "commerce", "inventory", "procurement", "content", "reports", "tasks"]);
     const targetSurface = action?.surface || task?.surface || task?.category_surface || task?.category_code;
@@ -519,7 +518,7 @@ export default function UserDashboardPanel({ node, ctx }) {
   return (
     <section className={`command-center-surface ${theme.surface}`}>
       <div className={`grid gap-2 transition-[grid-template-columns] duration-300 ease-out ${
-        !showTaskBrowser || taskBrowserCollapsed ? "xl:grid-cols-1" : "xl:grid-cols-[minmax(0,1fr)_minmax(330px,24vw)]"
+        taskBrowserCollapsed ? "xl:grid-cols-1" : "xl:grid-cols-[minmax(0,1fr)_minmax(330px,24vw)]"
       }`}>
         <main className="min-w-0 space-y-3">
           <CommandHeader
@@ -567,34 +566,36 @@ export default function UserDashboardPanel({ node, ctx }) {
               actorAgentId={payload?.workload?.assigned_agent_id}
               onAction={handleAction}
               onSchedule={(task) => setSchedulingTask(task)}
+              focusedDate={workloadDateFocus}
+              onFocusDate={setWorkloadDateFocus}
             />
           ) : null}
         </main>
 
-        {showTaskBrowser ? (
-          <TaskBrowser
-            loading={loading}
-            labels={config.labels}
-            taskBrowser={config.taskBrowser}
-            actorAgentId={payload?.workload?.assigned_agent_id}
-            categories={decoratedCategories}
-            openCategory={openCategory}
-            setOpenCategory={setOpenCategory}
-            pinnedCategories={pinnedCategories}
-            setPinnedCategories={setPinnedCategories}
-            delegationCandidates={payload?.workload?.delegation_candidates || []}
-            onAction={handleAction}
-            onDelegate={handleDelegate}
-            onSchedule={(task) => setSchedulingTask(task)}
-            globalSearch={globalSearch}
-            collapsed={taskBrowserCollapsed}
-            setCollapsed={setTaskBrowserCollapsed}
-            theme={theme}
-          />
-        ) : null}
+        <TaskBrowser
+          loading={loading}
+          labels={config.labels}
+          taskBrowser={config.taskBrowser}
+          actorAgentId={payload?.workload?.assigned_agent_id}
+          categories={decoratedCategories}
+          openCategory={openCategory}
+          setOpenCategory={setOpenCategory}
+          pinnedCategories={pinnedCategories}
+          setPinnedCategories={setPinnedCategories}
+          delegationCandidates={payload?.workload?.delegation_candidates || []}
+          onAction={handleAction}
+          onDelegate={handleDelegate}
+          onSchedule={(task) => setSchedulingTask(task)}
+          globalSearch={globalSearch}
+          dateFocus={activeTab === "workload" ? workloadDateFocus : ""}
+          onClearDateFocus={() => setWorkloadDateFocus("")}
+          collapsed={taskBrowserCollapsed}
+          setCollapsed={setTaskBrowserCollapsed}
+          theme={theme}
+        />
       </div>
       <p className={`mt-2 text-xs font-semibold ${theme.muted}`}>
-        UI rule: Command Center Task Browser = all user actionables; Workload merges the task list into the calendar planner; Burning Topics = pinned urgent subset.
+        UI rule: Task Browser = all user actionables; Workload calendar focuses the Task Browser by selected date instead of duplicating the task list.
       </p>
       <ScheduleTaskModal
         task={schedulingTask}
@@ -830,10 +831,10 @@ function AnalyticsView({ loading, payload, labels, theme }) {
   );
 }
 
-function WorkloadView({ loading, labels, categories, theme, tasks, actorAgentId, onAction, onSchedule }) {
+function WorkloadView({ loading, labels, categories, theme, tasks, actorAgentId, onAction, onSchedule, focusedDate, onFocusDate }) {
   const [calendarView, setCalendarView] = useState("week");
   const [anchorDate, setAnchorDate] = useState(() => startOfLocalDay());
-  const [selectedDate, setSelectedDate] = useState(() => formatLocalDateKey(new Date()));
+  const [selectedDate, setSelectedDate] = useState(() => focusedDate || formatLocalDateKey(new Date()));
   const [filter, setFilter] = useState("all");
   const [urgency, setUrgency] = useState("all");
   const [assignmentFilter, setAssignmentFilter] = useState("all");
@@ -865,15 +866,19 @@ function WorkloadView({ loading, labels, categories, theme, tasks, actorAgentId,
         calendarView === "month"
           ? addMonths(current, direction)
           : addDays(current, calendarView === "week" ? direction * 7 : direction);
-      setSelectedDate(formatLocalDateKey(next));
+      const nextKey = formatLocalDateKey(next);
+      setSelectedDate(nextKey);
+      onFocusDate?.(nextKey);
       return next;
     });
   };
 
   const jumpToday = () => {
     const todayDate = startOfLocalDay();
+    const todayKey = formatLocalDateKey(todayDate);
     setAnchorDate(todayDate);
-    setSelectedDate(formatLocalDateKey(todayDate));
+    setSelectedDate(todayKey);
+    onFocusDate?.(todayKey);
   };
 
   const openTask = (task) => onAction(task, task.actions?.find((action) => action.code === "open") || task.actions?.[0]);
@@ -934,7 +939,7 @@ function WorkloadView({ loading, labels, categories, theme, tasks, actorAgentId,
             <Select label="Category" value={categoryFilter} onChange={setCategoryFilter} options={["all", ...categories.map((category) => category.code)]} />
           </div>
         </div>
-        <div className="grid max-h-[calc(100vh-16rem)] min-h-[30rem] gap-2 overflow-hidden lg:grid-cols-[minmax(0,1fr)_22rem]">
+        <div className="grid max-h-[calc(100vh-16rem)] min-h-[30rem] gap-2 overflow-hidden">
           <CalendarWorkbench
             view={calendarView}
             anchorDate={anchorDate}
@@ -944,17 +949,10 @@ function WorkloadView({ loading, labels, categories, theme, tasks, actorAgentId,
               const next = parseLocalDate(dateKey) || new Date();
               setSelectedDate(dateKey);
               setAnchorDate(next);
+              onFocusDate?.(dateKey);
             }}
             onOpenTask={openTask}
             onSchedule={onSchedule}
-          />
-          <CalendarTaskSideList
-            selectedDate={selectedDate}
-            tasks={filteredTasks}
-            loading={loading}
-            onOpenTask={openTask}
-            onSchedule={onSchedule}
-            theme={theme}
           />
         </div>
       </div>
@@ -1067,36 +1065,6 @@ function CalendarWorkbench({ view, anchorDate, selectedDate, tasks, onSelectDate
   );
 }
 
-function CalendarTaskSideList({ selectedDate, tasks, loading, onOpenTask, onSchedule, theme }) {
-  const selectedTasks = (tasks || []).filter((task) => toDateInputValue(task.due_at) === selectedDate);
-  const unscheduled = (tasks || []).filter((task) => !task.due_at);
-  const otherTasks = (tasks || []).filter((task) => toDateInputValue(task.due_at) !== selectedDate && task.due_at);
-  const list = [...selectedTasks, ...otherTasks, ...unscheduled].slice(0, 60);
-  const selectedLabel = parseLocalDate(selectedDate)?.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }) || "Selected date";
-  return (
-    <aside className="flex min-h-0 flex-col rounded-[1.5rem] border border-ink-100 bg-white p-3 shadow-soft">
-      <div className="rounded-2xl border border-ink-100 bg-ink-50/70 px-3 py-3">
-        <p className="text-[0.6rem] font-semibold uppercase tracking-[0.22em] text-ink-400">Selected day</p>
-        <h4 className="mt-1 text-lg font-semibold text-ink-900">{selectedLabel}</h4>
-        <p className="mt-1 text-xs text-ink-500">{selectedTasks.length} due here · {list.length} visible tasks</p>
-      </div>
-      <div className="mt-2 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
-        {list.length ? list.map((task) => (
-          <TaskAgendaRow
-            key={`side-${task.id}`}
-            task={task}
-            selected={toDateInputValue(task.due_at) === selectedDate}
-            onOpen={() => onOpenTask(task)}
-            onSchedule={() => onSchedule(task)}
-          />
-        )) : (
-          <p className={theme.empty}>{loading ? "Loading..." : "No tasks match the calendar filters."}</p>
-        )}
-      </div>
-    </aside>
-  );
-}
-
 function TaskAgendaRow({ task, onOpen, onSchedule, selected, compact }) {
   const due = dueState(task.due_at, task.status);
   return (
@@ -1137,6 +1105,8 @@ function TaskBrowser({
   onDelegate,
   onSchedule,
   globalSearch,
+  dateFocus,
+  onClearDateFocus,
   collapsed,
   setCollapsed,
   theme
@@ -1166,9 +1136,10 @@ function TaskBrowser({
       const matchesQuery = !q || [task.title, task.context, task.status, task.task_type].join(" ").toLowerCase().includes(q);
       const matchesUrgency = urgency === "all" || task.urgency === urgency;
       const matchesDate = matchesDateFilter(task, dateFilter);
+      const matchesFocusDate = !dateFocus || toDateInputValue(task.due_at) === dateFocus;
       const matchesAssignment = matchesAssignmentFilter(task, assignmentFilter, actorAgentId);
       const matchesCategory = categoryFilter === "all" || task.category_code === categoryFilter;
-      return matchesQuery && matchesUrgency && matchesDate && matchesAssignment && matchesCategory;
+      return matchesQuery && matchesUrgency && matchesDate && matchesFocusDate && matchesAssignment && matchesCategory;
     });
     return filtered.sort((a, b) => {
       if (sort === "created_date") return String(b.created_at || "").localeCompare(String(a.created_at || ""));
@@ -1244,6 +1215,16 @@ function TaskBrowser({
       </div>
 
       <div className="mt-3 space-y-2 pr-1">
+        {dateFocus ? (
+          <div className="rounded-2xl border border-brand-100 bg-brand-50 px-3 py-2 text-xs font-semibold text-brand-700">
+            <div className="flex items-center justify-between gap-2">
+              <span>Focused on {formatDate(dateFocus)}</span>
+              <button type="button" onClick={onClearDateFocus} className="rounded-full border border-brand-100 bg-white px-2 py-1 text-[0.65rem]">
+                Clear
+              </button>
+            </div>
+          </div>
+        ) : null}
         {categories.map((category) => {
           const isOpen = openCategory === category.code;
           const tasks = filteredTasks(category.tasks);
@@ -1251,7 +1232,7 @@ function TaskBrowser({
           return (
             <div
               key={category.code}
-              className={`${theme.cardRaised} transition ${isOpen ? "border-ink-900 bg-ink-900 text-white shadow-strong ring-2 ring-brand-100" : ""}`}
+              className={`${theme.cardRaised} transition ${isOpen ? "border-brand-200 bg-brand-50/80 shadow-soft ring-2 ring-brand-100" : ""}`}
             >
               <div className="flex items-center justify-between gap-3 px-3 py-2.5">
                 <button
@@ -1259,23 +1240,23 @@ function TaskBrowser({
                   onClick={() => toggleCategory(category.code)}
                   className="min-w-0 flex-1 text-left"
                 >
-                  <span className={`block truncate text-sm font-semibold ${isOpen ? "text-white" : theme.heading}`}>{category.display_label}</span>
-                  <span className={`mt-1 block text-xs ${isOpen ? "text-white/70" : theme.muted}`}>
+                  <span className={`block truncate text-sm font-semibold ${isOpen ? "text-brand-900" : theme.heading}`}>{category.display_label}</span>
+                  <span className={`mt-1 block text-xs ${isOpen ? "text-brand-700" : theme.muted}`}>
                     {category.count} tasks, {category.urgent_count} urgent
                   </span>
                 </button>
                 <div className="flex items-center gap-2">
-                  <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${isOpen ? "bg-white text-ink-900" : "border border-ink-100 bg-white text-ink-500"}`}>
+                  <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${isOpen ? "bg-white text-brand-700" : "border border-ink-100 bg-white text-ink-500"}`}>
                     {category.count}
                   </span>
                   {isPinned ? <span className="rounded-full bg-brand-500 px-2 py-1 text-[0.6rem] font-semibold uppercase tracking-[0.14em] text-white">{labels.pinned}</span> : null}
                   <button
                     type="button"
                     onClick={() => toggleCategory(category.code)}
-                    className={`rounded-full border p-1 transition ${isOpen ? "border-white/20 bg-white/10 text-white" : "border-transparent hover:bg-ink-50"}`}
+                    className={`rounded-full border p-1 transition ${isOpen ? "border-brand-100 bg-white text-brand-700" : "border-transparent hover:bg-ink-50"}`}
                     aria-label={isOpen ? "Collapse category" : "Expand category"}
                   >
-                    <ChevronDown className={`h-4 w-4 transition ${isOpen ? "rotate-180 text-white" : "text-ink-400"}`} />
+                    <ChevronDown className={`h-4 w-4 transition ${isOpen ? "rotate-180 text-brand-700" : "text-ink-400"}`} />
                   </button>
                 </div>
               </div>
@@ -1284,7 +1265,7 @@ function TaskBrowser({
                 isOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
               }`}>
                 <div className="overflow-hidden">
-                  <div className={`${isOpen ? "border-t border-white/10 bg-white/95" : "border-t border-ink-100"} px-2 py-2`}>
+                  <div className={`${isOpen ? "border-t border-brand-100 bg-white/95" : "border-t border-ink-100"} px-2 py-2`}>
                     <div className="max-h-[42vh] min-h-[14rem] space-y-2 overflow-y-auto overscroll-contain pr-2 scrollbar-thin">
                       {tasks.length ? (
                         tasks.map((task) => (

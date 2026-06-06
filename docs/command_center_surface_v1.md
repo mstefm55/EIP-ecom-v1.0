@@ -15,11 +15,11 @@ The Command Center is the tenant dashboard landing surface for SME owners. It is
 - A centered signal search supports quick scanning without turning the surface into a dense filter bar.
 - The primary headline is: "Run the business, not the system."
 - The center column shows compact business statistic cards with lightweight trend graphics above focused Burning Topics.
-- The right rail is a full-height Task Browser sized for roughly one quarter of the viewport on Command Center and Analytics.
+- The right rail is a full-height Task Browser sized for roughly one quarter of the viewport.
 - Task Browser category cards are stacked. One category opens by default, and the task list inside that category is scroll bounded.
 - Task Browser filters, sorting, and category pinning are opened from a top header modal so the expanded task list remains readable.
-- Workload is the calendar scheduling tab. It hides the separate right Task Browser and merges the task list into a selected-day side list so large task volumes stay bounded inside one planner.
-- Workload does not repeat category cards or analytics panels below the calendar; those stay in Command Center/Analytics.
+- Workload is the calendar scheduling tab. It does not render a second task list; selecting a calendar date focuses the existing Task Browser on that due date.
+- Workload does not repeat category cards or analytics panels below the calendar; those stay in Command Center/Analytics/Task Browser.
 
 ## Backend Composition
 
@@ -82,7 +82,6 @@ React owns only reusable layout primitives:
 - task row
 - delegation form
 - day/week/month calendar workbench
-- integrated Workload task side list
 - schedule modal
 
 Module approvals, replies, purchasing decisions, inventory decisions, and commerce operations are not implemented in React. The Command Center opens the relevant governed workspace for those actions.
@@ -150,8 +149,8 @@ Manual dashboard check:
 5. Open a category and verify the task list scrolls inside the category instead of expanding the whole page.
 6. Open the Task Browser filter button in the header and verify search, due, assignment, category, sort, and pinning live inside the modal.
 7. Pin or unpin categories and verify Burning Topics only shows urgent tasks from pinned categories.
-8. Open Workload and verify the separate right Task Browser disappears, day/week/month calendar views render, selected-day highlighting works, and the integrated side list scrolls internally.
-9. Use Open on a task and confirm it routes to the governed module workspace.
+8. Open Workload and verify the right Task Browser remains visible, no duplicate scheduler task list appears, and selected calendar dates focus the Task Browser with a clearable date chip.
+9. Use Open on a task from either calendar chips or Task Browser and confirm it routes to the governed module workspace.
 10. Delegate a task you own or an unassigned task and confirm the task assignment updates after refresh.
 11. Schedule a task on the 10th and confirm the date input remains the 10th in the local browser timezone.
 
