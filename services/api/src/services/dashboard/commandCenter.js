@@ -148,22 +148,34 @@ async function buildActiveModules(app, tenantId) {
 }
 
 function deriveCategory(row) {
-  const haystack = [
+  const explicitModule = normalizeLower(readAttr(row, "module") || readAttr(row, "area") || readAttr(row, "surface"));
+  const strongFields = [
+    row.task_type,
+    row.object_type,
+    row.process_code,
+    row.process_name
+  ].map(normalizeLower).join(" ");
+  const descriptiveFields = [
     readAttr(row, "module"),
     readAttr(row, "area"),
     readAttr(row, "surface"),
     readAttr(row, "source"),
-    row.task_type,
-    row.object_type,
-    row.process_code,
-    row.process_name,
     row.title,
     row.description
   ].map(normalizeLower).join(" ");
 
-  return CATEGORY_DEFS.find((category) =>
-    category.keywords.some((keyword) => haystack.includes(keyword))
-  ) || CATEGORY_DEFS[CATEGORY_DEFS.length - 1];
+  const scores = CATEGORY_DEFS.map((category) => {
+    let score = explicitModule === category.code ? 100 : 0;
+    for (const keyword of category.keywords) {
+      const token = normalizeLower(keyword);
+      const pattern = new RegExp(`(^|[^a-z0-9])${token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`, "i");
+      if (pattern.test(strongFields)) score += token === "order" ? 4 : 12;
+      if (pattern.test(descriptiveFields)) score += token === "order" ? 1 : 3;
+    }
+    return { category, score };
+  }).sort((a, b) => b.score - a.score);
+
+  return scores[0]?.score > 0 ? scores[0].category : CATEGORY_DEFS[CATEGORY_DEFS.length - 1];
 }
 
 function computeUrgency(row) {

@@ -4,6 +4,8 @@ import {
   ChevronDown,
   Clock3,
   LayoutGrid,
+  PanelRightClose,
+  PanelRightOpen,
   RefreshCw,
   Search,
   SlidersHorizontal,
@@ -233,6 +235,7 @@ export default function UserDashboardPanel({ node, ctx }) {
   const [openCategory, setOpenCategory] = useState(config.taskBrowser.defaultOpen || "");
   const [pinnedCategories, setPinnedCategories] = useState([]);
   const [globalSearch, setGlobalSearch] = useState("");
+  const [taskBrowserCollapsed, setTaskBrowserCollapsed] = useState(false);
 
   const loadCommandCenter = useCallback(async () => {
     setLoading(true);
@@ -306,11 +309,12 @@ export default function UserDashboardPanel({ node, ctx }) {
   }, [decoratedCategories, pinnedCategories]);
 
   const handleAction = useCallback((task, action) => {
-    if (action?.kind === "navigate" && action.surface) {
+    const allowedSurfaces = new Set(["crm", "commerce", "inventory", "procurement", "content", "reports", "tasks"]);
+    if (action?.kind === "navigate" && allowedSurfaces.has(action.surface)) {
       ctx?.user?.setActiveTab?.(action.surface);
       return;
     }
-    if (task?.surface) {
+    if (allowedSurfaces.has(task?.surface)) {
       ctx?.user?.setActiveTab?.(task.surface);
     }
   }, [ctx]);
@@ -336,7 +340,9 @@ export default function UserDashboardPanel({ node, ctx }) {
 
   return (
     <section className="command-center-surface min-h-[calc(100vh-8rem)] rounded-[2rem] border border-white/75 bg-white/92 px-5 py-5 shadow-soft">
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(330px,24vw)]">
+      <div className={`grid gap-6 transition-[grid-template-columns] duration-300 ease-out ${
+        taskBrowserCollapsed ? "xl:grid-cols-1" : "xl:grid-cols-[minmax(0,1fr)_minmax(330px,24vw)]"
+      }`}>
         <main className="min-w-0 space-y-6">
           <CommandHeader
             config={config}
@@ -394,6 +400,8 @@ export default function UserDashboardPanel({ node, ctx }) {
           onAction={handleAction}
           onDelegate={handleDelegate}
           globalSearch={globalSearch}
+          collapsed={taskBrowserCollapsed}
+          setCollapsed={setTaskBrowserCollapsed}
         />
       </div>
       <p className="mt-4 text-xs font-semibold text-ink-300">
@@ -662,7 +670,9 @@ function TaskBrowser({
   delegationCandidates,
   onAction,
   onDelegate,
-  globalSearch
+  globalSearch,
+  collapsed,
+  setCollapsed
 }) {
   const [controlsOpen, setControlsOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -672,6 +682,7 @@ function TaskBrowser({
   const [assignee, setAssignee] = useState("");
   const [delegateError, setDelegateError] = useState("");
   const [delegateBusy, setDelegateBusy] = useState(false);
+  const hasOpenCategory = Boolean(openCategory);
 
   const togglePin = (code) => {
     setPinnedCategories((current) => {
@@ -712,18 +723,47 @@ function TaskBrowser({
     }
   };
 
+  const toggleCategory = (code) => {
+    setControlsOpen(false);
+    setDelegatingTaskId("");
+    setOpenCategory((current) => (current === code ? "" : code));
+  };
+
+  if (collapsed) {
+    return (
+      <button
+        type="button"
+        onClick={() => setCollapsed(false)}
+        className="fixed right-5 top-[6.75rem] z-40 hidden rounded-2xl border border-white/70 bg-white/95 p-3 text-ink-600 shadow-strong transition hover:text-ink-900 xl:inline-flex"
+        aria-label="Open Task Browser"
+      >
+        <PanelRightOpen className="h-5 w-5" />
+      </button>
+    );
+  }
+
   return (
-    <aside className="glass-panel min-h-[calc(100vh-9rem)] px-4 py-4 xl:sticky xl:top-[6.75rem] xl:max-h-[calc(100vh-7.5rem)] xl:overflow-hidden">
+    <aside className="glass-panel px-4 py-4 xl:fixed xl:right-5 xl:top-[6.75rem] xl:z-30 xl:h-[calc(100vh-7.5rem)] xl:w-[min(24vw,26rem)] xl:overflow-y-auto xl:overscroll-contain">
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-ink-400">Action queue</p>
           <h3 className="text-lg font-semibold text-ink-900">{labels.taskBrowser}</h3>
           <p className="mt-1 text-xs font-semibold text-ink-400">{labels.taskBrowserHint}</p>
         </div>
-        <LayoutGrid className="h-5 w-5 text-ink-400" />
+        <div className="flex items-center gap-2">
+          <LayoutGrid className="h-5 w-5 text-ink-400" />
+          <button
+            type="button"
+            onClick={() => setCollapsed(true)}
+            className="hidden rounded-full border border-ink-100 bg-white p-2 text-ink-400 transition hover:text-ink-800 xl:inline-flex"
+            aria-label="Collapse Task Browser"
+          >
+            <PanelRightClose className="h-4 w-4" />
+          </button>
+        </div>
       </div>
 
-      <div className="mt-4 space-y-3 overflow-y-auto pr-1 xl:max-h-[calc(100vh-16rem)]">
+      <div className="mt-4 space-y-3 pr-1">
         {categories.map((category) => {
           const isOpen = openCategory === category.code;
           const tasks = filteredTasks(category.tasks);
@@ -733,7 +773,7 @@ function TaskBrowser({
               <div className="flex items-center justify-between gap-3 px-4 py-3">
                 <button
                   type="button"
-                  onClick={() => setOpenCategory(isOpen ? "" : category.code)}
+                  onClick={() => toggleCategory(category.code)}
                   className="min-w-0 flex-1 text-left"
                 >
                   <span className="block truncate text-sm font-semibold text-ink-900">{category.display_label}</span>
@@ -753,7 +793,7 @@ function TaskBrowser({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setOpenCategory(isOpen ? "" : category.code)}
+                    onClick={() => toggleCategory(category.code)}
                     className="rounded-full p-1 hover:bg-ink-50"
                     aria-label={isOpen ? "Collapse category" : "Expand category"}
                   >
@@ -762,72 +802,78 @@ function TaskBrowser({
                 </div>
               </div>
 
-              {isOpen ? (
-                <div className="border-t border-ink-100 px-3 py-3">
-                  <div className="max-h-[30vh] space-y-2 overflow-y-auto overscroll-contain pr-1">
-                    {tasks.length ? (
-                      tasks.map((task) => (
-                        <TaskRow
-                          key={task.id}
-                          task={task}
-                          delegating={delegatingTaskId === task.id}
-                          setDelegatingTaskId={setDelegatingTaskId}
-                          assignee={assignee}
-                          setAssignee={setAssignee}
-                          delegationCandidates={delegationCandidates}
-                          delegateBusy={delegateBusy}
-                          delegateError={delegateError}
-                          onAction={onAction}
-                          onSubmitDelegate={submitDelegate}
-                          labels={labels}
-                        />
-                      ))
-                    ) : (
-                      <p className="rounded-xl border border-dashed border-ink-200 bg-white/70 px-3 py-4 text-sm text-ink-400">
-                        {loading ? "Loading..." : labels.noTasks}
-                      </p>
-                    )}
+              <div className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${
+                isOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
+              }`}>
+                <div className="overflow-hidden">
+                  <div className="border-t border-ink-100 px-3 py-3">
+                    <div className="max-h-[30vh] space-y-2 overflow-y-auto overscroll-contain pr-1">
+                      {tasks.length ? (
+                        tasks.map((task) => (
+                          <TaskRow
+                            key={task.id}
+                            task={task}
+                            delegating={delegatingTaskId === task.id}
+                            setDelegatingTaskId={setDelegatingTaskId}
+                            assignee={assignee}
+                            setAssignee={setAssignee}
+                            delegationCandidates={delegationCandidates}
+                            delegateBusy={delegateBusy}
+                            delegateError={delegateError}
+                            onAction={onAction}
+                            onSubmitDelegate={submitDelegate}
+                            labels={labels}
+                          />
+                        ))
+                      ) : (
+                        <p className="rounded-xl border border-dashed border-ink-200 bg-white/70 px-3 py-4 text-sm text-ink-400">
+                          {loading ? "Loading..." : labels.noTasks}
+                        </p>
+                      )}
+                    </div>
                   </div>
                 </div>
-              ) : null}
+              </div>
             </div>
           );
         })}
       </div>
 
-      <div className="mt-3 rounded-2xl border border-white/70 bg-white/80">
-        <button
-          type="button"
-          onClick={() => setControlsOpen((value) => !value)}
-          className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm font-semibold text-ink-800"
-        >
-          <span className="inline-flex items-center gap-2">
-            <SlidersHorizontal className="h-4 w-4 text-ink-400" />
-            {labels.controls}
-          </span>
-          <ChevronDown className={`h-4 w-4 text-ink-400 transition ${controlsOpen ? "rotate-180" : ""}`} />
-        </button>
-        {controlsOpen ? (
-          <div className="space-y-3 border-t border-ink-100 px-4 py-3">
-            <label className="block text-xs font-semibold uppercase tracking-[0.16em] text-ink-400">
-              {labels.search}
-              <span className="mt-2 flex items-center gap-2 rounded-xl border border-ink-100 bg-white px-3 py-2">
-                <Search className="h-4 w-4 text-ink-300" />
-                <input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  className="w-full bg-transparent text-sm normal-case tracking-normal text-ink-800 outline-none"
-                  placeholder="Title, status, context"
-                />
-              </span>
-            </label>
-            <div className="grid gap-2 sm:grid-cols-2">
-              <Select label={labels.urgency} value={urgency} onChange={setUrgency} options={taskBrowser.urgencyFilters || []} />
-              <Select label={labels.sort} value={sort} onChange={setSort} options={taskBrowser.sortOptions || []} />
+      {!hasOpenCategory ? (
+        <div className="mt-3 rounded-2xl border border-white/70 bg-white/80">
+          <button
+            type="button"
+            onClick={() => setControlsOpen((value) => !value)}
+            className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm font-semibold text-ink-800"
+          >
+            <span className="inline-flex items-center gap-2">
+              <SlidersHorizontal className="h-4 w-4 text-ink-400" />
+              {labels.controls}
+            </span>
+            <ChevronDown className={`h-4 w-4 text-ink-400 transition ${controlsOpen ? "rotate-180" : ""}`} />
+          </button>
+          {controlsOpen ? (
+            <div className="space-y-3 border-t border-ink-100 px-4 py-3">
+              <label className="block text-xs font-semibold uppercase tracking-[0.16em] text-ink-400">
+                {labels.search}
+                <span className="mt-2 flex items-center gap-2 rounded-xl border border-ink-100 bg-white px-3 py-2">
+                  <Search className="h-4 w-4 text-ink-300" />
+                  <input
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    className="w-full bg-transparent text-sm normal-case tracking-normal text-ink-800 outline-none"
+                    placeholder="Title, status, context"
+                  />
+                </span>
+              </label>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Select label={labels.urgency} value={urgency} onChange={setUrgency} options={taskBrowser.urgencyFilters || []} />
+                <Select label={labels.sort} value={sort} onChange={setSort} options={taskBrowser.sortOptions || []} />
+              </div>
             </div>
-          </div>
-        ) : null}
-      </div>
+          ) : null}
+        </div>
+      ) : null}
     </aside>
   );
 }

@@ -44,6 +44,12 @@ test("command center dashboard UI is descriptor-driven and keeps the task browse
   assert.match(component, /Burning topics/);
   assert.match(component, /text-3xl font-semibold/);
   assert.match(component, /max-h-\[30vh\]/);
+  assert.match(component, /xl:fixed xl:right-5 xl:top-\[6\.75rem\]/);
+  assert.match(component, /PanelRightClose/);
+  assert.match(component, /PanelRightOpen/);
+  assert.match(component, /grid-rows-\[1fr\]/);
+  assert.match(component, /grid-rows-\[0fr\]/);
+  assert.match(component, /!hasOpenCategory/);
   assert.match(component, /xl:grid-cols-\[minmax\(0,1fr\)_minmax\(330px,24vw\)\]/);
   assert.match(component, /onOpenDetail\?\.\(widget\)/);
   assert.match(component, /onDelegate/);
@@ -59,4 +65,14 @@ test("command center dashboard UI is descriptor-driven and keeps the task browse
   assert.match(seed, /"taskBrowser"/);
   assert.match(migration, /command_center_props/);
   assert.match(migration, /jsonb_set\(panel_child, '\{props\}', command_center_props, true\)/);
+});
+
+test("command center category routing uses scored metadata instead of broad text includes", () => {
+  const service = read("services/api/src/services/dashboard/commandCenter.js");
+
+  assert.match(service, /explicitModule === category\.code/);
+  assert.match(service, /strongFields/);
+  assert.match(service, /descriptiveFields/);
+  assert.match(service, /new RegExp/);
+  assert.doesNotMatch(service, /haystack\.includes/);
 });
