@@ -93,6 +93,15 @@ cd apps/dashboard
 npm run build
 ```
 
+Railway rollout:
+
+```bash
+cd services/api
+npm run migrate
+```
+
+Migration `0113_command_center_dashboard_descriptor.sql` is metadata-only. It patches active/published `dashboard` UI surface descriptors so Command Center labels, tabs, widgets, category presentation, and Task Browser settings come from persisted surface metadata rather than only React fallback defaults.
+
 Manual dashboard check:
 
 1. Sign in to a tenant dashboard.

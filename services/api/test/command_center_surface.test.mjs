@@ -33,6 +33,7 @@ test("command center dashboard UI is descriptor-driven and keeps the task browse
   const component = read("apps/dashboard/src/components/user/UserDashboardPanel.jsx");
   const descriptor = read("apps/dashboard/src/engine/surfaces/dashboard.js");
   const seed = read("services/api/db/seed/ui_surface_dashboard.sql");
+  const migration = read("services/api/db/migrations/0113_command_center_dashboard_descriptor.sql");
 
   assert.match(component, /mergeConfig\(node\?\.props/);
   assert.match(component, /Run the business, not the system/);
@@ -56,4 +57,6 @@ test("command center dashboard UI is descriptor-driven and keeps the task browse
   assert.match(seed, /"endpoint": "\/api\/eip\/user\/dashboard\/command-center"/);
   assert.match(seed, /"categoryPresentation"/);
   assert.match(seed, /"taskBrowser"/);
+  assert.match(migration, /command_center_props/);
+  assert.match(migration, /jsonb_set\(panel_child, '\{props\}', command_center_props, true\)/);
 });
