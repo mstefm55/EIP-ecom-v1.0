@@ -1,4 +1,8 @@
 import { isAuthenticatedSurfaceAllowed, resolveEipSurfaceAccess } from "../lib/surfaceAccess.js";
+import {
+  buildCommandCenterPayload,
+  delegateCommandCenterTask
+} from "../services/dashboard/commandCenter.js";
 
 const OPEN_TASK_STATUSES = ["open", "assigned", "in_progress", "blocked", "pending"];
 
@@ -242,6 +246,57 @@ export default async function uiSurfaceRoutes(app, opts = {}) {
     const activeModules = await buildActiveModules(app, s.session.tenant_id);
     return reply.send({ ok: true, active_modules: activeModules });
   });
+
+  app.get("/user/dashboard/command-center", async (req, reply) => {
+    const s = await app.requireSession(req, { realm: "EIP" });
+    if (!s.ok) return reply.code(s.status).send({ ok: false, error: s.error });
+
+    const payload = await buildCommandCenterPayload(
+      app,
+      s.session.tenant_id,
+      s.session.identity_id
+    );
+    return reply.send(payload);
+  });
+
+  app.post(
+    "/user/tasks/:id/delegate",
+    {
+      schema: {
+        params: {
+          type: "object",
+          required: ["id"],
+          properties: { id: { type: "string", minLength: 36, maxLength: 36 } }
+        },
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["assigned_agent_id"],
+          properties: {
+            assigned_agent_id: { type: "string", minLength: 36, maxLength: 36 }
+          }
+        }
+      }
+    },
+    async (req, reply) => {
+      const s = await app.requireSession(req, { realm: "EIP" });
+      if (!s.ok) return reply.code(s.status).send({ ok: false, error: s.error });
+
+      const c = await app.requireCsrf(req);
+      if (!c.ok) return reply.code(c.status).send({ ok: false, error: c.error });
+
+      const result = await delegateCommandCenterTask(app, {
+        tenantId: s.session.tenant_id,
+        identityId: s.session.identity_id,
+        taskId: normalizeText(req.params.id),
+        assignedAgentId: normalizeText(req.body?.assigned_agent_id)
+      });
+      if (!result.ok) {
+        return reply.code(result.status || 500).send(result);
+      }
+      return reply.send(result);
+    }
+  );
 
   // Authenticated surfaces
   app.get(

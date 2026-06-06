@@ -38,7 +38,38 @@ SELECT
       "children": [
         {
           "id": "user-dashboard",
-          "type": "UserDashboardPanel"
+          "type": "UserDashboardPanel",
+          "props": {
+            "endpoint": "/api/eip/user/dashboard/command-center",
+            "title": "Command Center",
+            "subtitle": "Start with the urgent work, inspect the signal, then continue in the governed module workspace.",
+            "tabs": [
+              { "code": "command", "label": "Command Center" },
+              { "code": "analytics", "label": "Analytics" },
+              { "code": "workload", "label": "Workload" }
+            ],
+            "widgets": [
+              { "code": "open_work", "label": "Open work" },
+              { "code": "high_urgency", "label": "High urgency" },
+              { "code": "due_today", "label": "Due today" },
+              { "code": "active_modules", "label": "Active modules" }
+            ],
+            "labels": {
+              "burningTopics": "Burning topics",
+              "burningEmpty": "No urgent item is waiting in the pinned categories.",
+              "taskBrowser": "Task Browser",
+              "controls": "Filters and delegation",
+              "analytics": "Signal analytics",
+              "workload": "Workload balance",
+              "delegate": "Delegate",
+              "noTasks": "No open tasks in this category."
+            },
+            "taskBrowser": {
+              "defaultOpen": "crm",
+              "urgencyFilters": ["all", "critical", "high", "medium", "normal"],
+              "sortOptions": ["urgency", "due_date", "category"]
+            }
+          }
         }
       ]
     },
