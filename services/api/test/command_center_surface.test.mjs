@@ -35,19 +35,23 @@ test("command center dashboard UI is descriptor-driven and keeps the task browse
   const seed = read("services/api/db/seed/ui_surface_dashboard.sql");
 
   assert.match(component, /mergeConfig\(node\?\.props/);
-  assert.match(component, /Command Center/);
+  assert.match(component, /Run the business, not the system/);
   assert.match(component, /Analytics/);
   assert.match(component, /Workload/);
   assert.match(component, /TaskBrowser/);
-  assert.match(component, /max-h-\[30vh\]/);
-  assert.match(component, /xl:grid-cols-\[minmax\(0,1fr\)_minmax\(320px,24vw\)\]/);
+  assert.match(component, /Business statistics/);
+  assert.match(component, /Burning topics/);
+  assert.match(component, /max-h-\[34vh\]/);
+  assert.match(component, /xl:grid-cols-\[minmax\(0,1fr\)_minmax\(330px,24vw\)\]/);
   assert.match(component, /onDelegate/);
   assert.match(component, /ctx\?\.user\?\.setActiveTab/);
   assert.doesNotMatch(component, /samara|samarapattern|samara-web-storefront/i);
 
   assert.match(descriptor, /endpoint: "\/api\/eip\/user\/dashboard\/command-center"/);
   assert.match(descriptor, /taskBrowser/);
+  assert.match(descriptor, /categoryPresentation/);
   assert.match(descriptor, /widgets/);
   assert.match(seed, /"endpoint": "\/api\/eip\/user\/dashboard\/command-center"/);
+  assert.match(seed, /"categoryPresentation"/);
   assert.match(seed, /"taskBrowser"/);
 });

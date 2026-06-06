@@ -41,8 +41,8 @@ SELECT
           "type": "UserDashboardPanel",
           "props": {
             "endpoint": "/api/eip/user/dashboard/command-center",
-            "title": "Command Center",
-            "subtitle": "Start with the urgent work, inspect the signal, then continue in the governed module workspace.",
+            "title": "Run the business, not the system",
+            "subtitle": "Stats on top, burning topics below. The Task Browser shows all actionables and expands like the Admin data browser.",
             "tabs": [
               { "code": "command", "label": "Command Center" },
               { "code": "analytics", "label": "Analytics" },
@@ -52,17 +52,35 @@ SELECT
               { "code": "open_work", "label": "Open work" },
               { "code": "high_urgency", "label": "High urgency" },
               { "code": "due_today", "label": "Due today" },
-              { "code": "active_modules", "label": "Active modules" }
+              { "code": "active_modules", "label": "Active modules" },
+              { "code": "recent_reports", "label": "Recent reports" }
             ],
             "labels": {
+              "businessStats": "Business statistics",
+              "businessStatsHint": "Role/template-driven graph set",
+              "openDetail": "Open detail",
               "burningTopics": "Burning topics",
-              "burningEmpty": "No urgent item is waiting in the pinned categories.",
+              "burningHint": "Top urgent items only. User pins 2-3 categories from the Task Browser.",
               "taskBrowser": "Task Browser",
+              "taskBrowserHint": "All user actionables - categories are metadata-driven",
+              "taskSearch": "Search actionables...",
+              "signalSearch": "Search signal, customer, order, material...",
+              "actionables": "Actionables",
               "controls": "Filters and delegation",
               "analytics": "Signal analytics",
               "workload": "Workload balance",
               "delegate": "Delegate",
+              "assign": "Assign",
               "noTasks": "No open tasks in this category."
+            },
+            "categoryPresentation": {
+              "crm": { "label": "Customer queries", "badge": "CRM / INTAKE", "tone": "blue" },
+              "commerce": { "label": "Orders to deliver", "badge": "ORDER FLOW", "tone": "red" },
+              "inventory": { "label": "Stock risks", "badge": "INVENTORY", "tone": "gold" },
+              "procurement": { "label": "RFQ / Suppliers", "badge": "PROCUREMENT", "tone": "violet" },
+              "content": { "label": "Content & catalog", "badge": "STORE", "tone": "green" },
+              "reports": { "label": "Reports & review", "badge": "REPORTING", "tone": "slate" },
+              "general": { "label": "General work", "badge": "TASKS", "tone": "slate" }
             },
             "taskBrowser": {
               "defaultOpen": "crm",

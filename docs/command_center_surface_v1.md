@@ -7,11 +7,14 @@ The Command Center is the tenant dashboard landing surface for SME owners. It is
 ## Layout Contract
 
 - Left navigation remains the existing collapsible dashboard sidebar.
-- Main dashboard has three active working tabs:
+- Main dashboard uses a light, spacious owner workbench layout rather than nested operational tables.
+- Top navigation has three active working tabs:
   - Command Center
   - Analytics
   - Workload
-- The center column shows compact KPI and graph widgets above focused Burning Topics.
+- A centered signal search supports quick scanning without turning the surface into a dense filter bar.
+- The primary headline is: "Run the business, not the system."
+- The center column shows compact business statistic cards with lightweight trend graphics above focused Burning Topics.
 - The right rail is a full-height Task Browser sized for roughly one quarter of the viewport.
 - Task Browser category cards are stacked. One category opens by default, and the task list inside that category is scroll bounded.
 - Bottom filters, sorting, pinning, and delegation controls are secondary and collapsible.

@@ -1,11 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Activity,
   BarChart3,
   ChevronDown,
-  CircleDot,
   Clock3,
-  Flame,
   LayoutGrid,
   RefreshCw,
   Search,
@@ -16,8 +13,9 @@ import { apiFetch } from "../../services/apiClient";
 
 const DEFAULT_CONFIG = {
   endpoint: "/api/eip/user/dashboard/command-center",
-  title: "Command Center",
-  subtitle: "Owner-level workbench for urgent work, live signals, and governed next actions.",
+  title: "Run the business, not the system",
+  subtitle:
+    "Stats on top, burning topics below. The Task Browser shows all actionables and expands like the Admin data browser.",
   tabs: [
     { code: "command", label: "Command Center" },
     { code: "analytics", label: "Analytics" },
@@ -27,17 +25,27 @@ const DEFAULT_CONFIG = {
     { code: "open_work", label: "Open work" },
     { code: "high_urgency", label: "High urgency" },
     { code: "due_today", label: "Due today" },
-    { code: "active_modules", label: "Active modules" }
+    { code: "active_modules", label: "Active modules" },
+    { code: "recent_reports", label: "Recent reports" }
   ],
   labels: {
     refresh: "Refresh",
+    businessStats: "Business statistics",
+    businessStatsHint: "Role/template-driven graph set",
+    openDetail: "Open detail",
     burningTopics: "Burning topics",
+    burningHint: "Top urgent items only. User pins 2-3 categories from the Task Browser.",
     burningEmpty: "No urgent item is waiting in the pinned categories.",
     taskBrowser: "Task Browser",
-    controls: "Filters and delegation",
+    taskBrowserHint: "All user actionables - categories are metadata-driven",
+    taskSearch: "Search actionables...",
+    signalSearch: "Search signal, customer, order, material...",
+    actionables: "Actionables",
+    controls: "Filters, delegation rules and category pinning",
     analytics: "Signal analytics",
     workload: "Workload balance",
     delegate: "Delegate",
+    assign: "Assign",
     cancel: "Cancel",
     confirm: "Confirm",
     noTasks: "No open tasks in this category.",
@@ -46,6 +54,15 @@ const DEFAULT_CONFIG = {
     sort: "Sort",
     pinned: "Pinned"
   },
+  categoryPresentation: {
+    crm: { label: "Customer queries", badge: "CRM / INTAKE", tone: "blue" },
+    commerce: { label: "Orders to deliver", badge: "ORDER FLOW", tone: "red" },
+    inventory: { label: "Stock risks", badge: "INVENTORY", tone: "gold" },
+    procurement: { label: "RFQ / Suppliers", badge: "PROCUREMENT", tone: "violet" },
+    content: { label: "Content & catalog", badge: "STORE", tone: "green" },
+    reports: { label: "Reports & review", badge: "REPORTING", tone: "slate" },
+    general: { label: "General work", badge: "TASKS", tone: "slate" }
+  },
   taskBrowser: {
     defaultOpen: "crm",
     urgencyFilters: ["all", "critical", "high", "medium", "normal"],
@@ -53,20 +70,68 @@ const DEFAULT_CONFIG = {
   }
 };
 
-const TONE_CLASSES = {
-  ink: "border-ink-100 bg-white/85 text-ink-900",
-  rose: "border-rose-200 bg-rose-50/90 text-rose-700",
-  amber: "border-amber-200 bg-amber-50/90 text-amber-700",
-  emerald: "border-emerald-200 bg-emerald-50/90 text-emerald-700",
-  brand: "border-brand-200 bg-brand-50/90 text-brand-700",
-  cyan: "border-cyan-200 bg-cyan-50/90 text-cyan-700"
+const TONE = {
+  blue: {
+    accent: "text-brand-600",
+    border: "border-brand-500",
+    softBorder: "border-brand-200",
+    bg: "bg-brand-50",
+    dot: "bg-brand-500",
+    badge: "bg-brand-600 text-white",
+    active: "bg-ink-900 text-white"
+  },
+  red: {
+    accent: "text-rose-600",
+    border: "border-rose-500",
+    softBorder: "border-rose-200",
+    bg: "bg-rose-50",
+    dot: "bg-rose-500",
+    badge: "bg-rose-500 text-white",
+    active: "bg-ink-900 text-white"
+  },
+  gold: {
+    accent: "text-amber-600",
+    border: "border-amber-500",
+    softBorder: "border-amber-200",
+    bg: "bg-amber-50",
+    dot: "bg-amber-500",
+    badge: "bg-amber-500 text-white",
+    active: "bg-ink-900 text-white"
+  },
+  violet: {
+    accent: "text-violet-600",
+    border: "border-violet-500",
+    softBorder: "border-violet-200",
+    bg: "bg-violet-50",
+    dot: "bg-violet-500",
+    badge: "bg-violet-500 text-white",
+    active: "bg-ink-900 text-white"
+  },
+  green: {
+    accent: "text-emerald-600",
+    border: "border-emerald-500",
+    softBorder: "border-emerald-200",
+    bg: "bg-emerald-50",
+    dot: "bg-emerald-500",
+    badge: "bg-emerald-500 text-white",
+    active: "bg-ink-900 text-white"
+  },
+  slate: {
+    accent: "text-ink-500",
+    border: "border-ink-300",
+    softBorder: "border-ink-100",
+    bg: "bg-ink-50",
+    dot: "bg-ink-400",
+    badge: "bg-ink-500 text-white",
+    active: "bg-ink-900 text-white"
+  }
 };
 
-const URGENCY_CLASSES = {
-  critical: "border-rose-200 bg-rose-50 text-rose-700",
-  high: "border-amber-200 bg-amber-50 text-amber-700",
-  medium: "border-cyan-200 bg-cyan-50 text-cyan-700",
-  normal: "border-ink-100 bg-white text-ink-500"
+const URGENCY = {
+  critical: "text-rose-600",
+  high: "text-rose-600",
+  medium: "text-violet-600",
+  normal: "text-ink-400"
 };
 
 function mergeConfig(props = {}) {
@@ -74,7 +139,11 @@ function mergeConfig(props = {}) {
     ...DEFAULT_CONFIG,
     ...props,
     labels: { ...DEFAULT_CONFIG.labels, ...(props.labels || {}) },
-    taskBrowser: { ...DEFAULT_CONFIG.taskBrowser, ...(props.taskBrowser || {}) }
+    taskBrowser: { ...DEFAULT_CONFIG.taskBrowser, ...(props.taskBrowser || {}) },
+    categoryPresentation: {
+      ...DEFAULT_CONFIG.categoryPresentation,
+      ...(props.categoryPresentation || {})
+    }
   };
 }
 
@@ -91,7 +160,33 @@ function formatDate(value) {
 
 function percentOf(value, total) {
   if (!total) return 0;
-  return Math.max(4, Math.min(100, Math.round((Number(value || 0) / total) * 100)));
+  return Math.max(5, Math.min(100, Math.round((Number(value || 0) / total) * 100)));
+}
+
+function decorateCategory(category, config) {
+  const presentation = config.categoryPresentation?.[category.code] || {};
+  const tone = TONE[presentation.tone] || TONE.slate;
+  return {
+    ...category,
+    display_label: presentation.label || category.label,
+    badge: presentation.badge || String(category.code || "TASKS").toUpperCase(),
+    tone_name: presentation.tone || "slate",
+    tone
+  };
+}
+
+function makeSparklinePoints(series) {
+  const values = Array.isArray(series) && series.length
+    ? series.map((item) => Number(item.value || item.count || 0))
+    : [2, 4, 3, 6, 8, 10];
+  const max = Math.max(...values, 1);
+  const min = Math.min(...values, 0);
+  const range = Math.max(max - min, 1);
+  return values.map((value, index) => {
+    const x = values.length === 1 ? 0 : (index / (values.length - 1)) * 100;
+    const y = 46 - ((value - min) / range) * 38;
+    return `${x},${y}`;
+  }).join(" ");
 }
 
 export default function UserDashboardPanel({ node, ctx }) {
@@ -102,6 +197,7 @@ export default function UserDashboardPanel({ node, ctx }) {
   const [activeTab, setActiveTab] = useState("command");
   const [openCategory, setOpenCategory] = useState(config.taskBrowser.defaultOpen || "");
   const [pinnedCategories, setPinnedCategories] = useState([]);
+  const [globalSearch, setGlobalSearch] = useState("");
 
   const loadCommandCenter = useCallback(async () => {
     setLoading(true);
@@ -116,7 +212,7 @@ export default function UserDashboardPanel({ node, ctx }) {
         if (current.length) return current;
         return categories.filter((item) => item.pinned).map((item) => item.code).slice(0, 3);
       });
-    } catch (err) {
+    } catch {
       setError("Unable to load the live Command Center.");
     } finally {
       setLoading(false);
@@ -148,25 +244,31 @@ export default function UserDashboardPanel({ node, ctx }) {
     };
   }, [config.endpoint]);
 
-  const categories = Array.isArray(payload?.categories) ? payload.categories : [];
+  const decoratedCategories = useMemo(
+    () => (payload?.categories || []).map((category) => decorateCategory(category, config)),
+    [config, payload]
+  );
+
   const widgets = useMemo(() => {
     const byCode = new Map((payload?.widgets || []).map((widget) => [widget.code, widget]));
     return (config.widgets || DEFAULT_CONFIG.widgets)
       .map((descriptor) => ({ ...descriptor, ...(byCode.get(descriptor.code) || {}) }))
-      .slice(0, 4);
+      .slice(0, 5);
   }, [config.widgets, payload]);
 
   const burningTopics = useMemo(() => {
     const pinned = new Set(pinnedCategories);
-    return categories
+    return decoratedCategories
       .filter((category) => pinned.has(category.code))
       .map((category) => ({
         ...category,
-        urgentTasks: (category.tasks || []).filter((task) => Number(task.urgency_score || 0) >= 3).slice(0, 3)
+        urgentTasks: (category.tasks || [])
+          .filter((task) => Number(task.urgency_score || 0) >= 3)
+          .slice(0, 3)
       }))
       .filter((category) => category.urgentTasks.length)
       .slice(0, 3);
-  }, [categories, pinnedCategories]);
+  }, [decoratedCategories, pinnedCategories]);
 
   const handleAction = useCallback((task, action) => {
     if (action?.kind === "navigate" && action.surface) {
@@ -186,58 +288,34 @@ export default function UserDashboardPanel({ node, ctx }) {
   }, [loadCommandCenter]);
 
   return (
-    <section className="space-y-4">
-      <div className="glass-panel px-5 py-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="text-[0.65rem] font-semibold uppercase tracking-[0.28em] text-ink-400">Workspace</p>
-            <h2 className="mt-1 text-2xl font-semibold font-display text-ink-900">{config.title}</h2>
-            <p className="mt-1 max-w-3xl text-sm text-ink-500">{config.subtitle}</p>
-          </div>
-          <button
-            type="button"
-            onClick={loadCommandCenter}
-            disabled={loading}
-            className="inline-flex items-center gap-2 rounded-full border border-white/70 bg-white/85 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-ink-500 shadow-soft transition hover:text-ink-900 disabled:opacity-60"
-          >
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-            {config.labels.refresh}
-          </button>
-        </div>
+    <section className="command-center-surface min-h-[calc(100vh-8rem)] rounded-[2rem] border border-white/75 bg-white/92 px-5 py-5 shadow-soft">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(330px,24vw)]">
+        <main className="min-w-0 space-y-6">
+          <CommandHeader
+            config={config}
+            activeTab={activeTab}
+            setActiveTab={setActiveTab}
+            globalSearch={globalSearch}
+            setGlobalSearch={setGlobalSearch}
+            loading={loading}
+            loadCommandCenter={loadCommandCenter}
+          />
 
-        <div className="mt-4 flex flex-wrap gap-2">
-          {(config.tabs || DEFAULT_CONFIG.tabs).map((tab) => (
-            <button
-              key={tab.code}
-              type="button"
-              onClick={() => setActiveTab(tab.code)}
-              className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
-                activeTab === tab.code
-                  ? "bg-ink-900 text-white shadow-glow"
-                  : "border border-white/70 bg-white/75 text-ink-500 hover:text-ink-900"
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      </div>
+          {error ? (
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+              {error}
+            </div>
+          ) : null}
 
-      {error ? (
-        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-          {error}
-        </div>
-      ) : null}
-
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,24vw)]">
-        <div className="min-w-0 space-y-4">
           {activeTab === "command" ? (
             <CommandView
               loading={loading}
               widgets={widgets}
               payload={payload}
-              burningTopics={burningTopics}
               labels={config.labels}
+              burningTopics={burningTopics}
+              pinnedCategories={pinnedCategories}
+              decoratedCategories={decoratedCategories}
               onOpenSurface={(surface) => ctx?.user?.setActiveTab?.(surface)}
             />
           ) : null}
@@ -249,17 +327,17 @@ export default function UserDashboardPanel({ node, ctx }) {
               loading={loading}
               payload={payload}
               labels={config.labels}
-              categories={categories}
+              categories={decoratedCategories}
               pinnedCategories={pinnedCategories}
             />
           ) : null}
-        </div>
+        </main>
 
         <TaskBrowser
           loading={loading}
           labels={config.labels}
           taskBrowser={config.taskBrowser}
-          categories={categories}
+          categories={decoratedCategories}
           openCategory={openCategory}
           setOpenCategory={setOpenCategory}
           pinnedCategories={pinnedCategories}
@@ -267,99 +345,186 @@ export default function UserDashboardPanel({ node, ctx }) {
           delegationCandidates={payload?.workload?.delegation_candidates || []}
           onAction={handleAction}
           onDelegate={handleDelegate}
+          globalSearch={globalSearch}
         />
       </div>
+      <p className="mt-4 text-xs font-semibold text-ink-300">
+        UI rule: Task Browser = all user actionables; Burning Topics = pinned urgent subset.
+        Filters collapse at bottom. Delegation is available on each task.
+      </p>
     </section>
   );
 }
 
-function CommandView({ loading, widgets, payload, burningTopics, labels, onOpenSurface }) {
+function CommandHeader({ config, activeTab, setActiveTab, globalSearch, setGlobalSearch, loading, loadCommandCenter }) {
+  return (
+    <header className="space-y-7">
+      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.42fr)_auto]">
+        <nav className="flex flex-wrap items-center gap-6">
+          {(config.tabs || DEFAULT_CONFIG.tabs).map((tab) => (
+            <button
+              key={tab.code}
+              type="button"
+              onClick={() => setActiveTab(tab.code)}
+              className={`border-b-4 pb-3 text-base font-semibold transition ${
+                activeTab === tab.code
+                  ? "border-brand-500 text-brand-600"
+                  : "border-transparent text-ink-400 hover:text-ink-700"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </nav>
+        <label className="flex h-14 items-center gap-3 rounded-[1.35rem] border border-ink-100 bg-ink-50/80 px-5 text-sm text-ink-400">
+          <Search className="h-4 w-4" />
+          <input
+            value={globalSearch}
+            onChange={(event) => setGlobalSearch(event.target.value)}
+            placeholder={config.labels.signalSearch}
+            className="w-full bg-transparent text-sm text-ink-700 outline-none placeholder:text-ink-300"
+          />
+        </label>
+        <button
+          type="button"
+          onClick={loadCommandCenter}
+          disabled={loading}
+          className="inline-flex h-12 items-center justify-center gap-2 rounded-full border border-ink-100 bg-white px-4 text-xs font-semibold uppercase tracking-[0.18em] text-ink-400 shadow-soft transition hover:text-ink-900 disabled:opacity-60"
+        >
+          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+          {config.labels.refresh}
+        </button>
+      </div>
+      <div>
+        <h2 className="text-5xl font-semibold leading-none tracking-normal text-ink-900 xl:text-6xl">
+          {config.title}
+        </h2>
+        <p className="mt-3 max-w-5xl text-lg font-medium text-ink-400">{config.subtitle}</p>
+      </div>
+    </header>
+  );
+}
+
+function CommandView({
+  loading,
+  widgets,
+  payload,
+  labels,
+  burningTopics,
+  pinnedCategories,
+  decoratedCategories,
+  onOpenSurface
+}) {
   return (
     <>
-      <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-4">
-        {widgets.map((widget) => (
-          <KpiCard key={widget.code} widget={widget} loading={loading} />
-        ))}
-      </div>
+      <section className="rounded-[1.75rem] border border-ink-100 bg-white px-6 py-6 shadow-soft">
+        <div className="mb-5">
+          <h3 className="text-2xl font-semibold text-ink-900">{labels.businessStats}</h3>
+          <p className="text-sm font-semibold text-ink-400">{labels.businessStatsHint}</p>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          {widgets.map((widget) => (
+            <StatTile key={widget.code} widget={widget} loading={loading} labels={labels} />
+          ))}
+        </div>
+      </section>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,0.52fr)_minmax(0,0.48fr)]">
-        <GraphPanel
-          title="Work by category"
-          subtitle="Task engine load, grouped by module signal."
-          items={payload?.analytics?.category_load || []}
-          valueKey="count"
-          accentKey="urgent_count"
-          empty="No open work detected."
-        />
-        <GraphPanel
-          title="Due map"
-          subtitle="Owner attention by schedule window."
-          items={payload?.analytics?.due_buckets || []}
-          valueKey="count"
-          empty="Nothing scheduled yet."
-        />
-      </div>
-
-      <div className="glass-panel px-5 py-4">
-        <div className="mb-4 flex items-center justify-between gap-3">
+      <section className="rounded-[1.75rem] border border-ink-100 bg-white px-6 py-6 shadow-soft">
+        <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-rose-400">Urgent subset</p>
-            <h3 className="text-lg font-semibold text-ink-900">{labels.burningTopics}</h3>
+            <h3 className="text-2xl font-semibold text-ink-900">{labels.burningTopics}</h3>
+            <p className="text-sm font-semibold text-ink-400">{labels.burningHint}</p>
           </div>
-          <Flame className="h-5 w-5 text-rose-400" />
+          <div className="flex flex-wrap gap-2">
+            {decoratedCategories
+              .filter((category) => pinnedCategories.includes(category.code))
+              .slice(0, 3)
+              .map((category) => (
+                <span
+                  key={category.code}
+                  className={`rounded-full border ${category.tone.softBorder} ${category.tone.bg} px-4 py-1.5 text-sm font-semibold ${category.tone.accent}`}
+                >
+                  {category.display_label}
+                </span>
+              ))}
+          </div>
         </div>
         {burningTopics.length ? (
-          <div className="grid gap-3 lg:grid-cols-3">
+          <div className="grid gap-4 lg:grid-cols-3">
             {burningTopics.map((topic) => (
-              <div key={topic.code} className="rounded-2xl border border-white/70 bg-white/85 p-4 shadow-soft">
-                <div className="flex items-center justify-between gap-3">
-                  <h4 className="font-semibold text-ink-900">{topic.label}</h4>
-                  <span className="rounded-full border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-600">
-                    {topic.urgentTasks.length} urgent
-                  </span>
-                </div>
-                <div className="mt-3 space-y-2">
-                  {topic.urgentTasks.map((task) => (
-                    <button
-                      key={task.id}
-                      type="button"
-                      onClick={() => onOpenSurface(task.surface)}
-                      className="w-full rounded-xl border border-ink-100 bg-ink-50/80 px-3 py-2 text-left transition hover:border-ink-200 hover:bg-white"
-                    >
-                      <p className="text-sm font-semibold text-ink-900">{task.title}</p>
-                      <p className="mt-1 text-xs text-ink-500">{task.context}</p>
-                    </button>
-                  ))}
-                </div>
-                <p className="mt-3 text-xs leading-relaxed text-ink-400">
-                  Review the first urgent item, then continue inside the governed workspace.
-                </p>
-              </div>
+              <BurningPanel key={topic.code} topic={topic} labels={labels} onOpenSurface={onOpenSurface} />
             ))}
           </div>
         ) : (
-          <p className="rounded-2xl border border-dashed border-ink-200 bg-white/70 px-4 py-6 text-sm text-ink-400">
+          <p className="rounded-2xl border border-dashed border-ink-200 bg-ink-50 px-4 py-6 text-sm text-ink-400">
             {labels.burningEmpty}
           </p>
         )}
-      </div>
+      </section>
     </>
+  );
+}
+
+function StatTile({ widget, loading, labels }) {
+  const series = Array.isArray(widget.series) ? widget.series : [];
+  const total = series.reduce((sum, item) => sum + Number(item.value || 0), 0);
+  const accent = widget.tone === "rose" ? "stroke-rose-500" : widget.tone === "amber" ? "stroke-amber-500" : "stroke-brand-500";
+  const secondary = widget.tone === "rose" ? "stroke-rose-300" : widget.tone === "amber" ? "stroke-amber-300" : "stroke-amber-400";
+  return (
+    <article className="rounded-2xl border border-ink-100 bg-ink-50/70 px-4 py-4">
+      <p className="text-sm font-semibold text-ink-400">{widget.label}</p>
+      <p className="mt-2 text-3xl font-semibold text-ink-900">{loading ? "..." : widget.value ?? 0}</p>
+      <p className={`mt-2 text-sm font-semibold ${widget.tone === "rose" ? "text-rose-500" : widget.tone === "amber" ? "text-amber-500" : "text-brand-500"}`}>
+        {widget.helper || (total ? `${total} live signals` : "live signal")}
+      </p>
+      <svg viewBox="0 0 100 52" className="mt-4 h-20 w-full overflow-visible">
+        <line x1="0" y1="47" x2="100" y2="47" className="stroke-ink-200" strokeWidth="2" />
+        <polyline points={makeSparklinePoints(series)} fill="none" className={accent} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+        <polyline points={makeSparklinePoints(series.slice().reverse())} fill="none" className={secondary} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" opacity="0.75" />
+      </svg>
+      <button
+        type="button"
+        className="mt-2 w-full rounded-full border border-ink-100 bg-white py-2 text-sm font-semibold text-brand-600 shadow-soft"
+      >
+        {labels.openDetail}
+      </button>
+    </article>
+  );
+}
+
+function BurningPanel({ topic, labels, onOpenSurface }) {
+  return (
+    <article className="rounded-2xl border border-ink-100 bg-ink-50/70 p-4">
+      <h4 className="text-lg font-semibold text-ink-900">Urgent {topic.display_label.toLowerCase()}</h4>
+      <p className="text-sm font-semibold text-ink-400">top urgent only</p>
+      <div className="mt-5 space-y-3">
+        {topic.urgentTasks.map((task, index) => (
+          <button
+            key={task.id}
+            type="button"
+            onClick={() => onOpenSurface(task.surface)}
+            className={`flex w-full items-center gap-3 rounded-2xl border bg-white px-3 py-3 text-left shadow-soft transition hover:-translate-y-0.5 ${index === 0 ? topic.tone.border : "border-ink-100"}`}
+          >
+            <span className={`h-8 w-8 shrink-0 rounded-xl ${topic.tone.dot}`} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-semibold text-ink-800">{task.title}</span>
+              <span className="mt-1 block truncate text-sm font-semibold text-ink-400">{task.context}</span>
+            </span>
+            <span className="rounded-full border border-brand-100 bg-brand-50 px-3 py-1 text-sm font-semibold text-brand-600">
+              {labels.openDetail.replace(" detail", "")}
+            </span>
+          </button>
+        ))}
+      </div>
+    </article>
   );
 }
 
 function AnalyticsView({ loading, payload, labels }) {
   return (
-    <div className="space-y-4">
-      <div className="glass-panel px-5 py-4">
-        <div className="flex items-center gap-3">
-          <BarChart3 className="h-5 w-5 text-brand-500" />
-          <div>
-            <h3 className="text-lg font-semibold text-ink-900">{labels.analytics}</h3>
-            <p className="text-sm text-ink-500">Lightweight operational signal, not a table dump.</p>
-          </div>
-        </div>
-      </div>
-      <div className="grid gap-4 lg:grid-cols-2">
+    <div className="space-y-5">
+      <SectionHeader icon={BarChart3} title={labels.analytics} subtitle="Graph-led view of module load, urgency, and due windows." />
+      <div className="grid gap-5 lg:grid-cols-2">
         <GraphPanel
           title="Category load"
           subtitle="Open tasks by business area."
@@ -389,25 +554,17 @@ function AnalyticsView({ loading, payload, labels }) {
 
 function WorkloadView({ loading, payload, labels, categories, pinnedCategories }) {
   return (
-    <div className="space-y-4">
-      <div className="glass-panel px-5 py-4">
-        <div className="flex items-center gap-3">
-          <Activity className="h-5 w-5 text-brand-500" />
-          <div>
-            <h3 className="text-lg font-semibold text-ink-900">{labels.workload}</h3>
-            <p className="text-sm text-ink-500">Pinned categories and delegation readiness for the current workspace.</p>
-          </div>
-        </div>
-      </div>
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+    <div className="space-y-5">
+      <SectionHeader icon={LayoutGrid} title={labels.workload} subtitle="Pinned categories and delegation readiness for the current workspace." />
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {categories.map((category) => (
-          <div key={category.code} className="rounded-2xl border border-white/70 bg-white/85 p-4 shadow-soft">
+          <div key={category.code} className="rounded-2xl border border-ink-100 bg-white p-4 shadow-soft">
             <div className="flex items-center justify-between gap-3">
-              <h4 className="font-semibold text-ink-900">{category.label}</h4>
-              <span className="text-sm font-semibold text-ink-500">{category.count}</span>
+              <h4 className="font-semibold text-ink-900">{category.display_label}</h4>
+              <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${category.tone.badge}`}>{category.count}</span>
             </div>
             <p className="mt-2 min-h-10 text-sm text-ink-500">{category.description}</p>
-            <div className="mt-3 flex items-center justify-between text-xs text-ink-400">
+            <div className="mt-3 flex items-center justify-between text-xs font-semibold text-ink-400">
               <span>{category.urgent_count} urgent</span>
               <span>{pinnedCategories.includes(category.code) ? labels.pinned : "Available"}</span>
             </div>
@@ -441,7 +598,8 @@ function TaskBrowser({
   setPinnedCategories,
   delegationCandidates,
   onAction,
-  onDelegate
+  onDelegate,
+  globalSearch
 }) {
   const [controlsOpen, setControlsOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -460,7 +618,7 @@ function TaskBrowser({
   };
 
   const filteredTasks = useCallback((tasks) => {
-    const q = normalizeText(query).toLowerCase();
+    const q = [query, globalSearch].map(normalizeText).filter(Boolean).join(" ").toLowerCase();
     const filtered = (tasks || []).filter((task) => {
       const matchesQuery = !q || [task.title, task.context, task.status, task.task_type].join(" ").toLowerCase().includes(q);
       const matchesUrgency = urgency === "all" || task.urgency === urgency;
@@ -471,7 +629,7 @@ function TaskBrowser({
       if (sort === "category") return String(a.category_label || "").localeCompare(String(b.category_label || ""));
       return Number(b.urgency_score || 0) - Number(a.urgency_score || 0);
     });
-  }, [query, sort, urgency]);
+  }, [globalSearch, query, sort, urgency]);
 
   const submitDelegate = async (task) => {
     setDelegateError("");
@@ -492,57 +650,74 @@ function TaskBrowser({
   };
 
   return (
-    <aside className="glass-panel min-h-[calc(100vh-9rem)] px-4 py-4 xl:sticky xl:top-[6.75rem] xl:max-h-[calc(100vh-7.5rem)] xl:overflow-hidden">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <p className="text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-ink-400">Action queue</p>
-          <h3 className="text-lg font-semibold text-ink-900">{labels.taskBrowser}</h3>
-        </div>
-        <LayoutGrid className="h-5 w-5 text-ink-400" />
+    <aside className="task-browser rounded-[2rem] border border-ink-100 bg-ink-50/80 px-5 py-6 shadow-soft xl:sticky xl:top-[6.75rem] xl:max-h-[calc(100vh-7.75rem)] xl:overflow-hidden">
+      <div>
+        <h3 className="text-4xl font-semibold leading-none text-ink-900">{labels.taskBrowser}</h3>
+        <p className="mt-1 text-sm font-semibold text-ink-500">{labels.taskBrowserHint}</p>
       </div>
 
-      <div className="mt-4 space-y-3 overflow-y-auto pr-1 xl:max-h-[calc(100vh-16rem)]">
+      <div className="mt-6 flex rounded-[1.35rem] border border-ink-100 bg-white p-1.5 shadow-soft">
+        <label className="flex min-w-0 flex-1 items-center gap-2 px-3 text-sm text-ink-400">
+          <Search className="h-4 w-4" />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={labels.taskSearch}
+            className="w-full bg-transparent text-sm text-ink-700 outline-none placeholder:text-ink-300"
+          />
+        </label>
+        <button
+          type="button"
+          onClick={() => setControlsOpen(true)}
+          className="rounded-[1rem] border border-brand-100 bg-brand-50 px-4 py-2 text-sm font-semibold text-brand-600 shadow-soft"
+        >
+          {labels.delegate}
+        </button>
+      </div>
+
+      <div className="mt-5 space-y-3 overflow-y-auto pr-1 xl:max-h-[calc(100vh-19rem)]">
         {categories.map((category) => {
           const isOpen = openCategory === category.code;
           const tasks = filteredTasks(category.tasks);
           const isPinned = pinnedCategories.includes(category.code);
           return (
-            <div key={category.code} className="rounded-2xl border border-white/70 bg-white/80 shadow-soft">
-              <div className="flex items-center justify-between gap-3 px-4 py-3">
-                <button
-                  type="button"
-                  onClick={() => setOpenCategory(isOpen ? "" : category.code)}
-                  className="min-w-0 flex-1 text-left"
-                >
-                  <span className="block text-sm font-semibold text-ink-900">{category.label}</span>
-                  <span className="mt-1 block text-xs text-ink-400">
-                    {category.count} tasks, {category.urgent_count} urgent
-                  </span>
-                </button>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => togglePin(category.code)}
-                    className={`rounded-full border px-2 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.14em] ${
-                      isPinned ? "border-brand-200 bg-brand-50 text-brand-700" : "border-ink-100 bg-white text-ink-400"
-                    }`}
-                  >
-                    {isPinned ? labels.pinned : "Pin"}
-                  </button>
+            <div key={category.code}>
+              <div className={`rounded-2xl border shadow-soft ${isOpen ? category.tone.active : "border-ink-100 bg-white text-ink-900"}`}>
+                <div className="flex items-center justify-between gap-3 px-4 py-4">
                   <button
                     type="button"
                     onClick={() => setOpenCategory(isOpen ? "" : category.code)}
-                    className="rounded-full p-1 hover:bg-ink-50"
-                    aria-label={isOpen ? "Collapse category" : "Expand category"}
+                    className="flex min-w-0 flex-1 items-center gap-3 text-left"
                   >
-                    <ChevronDown className={`h-4 w-4 text-ink-400 transition ${isOpen ? "rotate-180" : ""}`} />
+                    <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border ${isOpen ? "border-brand-300 text-brand-300" : `${category.tone.softBorder} ${category.tone.accent}`}`}>
+                      !
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-lg font-semibold">{category.display_label}</span>
+                    </span>
                   </button>
+                  <div className="flex shrink-0 items-center gap-3">
+                    <span className={`hidden text-xs font-semibold uppercase tracking-[0.08em] ${isOpen ? "text-white/60" : "text-ink-300"} sm:inline`}>
+                      {category.badge}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => togglePin(category.code)}
+                      className={`rounded-full px-2 py-1 text-xs font-semibold ${isOpen ? "bg-white/10 text-white" : isPinned ? category.tone.badge : "bg-ink-50 text-ink-400"}`}
+                    >
+                      {category.count}
+                    </button>
+                  </div>
                 </div>
               </div>
 
               {isOpen ? (
-                <div className="border-t border-ink-100 px-3 py-3">
-                  <div className="max-h-[30vh] space-y-2 overflow-y-auto overscroll-contain pr-1">
+                <div className="mx-1 mt-3 rounded-2xl border border-ink-100 bg-ink-100/55 px-3 py-4">
+                  <div className="mb-3 flex items-center justify-between px-1">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink-400">{labels.actionables}</p>
+                    <p className="text-xs font-semibold text-ink-300">scroll</p>
+                  </div>
+                  <div className="max-h-[34vh] space-y-2 overflow-y-auto overscroll-contain pr-1">
                     {tasks.length ? (
                       tasks.map((task) => (
                         <TaskRow
@@ -561,7 +736,7 @@ function TaskBrowser({
                         />
                       ))
                     ) : (
-                      <p className="rounded-xl border border-dashed border-ink-200 bg-white/70 px-3 py-4 text-sm text-ink-400">
+                      <p className="rounded-xl border border-dashed border-ink-200 bg-white px-3 py-4 text-sm text-ink-400">
                         {loading ? "Loading..." : labels.noTasks}
                       </p>
                     )}
@@ -573,32 +748,20 @@ function TaskBrowser({
         })}
       </div>
 
-      <div className="mt-3 rounded-2xl border border-white/70 bg-white/80">
+      <div className="mt-4 rounded-2xl border border-ink-100 bg-white shadow-soft">
         <button
           type="button"
           onClick={() => setControlsOpen((value) => !value)}
-          className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm font-semibold text-ink-800"
+          className="flex w-full items-center justify-between gap-3 px-4 py-4 text-left text-sm font-semibold text-ink-500"
         >
           <span className="inline-flex items-center gap-2">
             <SlidersHorizontal className="h-4 w-4 text-ink-400" />
             {labels.controls}
           </span>
-          <ChevronDown className={`h-4 w-4 text-ink-400 transition ${controlsOpen ? "rotate-180" : ""}`} />
+          <ChevronDown className={`h-4 w-4 text-brand-500 transition ${controlsOpen ? "rotate-180" : ""}`} />
         </button>
         {controlsOpen ? (
           <div className="space-y-3 border-t border-ink-100 px-4 py-3">
-            <label className="block text-xs font-semibold uppercase tracking-[0.16em] text-ink-400">
-              {labels.search}
-              <span className="mt-2 flex items-center gap-2 rounded-xl border border-ink-100 bg-white px-3 py-2">
-                <Search className="h-4 w-4 text-ink-300" />
-                <input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  className="w-full bg-transparent text-sm normal-case tracking-normal text-ink-800 outline-none"
-                  placeholder="Title, status, context"
-                />
-              </span>
-            </label>
             <div className="grid gap-2 sm:grid-cols-2">
               <Select label={labels.urgency} value={urgency} onChange={setUrgency} options={taskBrowser.urgencyFilters || []} />
               <Select label={labels.sort} value={sort} onChange={setSort} options={taskBrowser.sortOptions || []} />
@@ -624,35 +787,36 @@ function TaskRow({
   labels
 }) {
   const primaryAction = task.actions?.find((action) => action.code === "open") || task.actions?.[0];
+  const actionLabel = primaryAction?.label || labels.openDetail.replace(" detail", "");
   return (
-    <div className="rounded-xl border border-ink-100 bg-white px-3 py-3">
-      <div className="flex items-start justify-between gap-3">
-        <span className={`rounded-full border px-2 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.12em] ${URGENCY_CLASSES[task.urgency] || URGENCY_CLASSES.normal}`}>
-          {task.urgency_label}
+    <article className="rounded-xl border border-ink-100 bg-white px-3 py-3 shadow-soft">
+      <div className="flex items-start gap-3">
+        <span className={`w-12 shrink-0 text-sm font-semibold uppercase ${URGENCY[task.urgency] || URGENCY.normal}`}>
+          {task.urgency_label === "Overdue" ? "High" : task.urgency_label}
         </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-semibold text-ink-800">{task.title}</p>
+          <p className="mt-1 truncate text-sm font-semibold text-ink-400">{task.context}</p>
+        </div>
         {task.due_at ? (
-          <span className="inline-flex items-center gap-1 text-xs text-ink-400">
+          <span className="hidden items-center gap-1 text-xs text-ink-300 2xl:inline-flex">
             <Clock3 className="h-3.5 w-3.5" />
             {formatDate(task.due_at)}
           </span>
         ) : null}
+        <button
+          type="button"
+          onClick={() => onAction(task, primaryAction)}
+          className="rounded-full border border-brand-100 bg-brand-50 px-3 py-1.5 text-sm font-semibold text-brand-600"
+        >
+          {actionLabel}
+        </button>
       </div>
-      <p className="mt-2 text-sm font-semibold leading-snug text-ink-900">{task.title}</p>
-      <p className="mt-1 text-xs leading-relaxed text-ink-500">{task.context}</p>
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        {primaryAction ? (
-          <button
-            type="button"
-            onClick={() => onAction(task, primaryAction)}
-            className="rounded-full bg-ink-900 px-3 py-1.5 text-xs font-semibold text-white shadow-soft"
-          >
-            {primaryAction.label}
-          </button>
-        ) : null}
+      <div className="mt-2 flex justify-end">
         <button
           type="button"
           onClick={() => setDelegatingTaskId(delegating ? "" : task.id)}
-          className="inline-flex items-center gap-1 rounded-full border border-ink-100 bg-ink-50 px-3 py-1.5 text-xs font-semibold text-ink-500"
+          className="inline-flex items-center gap-1 rounded-full border border-ink-100 bg-ink-50 px-3 py-1 text-xs font-semibold text-ink-400"
         >
           <UserPlus className="h-3.5 w-3.5" />
           {labels.delegate}
@@ -694,20 +858,20 @@ function TaskRow({
           </div>
         </div>
       ) : null}
-    </div>
+    </article>
   );
 }
 
-function KpiCard({ widget, loading }) {
-  const tone = TONE_CLASSES[widget.tone] || TONE_CLASSES.ink;
+function SectionHeader({ icon: Icon, title, subtitle }) {
   return (
-    <div className={`rounded-2xl border px-4 py-4 shadow-soft ${tone}`}>
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] opacity-70">{widget.label}</p>
-        <CircleDot className="h-4 w-4 opacity-60" />
+    <div className="rounded-[1.75rem] border border-ink-100 bg-white px-6 py-5 shadow-soft">
+      <div className="flex items-center gap-3">
+        <Icon className="h-5 w-5 text-brand-500" />
+        <div>
+          <h3 className="text-2xl font-semibold text-ink-900">{title}</h3>
+          <p className="text-sm text-ink-500">{subtitle}</p>
+        </div>
       </div>
-      <p className="mt-3 text-3xl font-semibold">{loading ? "..." : widget.value ?? 0}</p>
-      <p className="mt-2 min-h-8 text-xs leading-relaxed opacity-70">{widget.helper}</p>
     </div>
   );
 }
@@ -716,9 +880,9 @@ function GraphPanel({ title, subtitle, items, valueKey, accentKey, empty }) {
   const safeItems = Array.isArray(items) ? items : [];
   const total = safeItems.reduce((sum, item) => sum + Number(item?.[valueKey] || 0), 0);
   return (
-    <div className="glass-panel px-5 py-4">
+    <div className="rounded-[1.75rem] border border-ink-100 bg-white px-6 py-5 shadow-soft">
       <div className="mb-4">
-        <h3 className="text-lg font-semibold text-ink-900">{title}</h3>
+        <h3 className="text-xl font-semibold text-ink-900">{title}</h3>
         <p className="mt-1 text-sm text-ink-500">{subtitle}</p>
       </div>
       {safeItems.length ? (
@@ -733,7 +897,7 @@ function GraphPanel({ title, subtitle, items, valueKey, accentKey, empty }) {
                   <span className="text-ink-400">{value}</span>
                 </div>
                 <div className="h-2 overflow-hidden rounded-full bg-ink-100">
-                  <div className="h-full rounded-full bg-ink-800" style={{ width: `${percentOf(value, total) || 4}%` }} />
+                  <div className="h-full rounded-full bg-brand-600" style={{ width: `${percentOf(value, total) || 5}%` }} />
                 </div>
                 {accent ? <p className="text-xs text-rose-500">{accent} urgent</p> : null}
               </div>
@@ -741,7 +905,7 @@ function GraphPanel({ title, subtitle, items, valueKey, accentKey, empty }) {
           })}
         </div>
       ) : (
-        <p className="rounded-2xl border border-dashed border-ink-200 bg-white/70 px-4 py-6 text-sm text-ink-400">
+        <p className="rounded-2xl border border-dashed border-ink-200 bg-ink-50 px-4 py-6 text-sm text-ink-400">
           {empty}
         </p>
       )}
