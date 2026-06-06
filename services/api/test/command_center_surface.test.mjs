@@ -41,8 +41,10 @@ test("command center dashboard UI is descriptor-driven and keeps the task browse
   assert.match(component, /TaskBrowser/);
   assert.match(component, /Business statistics/);
   assert.match(component, /Burning topics/);
-  assert.match(component, /max-h-\[34vh\]/);
+  assert.match(component, /text-3xl font-semibold/);
+  assert.match(component, /max-h-\[30vh\]/);
   assert.match(component, /xl:grid-cols-\[minmax\(0,1fr\)_minmax\(330px,24vw\)\]/);
+  assert.match(component, /onOpenDetail\?\.\(widget\)/);
   assert.match(component, /onDelegate/);
   assert.match(component, /ctx\?\.user\?\.setActiveTab/);
   assert.doesNotMatch(component, /samara|samarapattern|samara-web-storefront/i);

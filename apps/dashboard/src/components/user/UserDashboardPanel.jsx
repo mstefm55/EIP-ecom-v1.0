@@ -127,11 +127,11 @@ const TONE = {
   }
 };
 
-const URGENCY = {
-  critical: "text-rose-600",
-  high: "text-rose-600",
-  medium: "text-violet-600",
-  normal: "text-ink-400"
+const URGENCY_CLASSES = {
+  critical: "border-rose-200 bg-rose-50 text-rose-700",
+  high: "border-amber-200 bg-amber-50 text-amber-700",
+  medium: "border-cyan-200 bg-cyan-50 text-cyan-700",
+  normal: "border-ink-100 bg-white text-ink-500"
 };
 
 function mergeConfig(props = {}) {
@@ -175,10 +175,33 @@ function decorateCategory(category, config) {
   };
 }
 
-function makeSparklinePoints(series) {
+function makeSparkValues(series) {
   const values = Array.isArray(series) && series.length
     ? series.map((item) => Number(item.value || item.count || 0))
     : [2, 4, 3, 6, 8, 10];
+  if (values.length >= 5) return values;
+
+  if (values.length === 1) {
+    const value = Math.max(values[0], 1);
+    return [value * 0.2, value * 0.45, value * 0.35, value * 0.8, value, value * 0.7, value * 0.9];
+  }
+
+  const expanded = [];
+  for (let i = 0; i < values.length - 1; i += 1) {
+    const from = values[i];
+    const to = values[i + 1];
+    expanded.push(from, from * 0.72 + to * 0.28, from * 0.38 + to * 0.62);
+  }
+  expanded.push(values[values.length - 1]);
+  while (expanded.length < 7) {
+    const last = expanded[expanded.length - 1] || 1;
+    expanded.push(last * (expanded.length % 2 ? 0.86 : 1.08));
+  }
+  return expanded;
+}
+
+function makeSparklinePoints(series) {
+  const values = makeSparkValues(series);
   const max = Math.max(...values, 1);
   const min = Math.min(...values, 0);
   const range = Math.max(max - min, 1);
@@ -187,6 +210,18 @@ function makeSparklinePoints(series) {
     const y = 46 - ((value - min) / range) * 38;
     return `${x},${y}`;
   }).join(" ");
+}
+
+function makeSparkAreaPoints(series) {
+  const points = makeSparklinePoints(series);
+  return `0,50 ${points} 100,50`;
+}
+
+function lastSparkPoint(series) {
+  const points = makeSparklinePoints(series).split(" ");
+  const last = points[points.length - 1] || "100,46";
+  const [x, y] = last.split(",").map(Number);
+  return { x: Number.isFinite(x) ? x : 100, y: Number.isFinite(y) ? y : 46 };
 }
 
 export default function UserDashboardPanel({ node, ctx }) {
@@ -287,6 +322,18 @@ export default function UserDashboardPanel({ node, ctx }) {
     await loadCommandCenter();
   }, [loadCommandCenter]);
 
+  const handleWidgetDetail = useCallback((widget) => {
+    if (widget?.code === "recent_reports") {
+      ctx?.user?.setActiveTab?.("reports");
+      return;
+    }
+    if (widget?.code === "active_modules") {
+      setActiveTab("analytics");
+      return;
+    }
+    setActiveTab("workload");
+  }, [ctx]);
+
   return (
     <section className="command-center-surface min-h-[calc(100vh-8rem)] rounded-[2rem] border border-white/75 bg-white/92 px-5 py-5 shadow-soft">
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(330px,24vw)]">
@@ -316,6 +363,7 @@ export default function UserDashboardPanel({ node, ctx }) {
               burningTopics={burningTopics}
               pinnedCategories={pinnedCategories}
               decoratedCategories={decoratedCategories}
+              onWidgetDetail={handleWidgetDetail}
               onOpenSurface={(surface) => ctx?.user?.setActiveTab?.(surface)}
             />
           ) : null}
@@ -396,10 +444,10 @@ function CommandHeader({ config, activeTab, setActiveTab, globalSearch, setGloba
         </button>
       </div>
       <div>
-        <h2 className="text-5xl font-semibold leading-none tracking-normal text-ink-900 xl:text-6xl">
+        <h2 className="text-3xl font-semibold leading-tight tracking-normal text-ink-900 xl:text-4xl">
           {config.title}
         </h2>
-        <p className="mt-3 max-w-5xl text-lg font-medium text-ink-400">{config.subtitle}</p>
+        <p className="mt-2 max-w-5xl text-sm font-medium text-ink-400 xl:text-base">{config.subtitle}</p>
       </div>
     </header>
   );
@@ -413,6 +461,7 @@ function CommandView({
   burningTopics,
   pinnedCategories,
   decoratedCategories,
+  onWidgetDetail,
   onOpenSurface
 }) {
   return (
@@ -424,7 +473,7 @@ function CommandView({
         </div>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           {widgets.map((widget) => (
-            <StatTile key={widget.code} widget={widget} loading={loading} labels={labels} />
+            <StatTile key={widget.code} widget={widget} loading={loading} labels={labels} onOpenDetail={onWidgetDetail} />
           ))}
         </div>
       </section>
@@ -465,25 +514,37 @@ function CommandView({
   );
 }
 
-function StatTile({ widget, loading, labels }) {
+function StatTile({ widget, loading, labels, onOpenDetail }) {
   const series = Array.isArray(widget.series) ? widget.series : [];
-  const total = series.reduce((sum, item) => sum + Number(item.value || 0), 0);
-  const accent = widget.tone === "rose" ? "stroke-rose-500" : widget.tone === "amber" ? "stroke-amber-500" : "stroke-brand-500";
-  const secondary = widget.tone === "rose" ? "stroke-rose-300" : widget.tone === "amber" ? "stroke-amber-300" : "stroke-amber-400";
+  const sparkId = `spark-${String(widget.code || "card").replace(/[^a-z0-9_-]/gi, "-")}`;
+  const sparkTone = widget.tone === "rose"
+    ? { line: "stroke-rose-500", text: "text-rose-500", fill: "fill-rose-500", color: "#f43f5e" }
+    : widget.tone === "amber"
+      ? { line: "stroke-amber-500", text: "text-amber-500", fill: "fill-amber-500", color: "#f59e0b" }
+      : { line: "stroke-brand-600", text: "text-brand-600", fill: "fill-brand-600", color: "#2563eb" };
+  const point = lastSparkPoint(series);
   return (
     <article className="rounded-2xl border border-ink-100 bg-ink-50/70 px-4 py-4">
       <p className="text-sm font-semibold text-ink-400">{widget.label}</p>
       <p className="mt-2 text-3xl font-semibold text-ink-900">{loading ? "..." : widget.value ?? 0}</p>
       <p className={`mt-2 text-sm font-semibold ${widget.tone === "rose" ? "text-rose-500" : widget.tone === "amber" ? "text-amber-500" : "text-brand-500"}`}>
-        {widget.helper || (total ? `${total} live signals` : "live signal")}
+        {widget.helper || "live signal"}
       </p>
-      <svg viewBox="0 0 100 52" className="mt-4 h-20 w-full overflow-visible">
-        <line x1="0" y1="47" x2="100" y2="47" className="stroke-ink-200" strokeWidth="2" />
-        <polyline points={makeSparklinePoints(series)} fill="none" className={accent} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-        <polyline points={makeSparklinePoints(series.slice().reverse())} fill="none" className={secondary} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" opacity="0.75" />
+      <svg viewBox="0 0 100 56" className="mt-4 h-20 w-full overflow-visible" aria-hidden="true">
+        <defs>
+          <linearGradient id={sparkId} x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor={sparkTone.color} stopOpacity="0.22" />
+            <stop offset="100%" stopColor={sparkTone.color} stopOpacity="0.02" />
+          </linearGradient>
+        </defs>
+        <path d="M0 48 C25 45, 75 45, 100 48" className="stroke-ink-200" fill="none" strokeWidth="2" />
+        <polygon points={makeSparkAreaPoints(series)} fill={`url(#${sparkId})`} className={sparkTone.text} />
+        <polyline points={makeSparklinePoints(series)} fill="none" className={sparkTone.line} strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
+        <circle cx={point.x} cy={point.y} r="3.5" className={`${sparkTone.fill} stroke-white`} strokeWidth="2" />
       </svg>
       <button
         type="button"
+        onClick={() => onOpenDetail?.(widget)}
         className="mt-2 w-full rounded-full border border-ink-100 bg-white py-2 text-sm font-semibold text-brand-600 shadow-soft"
       >
         {labels.openDetail}
@@ -650,74 +711,58 @@ function TaskBrowser({
   };
 
   return (
-    <aside className="task-browser rounded-[2rem] border border-ink-100 bg-ink-50/80 px-5 py-6 shadow-soft xl:sticky xl:top-[6.75rem] xl:max-h-[calc(100vh-7.75rem)] xl:overflow-hidden">
-      <div>
-        <h3 className="text-4xl font-semibold leading-none text-ink-900">{labels.taskBrowser}</h3>
-        <p className="mt-1 text-sm font-semibold text-ink-500">{labels.taskBrowserHint}</p>
+    <aside className="glass-panel min-h-[calc(100vh-9rem)] px-4 py-4 xl:sticky xl:top-[6.75rem] xl:max-h-[calc(100vh-7.5rem)] xl:overflow-hidden">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-ink-400">Action queue</p>
+          <h3 className="text-lg font-semibold text-ink-900">{labels.taskBrowser}</h3>
+          <p className="mt-1 text-xs font-semibold text-ink-400">{labels.taskBrowserHint}</p>
+        </div>
+        <LayoutGrid className="h-5 w-5 text-ink-400" />
       </div>
 
-      <div className="mt-6 flex rounded-[1.35rem] border border-ink-100 bg-white p-1.5 shadow-soft">
-        <label className="flex min-w-0 flex-1 items-center gap-2 px-3 text-sm text-ink-400">
-          <Search className="h-4 w-4" />
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder={labels.taskSearch}
-            className="w-full bg-transparent text-sm text-ink-700 outline-none placeholder:text-ink-300"
-          />
-        </label>
-        <button
-          type="button"
-          onClick={() => setControlsOpen(true)}
-          className="rounded-[1rem] border border-brand-100 bg-brand-50 px-4 py-2 text-sm font-semibold text-brand-600 shadow-soft"
-        >
-          {labels.delegate}
-        </button>
-      </div>
-
-      <div className="mt-5 space-y-3 overflow-y-auto pr-1 xl:max-h-[calc(100vh-19rem)]">
+      <div className="mt-4 space-y-3 overflow-y-auto pr-1 xl:max-h-[calc(100vh-16rem)]">
         {categories.map((category) => {
           const isOpen = openCategory === category.code;
           const tasks = filteredTasks(category.tasks);
           const isPinned = pinnedCategories.includes(category.code);
           return (
-            <div key={category.code}>
-              <div className={`rounded-2xl border shadow-soft ${isOpen ? category.tone.active : "border-ink-100 bg-white text-ink-900"}`}>
-                <div className="flex items-center justify-between gap-3 px-4 py-4">
+            <div key={category.code} className="rounded-2xl border border-white/70 bg-white/80 shadow-soft">
+              <div className="flex items-center justify-between gap-3 px-4 py-3">
+                <button
+                  type="button"
+                  onClick={() => setOpenCategory(isOpen ? "" : category.code)}
+                  className="min-w-0 flex-1 text-left"
+                >
+                  <span className="block truncate text-sm font-semibold text-ink-900">{category.display_label}</span>
+                  <span className="mt-1 block text-xs text-ink-400">
+                    {category.count} tasks, {category.urgent_count} urgent
+                  </span>
+                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => togglePin(category.code)}
+                    className={`rounded-full border px-2 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.14em] ${
+                      isPinned ? "border-brand-200 bg-brand-50 text-brand-700" : "border-ink-100 bg-white text-ink-400"
+                    }`}
+                  >
+                    {isPinned ? labels.pinned : "Pin"}
+                  </button>
                   <button
                     type="button"
                     onClick={() => setOpenCategory(isOpen ? "" : category.code)}
-                    className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                    className="rounded-full p-1 hover:bg-ink-50"
+                    aria-label={isOpen ? "Collapse category" : "Expand category"}
                   >
-                    <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border ${isOpen ? "border-brand-300 text-brand-300" : `${category.tone.softBorder} ${category.tone.accent}`}`}>
-                      !
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block truncate text-lg font-semibold">{category.display_label}</span>
-                    </span>
+                    <ChevronDown className={`h-4 w-4 text-ink-400 transition ${isOpen ? "rotate-180" : ""}`} />
                   </button>
-                  <div className="flex shrink-0 items-center gap-3">
-                    <span className={`hidden text-xs font-semibold uppercase tracking-[0.08em] ${isOpen ? "text-white/60" : "text-ink-300"} sm:inline`}>
-                      {category.badge}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => togglePin(category.code)}
-                      className={`rounded-full px-2 py-1 text-xs font-semibold ${isOpen ? "bg-white/10 text-white" : isPinned ? category.tone.badge : "bg-ink-50 text-ink-400"}`}
-                    >
-                      {category.count}
-                    </button>
-                  </div>
                 </div>
               </div>
 
               {isOpen ? (
-                <div className="mx-1 mt-3 rounded-2xl border border-ink-100 bg-ink-100/55 px-3 py-4">
-                  <div className="mb-3 flex items-center justify-between px-1">
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink-400">{labels.actionables}</p>
-                    <p className="text-xs font-semibold text-ink-300">scroll</p>
-                  </div>
-                  <div className="max-h-[34vh] space-y-2 overflow-y-auto overscroll-contain pr-1">
+                <div className="border-t border-ink-100 px-3 py-3">
+                  <div className="max-h-[30vh] space-y-2 overflow-y-auto overscroll-contain pr-1">
                     {tasks.length ? (
                       tasks.map((task) => (
                         <TaskRow
@@ -736,7 +781,7 @@ function TaskBrowser({
                         />
                       ))
                     ) : (
-                      <p className="rounded-xl border border-dashed border-ink-200 bg-white px-3 py-4 text-sm text-ink-400">
+                      <p className="rounded-xl border border-dashed border-ink-200 bg-white/70 px-3 py-4 text-sm text-ink-400">
                         {loading ? "Loading..." : labels.noTasks}
                       </p>
                     )}
@@ -748,20 +793,32 @@ function TaskBrowser({
         })}
       </div>
 
-      <div className="mt-4 rounded-2xl border border-ink-100 bg-white shadow-soft">
+      <div className="mt-3 rounded-2xl border border-white/70 bg-white/80">
         <button
           type="button"
           onClick={() => setControlsOpen((value) => !value)}
-          className="flex w-full items-center justify-between gap-3 px-4 py-4 text-left text-sm font-semibold text-ink-500"
+          className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm font-semibold text-ink-800"
         >
           <span className="inline-flex items-center gap-2">
             <SlidersHorizontal className="h-4 w-4 text-ink-400" />
             {labels.controls}
           </span>
-          <ChevronDown className={`h-4 w-4 text-brand-500 transition ${controlsOpen ? "rotate-180" : ""}`} />
+          <ChevronDown className={`h-4 w-4 text-ink-400 transition ${controlsOpen ? "rotate-180" : ""}`} />
         </button>
         {controlsOpen ? (
           <div className="space-y-3 border-t border-ink-100 px-4 py-3">
+            <label className="block text-xs font-semibold uppercase tracking-[0.16em] text-ink-400">
+              {labels.search}
+              <span className="mt-2 flex items-center gap-2 rounded-xl border border-ink-100 bg-white px-3 py-2">
+                <Search className="h-4 w-4 text-ink-300" />
+                <input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  className="w-full bg-transparent text-sm normal-case tracking-normal text-ink-800 outline-none"
+                  placeholder="Title, status, context"
+                />
+              </span>
+            </label>
             <div className="grid gap-2 sm:grid-cols-2">
               <Select label={labels.urgency} value={urgency} onChange={setUrgency} options={taskBrowser.urgencyFilters || []} />
               <Select label={labels.sort} value={sort} onChange={setSort} options={taskBrowser.sortOptions || []} />
@@ -787,36 +844,35 @@ function TaskRow({
   labels
 }) {
   const primaryAction = task.actions?.find((action) => action.code === "open") || task.actions?.[0];
-  const actionLabel = primaryAction?.label || labels.openDetail.replace(" detail", "");
   return (
-    <article className="rounded-xl border border-ink-100 bg-white px-3 py-3 shadow-soft">
-      <div className="flex items-start gap-3">
-        <span className={`w-12 shrink-0 text-sm font-semibold uppercase ${URGENCY[task.urgency] || URGENCY.normal}`}>
-          {task.urgency_label === "Overdue" ? "High" : task.urgency_label}
+    <div className="rounded-xl border border-ink-100 bg-white px-3 py-3">
+      <div className="flex items-start justify-between gap-3">
+        <span className={`rounded-full border px-2 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.12em] ${URGENCY_CLASSES[task.urgency] || URGENCY_CLASSES.normal}`}>
+          {task.urgency_label}
         </span>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-ink-800">{task.title}</p>
-          <p className="mt-1 truncate text-sm font-semibold text-ink-400">{task.context}</p>
-        </div>
         {task.due_at ? (
-          <span className="hidden items-center gap-1 text-xs text-ink-300 2xl:inline-flex">
+          <span className="inline-flex items-center gap-1 text-xs text-ink-400">
             <Clock3 className="h-3.5 w-3.5" />
             {formatDate(task.due_at)}
           </span>
         ) : null}
-        <button
-          type="button"
-          onClick={() => onAction(task, primaryAction)}
-          className="rounded-full border border-brand-100 bg-brand-50 px-3 py-1.5 text-sm font-semibold text-brand-600"
-        >
-          {actionLabel}
-        </button>
       </div>
-      <div className="mt-2 flex justify-end">
+      <p className="mt-2 text-sm font-semibold leading-snug text-ink-900">{task.title}</p>
+      <p className="mt-1 text-xs leading-relaxed text-ink-500">{task.context}</p>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {primaryAction ? (
+          <button
+            type="button"
+            onClick={() => onAction(task, primaryAction)}
+            className="rounded-full bg-ink-900 px-3 py-1.5 text-xs font-semibold text-white shadow-soft"
+          >
+            {primaryAction.label}
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={() => setDelegatingTaskId(delegating ? "" : task.id)}
-          className="inline-flex items-center gap-1 rounded-full border border-ink-100 bg-ink-50 px-3 py-1 text-xs font-semibold text-ink-400"
+          className="inline-flex items-center gap-1 rounded-full border border-ink-100 bg-ink-50 px-3 py-1.5 text-xs font-semibold text-ink-500"
         >
           <UserPlus className="h-3.5 w-3.5" />
           {labels.delegate}
@@ -858,7 +914,7 @@ function TaskRow({
           </div>
         </div>
       ) : null}
-    </article>
+    </div>
   );
 }
 
