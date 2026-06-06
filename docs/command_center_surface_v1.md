@@ -57,6 +57,7 @@ The dashboard surface descriptor owns:
 - default open category
 - urgency filters
 - sort options
+- semantic theme variant and density tokens
 
 React owns only reusable layout primitives:
 
@@ -69,6 +70,21 @@ React owns only reusable layout primitives:
 - delegation form
 
 Module approvals, replies, purchasing decisions, inventory decisions, and commerce operations are not implemented in React. The Command Center opens the relevant governed workspace for those actions.
+
+## Theme Tokens
+
+The default Command Center theme is `eip_v1`, which maps to the current production `ink`, `brand`, `mist`, and glass-panel styling. The surface descriptor stores:
+
+```json
+{
+  "theme": {
+    "variant": "eip_v1",
+    "density": "comfortable"
+  }
+}
+```
+
+The React primitive resolves those semantic tokens into class groups for shell, panels, cards, action buttons, tabs, and empty states. A dormant `light_glass_ready` variant exists only as a future-ready token map; it is not activated by default and does not change the production theme.
 
 ## Engine-First Boundaries
 

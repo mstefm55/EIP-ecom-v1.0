@@ -69,6 +69,49 @@ const DEFAULT_CONFIG = {
     defaultOpen: "crm",
     urgencyFilters: ["all", "critical", "high", "medium", "normal"],
     sortOptions: ["urgency", "due_date", "category"]
+  },
+  theme: {
+    variant: "eip_v1",
+    density: "comfortable"
+  }
+};
+
+const COMMAND_CENTER_THEMES = {
+  eip_v1: {
+    surface: "min-h-[calc(100vh-8rem)] rounded-[2rem] border border-white/75 bg-white/92 px-5 py-5 shadow-soft",
+    panel: "rounded-[1.75rem] border border-ink-100 bg-white px-6 py-6 shadow-soft",
+    panelCompact: "rounded-[1.75rem] border border-ink-100 bg-white px-6 py-5 shadow-soft",
+    card: "rounded-2xl border border-ink-100 bg-ink-50/70",
+    cardRaised: "rounded-2xl border border-white/70 bg-white/80 shadow-soft",
+    taskRail: "glass-panel px-4 py-4 xl:fixed xl:right-5 xl:top-[6.75rem] xl:z-30 xl:h-[calc(100vh-7.5rem)] xl:w-[min(24vw,26rem)] xl:overflow-y-auto xl:overscroll-contain",
+    heading: "text-ink-900",
+    muted: "text-ink-400",
+    body: "text-ink-700",
+    primaryAction: "rounded-full bg-ink-900 px-3 py-1.5 text-xs font-semibold text-white shadow-soft",
+    secondaryAction: "rounded-full border border-ink-100 bg-white text-brand-600 shadow-soft",
+    tabActive: "border-brand-500 text-brand-600",
+    tabIdle: "border-transparent text-ink-400 hover:text-ink-700",
+    search: "border border-ink-100 bg-ink-50/80 text-ink-400",
+    input: "text-ink-700 placeholder:text-ink-300",
+    empty: "rounded-2xl border border-dashed border-ink-200 bg-ink-50 px-4 py-6 text-sm text-ink-400"
+  },
+  light_glass_ready: {
+    surface: "min-h-[calc(100vh-8rem)] rounded-[2rem] border border-white/80 bg-white/95 px-5 py-5 shadow-soft",
+    panel: "rounded-[1.75rem] border border-slate-200/80 bg-white/95 px-6 py-6 shadow-soft",
+    panelCompact: "rounded-[1.75rem] border border-slate-200/80 bg-white/95 px-6 py-5 shadow-soft",
+    card: "rounded-2xl border border-slate-200 bg-white/90",
+    cardRaised: "rounded-2xl border border-white/80 bg-white/90 shadow-soft",
+    taskRail: "glass-panel px-4 py-4 xl:fixed xl:right-5 xl:top-[6.75rem] xl:z-30 xl:h-[calc(100vh-7.5rem)] xl:w-[min(24vw,26rem)] xl:overflow-y-auto xl:overscroll-contain",
+    heading: "text-ink-900",
+    muted: "text-ink-400",
+    body: "text-ink-700",
+    primaryAction: "rounded-full bg-ink-900 px-3 py-1.5 text-xs font-semibold text-white shadow-soft",
+    secondaryAction: "rounded-full border border-slate-200 bg-white text-brand-600 shadow-soft",
+    tabActive: "border-brand-500 text-brand-600",
+    tabIdle: "border-transparent text-ink-400 hover:text-ink-700",
+    search: "border border-slate-200 bg-white/85 text-ink-400",
+    input: "text-ink-700 placeholder:text-ink-300",
+    empty: "rounded-2xl border border-dashed border-slate-200 bg-white/75 px-4 py-6 text-sm text-ink-400"
   }
 };
 
@@ -142,11 +185,17 @@ function mergeConfig(props = {}) {
     ...props,
     labels: { ...DEFAULT_CONFIG.labels, ...(props.labels || {}) },
     taskBrowser: { ...DEFAULT_CONFIG.taskBrowser, ...(props.taskBrowser || {}) },
+    theme: { ...DEFAULT_CONFIG.theme, ...(props.theme || {}) },
     categoryPresentation: {
       ...DEFAULT_CONFIG.categoryPresentation,
       ...(props.categoryPresentation || {})
     }
   };
+}
+
+function resolveCommandTheme(theme = {}) {
+  const base = COMMAND_CENTER_THEMES[theme.variant] || COMMAND_CENTER_THEMES.eip_v1;
+  return { ...base, ...(theme.classes || {}) };
 }
 
 function normalizeText(value) {
@@ -228,6 +277,7 @@ function lastSparkPoint(series) {
 
 export default function UserDashboardPanel({ node, ctx }) {
   const config = useMemo(() => mergeConfig(node?.props || {}), [node]);
+  const theme = useMemo(() => resolveCommandTheme(config.theme), [config.theme]);
   const [payload, setPayload] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -339,13 +389,14 @@ export default function UserDashboardPanel({ node, ctx }) {
   }, [ctx]);
 
   return (
-    <section className="command-center-surface min-h-[calc(100vh-8rem)] rounded-[2rem] border border-white/75 bg-white/92 px-5 py-5 shadow-soft">
+    <section className={`command-center-surface ${theme.surface}`}>
       <div className={`grid gap-6 transition-[grid-template-columns] duration-300 ease-out ${
         taskBrowserCollapsed ? "xl:grid-cols-1" : "xl:grid-cols-[minmax(0,1fr)_minmax(330px,24vw)]"
       }`}>
         <main className="min-w-0 space-y-6">
           <CommandHeader
             config={config}
+            theme={theme}
             activeTab={activeTab}
             setActiveTab={setActiveTab}
             globalSearch={globalSearch}
@@ -363,6 +414,7 @@ export default function UserDashboardPanel({ node, ctx }) {
           {activeTab === "command" ? (
             <CommandView
               loading={loading}
+              theme={theme}
               widgets={widgets}
               payload={payload}
               labels={config.labels}
@@ -374,11 +426,12 @@ export default function UserDashboardPanel({ node, ctx }) {
             />
           ) : null}
           {activeTab === "analytics" ? (
-            <AnalyticsView loading={loading} payload={payload} labels={config.labels} />
+            <AnalyticsView loading={loading} payload={payload} labels={config.labels} theme={theme} />
           ) : null}
           {activeTab === "workload" ? (
             <WorkloadView
               loading={loading}
+              theme={theme}
               payload={payload}
               labels={config.labels}
               categories={decoratedCategories}
@@ -402,9 +455,10 @@ export default function UserDashboardPanel({ node, ctx }) {
           globalSearch={globalSearch}
           collapsed={taskBrowserCollapsed}
           setCollapsed={setTaskBrowserCollapsed}
+          theme={theme}
         />
       </div>
-      <p className="mt-4 text-xs font-semibold text-ink-300">
+      <p className={`mt-4 text-xs font-semibold ${theme.muted}`}>
         UI rule: Task Browser = all user actionables; Burning Topics = pinned urgent subset.
         Filters collapse at bottom. Delegation is available on each task.
       </p>
@@ -412,7 +466,7 @@ export default function UserDashboardPanel({ node, ctx }) {
   );
 }
 
-function CommandHeader({ config, activeTab, setActiveTab, globalSearch, setGlobalSearch, loading, loadCommandCenter }) {
+function CommandHeader({ config, theme, activeTab, setActiveTab, globalSearch, setGlobalSearch, loading, loadCommandCenter }) {
   return (
     <header className="space-y-7">
       <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.42fr)_auto]">
@@ -424,21 +478,21 @@ function CommandHeader({ config, activeTab, setActiveTab, globalSearch, setGloba
               onClick={() => setActiveTab(tab.code)}
               className={`border-b-4 pb-3 text-base font-semibold transition ${
                 activeTab === tab.code
-                  ? "border-brand-500 text-brand-600"
-                  : "border-transparent text-ink-400 hover:text-ink-700"
+                  ? theme.tabActive
+                  : theme.tabIdle
               }`}
             >
               {tab.label}
             </button>
           ))}
         </nav>
-        <label className="flex h-14 items-center gap-3 rounded-[1.35rem] border border-ink-100 bg-ink-50/80 px-5 text-sm text-ink-400">
+        <label className={`flex h-14 items-center gap-3 rounded-[1.35rem] px-5 text-sm ${theme.search}`}>
           <Search className="h-4 w-4" />
           <input
             value={globalSearch}
             onChange={(event) => setGlobalSearch(event.target.value)}
             placeholder={config.labels.signalSearch}
-            className="w-full bg-transparent text-sm text-ink-700 outline-none placeholder:text-ink-300"
+            className={`w-full bg-transparent text-sm outline-none ${theme.input}`}
           />
         </label>
         <button
@@ -452,10 +506,10 @@ function CommandHeader({ config, activeTab, setActiveTab, globalSearch, setGloba
         </button>
       </div>
       <div>
-        <h2 className="text-3xl font-semibold leading-tight tracking-normal text-ink-900 xl:text-4xl">
+        <h2 className={`text-3xl font-semibold leading-tight tracking-normal xl:text-4xl ${theme.heading}`}>
           {config.title}
         </h2>
-        <p className="mt-2 max-w-5xl text-sm font-medium text-ink-400 xl:text-base">{config.subtitle}</p>
+        <p className={`mt-2 max-w-5xl text-sm font-medium xl:text-base ${theme.muted}`}>{config.subtitle}</p>
       </div>
     </header>
   );
@@ -463,6 +517,7 @@ function CommandHeader({ config, activeTab, setActiveTab, globalSearch, setGloba
 
 function CommandView({
   loading,
+  theme,
   widgets,
   payload,
   labels,
@@ -474,23 +529,23 @@ function CommandView({
 }) {
   return (
     <>
-      <section className="rounded-[1.75rem] border border-ink-100 bg-white px-6 py-6 shadow-soft">
+      <section className={theme.panel}>
         <div className="mb-5">
-          <h3 className="text-2xl font-semibold text-ink-900">{labels.businessStats}</h3>
-          <p className="text-sm font-semibold text-ink-400">{labels.businessStatsHint}</p>
+          <h3 className={`text-2xl font-semibold ${theme.heading}`}>{labels.businessStats}</h3>
+          <p className={`text-sm font-semibold ${theme.muted}`}>{labels.businessStatsHint}</p>
         </div>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           {widgets.map((widget) => (
-            <StatTile key={widget.code} widget={widget} loading={loading} labels={labels} onOpenDetail={onWidgetDetail} />
+            <StatTile key={widget.code} widget={widget} loading={loading} labels={labels} onOpenDetail={onWidgetDetail} theme={theme} />
           ))}
         </div>
       </section>
 
-      <section className="rounded-[1.75rem] border border-ink-100 bg-white px-6 py-6 shadow-soft">
+      <section className={theme.panel}>
         <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h3 className="text-2xl font-semibold text-ink-900">{labels.burningTopics}</h3>
-            <p className="text-sm font-semibold text-ink-400">{labels.burningHint}</p>
+            <h3 className={`text-2xl font-semibold ${theme.heading}`}>{labels.burningTopics}</h3>
+            <p className={`text-sm font-semibold ${theme.muted}`}>{labels.burningHint}</p>
           </div>
           <div className="flex flex-wrap gap-2">
             {decoratedCategories
@@ -509,11 +564,11 @@ function CommandView({
         {burningTopics.length ? (
           <div className="grid gap-4 lg:grid-cols-3">
             {burningTopics.map((topic) => (
-              <BurningPanel key={topic.code} topic={topic} labels={labels} onOpenSurface={onOpenSurface} />
+              <BurningPanel key={topic.code} topic={topic} labels={labels} onOpenSurface={onOpenSurface} theme={theme} />
             ))}
           </div>
         ) : (
-          <p className="rounded-2xl border border-dashed border-ink-200 bg-ink-50 px-4 py-6 text-sm text-ink-400">
+          <p className={theme.empty}>
             {labels.burningEmpty}
           </p>
         )}
@@ -522,7 +577,7 @@ function CommandView({
   );
 }
 
-function StatTile({ widget, loading, labels, onOpenDetail }) {
+function StatTile({ widget, loading, labels, onOpenDetail, theme }) {
   const series = Array.isArray(widget.series) ? widget.series : [];
   const sparkId = `spark-${String(widget.code || "card").replace(/[^a-z0-9_-]/gi, "-")}`;
   const sparkTone = widget.tone === "rose"
@@ -532,9 +587,9 @@ function StatTile({ widget, loading, labels, onOpenDetail }) {
       : { line: "stroke-brand-600", text: "text-brand-600", fill: "fill-brand-600", color: "#2563eb" };
   const point = lastSparkPoint(series);
   return (
-    <article className="flex h-full flex-col rounded-2xl border border-ink-100 bg-ink-50/70 px-4 py-4">
-      <p className="text-sm font-semibold text-ink-400">{widget.label}</p>
-      <p className="mt-2 text-3xl font-semibold text-ink-900">{loading ? "..." : widget.value ?? 0}</p>
+    <article className={`flex h-full flex-col px-4 py-4 ${theme.card}`}>
+      <p className={`text-sm font-semibold ${theme.muted}`}>{widget.label}</p>
+      <p className={`mt-2 text-3xl font-semibold ${theme.heading}`}>{loading ? "..." : widget.value ?? 0}</p>
       <p className={`mt-2 min-h-[4.5rem] text-sm font-semibold leading-relaxed ${widget.tone === "rose" ? "text-rose-500" : widget.tone === "amber" ? "text-amber-500" : "text-brand-500"}`}>
         {widget.helper || "live signal"}
       </p>
@@ -554,7 +609,7 @@ function StatTile({ widget, loading, labels, onOpenDetail }) {
         <button
           type="button"
           onClick={() => onOpenDetail?.(widget)}
-          className="mt-2 w-full rounded-full border border-ink-100 bg-white py-2 text-sm font-semibold text-brand-600 shadow-soft"
+          className={`mt-2 w-full py-2 text-sm font-semibold ${theme.secondaryAction}`}
         >
           {labels.openDetail}
         </button>
@@ -563,11 +618,11 @@ function StatTile({ widget, loading, labels, onOpenDetail }) {
   );
 }
 
-function BurningPanel({ topic, labels, onOpenSurface }) {
+function BurningPanel({ topic, labels, onOpenSurface, theme }) {
   return (
-    <article className="rounded-2xl border border-ink-100 bg-ink-50/70 p-4">
-      <h4 className="text-lg font-semibold text-ink-900">Urgent {topic.display_label.toLowerCase()}</h4>
-      <p className="text-sm font-semibold text-ink-400">top urgent only</p>
+    <article className={`p-4 ${theme.card}`}>
+      <h4 className={`text-lg font-semibold ${theme.heading}`}>Urgent {topic.display_label.toLowerCase()}</h4>
+      <p className={`text-sm font-semibold ${theme.muted}`}>top urgent only</p>
       <div className="mt-5 space-y-3">
         {topic.urgentTasks.map((task, index) => (
           <button
@@ -591,10 +646,10 @@ function BurningPanel({ topic, labels, onOpenSurface }) {
   );
 }
 
-function AnalyticsView({ loading, payload, labels }) {
+function AnalyticsView({ loading, payload, labels, theme }) {
   return (
     <div className="space-y-5">
-      <SectionHeader icon={BarChart3} title={labels.analytics} subtitle="Graph-led view of module load, urgency, and due windows." />
+      <SectionHeader icon={BarChart3} title={labels.analytics} subtitle="Graph-led view of module load, urgency, and due windows." theme={theme} />
       <div className="grid gap-5 lg:grid-cols-2">
         <GraphPanel
           title="Category load"
@@ -603,6 +658,7 @@ function AnalyticsView({ loading, payload, labels }) {
           valueKey="count"
           accentKey="urgent_count"
           empty={loading ? "Loading..." : "No category load yet."}
+          theme={theme}
         />
         <GraphPanel
           title="Status mix"
@@ -610,6 +666,7 @@ function AnalyticsView({ loading, payload, labels }) {
           items={(payload?.analytics?.status_mix || []).map((item) => ({ label: item.status, count: item.count }))}
           valueKey="count"
           empty={loading ? "Loading..." : "No status data yet."}
+          theme={theme}
         />
       </div>
       <GraphPanel
@@ -618,31 +675,32 @@ function AnalyticsView({ loading, payload, labels }) {
         items={payload?.analytics?.due_buckets || []}
         valueKey="count"
         empty={loading ? "Loading..." : "No due dates detected."}
+        theme={theme}
       />
     </div>
   );
 }
 
-function WorkloadView({ loading, payload, labels, categories, pinnedCategories }) {
+function WorkloadView({ loading, payload, labels, categories, pinnedCategories, theme }) {
   return (
     <div className="space-y-5">
-      <SectionHeader icon={LayoutGrid} title={labels.workload} subtitle="Pinned categories and delegation readiness for the current workspace." />
+      <SectionHeader icon={LayoutGrid} title={labels.workload} subtitle="Pinned categories and delegation readiness for the current workspace." theme={theme} />
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {categories.map((category) => (
-          <div key={category.code} className="rounded-2xl border border-ink-100 bg-white p-4 shadow-soft">
+          <div key={category.code} className={`p-4 ${theme.cardRaised}`}>
             <div className="flex items-center justify-between gap-3">
-              <h4 className="font-semibold text-ink-900">{category.display_label}</h4>
+              <h4 className={`font-semibold ${theme.heading}`}>{category.display_label}</h4>
               <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${category.tone.badge}`}>{category.count}</span>
             </div>
-            <p className="mt-2 min-h-10 text-sm text-ink-500">{category.description}</p>
-            <div className="mt-3 flex items-center justify-between text-xs font-semibold text-ink-400">
+            <p className={`mt-2 min-h-10 text-sm ${theme.body}`}>{category.description}</p>
+            <div className={`mt-3 flex items-center justify-between text-xs font-semibold ${theme.muted}`}>
               <span>{category.urgent_count} urgent</span>
               <span>{pinnedCategories.includes(category.code) ? labels.pinned : "Available"}</span>
             </div>
           </div>
         ))}
         {!categories.length && !loading ? (
-          <p className="rounded-2xl border border-dashed border-ink-200 bg-white/70 px-4 py-6 text-sm text-ink-400">
+          <p className={theme.empty}>
             No workload categories available yet.
           </p>
         ) : null}
@@ -653,6 +711,7 @@ function WorkloadView({ loading, payload, labels, categories, pinnedCategories }
         items={(payload?.workload?.delegation_candidates || []).map((item) => ({ label: item.label, count: 1 }))}
         valueKey="count"
         empty={loading ? "Loading..." : "No delegation candidates available."}
+        theme={theme}
       />
     </div>
   );
@@ -672,7 +731,8 @@ function TaskBrowser({
   onDelegate,
   globalSearch,
   collapsed,
-  setCollapsed
+  setCollapsed,
+  theme
 }) {
   const [controlsOpen, setControlsOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -743,12 +803,12 @@ function TaskBrowser({
   }
 
   return (
-    <aside className="glass-panel px-4 py-4 xl:fixed xl:right-5 xl:top-[6.75rem] xl:z-30 xl:h-[calc(100vh-7.5rem)] xl:w-[min(24vw,26rem)] xl:overflow-y-auto xl:overscroll-contain">
+    <aside className={theme.taskRail}>
       <div className="flex items-center justify-between gap-3">
         <div>
-          <p className="text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-ink-400">Action queue</p>
-          <h3 className="text-lg font-semibold text-ink-900">{labels.taskBrowser}</h3>
-          <p className="mt-1 text-xs font-semibold text-ink-400">{labels.taskBrowserHint}</p>
+          <p className={`text-[0.65rem] font-semibold uppercase tracking-[0.25em] ${theme.muted}`}>Action queue</p>
+          <h3 className={`text-lg font-semibold ${theme.heading}`}>{labels.taskBrowser}</h3>
+          <p className={`mt-1 text-xs font-semibold ${theme.muted}`}>{labels.taskBrowserHint}</p>
         </div>
         <div className="flex items-center gap-2">
           <LayoutGrid className="h-5 w-5 text-ink-400" />
@@ -769,15 +829,15 @@ function TaskBrowser({
           const tasks = filteredTasks(category.tasks);
           const isPinned = pinnedCategories.includes(category.code);
           return (
-            <div key={category.code} className="rounded-2xl border border-white/70 bg-white/80 shadow-soft">
+            <div key={category.code} className={theme.cardRaised}>
               <div className="flex items-center justify-between gap-3 px-4 py-3">
                 <button
                   type="button"
                   onClick={() => toggleCategory(category.code)}
                   className="min-w-0 flex-1 text-left"
                 >
-                  <span className="block truncate text-sm font-semibold text-ink-900">{category.display_label}</span>
-                  <span className="mt-1 block text-xs text-ink-400">
+                  <span className={`block truncate text-sm font-semibold ${theme.heading}`}>{category.display_label}</span>
+                  <span className={`mt-1 block text-xs ${theme.muted}`}>
                     {category.count} tasks, {category.urgent_count} urgent
                   </span>
                 </button>
@@ -823,10 +883,11 @@ function TaskBrowser({
                             onAction={onAction}
                             onSubmitDelegate={submitDelegate}
                             labels={labels}
+                            theme={theme}
                           />
                         ))
                       ) : (
-                        <p className="rounded-xl border border-dashed border-ink-200 bg-white/70 px-3 py-4 text-sm text-ink-400">
+                        <p className={theme.empty}>
                           {loading ? "Loading..." : labels.noTasks}
                         </p>
                       )}
@@ -840,7 +901,7 @@ function TaskBrowser({
       </div>
 
       {!hasOpenCategory ? (
-        <div className="mt-3 rounded-2xl border border-white/70 bg-white/80">
+        <div className={`mt-3 ${theme.cardRaised}`}>
           <button
             type="button"
             onClick={() => setControlsOpen((value) => !value)}
@@ -889,7 +950,8 @@ function TaskRow({
   delegateError,
   onAction,
   onSubmitDelegate,
-  labels
+  labels,
+  theme
 }) {
   const primaryAction = task.actions?.find((action) => action.code === "open") || task.actions?.[0];
   return (
@@ -912,7 +974,7 @@ function TaskRow({
           <button
             type="button"
             onClick={() => onAction(task, primaryAction)}
-            className="rounded-full bg-ink-900 px-3 py-1.5 text-xs font-semibold text-white shadow-soft"
+            className={theme.primaryAction}
           >
             {primaryAction.label}
           </button>
@@ -966,28 +1028,28 @@ function TaskRow({
   );
 }
 
-function SectionHeader({ icon: Icon, title, subtitle }) {
+function SectionHeader({ icon: Icon, title, subtitle, theme }) {
   return (
-    <div className="rounded-[1.75rem] border border-ink-100 bg-white px-6 py-5 shadow-soft">
+    <div className={theme.panelCompact}>
       <div className="flex items-center gap-3">
         <Icon className="h-5 w-5 text-brand-500" />
         <div>
-          <h3 className="text-2xl font-semibold text-ink-900">{title}</h3>
-          <p className="text-sm text-ink-500">{subtitle}</p>
+          <h3 className={`text-2xl font-semibold ${theme.heading}`}>{title}</h3>
+          <p className={`text-sm ${theme.body}`}>{subtitle}</p>
         </div>
       </div>
     </div>
   );
 }
 
-function GraphPanel({ title, subtitle, items, valueKey, accentKey, empty }) {
+function GraphPanel({ title, subtitle, items, valueKey, accentKey, empty, theme }) {
   const safeItems = Array.isArray(items) ? items : [];
   const total = safeItems.reduce((sum, item) => sum + Number(item?.[valueKey] || 0), 0);
   return (
-    <div className="rounded-[1.75rem] border border-ink-100 bg-white px-6 py-5 shadow-soft">
+    <div className={theme.panelCompact}>
       <div className="mb-4">
-        <h3 className="text-xl font-semibold text-ink-900">{title}</h3>
-        <p className="mt-1 text-sm text-ink-500">{subtitle}</p>
+        <h3 className={`text-xl font-semibold ${theme.heading}`}>{title}</h3>
+        <p className={`mt-1 text-sm ${theme.body}`}>{subtitle}</p>
       </div>
       {safeItems.length ? (
         <div className="space-y-3">
@@ -1009,7 +1071,7 @@ function GraphPanel({ title, subtitle, items, valueKey, accentKey, empty }) {
           })}
         </div>
       ) : (
-        <p className="rounded-2xl border border-dashed border-ink-200 bg-ink-50 px-4 py-6 text-sm text-ink-400">
+        <p className={theme.empty}>
           {empty}
         </p>
       )}

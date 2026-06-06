@@ -23,22 +23,30 @@ DECLARE
       { "code": "recent_reports", "label": "Recent reports" }
     ],
     "labels": {
+      "refresh": "Refresh",
       "businessStats": "Business statistics",
       "businessStatsHint": "Role/template-driven graph set",
       "openDetail": "Open detail",
       "burningTopics": "Burning topics",
       "burningHint": "Top urgent items only. User pins 2-3 categories from the Task Browser.",
+      "burningEmpty": "No urgent item is waiting in the pinned categories.",
       "taskBrowser": "Task Browser",
       "taskBrowserHint": "All user actionables - categories are metadata-driven",
       "taskSearch": "Search actionables...",
       "signalSearch": "Search signal, customer, order, material...",
       "actionables": "Actionables",
-      "controls": "Filters and delegation",
+      "controls": "Filters, delegation rules and category pinning",
       "analytics": "Signal analytics",
       "workload": "Workload balance",
       "delegate": "Delegate",
       "assign": "Assign",
-      "noTasks": "No open tasks in this category."
+      "cancel": "Cancel",
+      "confirm": "Confirm",
+      "noTasks": "No open tasks in this category.",
+      "search": "Search tasks",
+      "urgency": "Urgency",
+      "sort": "Sort",
+      "pinned": "Pinned"
     },
     "categoryPresentation": {
       "crm": { "label": "Customer queries", "badge": "CRM / INTAKE", "tone": "blue" },
@@ -53,6 +61,10 @@ DECLARE
       "defaultOpen": "crm",
       "urgencyFilters": ["all", "critical", "high", "medium", "normal"],
       "sortOptions": ["urgency", "due_date", "category"]
+    },
+    "theme": {
+      "variant": "eip_v1",
+      "density": "comfortable"
     }
   }'::jsonb;
   surface_record record;

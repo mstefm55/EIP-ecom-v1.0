@@ -36,6 +36,10 @@ test("command center dashboard UI is descriptor-driven and keeps the task browse
   const migration = read("services/api/db/migrations/0113_command_center_dashboard_descriptor.sql");
 
   assert.match(component, /mergeConfig\(node\?\.props/);
+  assert.match(component, /COMMAND_CENTER_THEMES/);
+  assert.match(component, /variant: "eip_v1"/);
+  assert.match(component, /light_glass_ready/);
+  assert.match(component, /resolveCommandTheme/);
   assert.match(component, /Run the business, not the system/);
   assert.match(component, /Analytics/);
   assert.match(component, /Workload/);
@@ -58,12 +62,19 @@ test("command center dashboard UI is descriptor-driven and keeps the task browse
 
   assert.match(descriptor, /endpoint: "\/api\/eip\/user\/dashboard\/command-center"/);
   assert.match(descriptor, /taskBrowser/);
+  assert.match(descriptor, /theme/);
+  assert.match(descriptor, /variant: "eip_v1"/);
   assert.match(descriptor, /categoryPresentation/);
   assert.match(descriptor, /widgets/);
   assert.match(seed, /"endpoint": "\/api\/eip\/user\/dashboard\/command-center"/);
   assert.match(seed, /"categoryPresentation"/);
   assert.match(seed, /"taskBrowser"/);
+  assert.match(seed, /"theme"/);
+  assert.match(seed, /"variant": "eip_v1"/);
+  assert.match(seed, /"controls": "Filters, delegation rules and category pinning"/);
   assert.match(migration, /command_center_props/);
+  assert.match(migration, /"theme"/);
+  assert.match(migration, /"density": "comfortable"/);
   assert.match(migration, /jsonb_set\(panel_child, '\{props\}', command_center_props, true\)/);
 });
 
