@@ -1,7 +1,8 @@
 import { isAuthenticatedSurfaceAllowed, resolveEipSurfaceAccess } from "../lib/surfaceAccess.js";
 import {
   buildCommandCenterPayload,
-  delegateCommandCenterTask
+  delegateCommandCenterTask,
+  scheduleCommandCenterTask
 } from "../services/dashboard/commandCenter.js";
 
 const OPEN_TASK_STATUSES = ["open", "assigned", "in_progress", "blocked", "pending"];
@@ -290,6 +291,49 @@ export default async function uiSurfaceRoutes(app, opts = {}) {
         identityId: s.session.identity_id,
         taskId: normalizeText(req.params.id),
         assignedAgentId: normalizeText(req.body?.assigned_agent_id)
+      });
+      if (!result.ok) {
+        return reply.code(result.status || 500).send(result);
+      }
+      return reply.send(result);
+    }
+  );
+
+  app.post(
+    "/user/tasks/:id/schedule",
+    {
+      schema: {
+        params: {
+          type: "object",
+          required: ["id"],
+          properties: { id: { type: "string", minLength: 36, maxLength: 36 } }
+        },
+        body: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            due_at: { anyOf: [{ type: "string", maxLength: 80 }, { type: "null" }] },
+            planned_start_at: { anyOf: [{ type: "string", maxLength: 80 }, { type: "null" }] },
+            planned_end_at: { anyOf: [{ type: "string", maxLength: 80 }, { type: "null" }] },
+            reminder_at: { anyOf: [{ type: "string", maxLength: 80 }, { type: "null" }] },
+            priority: { type: "string", maxLength: 40 },
+            status: { type: "string", maxLength: 40 }
+          }
+        }
+      }
+    },
+    async (req, reply) => {
+      const s = await app.requireSession(req, { realm: "EIP" });
+      if (!s.ok) return reply.code(s.status).send({ ok: false, error: s.error });
+
+      const c = await app.requireCsrf(req);
+      if (!c.ok) return reply.code(c.status).send({ ok: false, error: c.error });
+
+      const result = await scheduleCommandCenterTask(app, {
+        tenantId: s.session.tenant_id,
+        identityId: s.session.identity_id,
+        taskId: normalizeText(req.params.id),
+        schedule: req.body || {}
       });
       if (!result.ok) {
         return reply.code(result.status || 500).send(result);

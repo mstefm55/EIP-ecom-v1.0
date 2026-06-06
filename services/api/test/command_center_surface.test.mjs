@@ -19,12 +19,16 @@ test("command center backend stays a thin tenant-scoped composition surface", ()
   assert.match(route, /\/user\/dashboard\/command-center/);
   assert.match(route, /buildCommandCenterPayload/);
   assert.match(route, /\/user\/tasks\/:id\/delegate/);
+  assert.match(route, /\/user\/tasks\/:id\/schedule/);
   assert.match(route, /app\.requireCsrf\(req\)/);
   assert.match(service, /FROM eip_core\.task t/);
   assert.match(service, /LEFT JOIN eip_core\.service_object so/);
   assert.match(service, /LEFT JOIN eip_core\.process_def pd/);
   assert.match(service, /tenant_id=\$1|tenant_id = \$1/);
   assert.match(service, /task_status_event/);
+  assert.match(service, /scheduleCommandCenterTask/);
+  assert.match(service, /reason_code, note, actor_agent_id, attrs/);
+  assert.match(service, /'scheduled'/);
   assert.doesNotMatch(service, /CREATE TABLE/i);
   assert.doesNotMatch(service, /samara|samarapattern|samara-web-storefront/i);
 });
@@ -45,19 +49,24 @@ test("command center dashboard UI is descriptor-driven and keeps the task browse
   assert.match(component, /Analytics/);
   assert.match(component, /Workload/);
   assert.match(component, /TaskBrowser/);
+  assert.match(component, /ScheduleTaskModal/);
+  assert.match(component, /dueDateFilters/);
+  assert.match(component, /assignmentFilters/);
+  assert.match(component, /min-h-\[32vh\] max-h-\[46vh\]/);
+  assert.match(component, /sticky bottom-0/);
   assert.match(component, /Business statistics/);
   assert.match(component, /Burning topics/);
   assert.match(component, /text-3xl font-semibold/);
-  assert.match(component, /max-h-\[30vh\]/);
   assert.match(component, /xl:fixed xl:right-5 xl:top-\[6\.75rem\]/);
   assert.match(component, /PanelRightClose/);
   assert.match(component, /PanelRightOpen/);
   assert.match(component, /grid-rows-\[1fr\]/);
   assert.match(component, /grid-rows-\[0fr\]/);
-  assert.match(component, /!hasOpenCategory/);
+  assert.doesNotMatch(component, /!hasOpenCategory/);
   assert.match(component, /xl:grid-cols-\[minmax\(0,1fr\)_minmax\(330px,24vw\)\]/);
   assert.match(component, /onOpenDetail\?\.\(widget\)/);
   assert.match(component, /onDelegate/);
+  assert.match(component, /onSchedule/);
   assert.match(component, /ctx\?\.user\?\.setActiveTab/);
   assert.doesNotMatch(component, /samara|samarapattern|samara-web-storefront/i);
 
@@ -70,6 +79,8 @@ test("command center dashboard UI is descriptor-driven and keeps the task browse
   assert.match(seed, /"endpoint": "\/api\/eip\/user\/dashboard\/command-center"/);
   assert.match(seed, /"categoryPresentation"/);
   assert.match(seed, /"taskBrowser"/);
+  assert.match(seed, /"dueDateFilters"/);
+  assert.match(seed, /"assignmentFilters"/);
   assert.match(seed, /"theme"/);
   assert.match(seed, /"variant": "eip_v1"/);
   assert.match(seed, /"controls": "Filters, delegation rules and category pinning"/);
@@ -80,6 +91,8 @@ test("command center dashboard UI is descriptor-driven and keeps the task browse
   assert.match(refreshMigration, /command_center_theme_descriptor_refresh/);
   assert.match(refreshMigration, /"command_center_theme_tokens":true/);
   assert.match(refreshMigration, /"variant": "eip_v1"/);
+  const surfacePolishMigration = read("services/api/db/migrations/0115_command_center_product_studio_surface_polish.sql");
+  assert.match(surfacePolishMigration, /command_center_scheduling/);
 });
 
 test("command center category routing uses scored metadata instead of broad text includes", () => {
@@ -89,5 +102,6 @@ test("command center category routing uses scored metadata instead of broad text
   assert.match(service, /strongFields/);
   assert.match(service, /descriptiveFields/);
   assert.match(service, /new RegExp/);
+  assert.match(service, /objectTitle\.toLowerCase\(\)\.includes\(objectCode\.toLowerCase\(\)\)/);
   assert.doesNotMatch(service, /haystack\.includes/);
 });

@@ -47,6 +47,14 @@ POST /api/eip/user/tasks/:id/delegate
 
 It requires an EIP session, CSRF, tenant scoping, an actor agent, and either ownership of the task or an existing task/process write permission. It updates the existing task assignment and writes a `task_status_event` with reason `delegated`.
 
+Task scheduling uses:
+
+```text
+POST /api/eip/user/tasks/:id/schedule
+```
+
+It reuses existing `eip_core.task.due_at`, `started_at`, assignment, status, and `attrs`. Planned start/end, reminder, priority, and scheduling metadata are stored in task attrs until the process engine exposes richer first-class scheduling effects. The route requires EIP session, CSRF, tenant scope, actor agent resolution, and ownership or existing task/process permissions. It writes a `task_status_event` with reason `scheduled`.
+
 ## UI Descriptor Governance
 
 The dashboard surface descriptor owns:
@@ -57,6 +65,8 @@ The dashboard surface descriptor owns:
 - default open category
 - urgency filters
 - sort options
+- due-date filters
+- assignment/delegation filters
 - semantic theme variant and density tokens
 
 React owns only reusable layout primitives:
@@ -100,6 +110,13 @@ API static contract:
 ```bash
 cd services/api
 npm test -- test/command_center_surface.test.mjs
+```
+
+Full API/security checks for the release gate:
+
+```bash
+npm.cmd --prefix services/api test
+npm.cmd --prefix services/api run test:security
 ```
 
 Dashboard build:

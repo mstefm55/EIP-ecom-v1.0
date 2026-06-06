@@ -85,7 +85,9 @@ export const dashboardSurface = {
             taskBrowser: {
               defaultOpen: "crm",
               urgencyFilters: ["all", "critical", "high", "medium", "normal"],
-              sortOptions: ["urgency", "due_date", "category"],
+              dueDateFilters: ["all", "overdue", "today", "tomorrow", "future", "unscheduled"],
+              assignmentFilters: ["all", "my_tasks", "delegated", "unassigned"],
+              sortOptions: ["urgency", "due_date", "category", "created_date"],
             },
             theme: {
               variant: "eip_v1",
@@ -103,6 +105,27 @@ export const dashboardSurface = {
         {
           id: "catalog-workspace",
           type: "EcomProductWorkspace",
+          props: {
+            productStudio: {
+              tabs: [
+                { id: "studio", label: "Studio" },
+                { id: "focus", label: "Focus" },
+                { id: "analytics", label: "Analytics" },
+                { id: "workload", label: "Workload" },
+              ],
+              focusRules: [
+                { code: "rejected", label: "Rejected products" },
+                { code: "pending_publish", label: "Pending publish" },
+                { code: "missing_trade_conditions", label: "Missing trade conditions" },
+                { code: "missing_category", label: "Missing category/type" },
+                { code: "inventory_setup", label: "Physical inventory setup" },
+              ],
+              tradeConditions: {
+                title: "Trade conditions",
+                subtitle: "Commercial rules, pricing terms, supplier/customer terms, validity, and renewal tasks.",
+              },
+            },
+          },
         },
       ],
     },

@@ -70,6 +70,13 @@ function parseDate(value) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+function toIsoOrNull(value) {
+  const text = normalizeText(value);
+  if (!text) return null;
+  const date = new Date(text);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
 function startOfToday() {
   const date = new Date();
   date.setHours(0, 0, 0, 0);
@@ -205,13 +212,22 @@ function computeUrgency(row) {
 }
 
 function buildContext(row) {
+  const objectCode = normalizeText(row.object_code);
+  const objectTitle = normalizeText(row.object_title);
+  const objectType = normalizeText(row.object_type)
+    .replace(/^CRM_|^ECOM_/i, "")
+    .replace(/_/g, " ")
+    .toLowerCase();
+  const readableType = objectType ? objectType.charAt(0).toUpperCase() + objectType.slice(1) : "";
+  if (objectCode && objectTitle && objectTitle.toLowerCase().includes(objectCode.toLowerCase())) {
+    return readableType ? `${readableType} ${objectCode}` : objectCode;
+  }
   const parts = [
-    normalizeText(row.object_code),
-    normalizeText(row.object_title),
-    normalizeText(row.object_type),
+    readableType && objectCode ? `${readableType} ${objectCode}` : objectCode || readableType,
+    objectTitle,
     normalizeText(row.process_name || row.process_code)
   ].filter(Boolean);
-  return parts.length ? parts.slice(0, 2).join(" - ") : normalizeText(row.task_type) || "Task";
+  return [...new Set(parts)].slice(0, 2).join(" - ") || normalizeText(row.task_type) || "Task";
 }
 
 function toTaskItem(row) {
@@ -243,6 +259,12 @@ function toTaskItem(row) {
     context: buildContext(row),
     assigned_agent_id: row.assigned_agent_id,
     assigned_agent_name: row.assigned_agent_name || row.assigned_agent_code || "",
+    delegated_by_agent_id: readAttr(row, "last_delegation")?.actor_agent_id || null,
+    delegated_at: readAttr(row, "last_delegation")?.delegated_at || null,
+    planned_start_at: readAttr(row, "planned_start_at"),
+    planned_end_at: readAttr(row, "planned_end_at"),
+    reminder_at: readAttr(row, "reminder_at"),
+    priority: normalizeLower(readAttr(row, "priority") || readAttr(row, "severity")) || "normal",
     object: {
       id: row.service_object_id,
       type: row.object_type,
@@ -265,6 +287,14 @@ function toTaskItem(row) {
         endpoint: `/api/eip/user/tasks/${row.id}/delegate`,
         method: "POST",
         governed_by: "task_assignment"
+      },
+      {
+        code: "schedule",
+        label: "Schedule",
+        kind: "schedule",
+        endpoint: `/api/eip/user/tasks/${row.id}/schedule`,
+        method: "POST",
+        governed_by: "task_scheduling"
       }
     ]
   };
@@ -538,7 +568,14 @@ export async function buildCommandCenterPayload(app, tenantId, identityId) {
       assigned_agent_id: actorAgentId,
       default_category: categories.find((category) => category.count > 0)?.code || categories[0]?.code || "general",
       sort_options: ["urgency", "due_date", "category"],
-      urgency_filters: ["all", "critical", "high", "medium", "normal"]
+      urgency_filters: ["all", "critical", "high", "medium", "normal"],
+      due_buckets: dueBuckets,
+      delegated_count: tasks.filter((task) => task.delegated_at).length,
+      my_task_count: tasks.filter((task) => actorAgentId && task.assigned_agent_id === actorAgentId).length,
+      scheduled_tasks: tasks
+        .filter((task) => task.due_at)
+        .sort((a, b) => String(a.due_at || "").localeCompare(String(b.due_at || "")))
+        .slice(0, 30)
     }
   };
 }
@@ -645,6 +682,115 @@ export async function delegateCommandCenterTask(app, { tenantId, identityId, tas
     await client.query("ROLLBACK");
     app.log.error({ event: "command_center_delegate_error", tenantId, taskId, error: error.message });
     return { ok: false, status: 500, error: "TASK_DELEGATE_FAILED" };
+  } finally {
+    client.release();
+  }
+}
+
+export async function scheduleCommandCenterTask(app, { tenantId, identityId, taskId, schedule = {} }) {
+  const actorAgentId = await getPrimaryAgentId(app.db, tenantId, identityId);
+  if (!actorAgentId) {
+    return { ok: false, status: 403, error: "ACTOR_AGENT_REQUIRED" };
+  }
+
+  const dueAt = toIsoOrNull(schedule.due_at);
+  const plannedStartAt = toIsoOrNull(schedule.planned_start_at);
+  const plannedEndAt = toIsoOrNull(schedule.planned_end_at);
+  const reminderAt = toIsoOrNull(schedule.reminder_at);
+  const priority = normalizeLower(schedule.priority).slice(0, 40) || null;
+  const status = normalizeLower(schedule.status).slice(0, 40) || null;
+
+  if (schedule.due_at && !dueAt) return { ok: false, status: 400, error: "INVALID_DUE_AT" };
+  if (schedule.planned_start_at && !plannedStartAt) return { ok: false, status: 400, error: "INVALID_PLANNED_START_AT" };
+  if (schedule.planned_end_at && !plannedEndAt) return { ok: false, status: 400, error: "INVALID_PLANNED_END_AT" };
+  if (schedule.reminder_at && !reminderAt) return { ok: false, status: 400, error: "INVALID_REMINDER_AT" };
+
+  const client = await app.db.connect();
+  try {
+    await client.query("BEGIN");
+
+    const taskRes = await client.query(
+      `
+      SELECT id, status, assigned_agent_id, attrs
+      FROM eip_core.task
+      WHERE tenant_id=$1 AND id=$2
+      FOR UPDATE
+      `,
+      [tenantId, taskId]
+    );
+    const task = taskRes.rows[0];
+    if (!task) {
+      await client.query("ROLLBACK");
+      return { ok: false, status: 404, error: "TASK_NOT_FOUND" };
+    }
+
+    const canScheduleAny = await hasPermission(app, tenantId, identityId, "TASK_SCHEDULE")
+      || await hasPermission(app, tenantId, identityId, "TASK_DELEGATE")
+      || await hasPermission(app, tenantId, identityId, "CRM_TASK_WRITE")
+      || await hasPermission(app, tenantId, identityId, "PROCESS_INSTANCE_WRITE");
+    const ownsTask = !task.assigned_agent_id || task.assigned_agent_id === actorAgentId;
+    if (!ownsTask && !canScheduleAny) {
+      await client.query("ROLLBACK");
+      return { ok: false, status: 403, error: "TASK_SCHEDULE_FORBIDDEN" };
+    }
+
+    const scheduling = {
+      planned_start_at: plannedStartAt,
+      planned_end_at: plannedEndAt,
+      reminder_at: reminderAt,
+      priority,
+      scheduled_by_agent_id: actorAgentId,
+      scheduled_at: new Date().toISOString(),
+      source: "command_center"
+    };
+    const attrs = {
+      ...asObject(task.attrs),
+      ...Object.fromEntries(Object.entries({
+        planned_start_at: plannedStartAt,
+        planned_end_at: plannedEndAt,
+        reminder_at: reminderAt,
+        priority
+      }).filter(([, value]) => value !== null)),
+      last_schedule_update: scheduling
+    };
+
+    const updated = await client.query(
+      `
+      UPDATE eip_core.task
+      SET due_at=$3,
+          started_at=COALESCE($4, started_at),
+          status=COALESCE($5, status),
+          attrs=$6::jsonb,
+          updated_at=now()
+      WHERE tenant_id=$1 AND id=$2
+      RETURNING id, status, assigned_agent_id, due_at, started_at, updated_at, attrs
+      `,
+      [tenantId, taskId, dueAt, plannedStartAt, status, JSON.stringify(attrs)]
+    );
+
+    await client.query(
+      `
+      INSERT INTO eip_core.task_status_event
+        (tenant_id, task_id, from_status, to_status, reason_code, note, actor_agent_id, attrs)
+      VALUES ($1, $2, $3, COALESCE($4, $3), 'scheduled', $5, $6, $7::jsonb)
+      `,
+      [
+        tenantId,
+        taskId,
+        task.status,
+        status,
+        dueAt ? `Scheduled for ${dueAt}` : "Due date cleared",
+        actorAgentId,
+        JSON.stringify({ scheduling, due_at: dueAt, source: "command_center" })
+      ]
+    );
+
+    await client.query("COMMIT");
+    return { ok: true, item: updated.rows[0] };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    app.log.error({ event: "command_center_schedule_error", tenantId, taskId, error: error.message });
+    return { ok: false, status: 500, error: "TASK_SCHEDULE_FAILED" };
   } finally {
     client.release();
   }

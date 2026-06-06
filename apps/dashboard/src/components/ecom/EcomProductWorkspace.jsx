@@ -68,6 +68,25 @@ const PRODUCT_SLOT_SOURCE_MODES = [
   { value: "collection_or_drop", label: "Collection or drop" },
   { value: "hybrid_tag_overrides", label: "Tag with manual overrides" }
 ];
+const DEFAULT_PRODUCT_STUDIO_UI = {
+  tabs: [
+    { id: "studio", label: "Studio" },
+    { id: "focus", label: "Focus" },
+    { id: "analytics", label: "Analytics" },
+    { id: "workload", label: "Workload" }
+  ],
+  focusRules: [
+    { code: "rejected", label: "Rejected products" },
+    { code: "pending_publish", label: "Pending publish" },
+    { code: "missing_trade_conditions", label: "Missing trade conditions" },
+    { code: "missing_category", label: "Missing category/type" },
+    { code: "inventory_setup", label: "Physical inventory setup" }
+  ],
+  tradeConditions: {
+    title: "Trade conditions",
+    subtitle: "Commercial rules, pricing terms, supplier/customer terms, validity, and renewal tasks."
+  }
+};
 const DEFAULT_STOREFRONT_MAPPING_UI = {
   title: "Storefront mapping",
   scanButtonLabel: "Scan",
@@ -1278,8 +1297,87 @@ function buildPageNumbers(page, totalPages) {
   return pages;
 }
 
+function resolveProductStudioUi(overrides = {}) {
+  return {
+    ...DEFAULT_PRODUCT_STUDIO_UI,
+    ...(overrides || {}),
+    tabs: Array.isArray(overrides?.tabs) && overrides.tabs.length
+      ? overrides.tabs
+      : DEFAULT_PRODUCT_STUDIO_UI.tabs,
+    focusRules: Array.isArray(overrides?.focusRules) && overrides.focusRules.length
+      ? overrides.focusRules
+      : DEFAULT_PRODUCT_STUDIO_UI.focusRules,
+    tradeConditions: {
+      ...DEFAULT_PRODUCT_STUDIO_UI.tradeConditions,
+      ...(overrides?.tradeConditions || {})
+    }
+  };
+}
+
+function productStage(item = {}) {
+  return String(item?.attrs?.workflow?.stage || item?.status || "new").toLowerCase();
+}
+
+function productType(item = {}) {
+  const attrs = item?.attrs || {};
+  return String(
+    attrs.product_type ||
+    attrs.material_type ||
+    attrs.taxonomy?.product_type ||
+    attrs.taxonomy?.type ||
+    ""
+  ).toLowerCase();
+}
+
+function isDigitalProduct(item = {}) {
+  const type = productType(item);
+  return ["digital", "download", "service", "virtual"].some((token) => type.includes(token));
+}
+
+function productTradeConditions(item = {}) {
+  const attrs = item?.attrs || {};
+  const candidates = [
+    attrs.commercial_conditions,
+    attrs.trade_conditions,
+    attrs.pricing?.conditions,
+    attrs.conditions
+  ];
+  return candidates.find((value) => Array.isArray(value)) || [];
+}
+
+function hasTradeConditions(item = {}) {
+  return productTradeConditions(item).length > 0 || Boolean(item?.attrs?.pricing?.tiers?.length);
+}
+
+function needsInitialInventorySetup(item = {}) {
+  if (isDigitalProduct(item)) return false;
+  const inventory = item?.attrs?.inventory || {};
+  const stage = productStage(item);
+  const active = ["published", "completed", "active"].includes(stage);
+  return !active && inventory.track_inventory !== false && inventory.available_qty == null && inventory.on_hand == null;
+}
+
+function buildProductFocusItems(products = [], rules = DEFAULT_PRODUCT_STUDIO_UI.focusRules) {
+  const counts = {
+    rejected: products.filter((item) => productStage(item) === "rejected"),
+    pending_publish: products.filter((item) => ["review", "approved", "intake"].includes(productStage(item))),
+    missing_trade_conditions: products.filter((item) => !hasTradeConditions(item)),
+    missing_category: products.filter((item) => !(item.attrs?.taxonomy?.category || item.attrs?.taxonomy?.category_code)),
+    inventory_setup: products.filter((item) => needsInitialInventorySetup(item))
+  };
+  return (rules || []).map((rule) => ({
+    ...rule,
+    items: counts[rule.code] || [],
+    count: (counts[rule.code] || []).length
+  }));
+}
+
 export default function EcomProductWorkspace({ node }) {
   const contentStudioOnly = node?.props?.mode === "content-studio";
+  const productStudioUi = useMemo(
+    () => resolveProductStudioUi(node?.props?.productStudio),
+    [node?.props?.productStudio]
+  );
   const storefrontMappingUi = useMemo(
     () => resolveStorefrontMappingUi(node?.props?.storefrontMapping),
     [node?.props?.storefrontMapping]
@@ -1406,6 +1504,8 @@ export default function EcomProductWorkspace({ node }) {
   const [miniModalRequest, setMiniModalRequest] = useState(null);
   const [productCategoryComposer, setProductCategoryComposer] = useState(null);
   const [productCategoryComposerError, setProductCategoryComposerError] = useState("");
+  const [productStudioTab, setProductStudioTab] = useState("studio");
+  const [showTradeConditions, setShowTradeConditions] = useState(false);
 
   const stage = draft?.attrs?.workflow?.stage || "";
   const stageBadge = STAGE_BADGES[stage] || {
@@ -1414,6 +1514,12 @@ export default function EcomProductWorkspace({ node }) {
     className: "bg-slate-100 text-slate-600"
   };
   const StageIcon = stageBadge.icon || CalendarClock;
+  const productFocusItems = useMemo(
+    () => buildProductFocusItems(products, productStudioUi.focusRules),
+    [productStudioUi.focusRules, products]
+  );
+  const currentProductIsDigital = isDigitalProduct(draft);
+  const currentProductNeedsInventorySetup = needsInitialInventorySetup(draft);
   const storefrontStage = String(
     storefrontDraft?.attrs?.workflow?.stage ||
       storefrontDraft?.status ||
@@ -4768,6 +4874,8 @@ export default function EcomProductWorkspace({ node }) {
               const thumb = pickThumbnail(item);
               const stock = resolveProductStock(item.attrs);
               const inStock = stock > 0;
+              const itemStage = productStage(item);
+              const rejected = itemStage === "rejected";
               const category = item.attrs?.taxonomy?.category || "";
               const tags = Array.isArray(item.attrs?.taxonomy?.tags)
                 ? item.attrs.taxonomy.tags.join(", ")
@@ -4858,10 +4966,14 @@ export default function EcomProductWorkspace({ node }) {
                     </div>
                   </div>
                   <div className="text-right">
-                    <p className={`text-[0.7rem] ${active ? "text-white/70" : "text-ink-500"}`}>{stock}</p>
+                    <p className={`text-[0.7rem] ${active ? "text-white/70" : "text-ink-500"}`}>{rejected ? "Review" : stock}</p>
                     <span
                       className={`mt-1 inline-flex items-center rounded-full px-2 py-0.5 text-[0.55rem] font-semibold uppercase tracking-[0.2em] ${
-                        inStock
+                        rejected
+                          ? active
+                            ? "bg-rose-400/30 text-white"
+                            : "bg-rose-100 text-rose-700"
+                          : inStock
                           ? active
                             ? "bg-emerald-400/30 text-white"
                             : "bg-emerald-100 text-emerald-700"
@@ -4870,7 +4982,7 @@ export default function EcomProductWorkspace({ node }) {
                             : "bg-rose-100 text-rose-700"
                       }`}
                     >
-                      {inStock ? "In stock" : "Out of stock"}
+                      {rejected ? "Rejected" : inStock ? "In stock" : "Out of stock"}
                     </span>
                   </div>
                 </div>
@@ -5209,10 +5321,10 @@ export default function EcomProductWorkspace({ node }) {
             { id: "seo", label: "SEO & media data", icon: Search },
             { id: "media", label: "Media files", icon: Image },
             { id: "pricing", label: "Pricing", icon: CircleDot },
-            { id: "inventory", label: "Inventory", icon: Box },
+            ...(currentProductIsDigital ? [] : [{ id: "inventory", label: "Initial inventory", icon: Box }]),
             { id: "reviews", label: "Reviews", icon: MessageSquare }
           ],
-    [contentStudioOnly]
+    [contentStudioOnly, currentProductIsDigital]
   );
 
   useEffect(() => {
@@ -6742,6 +6854,35 @@ export default function EcomProductWorkspace({ node }) {
 
   return (
     <section className="space-y-4">
+      <ProductStudioTabs
+        tabs={productStudioUi.tabs}
+        activeTab={productStudioTab}
+        onChange={setProductStudioTab}
+      />
+      {productStudioTab === "focus" ? (
+        <ProductFocusPanel
+          focusItems={productFocusItems}
+          onSelectProduct={(item) => {
+            setSelectedId(item.id);
+            setProductStudioTab("studio");
+          }}
+          onOpenTradeConditions={(item) => {
+            setSelectedId(item.id);
+            setShowTradeConditions(true);
+          }}
+        />
+      ) : null}
+      {productStudioTab === "analytics" ? (
+        <ProductAnalyticsPanel products={products} focusItems={productFocusItems} />
+      ) : null}
+      {productStudioTab === "workload" ? (
+        <ProductWorkloadPanel
+          focusItems={productFocusItems}
+          onOpenTradeConditions={() => setShowTradeConditions(true)}
+        />
+      ) : null}
+      {productStudioTab === "studio" ? (
+      <>
       <div className="glass-panel flex flex-wrap items-center justify-between gap-4 border border-ink-100/60 bg-white/70 p-5">
         <div>
           <p className="text-[0.6rem] font-semibold uppercase tracking-[0.3em] text-ink-400">E-commerce</p>
@@ -7040,6 +7181,14 @@ export default function EcomProductWorkspace({ node }) {
               >
                 <ExternalLink className="h-4 w-4" />
                 Buyer preview
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowTradeConditions(true)}
+                className="inline-flex items-center gap-2 rounded-full border border-brand-100 bg-brand-50 px-3.5 py-1.5 text-[0.65rem] font-semibold uppercase tracking-[0.22em] text-brand-700"
+              >
+                <FileText className="h-4 w-4" />
+                Trade conditions
               </button>
               <button
                 type="button"
@@ -7990,6 +8139,8 @@ export default function EcomProductWorkspace({ node }) {
           </div>
         </section>
       </div>
+      </>
+      ) : null}
       <ImageAssetStudioModal
         open={imageStudioSession.open}
         sourceFile={imageStudioSession.file}
@@ -8038,8 +8189,236 @@ export default function EcomProductWorkspace({ node }) {
         onCancel={() => closeMiniModal(false)}
         onConfirm={(value) => closeMiniModal(true, value)}
       />
+      <TradeConditionsDrawer
+        open={showTradeConditions}
+        product={draft}
+        ui={productStudioUi.tradeConditions}
+        isDigital={currentProductIsDigital}
+        needsInventorySetup={currentProductNeedsInventorySetup}
+        onClose={() => setShowTradeConditions(false)}
+      />
     </section>
   );
+}
+
+function ProductStudioTabs({ tabs, activeTab, onChange }) {
+  return (
+    <div className="glass-panel flex flex-wrap items-center gap-2 border border-ink-100/60 bg-white/70 p-3">
+      {(tabs || DEFAULT_PRODUCT_STUDIO_UI.tabs).map((tab) => (
+        <button
+          key={tab.id}
+          type="button"
+          onClick={() => onChange(tab.id)}
+          className={`rounded-full px-4 py-2 text-[0.68rem] font-semibold uppercase tracking-[0.2em] transition ${
+            activeTab === tab.id
+              ? "bg-ink-900 text-white shadow-soft"
+              : "border border-ink-100/70 bg-white/80 text-ink-600 hover:bg-white"
+          }`}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function ProductFocusPanel({ focusItems, onSelectProduct, onOpenTradeConditions }) {
+  return (
+    <section className="grid gap-4 lg:grid-cols-2">
+      {(focusItems || []).map((group) => (
+        <article key={group.code} className="glass-panel border border-ink-100/60 bg-white/70 p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-[0.6rem] font-semibold uppercase tracking-[0.25em] text-ink-400">Product focus</p>
+              <h3 className="mt-1 text-base font-semibold text-ink-900">{group.label}</h3>
+            </div>
+            <span className="rounded-full bg-ink-900 px-3 py-1 text-xs font-semibold text-white">{group.count}</span>
+          </div>
+          <div className="mt-4 max-h-[18rem] space-y-2 overflow-y-auto pr-1">
+            {group.items.length ? group.items.slice(0, 8).map((item) => (
+              <div key={`${group.code}-${item.id}`} className="rounded-2xl border border-ink-100 bg-white px-3 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-ink-900">{item.title || item.name || "Untitled product"}</p>
+                    <p className="mt-1 text-[0.65rem] uppercase tracking-[0.16em] text-ink-400">{item.code || "NO-CODE"} · {productStage(item)}</p>
+                  </div>
+                  <button type="button" onClick={() => onSelectProduct(item)} className="rounded-full border border-ink-100 bg-ink-50 px-3 py-1 text-xs font-semibold text-ink-600">
+                    Open
+                  </button>
+                </div>
+                {group.code === "missing_trade_conditions" ? (
+                  <button type="button" onClick={() => onOpenTradeConditions(item)} className="mt-2 rounded-full border border-brand-100 bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">
+                    Trade conditions
+                  </button>
+                ) : null}
+              </div>
+            )) : (
+              <p className="rounded-2xl border border-dashed border-ink-200 bg-white/70 px-4 py-5 text-sm text-ink-400">
+                No focus item in this category.
+              </p>
+            )}
+          </div>
+        </article>
+      ))}
+    </section>
+  );
+}
+
+function ProductAnalyticsPanel({ products, focusItems }) {
+  const total = products.length;
+  const rejected = products.filter((item) => productStage(item) === "rejected").length;
+  const published = products.filter((item) => productStage(item) === "published").length;
+  const missingConditions = focusItems.find((item) => item.code === "missing_trade_conditions")?.count || 0;
+  return (
+    <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <ProductMetric label="Products" value={total} helper="Loaded catalog rows" />
+      <ProductMetric label="Published" value={published} helper="Process-published products" />
+      <ProductMetric label="Rejected" value={rejected} helper="Shown as rejected, not stock state" tone="rose" />
+      <ProductMetric label="Missing conditions" value={missingConditions} helper="Needs trade-condition review" tone="amber" />
+    </section>
+  );
+}
+
+function ProductMetric({ label, value, helper, tone }) {
+  const toneClass = tone === "rose" ? "text-rose-600" : tone === "amber" ? "text-amber-600" : "text-ink-900";
+  return (
+    <article className="glass-panel border border-ink-100/60 bg-white/70 p-4">
+      <p className="text-[0.6rem] font-semibold uppercase tracking-[0.25em] text-ink-400">{label}</p>
+      <p className={`mt-2 text-3xl font-semibold ${toneClass}`}>{value}</p>
+      <p className="mt-1 text-xs text-ink-500">{helper}</p>
+    </article>
+  );
+}
+
+function ProductWorkloadPanel({ focusItems, onOpenTradeConditions }) {
+  const work = (focusItems || []).filter((item) => item.count > 0);
+  return (
+    <section className="glass-panel border border-ink-100/60 bg-white/70 p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-[0.6rem] font-semibold uppercase tracking-[0.25em] text-ink-400">Product workload</p>
+          <h3 className="mt-1 text-lg font-semibold text-ink-900">Review queue</h3>
+          <p className="mt-1 text-sm text-ink-500">Product/master-data work only. Operational inventory stays in Inventory.</p>
+        </div>
+        <button type="button" onClick={onOpenTradeConditions} className="rounded-full border border-brand-100 bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-700">
+          Open trade conditions
+        </button>
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        {work.length ? work.map((item) => (
+          <div key={item.code} className="rounded-2xl border border-ink-100 bg-white px-4 py-3">
+            <p className="font-semibold text-ink-900">{item.label}</p>
+            <p className="mt-1 text-sm text-ink-500">{item.count} item{item.count === 1 ? "" : "s"} need attention.</p>
+          </div>
+        )) : (
+          <p className="rounded-2xl border border-dashed border-ink-200 bg-white/70 px-4 py-5 text-sm text-ink-400">
+            No product workload signals currently need attention.
+          </p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function TradeConditionsDrawer({ open, product, ui, isDigital, needsInventorySetup, onClose }) {
+  if (!open) return null;
+  const conditions = productTradeConditions(product);
+  const pricing = Array.isArray(product?.attrs?.pricing?.tiers) ? product.attrs.pricing.tiers : [];
+  const links = Array.isArray(product?.attrs?.agent_links) ? product.attrs.agent_links : [];
+  return (
+    <div className="fixed inset-0 z-[90] flex justify-end bg-ink-900/35 backdrop-blur-[2px]">
+      <aside className="h-full w-full max-w-4xl overflow-y-auto border-l border-ink-100 bg-white p-5 shadow-strong">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-[0.6rem] font-semibold uppercase tracking-[0.25em] text-ink-400">Product governance</p>
+            <h3 className="mt-1 text-xl font-semibold text-ink-900">{ui?.title || "Trade conditions"}</h3>
+            <p className="mt-1 text-sm text-ink-500">{ui?.subtitle || DEFAULT_PRODUCT_STUDIO_UI.tradeConditions.subtitle}</p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-full border border-ink-100 bg-white p-2 text-ink-500">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="mt-5 grid gap-4 lg:grid-cols-2">
+          <ConditionSection title="Marketplace conditions">
+            <ConditionList items={conditions.filter((item) => String(item.category || item.condition_category || "").toLowerCase().includes("marketplace"))} />
+          </ConditionSection>
+          <ConditionSection title="Linked agents / suppliers / customers">
+            {links.length ? links.map((link, index) => (
+              <ConditionCard key={`link-${index}`} item={{ condition_type: link.role || "LINK", summary: link.name || link.code || "Linked party", status: link.status || "active" }} />
+            )) : <EmptyCondition text="No linked agent/supplier/customer terms recorded on this product." />}
+          </ConditionSection>
+          <ConditionSection title="Trade conditions">
+            <ConditionList items={conditions} />
+          </ConditionSection>
+          <ConditionSection title="Pricing conditions">
+            {pricing.length ? pricing.map((tier, index) => (
+              <ConditionCard key={`price-${index}`} item={{ condition_type: "PRICE", category: tier.region || "global", summary: `${tier.currency || "USD"} ${tier.amount ?? "-"}`, status: "active" }} />
+            )) : <EmptyCondition text="No pricing conditions recorded." />}
+          </ConditionSection>
+          <ConditionSection title="Validity and renewal">
+            <ConditionList items={conditions.filter((item) => item.valid_from || item.valid_to || item.renewal_task_status)} empty="No validity window or renewal task metadata recorded." />
+          </ConditionSection>
+          <ConditionSection title="Product / Inventory boundary">
+            <ConditionCard
+              item={{
+                condition_type: isDigital ? "DIGITAL_PRODUCT" : "PHYSICAL_PRODUCT",
+                summary: isDigital
+                  ? "Physical inventory setup and stock operations are hidden for this product."
+                  : needsInventorySetup
+                    ? "Initial inventory setup can be completed here before activation; operational movements stay in Inventory."
+                    : "Operational stock movements stay in the Inventory module.",
+                status: needsInventorySetup ? "needs_setup" : "governed"
+              }}
+            />
+          </ConditionSection>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+function ConditionSection({ title, children }) {
+  return (
+    <section className="rounded-2xl border border-ink-100 bg-ink-50/60 p-4">
+      <h4 className="text-sm font-semibold uppercase tracking-[0.18em] text-ink-500">{title}</h4>
+      <div className="mt-3 space-y-2">{children}</div>
+    </section>
+  );
+}
+
+function ConditionList({ items, empty = "No governed condition records available for this section." }) {
+  return items?.length ? items.map((item, index) => <ConditionCard key={`condition-${index}`} item={item} />) : <EmptyCondition text={empty} />;
+}
+
+function ConditionCard({ item }) {
+  const status = String(item.status || item.condition_status || "active").toLowerCase();
+  const tone = status.includes("expired")
+    ? "border-rose-200 bg-rose-50 text-rose-700"
+    : status.includes("expir")
+      ? "border-amber-200 bg-amber-50 text-amber-700"
+      : "border-ink-100 bg-white text-ink-700";
+  return (
+    <article className={`rounded-xl border px-3 py-3 text-sm ${tone}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="font-semibold">{item.condition_type || item.type || "Condition"}</p>
+          <p className="mt-1 text-xs opacity-80">{item.category || item.condition_category || item.scope || "product scope"}</p>
+        </div>
+        <span className="rounded-full bg-white/70 px-2 py-0.5 text-[0.6rem] font-semibold uppercase tracking-[0.16em]">{status}</span>
+      </div>
+      <p className="mt-2">{item.summary || item.effect || item.description || "Governed commercial condition."}</p>
+      {(item.valid_from || item.valid_to || item.renewal_task_status) ? (
+        <p className="mt-2 text-xs opacity-80">
+          {item.valid_from || "open"} to {item.valid_to || "open"} {item.renewal_task_status ? `· renewal ${item.renewal_task_status}` : ""}
+        </p>
+      ) : null}
+    </article>
+  );
+}
+
+function EmptyCondition({ text }) {
+  return <p className="rounded-xl border border-dashed border-ink-200 bg-white/70 px-3 py-4 text-sm text-ink-400">{text}</p>;
 }
 
 function ProductCategoryComposerModal({
