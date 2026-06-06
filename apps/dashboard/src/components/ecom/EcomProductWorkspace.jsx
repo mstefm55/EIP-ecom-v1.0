@@ -71,16 +71,14 @@ const PRODUCT_SLOT_SOURCE_MODES = [
 const DEFAULT_PRODUCT_STUDIO_UI = {
   tabs: [
     { id: "studio", label: "Studio" },
-    { id: "focus", label: "Focus" },
-    { id: "analytics", label: "Analytics" },
-    { id: "workload", label: "Workload" }
+    { id: "focus", label: "Focus" }
   ],
   focusRules: [
-    { code: "rejected", label: "Rejected products" },
-    { code: "pending_publish", label: "Pending publish" },
-    { code: "missing_trade_conditions", label: "Missing trade conditions" },
-    { code: "missing_category", label: "Missing category/type" },
-    { code: "inventory_setup", label: "Physical inventory setup" }
+    { code: "rejected", label: "Rejected products", action: "Review rejection" },
+    { code: "pending_publish", label: "Pending publish", action: "Open publish task" },
+    { code: "missing_trade_conditions", label: "Missing trade conditions", action: "Complete trade terms" },
+    { code: "missing_category", label: "Missing category/type", action: "Complete setup" },
+    { code: "inventory_setup", label: "Physical inventory setup", action: "Complete initial inventory" }
   ],
   tradeConditions: {
     title: "Trade conditions",
@@ -1298,12 +1296,14 @@ function buildPageNumbers(page, totalPages) {
 }
 
 function resolveProductStudioUi(overrides = {}) {
+  const allowedTabs = new Set(["studio", "focus"]);
+  const configuredTabs = Array.isArray(overrides?.tabs) && overrides.tabs.length
+    ? overrides.tabs.filter((tab) => allowedTabs.has(tab.id))
+    : DEFAULT_PRODUCT_STUDIO_UI.tabs;
   return {
     ...DEFAULT_PRODUCT_STUDIO_UI,
     ...(overrides || {}),
-    tabs: Array.isArray(overrides?.tabs) && overrides.tabs.length
-      ? overrides.tabs
-      : DEFAULT_PRODUCT_STUDIO_UI.tabs,
+    tabs: configuredTabs.length ? configuredTabs : DEFAULT_PRODUCT_STUDIO_UI.tabs,
     focusRules: Array.isArray(overrides?.focusRules) && overrides.focusRules.length
       ? overrides.focusRules
       : DEFAULT_PRODUCT_STUDIO_UI.focusRules,
@@ -1710,6 +1710,12 @@ export default function EcomProductWorkspace({ node }) {
       };
     });
   };
+
+  useEffect(() => {
+    if (!productStudioUi.tabs.some((tab) => tab.id === productStudioTab)) {
+      setProductStudioTab("studio");
+    }
+  }, [productStudioTab, productStudioUi.tabs]);
 
   useEffect(() => {
     return () => {
@@ -6872,15 +6878,6 @@ export default function EcomProductWorkspace({ node }) {
           }}
         />
       ) : null}
-      {productStudioTab === "analytics" ? (
-        <ProductAnalyticsPanel products={products} focusItems={productFocusItems} />
-      ) : null}
-      {productStudioTab === "workload" ? (
-        <ProductWorkloadPanel
-          focusItems={productFocusItems}
-          onOpenTradeConditions={() => setShowTradeConditions(true)}
-        />
-      ) : null}
       {productStudioTab === "studio" ? (
       <>
       <div className="glass-panel flex flex-wrap items-center justify-between gap-4 border border-ink-100/60 bg-white/70 p-5">
@@ -8223,98 +8220,82 @@ function ProductStudioTabs({ tabs, activeTab, onChange }) {
 }
 
 function ProductFocusPanel({ focusItems, onSelectProduct, onOpenTradeConditions }) {
+  const actionable = (focusItems || []).filter((group) => group.count > 0);
+  const [selectedCode, setSelectedCode] = useState(() => actionable[0]?.code || focusItems?.[0]?.code || "");
+  useEffect(() => {
+    if (!focusItems?.some((group) => group.code === selectedCode)) {
+      setSelectedCode(actionable[0]?.code || focusItems?.[0]?.code || "");
+    }
+  }, [actionable, focusItems, selectedCode]);
+  const selected = (focusItems || []).find((group) => group.code === selectedCode) || actionable[0] || focusItems?.[0];
+  const total = actionable.reduce((sum, group) => sum + group.count, 0);
   return (
-    <section className="grid gap-4 lg:grid-cols-2">
-      {(focusItems || []).map((group) => (
-        <article key={group.code} className="glass-panel border border-ink-100/60 bg-white/70 p-4">
-          <div className="flex items-start justify-between gap-3">
+    <section className="glass-panel border border-ink-100/60 bg-white/75 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-[0.6rem] font-semibold uppercase tracking-[0.25em] text-ink-400">Product focus</p>
+          <h3 className="mt-1 text-lg font-semibold text-ink-900">Complete product setup work</h3>
+          <p className="mt-1 text-sm text-ink-500">Focus only on incomplete product/master-data activities. Operational stock and business-wide task scheduling stay outside Product Studio.</p>
+        </div>
+        <span className="rounded-full bg-ink-900 px-3 py-1 text-xs font-semibold text-white">{total} open</span>
+      </div>
+
+      <div className="mt-3 grid max-h-[32rem] min-h-[18rem] gap-2 overflow-hidden lg:grid-cols-[18rem_minmax(0,1fr)]">
+        <div className="min-h-0 space-y-2 overflow-y-auto pr-1">
+          {(focusItems || []).map((group) => (
+            <button
+              key={group.code}
+              type="button"
+              onClick={() => setSelectedCode(group.code)}
+              className={`flex w-full items-center justify-between gap-3 rounded-2xl border px-3 py-3 text-left transition ${
+                selected?.code === group.code
+                  ? "border-ink-900 bg-ink-900 text-white shadow-soft"
+                  : "border-ink-100 bg-white text-ink-700 hover:border-brand-200"
+              }`}
+            >
+              <span>
+                <span className="block text-sm font-semibold">{group.label}</span>
+                <span className={`mt-1 block text-xs ${selected?.code === group.code ? "text-white/70" : "text-ink-400"}`}>{group.action || "Complete setup"}</span>
+              </span>
+              <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${selected?.code === group.code ? "bg-white text-ink-900" : "border border-ink-100 bg-ink-50 text-ink-500"}`}>{group.count}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="min-h-0 rounded-2xl border border-ink-100 bg-ink-50/60 p-3">
+          <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="text-[0.6rem] font-semibold uppercase tracking-[0.25em] text-ink-400">Product focus</p>
-              <h3 className="mt-1 text-base font-semibold text-ink-900">{group.label}</h3>
+              <p className="text-[0.58rem] font-semibold uppercase tracking-[0.18em] text-ink-400">Selected focus</p>
+              <h4 className="text-base font-semibold text-ink-900">{selected?.label || "No focus item"}</h4>
             </div>
-            <span className="rounded-full bg-ink-900 px-3 py-1 text-xs font-semibold text-white">{group.count}</span>
+            <span className="rounded-full border border-ink-100 bg-white px-2.5 py-1 text-xs font-semibold text-ink-500">{selected?.count || 0}</span>
           </div>
-          <div className="mt-4 max-h-[18rem] space-y-2 overflow-y-auto pr-1">
-            {group.items.length ? group.items.slice(0, 8).map((item) => (
-              <div key={`${group.code}-${item.id}`} className="rounded-2xl border border-ink-100 bg-white px-3 py-3">
+          <div className="mt-3 max-h-[24rem] space-y-2 overflow-y-auto pr-1">
+            {selected?.items?.length ? selected.items.map((item) => (
+              <div key={`${selected.code}-${item.id}`} className="rounded-2xl border border-ink-100 bg-white px-3 py-3 shadow-soft">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold text-ink-900">{item.title || item.name || "Untitled product"}</p>
                     <p className="mt-1 text-[0.65rem] uppercase tracking-[0.16em] text-ink-400">{item.code || "NO-CODE"} · {productStage(item)}</p>
+                    <p className="mt-1 text-xs text-ink-500">{selected.action || "Complete this product activity."}</p>
                   </div>
-                  <button type="button" onClick={() => onSelectProduct(item)} className="rounded-full border border-ink-100 bg-ink-50 px-3 py-1 text-xs font-semibold text-ink-600">
+                  <button type="button" onClick={() => onSelectProduct(item)} className="rounded-full bg-ink-900 px-3 py-1.5 text-xs font-semibold text-white">
                     Open
                   </button>
                 </div>
-                {group.code === "missing_trade_conditions" ? (
+                {selected.code === "missing_trade_conditions" ? (
                   <button type="button" onClick={() => onOpenTradeConditions(item)} className="mt-2 rounded-full border border-brand-100 bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">
-                    Trade conditions
+                    Complete trade terms
                   </button>
                 ) : null}
               </div>
             )) : (
               <p className="rounded-2xl border border-dashed border-ink-200 bg-white/70 px-4 py-5 text-sm text-ink-400">
-                No focus item in this category.
+                No incomplete product activity in this focus area.
               </p>
             )}
           </div>
-        </article>
-      ))}
-    </section>
-  );
-}
-
-function ProductAnalyticsPanel({ products, focusItems }) {
-  const total = products.length;
-  const rejected = products.filter((item) => productStage(item) === "rejected").length;
-  const published = products.filter((item) => productStage(item) === "published").length;
-  const missingConditions = focusItems.find((item) => item.code === "missing_trade_conditions")?.count || 0;
-  return (
-    <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-      <ProductMetric label="Products" value={total} helper="Loaded catalog rows" />
-      <ProductMetric label="Published" value={published} helper="Process-published products" />
-      <ProductMetric label="Rejected" value={rejected} helper="Shown as rejected, not stock state" tone="rose" />
-      <ProductMetric label="Missing conditions" value={missingConditions} helper="Needs trade-condition review" tone="amber" />
-    </section>
-  );
-}
-
-function ProductMetric({ label, value, helper, tone }) {
-  const toneClass = tone === "rose" ? "text-rose-600" : tone === "amber" ? "text-amber-600" : "text-ink-900";
-  return (
-    <article className="glass-panel border border-ink-100/60 bg-white/70 p-4">
-      <p className="text-[0.6rem] font-semibold uppercase tracking-[0.25em] text-ink-400">{label}</p>
-      <p className={`mt-2 text-3xl font-semibold ${toneClass}`}>{value}</p>
-      <p className="mt-1 text-xs text-ink-500">{helper}</p>
-    </article>
-  );
-}
-
-function ProductWorkloadPanel({ focusItems, onOpenTradeConditions }) {
-  const work = (focusItems || []).filter((item) => item.count > 0);
-  return (
-    <section className="glass-panel border border-ink-100/60 bg-white/70 p-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-[0.6rem] font-semibold uppercase tracking-[0.25em] text-ink-400">Product workload</p>
-          <h3 className="mt-1 text-lg font-semibold text-ink-900">Review queue</h3>
-          <p className="mt-1 text-sm text-ink-500">Product/master-data work only. Operational inventory stays in Inventory.</p>
         </div>
-        <button type="button" onClick={onOpenTradeConditions} className="rounded-full border border-brand-100 bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-700">
-          Open trade conditions
-        </button>
-      </div>
-      <div className="mt-4 grid gap-3 md:grid-cols-2">
-        {work.length ? work.map((item) => (
-          <div key={item.code} className="rounded-2xl border border-ink-100 bg-white px-4 py-3">
-            <p className="font-semibold text-ink-900">{item.label}</p>
-            <p className="mt-1 text-sm text-ink-500">{item.count} item{item.count === 1 ? "" : "s"} need attention.</p>
-          </div>
-        )) : (
-          <p className="rounded-2xl border border-dashed border-ink-200 bg-white/70 px-4 py-5 text-sm text-ink-400">
-            No product workload signals currently need attention.
-          </p>
-        )}
       </div>
     </section>
   );
@@ -8327,51 +8308,61 @@ function TradeConditionsDrawer({ open, product, ui, isDigital, needsInventorySet
   const links = Array.isArray(product?.attrs?.agent_links) ? product.attrs.agent_links : [];
   return (
     <div className="fixed inset-0 z-[90] flex justify-end bg-ink-900/35 backdrop-blur-[2px]">
-      <aside className="h-full w-full max-w-4xl overflow-y-auto border-l border-ink-100 bg-white p-5 shadow-strong">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="text-[0.6rem] font-semibold uppercase tracking-[0.25em] text-ink-400">Product governance</p>
-            <h3 className="mt-1 text-xl font-semibold text-ink-900">{ui?.title || "Trade conditions"}</h3>
-            <p className="mt-1 text-sm text-ink-500">{ui?.subtitle || DEFAULT_PRODUCT_STUDIO_UI.tradeConditions.subtitle}</p>
+      <aside className="flex h-full w-full max-w-4xl flex-col border-l border-ink-100 bg-white shadow-strong">
+        <div className="border-b border-ink-100 px-5 py-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-[0.6rem] font-semibold uppercase tracking-[0.25em] text-ink-400">Product governance</p>
+              <h3 className="mt-1 text-xl font-semibold text-ink-900">{ui?.title || "Trade conditions"}</h3>
+              <p className="mt-1 text-sm text-ink-500">{ui?.subtitle || DEFAULT_PRODUCT_STUDIO_UI.tradeConditions.subtitle}</p>
+            </div>
+            <button type="button" onClick={onClose} className="rounded-full border border-ink-100 bg-white p-2 text-ink-500">
+              <X className="h-4 w-4" />
+            </button>
           </div>
-          <button type="button" onClick={onClose} className="rounded-full border border-ink-100 bg-white p-2 text-ink-500">
-            <X className="h-4 w-4" />
-          </button>
         </div>
 
-        <div className="mt-5 grid gap-4 lg:grid-cols-2">
-          <ConditionSection title="Marketplace conditions">
-            <ConditionList items={conditions.filter((item) => String(item.category || item.condition_category || "").toLowerCase().includes("marketplace"))} />
-          </ConditionSection>
-          <ConditionSection title="Linked agents / suppliers / customers">
-            {links.length ? links.map((link, index) => (
-              <ConditionCard key={`link-${index}`} item={{ condition_type: link.role || "LINK", summary: link.name || link.code || "Linked party", status: link.status || "active" }} />
-            )) : <EmptyCondition text="No linked agent/supplier/customer terms recorded on this product." />}
-          </ConditionSection>
-          <ConditionSection title="Trade conditions">
-            <ConditionList items={conditions} />
-          </ConditionSection>
-          <ConditionSection title="Pricing conditions">
-            {pricing.length ? pricing.map((tier, index) => (
-              <ConditionCard key={`price-${index}`} item={{ condition_type: "PRICE", category: tier.region || "global", summary: `${tier.currency || "USD"} ${tier.amount ?? "-"}`, status: "active" }} />
-            )) : <EmptyCondition text="No pricing conditions recorded." />}
-          </ConditionSection>
-          <ConditionSection title="Validity and renewal">
-            <ConditionList items={conditions.filter((item) => item.valid_from || item.valid_to || item.renewal_task_status)} empty="No validity window or renewal task metadata recorded." />
-          </ConditionSection>
-          <ConditionSection title="Product / Inventory boundary">
-            <ConditionCard
-              item={{
-                condition_type: isDigital ? "DIGITAL_PRODUCT" : "PHYSICAL_PRODUCT",
-                summary: isDigital
-                  ? "Physical inventory setup and stock operations are hidden for this product."
-                  : needsInventorySetup
-                    ? "Initial inventory setup can be completed here before activation; operational movements stay in Inventory."
-                    : "Operational stock movements stay in the Inventory module.",
-                status: needsInventorySetup ? "needs_setup" : "governed"
-              }}
-            />
-          </ConditionSection>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          <div className="grid gap-3 lg:grid-cols-2">
+            <ConditionSection title="Marketplace conditions">
+              <ConditionList items={conditions.filter((item) => String(item.category || item.condition_category || "").toLowerCase().includes("marketplace"))} />
+            </ConditionSection>
+            <ConditionSection title="Linked agents / suppliers / customers">
+              {links.length ? links.map((link, index) => (
+                <ConditionCard key={`link-${index}`} item={{ condition_type: link.role || "LINK", summary: link.name || link.code || "Linked party", status: link.status || "active" }} />
+              )) : <EmptyCondition text="No linked agent/supplier/customer terms recorded on this product." />}
+            </ConditionSection>
+            <ConditionSection title="Trade conditions">
+              <ConditionList items={conditions} />
+            </ConditionSection>
+            <ConditionSection title="Pricing conditions">
+              {pricing.length ? pricing.map((tier, index) => (
+                <ConditionCard key={`price-${index}`} item={{ condition_type: "PRICE", category: tier.region || "global", summary: `${tier.currency || "USD"} ${tier.amount ?? "-"}`, status: "active" }} />
+              )) : <EmptyCondition text="No pricing conditions recorded." />}
+            </ConditionSection>
+            <ConditionSection title="Validity and renewal">
+              <ConditionList items={conditions.filter((item) => item.valid_from || item.valid_to || item.renewal_task_status)} empty="No validity window or renewal task metadata recorded." />
+            </ConditionSection>
+            <ConditionSection title="Product / Inventory boundary">
+              <ConditionCard
+                item={{
+                  condition_type: isDigital ? "DIGITAL_PRODUCT" : "PHYSICAL_PRODUCT",
+                  summary: isDigital
+                    ? "Physical inventory setup and stock operations are hidden for this product."
+                    : needsInventorySetup
+                      ? "Initial inventory setup can be completed here before activation; operational movements stay in Inventory."
+                      : "Operational stock movements stay in the Inventory module.",
+                  status: needsInventorySetup ? "needs_setup" : "governed"
+                }}
+              />
+            </ConditionSection>
+          </div>
+        </div>
+        <div className="sticky bottom-0 flex items-center justify-between gap-3 border-t border-ink-100 bg-white px-5 py-3 shadow-soft">
+          <p className="text-xs text-ink-400">Read-only governance view. Edit flows stay process/schema governed.</p>
+          <button type="button" onClick={onClose} className="rounded-full bg-ink-900 px-4 py-2 text-xs font-semibold text-white">
+            Close
+          </button>
         </div>
       </aside>
     </div>

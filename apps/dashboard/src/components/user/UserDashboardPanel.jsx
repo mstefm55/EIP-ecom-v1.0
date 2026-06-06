@@ -469,19 +469,23 @@ export default function UserDashboardPanel({ node, ctx }) {
 
   const allTasks = useMemo(
     () => decoratedCategories.flatMap((category) =>
-      (category.tasks || []).map((task) => ({ ...task, category_label: category.display_label }))
+      (category.tasks || []).map((task) => ({
+        ...task,
+        category_code: category.code,
+        category_label: category.display_label,
+        category_surface: category.surface
+      }))
     ),
     [decoratedCategories]
   );
+  const showTaskBrowser = activeTab !== "workload";
 
   const handleAction = useCallback((task, action) => {
     const allowedSurfaces = new Set(["crm", "commerce", "inventory", "procurement", "content", "reports", "tasks"]);
-    if (action?.kind === "navigate" && allowedSurfaces.has(action.surface)) {
-      ctx?.user?.setActiveTab?.(action.surface);
+    const targetSurface = action?.surface || task?.surface || task?.category_surface || task?.category_code;
+    if ((action?.kind === "navigate" || !action?.kind) && allowedSurfaces.has(targetSurface)) {
+      ctx?.user?.setActiveTab?.(targetSurface);
       return;
-    }
-    if (allowedSurfaces.has(task?.surface)) {
-      ctx?.user?.setActiveTab?.(task.surface);
     }
   }, [ctx]);
 
@@ -514,10 +518,10 @@ export default function UserDashboardPanel({ node, ctx }) {
 
   return (
     <section className={`command-center-surface ${theme.surface}`}>
-      <div className={`grid gap-6 transition-[grid-template-columns] duration-300 ease-out ${
-        taskBrowserCollapsed ? "xl:grid-cols-1" : "xl:grid-cols-[minmax(0,1fr)_minmax(330px,24vw)]"
+      <div className={`grid gap-2 transition-[grid-template-columns] duration-300 ease-out ${
+        !showTaskBrowser || taskBrowserCollapsed ? "xl:grid-cols-1" : "xl:grid-cols-[minmax(0,1fr)_minmax(330px,24vw)]"
       }`}>
-        <main className="min-w-0 space-y-6">
+        <main className="min-w-0 space-y-3">
           <CommandHeader
             config={config}
             theme={theme}
@@ -557,10 +561,8 @@ export default function UserDashboardPanel({ node, ctx }) {
             <WorkloadView
               loading={loading}
               theme={theme}
-              payload={payload}
               labels={config.labels}
               categories={decoratedCategories}
-              pinnedCategories={pinnedCategories}
               tasks={allTasks}
               actorAgentId={payload?.workload?.assigned_agent_id}
               onAction={handleAction}
@@ -569,29 +571,30 @@ export default function UserDashboardPanel({ node, ctx }) {
           ) : null}
         </main>
 
-        <TaskBrowser
-          loading={loading}
-          labels={config.labels}
-          taskBrowser={config.taskBrowser}
-          actorAgentId={payload?.workload?.assigned_agent_id}
-          categories={decoratedCategories}
-          openCategory={openCategory}
-          setOpenCategory={setOpenCategory}
-          pinnedCategories={pinnedCategories}
-          setPinnedCategories={setPinnedCategories}
-          delegationCandidates={payload?.workload?.delegation_candidates || []}
-          onAction={handleAction}
-          onDelegate={handleDelegate}
-          onSchedule={(task) => setSchedulingTask(task)}
-          globalSearch={globalSearch}
-          collapsed={taskBrowserCollapsed}
-          setCollapsed={setTaskBrowserCollapsed}
-          theme={theme}
-        />
+        {showTaskBrowser ? (
+          <TaskBrowser
+            loading={loading}
+            labels={config.labels}
+            taskBrowser={config.taskBrowser}
+            actorAgentId={payload?.workload?.assigned_agent_id}
+            categories={decoratedCategories}
+            openCategory={openCategory}
+            setOpenCategory={setOpenCategory}
+            pinnedCategories={pinnedCategories}
+            setPinnedCategories={setPinnedCategories}
+            delegationCandidates={payload?.workload?.delegation_candidates || []}
+            onAction={handleAction}
+            onDelegate={handleDelegate}
+            onSchedule={(task) => setSchedulingTask(task)}
+            globalSearch={globalSearch}
+            collapsed={taskBrowserCollapsed}
+            setCollapsed={setTaskBrowserCollapsed}
+            theme={theme}
+          />
+        ) : null}
       </div>
-      <p className={`mt-4 text-xs font-semibold ${theme.muted}`}>
-        UI rule: Task Browser = all user actionables; Burning Topics = pinned urgent subset.
-        Filters collapse at bottom. Delegation is available on each task.
+      <p className={`mt-2 text-xs font-semibold ${theme.muted}`}>
+        UI rule: Command Center Task Browser = all user actionables; Workload merges the task list into the calendar planner; Burning Topics = pinned urgent subset.
       </p>
       <ScheduleTaskModal
         task={schedulingTask}
@@ -794,7 +797,7 @@ function BurningPanel({ topic, labels, onOpenSurface, theme }) {
 
 function AnalyticsView({ loading, payload, labels, theme }) {
   return (
-    <div className="space-y-5">
+    <div className="space-y-3">
       <SectionHeader icon={BarChart3} title={labels.analytics} subtitle="Graph-led view of module load, urgency, and due windows." theme={theme} />
       <div className="grid gap-5 lg:grid-cols-2">
         <GraphPanel
@@ -827,7 +830,7 @@ function AnalyticsView({ loading, payload, labels, theme }) {
   );
 }
 
-function WorkloadView({ loading, payload, labels, categories, pinnedCategories, theme, tasks, actorAgentId, onAction, onSchedule }) {
+function WorkloadView({ loading, labels, categories, theme, tasks, actorAgentId, onAction, onSchedule }) {
   const [calendarView, setCalendarView] = useState("week");
   const [anchorDate, setAnchorDate] = useState(() => startOfLocalDay());
   const [selectedDate, setSelectedDate] = useState(() => formatLocalDateKey(new Date()));
@@ -931,7 +934,7 @@ function WorkloadView({ loading, payload, labels, categories, pinnedCategories, 
             <Select label="Category" value={categoryFilter} onChange={setCategoryFilter} options={["all", ...categories.map((category) => category.code)]} />
           </div>
         </div>
-        <div className="grid min-h-[34rem] gap-4 lg:grid-cols-[minmax(0,1fr)_24rem]">
+        <div className="grid max-h-[calc(100vh-16rem)] min-h-[30rem] gap-2 overflow-hidden lg:grid-cols-[minmax(0,1fr)_22rem]">
           <CalendarWorkbench
             view={calendarView}
             anchorDate={anchorDate}
@@ -955,34 +958,6 @@ function WorkloadView({ loading, payload, labels, categories, pinnedCategories, 
           />
         </div>
       </div>
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {categories.map((category) => (
-          <div key={category.code} className={`p-4 ${theme.cardRaised}`}>
-            <div className="flex items-center justify-between gap-3">
-              <h4 className={`font-semibold ${theme.heading}`}>{category.display_label}</h4>
-              <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${category.tone.badge}`}>{category.count}</span>
-            </div>
-            <p className={`mt-2 min-h-10 text-sm ${theme.body}`}>{category.description}</p>
-            <div className={`mt-3 flex items-center justify-between text-xs font-semibold ${theme.muted}`}>
-              <span>{category.urgent_count} urgent</span>
-              <span>{pinnedCategories.includes(category.code) ? labels.pinned : "Available"}</span>
-            </div>
-          </div>
-        ))}
-        {!categories.length && !loading ? (
-          <p className={theme.empty}>
-            No workload categories available yet.
-          </p>
-        ) : null}
-      </div>
-      <GraphPanel
-        title="Delegation pool"
-        subtitle="Assignable tenant agents exposed by the kernel agent model."
-        items={(payload?.workload?.delegation_candidates || []).map((item) => ({ label: item.label, count: 1 }))}
-        valueKey="count"
-        empty={loading ? "Loading..." : "No delegation candidates available."}
-        theme={theme}
-      />
     </div>
   );
 }
@@ -1007,7 +982,7 @@ function CalendarWorkbench({ view, anchorDate, selectedDate, tasks, onSelectDate
       ? anchor.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })
       : `${days[0].toLocaleDateString(undefined, { month: "short", day: "numeric" })} - ${days[days.length - 1].toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
   return (
-    <div className="rounded-[1.5rem] border border-ink-100 bg-ink-50/70 p-3">
+    <div className="flex min-h-0 flex-col rounded-[1.5rem] border border-ink-100 bg-ink-50/70 p-3">
       <div className="mb-3 flex items-center justify-between gap-3">
         <div>
           <p className="text-[0.6rem] font-semibold uppercase tracking-[0.22em] text-ink-400">Calendar</p>
@@ -1017,7 +992,7 @@ function CalendarWorkbench({ view, anchorDate, selectedDate, tasks, onSelectDate
           {(tasks || []).length} filtered
         </span>
       </div>
-      <div className={`grid gap-2 ${view === "day" ? "grid-cols-1" : "grid-cols-7"}`}>
+      <div className={`min-h-0 overflow-y-auto pr-1 ${view === "day" ? "grid grid-cols-1 gap-2" : "grid grid-cols-7 gap-2"}`}>
         {days.map((day) => {
           const dayKey = formatLocalDateKey(day);
           const selected = selectedDate === dayKey;
@@ -1037,7 +1012,7 @@ function CalendarWorkbench({ view, anchorDate, selectedDate, tasks, onSelectDate
                   onSelectDate(dayKey);
                 }
               }}
-              className={`min-h-[8.5rem] rounded-2xl border p-2 text-left transition ${
+              className={`min-h-[8.25rem] rounded-2xl border p-2 text-left transition ${
                 selected
                   ? "border-brand-300 bg-brand-50 text-brand-900 shadow-soft ring-2 ring-brand-100"
                   : today
@@ -1105,7 +1080,7 @@ function CalendarTaskSideList({ selectedDate, tasks, loading, onOpenTask, onSche
         <h4 className="mt-1 text-lg font-semibold text-ink-900">{selectedLabel}</h4>
         <p className="mt-1 text-xs text-ink-500">{selectedTasks.length} due here · {list.length} visible tasks</p>
       </div>
-      <div className="mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+      <div className="mt-2 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
         {list.length ? list.map((task) => (
           <TaskAgendaRow
             key={`side-${task.id}`}
@@ -1268,7 +1243,7 @@ function TaskBrowser({
         </div>
       </div>
 
-      <div className="mt-4 space-y-3 pr-1">
+      <div className="mt-3 space-y-2 pr-1">
         {categories.map((category) => {
           const isOpen = openCategory === category.code;
           const tasks = filteredTasks(category.tasks);
@@ -1278,7 +1253,7 @@ function TaskBrowser({
               key={category.code}
               className={`${theme.cardRaised} transition ${isOpen ? "border-ink-900 bg-ink-900 text-white shadow-strong ring-2 ring-brand-100" : ""}`}
             >
-              <div className="flex items-center justify-between gap-3 px-4 py-3">
+              <div className="flex items-center justify-between gap-3 px-3 py-2.5">
                 <button
                   type="button"
                   onClick={() => toggleCategory(category.code)}
@@ -1309,8 +1284,8 @@ function TaskBrowser({
                 isOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
               }`}>
                 <div className="overflow-hidden">
-                  <div className={`${isOpen ? "border-t border-white/10 bg-white/95" : "border-t border-ink-100"} px-3 py-3`}>
-                    <div className="min-h-[32vh] max-h-[46vh] space-y-2 overflow-y-auto overscroll-contain pr-2 scrollbar-thin">
+                  <div className={`${isOpen ? "border-t border-white/10 bg-white/95" : "border-t border-ink-100"} px-2 py-2`}>
+                    <div className="max-h-[42vh] min-h-[14rem] space-y-2 overflow-y-auto overscroll-contain pr-2 scrollbar-thin">
                       {tasks.length ? (
                         tasks.map((task) => (
                           <TaskRow

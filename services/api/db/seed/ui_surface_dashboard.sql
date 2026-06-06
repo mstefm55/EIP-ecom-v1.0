@@ -117,16 +117,14 @@ SELECT
             "productStudio": {
               "tabs": [
                 { "id": "studio", "label": "Studio" },
-                { "id": "focus", "label": "Focus" },
-                { "id": "analytics", "label": "Analytics" },
-                { "id": "workload", "label": "Workload" }
+                { "id": "focus", "label": "Focus" }
               ],
               "focusRules": [
-                { "code": "rejected", "label": "Rejected products" },
-                { "code": "pending_publish", "label": "Pending publish" },
-                { "code": "missing_trade_conditions", "label": "Missing trade conditions" },
-                { "code": "missing_category", "label": "Missing category/type" },
-                { "code": "inventory_setup", "label": "Physical inventory setup" }
+                { "code": "rejected", "label": "Rejected products", "action": "Review rejection" },
+                { "code": "pending_publish", "label": "Pending publish", "action": "Open publish task" },
+                { "code": "missing_trade_conditions", "label": "Missing trade conditions", "action": "Complete trade terms" },
+                { "code": "missing_category", "label": "Missing category/type", "action": "Complete setup" },
+                { "code": "inventory_setup", "label": "Physical inventory setup", "action": "Complete initial inventory" }
               ],
               "tradeConditions": {
                 "title": "Trade conditions",
