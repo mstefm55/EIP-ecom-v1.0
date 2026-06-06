@@ -524,31 +524,33 @@ function StatTile({ widget, loading, labels, onOpenDetail }) {
       : { line: "stroke-brand-600", text: "text-brand-600", fill: "fill-brand-600", color: "#2563eb" };
   const point = lastSparkPoint(series);
   return (
-    <article className="rounded-2xl border border-ink-100 bg-ink-50/70 px-4 py-4">
+    <article className="flex h-full flex-col rounded-2xl border border-ink-100 bg-ink-50/70 px-4 py-4">
       <p className="text-sm font-semibold text-ink-400">{widget.label}</p>
       <p className="mt-2 text-3xl font-semibold text-ink-900">{loading ? "..." : widget.value ?? 0}</p>
-      <p className={`mt-2 text-sm font-semibold ${widget.tone === "rose" ? "text-rose-500" : widget.tone === "amber" ? "text-amber-500" : "text-brand-500"}`}>
+      <p className={`mt-2 min-h-[4.5rem] text-sm font-semibold leading-relaxed ${widget.tone === "rose" ? "text-rose-500" : widget.tone === "amber" ? "text-amber-500" : "text-brand-500"}`}>
         {widget.helper || "live signal"}
       </p>
-      <svg viewBox="0 0 100 56" className="mt-4 h-20 w-full overflow-visible" aria-hidden="true">
-        <defs>
-          <linearGradient id={sparkId} x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor={sparkTone.color} stopOpacity="0.22" />
-            <stop offset="100%" stopColor={sparkTone.color} stopOpacity="0.02" />
-          </linearGradient>
-        </defs>
-        <path d="M0 48 C25 45, 75 45, 100 48" className="stroke-ink-200" fill="none" strokeWidth="2" />
-        <polygon points={makeSparkAreaPoints(series)} fill={`url(#${sparkId})`} className={sparkTone.text} />
-        <polyline points={makeSparklinePoints(series)} fill="none" className={sparkTone.line} strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
-        <circle cx={point.x} cy={point.y} r="3.5" className={`${sparkTone.fill} stroke-white`} strokeWidth="2" />
-      </svg>
-      <button
-        type="button"
-        onClick={() => onOpenDetail?.(widget)}
-        className="mt-2 w-full rounded-full border border-ink-100 bg-white py-2 text-sm font-semibold text-brand-600 shadow-soft"
-      >
-        {labels.openDetail}
-      </button>
+      <div className="mt-auto">
+        <svg viewBox="0 0 100 56" className="h-20 w-full overflow-visible" aria-hidden="true">
+          <defs>
+            <linearGradient id={sparkId} x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stopColor={sparkTone.color} stopOpacity="0.22" />
+              <stop offset="100%" stopColor={sparkTone.color} stopOpacity="0.02" />
+            </linearGradient>
+          </defs>
+          <path d="M0 48 C25 45, 75 45, 100 48" className="stroke-ink-200" fill="none" strokeWidth="2" />
+          <polygon points={makeSparkAreaPoints(series)} fill={`url(#${sparkId})`} className={sparkTone.text} />
+          <polyline points={makeSparklinePoints(series)} fill="none" className={sparkTone.line} strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
+          <circle cx={point.x} cy={point.y} r="3.5" className={`${sparkTone.fill} stroke-white`} strokeWidth="2" />
+        </svg>
+        <button
+          type="button"
+          onClick={() => onOpenDetail?.(widget)}
+          className="mt-2 w-full rounded-full border border-ink-100 bg-white py-2 text-sm font-semibold text-brand-600 shadow-soft"
+        >
+          {labels.openDetail}
+        </button>
+      </div>
     </article>
   );
 }
