@@ -6,12 +6,18 @@ This protocol is mandatory for every Codex agent working on EIP V1 or V2 plannin
 
 Every agent must:
 
-1. Work on its own branch. No agent works directly on `main`.
-2. Pull or fetch latest `main` before starting.
-3. Read `docs/orchestration/AGENT_REGISTRY_V1.md` before starting.
-4. Declare the files it intends to touch before coding.
-5. Check for active migration reservations before creating a migration.
-6. Stop and report if the working tree is dirty with unrelated changes.
+1. Pull or fetch latest `main`.
+2. Read these files before coding:
+   - `docs/orchestration/AGENT_REGISTRY_V1.md`
+   - `docs/orchestration/AGENT_PROTOCOL_V1.md`
+   - `docs/orchestration/ACTIVE_WORKSTREAMS_V1.md`
+   - `docs/orchestration/AGENT_HANDOFF_TEMPLATE_V1.md`
+   - `docs/sme_operating_model_v1.md`
+3. Confirm the assigned agent scope.
+4. List files the agent expects to touch before coding.
+5. Work on the assigned branch. No agent works directly on `main`.
+6. Check for active migration reservations before creating a migration.
+7. Stop and report if the working tree is dirty with unrelated changes.
 
 ## Branch Rules
 
@@ -40,6 +46,8 @@ No agent may:
 - Modify V1 production behavior from a V2 worker scope.
 - Create duplicate routes or duplicate domain models.
 - Create new tables before checking existing kernel/governed structures.
+- Add legal, regulatory, or compliance framework into `commercial_condition`; that table is for trade/commercial/contract terms unless existing governed data explicitly says otherwise.
+- Add fake task, stock, supplier, customer, quote, condition, or inventory data to make a UI look populated.
 
 ## Engine-First Rules
 
@@ -52,6 +60,179 @@ Every agent must preserve the EIP architecture:
 - UI surfaces should use descriptors/metadata where practical.
 - React components are reusable primitives. They do not become tenant-specific business authority.
 - Tenant-specific behavior comes from metadata, schema/config, mapping profiles, connection profiles, process/task templates, dropdowns, and commercial conditions.
+
+## Agent Scope Guardrails
+
+### Agent 1 - Debug / Integration / UI Polish
+
+Allowed:
+
+- Command Center minor polish.
+- Tasks module minor polish.
+- Broken UI states.
+- Broken endpoint wiring.
+- Descriptor mismatch repairs.
+- Build/test failures.
+- Migration application issues.
+
+Forbidden:
+
+- New business modules.
+- Product Studio feature work.
+- Inventory, Procurement, or CRM feature expansion.
+- V2 migration changes.
+- Fake/demo data.
+- Final Purchase Order execution.
+
+Default task:
+
+- Audit latest live Dashboard/Tasks UI and fix only confirmed defects such as unreadable task rows, unclear selected state, duplicate display references, broken buttons/chips, broken empty states, descriptor mismatch, and build/runtime errors.
+
+Must preserve:
+
+- Dashboard remains the business cockpit.
+- Tasks remains detailed scheduling/delegation/workload.
+- Product Studio remains untouched unless explicitly assigned.
+
+### Agent 2 - Commercial Conditions
+
+Allowed:
+
+- Audit existing `commercial_condition` usage.
+- Centralize condition type/category helpers if duplicated.
+- Improve trade-condition display and empty states.
+- Improve pricing, supplier/customer terms, MOQ, lead time, payment terms, credit terms, RFQ threshold, validity date, condition expiry, and renewal-task governance where already supported.
+- Prepare Product Studio trade-condition modal plans if requested.
+
+Forbidden:
+
+- Product Studio UI implementation unless explicitly assigned.
+- Inventory execution.
+- Stock movements.
+- RFQ execution ownership.
+- Purchase Order execution.
+- CRM ownership.
+- Fake conditions.
+- Tenant-specific hardcoding.
+- Legal/regulatory/compliance frameworks inside `commercial_condition`.
+
+Closure must state:
+
+- `commercial_condition` remains trade/commercial policy authority.
+- Legal/compliance was not mixed into trade conditions.
+
+### Agent 3 - Inventory
+
+Allowed:
+
+- Operational stock.
+- Stock signals.
+- Stock position.
+- Stock movements.
+- Reorder recommendation display.
+- Policy display from `commercial_condition`.
+- Material override separation.
+- Procurement bridge.
+- Physical/digital behavior.
+- Inventory docs/tests.
+
+Forbidden:
+
+- Product Studio changes.
+- Supplier quote/RFQ UI duplication.
+- Final Purchase Order execution.
+- Production planning.
+- Fake inventory rows.
+- Fake stock locations.
+- Fake stock charts.
+
+Closure must state:
+
+- No fake inventory/demo data was added.
+- Inventory owns operational stock only.
+- Product Studio was untouched.
+- Procurement remains buying journey owner.
+- `commercial_condition` remains policy authority.
+
+### Agent 4 - CRM
+
+Allowed:
+
+- CRM journey UI.
+- CRM workbench readability.
+- CRM task/intake integration.
+- Production empty states.
+- Mailbox/intake/reply-draft connection.
+
+Forbidden:
+
+- Payments ownership.
+- Procurement ownership.
+- Inventory ownership.
+- Fake customer/demo data.
+- External AI provider calls unless already configured and governed.
+- Ungoverned message sending.
+
+Closure must state:
+
+- CRM remains customer journey owner.
+- Actions remain process/task governed.
+- No fake CRM data was added.
+
+### Agent 5 - Procurement
+
+Allowed:
+
+- Existing Procurement Workbench polish.
+- Real data display.
+- Empty states.
+- Route thinness if drift appears.
+- Procurement tests/docs.
+
+Forbidden:
+
+- Final Purchase Order execution.
+- Supplier outbound transmission.
+- Invoice matching.
+- Accounting ledger.
+- Goods receipt finalization beyond existing cash receipt foundation.
+- Inventory movement ownership.
+- Fake supplier quotes.
+- Fake procurement data.
+
+Closure must state:
+
+- No PO execution was added.
+- Procurement remains buying journey owner.
+- Routes remain transport/orchestration.
+- Process engine remains business process authority.
+
+### Agent 6 - V2 Migration / Kernel Governance
+
+Allowed:
+
+- V2 governance.
+- Effect/action library.
+- Document governance.
+- `service_object` canon.
+- Migration strategy.
+- Hardcoding audit.
+- V1-to-V2 migration strategy.
+- V2 docs/tests.
+
+Forbidden:
+
+- V1 production modification.
+- Speculative full rewrite.
+- Unjustified new tables.
+- Executable JavaScript stored in DB.
+- Broad feature expansion.
+
+Closure must state:
+
+- V2 work did not modify V1 production.
+- Effect/document/service-object governance status is clear.
+- Remaining migration limitations are documented.
 
 ## Shared File Rules
 

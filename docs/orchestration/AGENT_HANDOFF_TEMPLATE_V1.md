@@ -7,6 +7,8 @@ Agent:
 Branch:
 Commit SHA:
 Scope:
+Preflight completed:
+Files declared before coding:
 
 Files changed:
 
