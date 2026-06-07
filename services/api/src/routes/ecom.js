@@ -52,6 +52,128 @@ const STOREFRONT_CONTENT_STUDIO_TAB_DEFAULTS = [
 ];
 const PRODUCT_CATEGORY_LIST_CODE = "ECOM_PRODUCT_CATEGORY";
 const PRODUCT_CATEGORY_LIST_MODULE = "ecom";
+const COMMERCIAL_CONDITION_FIELD_LIST_CODE = "ECOM_COMMERCIAL_CONDITION_FIELD";
+const COMMERCIAL_CONDITION_FIELD_LIST_MODULE = "ecom";
+const DEFAULT_COMMERCIAL_CONDITION_FIELDS = [
+  {
+    code: "payment_terms_code",
+    label: "Payment terms code",
+    sort_order: 10,
+    attrs: {
+      data_type: "text",
+      effect_path: "payment_terms.payment_terms_code",
+      allowed_condition_types: ["PAYMENT_TERM_CONDITION", "PAYMENT_TERMS", "TRADE_TERMS"],
+      condition_category: "FINANCE"
+    }
+  },
+  {
+    code: "payment_due_days",
+    label: "Payment due days",
+    sort_order: 20,
+    attrs: {
+      data_type: "integer",
+      unit: "days",
+      effect_path: "payment_terms.payment_due_days",
+      allowed_condition_types: ["PAYMENT_TERM_CONDITION", "PAYMENT_TERMS", "TRADE_TERMS"],
+      condition_category: "FINANCE"
+    }
+  },
+  {
+    code: "credit_limit_days",
+    label: "Credit limit days",
+    sort_order: 30,
+    attrs: {
+      data_type: "integer",
+      unit: "days",
+      effect_path: "payment_terms.credit_limit_days",
+      allowed_condition_types: ["PAYMENT_TERM_CONDITION", "PAYMENT_TERMS", "TRADE_TERMS"],
+      condition_category: "FINANCE"
+    }
+  },
+  {
+    code: "credit_limit_amount",
+    label: "Credit limit amount",
+    sort_order: 40,
+    attrs: {
+      data_type: "number",
+      unit: "amount",
+      effect_path: "payment_terms.credit_limit_amount",
+      allowed_condition_types: ["PAYMENT_TERM_CONDITION", "PAYMENT_TERMS", "TRADE_TERMS"],
+      condition_category: "FINANCE"
+    }
+  },
+  {
+    code: "credit_available",
+    label: "Credit available",
+    sort_order: 50,
+    attrs: {
+      data_type: "boolean",
+      effect_path: "payment_terms.credit_available",
+      allowed_condition_types: ["PAYMENT_TERM_CONDITION", "PAYMENT_TERMS", "TRADE_TERMS"],
+      condition_category: "FINANCE"
+    }
+  },
+  {
+    code: "minimum_order_qty",
+    label: "Minimum order quantity",
+    sort_order: 60,
+    attrs: {
+      data_type: "number",
+      unit: "qty",
+      effect_path: "supplier_purchase.minimum_order_qty",
+      allowed_condition_types: ["SUPPLIER_PURCHASE_CONDITION", "MATERIAL_SUPPLIER_CONDITION", "TRADE_TERMS"],
+      condition_category: "PURCHASING"
+    }
+  },
+  {
+    code: "approval_threshold_value",
+    label: "Approval threshold value",
+    sort_order: 70,
+    attrs: {
+      data_type: "number",
+      unit: "amount",
+      effect_path: "procurement_policy.approval_threshold_value",
+      allowed_condition_types: ["PROCUREMENT_POLICY", "TRADE_TERMS"],
+      condition_category: "PURCHASING"
+    }
+  },
+  {
+    code: "cash_purchase_limit_value",
+    label: "Cash purchase limit value",
+    sort_order: 80,
+    attrs: {
+      data_type: "number",
+      unit: "amount",
+      effect_path: "cash_purchase_policy.cash_purchase_limit_value",
+      allowed_condition_types: ["CASH_PURCHASE_CONDITION", "TRADE_TERMS"],
+      condition_category: "PURCHASING"
+    }
+  },
+  {
+    code: "reorder_point_qty",
+    label: "Reorder point quantity",
+    sort_order: 90,
+    attrs: {
+      data_type: "number",
+      unit: "qty",
+      effect_path: "reorder_policy.reorder_point_qty",
+      allowed_condition_types: ["INVENTORY_REORDER_POLICY", "TRADE_TERMS"],
+      condition_category: "INVENTORY"
+    }
+  },
+  {
+    code: "discount_percent",
+    label: "Discount percent",
+    sort_order: 100,
+    attrs: {
+      data_type: "number",
+      unit: "percent",
+      effect_path: "discount.percent",
+      allowed_condition_types: ["DISCOUNT", "TRADE_TERMS"],
+      condition_category: "PRICING"
+    }
+  }
+];
 const STOREFRONT_CTA_ACTIONS = new Set([
   "navigate_internal",
   "navigate_external",
@@ -181,11 +303,171 @@ function normalizeCommercialConditionType(value) {
   return normalizeCommercialConditionCode(value || "TRADE_TERMS", "TRADE_TERMS").slice(0, 80);
 }
 
+function normalizeCommercialConditionFieldCode(value) {
+  return normalizeText(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 64);
+}
+
+function commercialConditionFieldLabelFromCode(codeValue) {
+  const code = normalizeCommercialConditionFieldCode(codeValue);
+  if (!code) return "";
+  return code
+    .split("_")
+    .filter(Boolean)
+    .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
+    .join(" ");
+}
+
+function normalizeCommercialConditionFieldLabel(value, fallbackCode = "") {
+  const label = normalizeOptionalText(value);
+  if (label) return label.slice(0, 120);
+  return commercialConditionFieldLabelFromCode(fallbackCode).slice(0, 120);
+}
+
 function safeJsonObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
-function mapCommercialConditionRow(row) {
+function getNestedValue(obj, pathValue) {
+  const parts = normalizeText(pathValue).split(".").filter(Boolean);
+  if (!parts.length) return undefined;
+  let cursor = obj;
+  for (const part of parts) {
+    if (!cursor || typeof cursor !== "object" || !Object.prototype.hasOwnProperty.call(cursor, part)) {
+      return undefined;
+    }
+    cursor = cursor[part];
+  }
+  return cursor;
+}
+
+function setNestedCommercialEffectValue(target, pathValue, value) {
+  const parts = normalizeText(pathValue).split(".").filter(Boolean);
+  if (!parts.length) return target;
+  let cursor = target;
+  for (let i = 0; i < parts.length - 1; i += 1) {
+    const part = parts[i];
+    if (!cursor[part] || typeof cursor[part] !== "object" || Array.isArray(cursor[part])) {
+      cursor[part] = {};
+    }
+    cursor = cursor[part];
+  }
+  cursor[parts[parts.length - 1]] = value;
+  return target;
+}
+
+function normalizeCommercialFieldValue(value, field = {}) {
+  const type = normalizeText(field.data_type || field.attrs?.data_type || "text").toLowerCase();
+  if (value === null || value === undefined || value === "") return { ok: false, empty: true };
+  if (type === "boolean") {
+    if (typeof value === "boolean") return { ok: true, value };
+    const normalized = normalizeText(value).toLowerCase();
+    if (["true", "yes", "y", "1", "enabled", "active"].includes(normalized)) return { ok: true, value: true };
+    if (["false", "no", "n", "0", "disabled", "inactive"].includes(normalized)) return { ok: true, value: false };
+    return { ok: false, error: "INVALID_BOOLEAN_VALUE" };
+  }
+  if (type === "number" || type === "integer") {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return { ok: false, error: "INVALID_NUMBER_VALUE" };
+    return { ok: true, value: type === "integer" ? Math.round(n) : n };
+  }
+  if (type === "date") {
+    const raw = normalizeText(value);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return { ok: false, error: "INVALID_DATE_VALUE" };
+    return { ok: true, value: raw };
+  }
+  const text = normalizeOptionalText(value);
+  if (!text) return { ok: false, empty: true };
+  return { ok: true, value: text.slice(0, 500) };
+}
+
+function mapCommercialConditionFieldRow(row) {
+  const attrs = safeJsonObject(row?.attrs);
+  const code = normalizeCommercialConditionFieldCode(row?.code);
+  if (!code) return null;
+  const effectPath =
+    normalizeOptionalText(attrs.effect_path) ||
+    `custom.${code}`;
+  const dataType = normalizeText(attrs.data_type || "text").toLowerCase();
+  return {
+    code,
+    label: normalizeCommercialConditionFieldLabel(row?.label, code) || code,
+    sort_order: Number(row?.sort_order || 0),
+    is_active: row?.is_active !== false,
+    data_type: ["text", "number", "integer", "boolean", "date"].includes(dataType) ? dataType : "text",
+    unit: normalizeOptionalText(attrs.unit),
+    effect_path: effectPath,
+    condition_category: normalizeOptionalText(attrs.condition_category),
+    allowed_condition_types: Array.isArray(attrs.allowed_condition_types)
+      ? attrs.allowed_condition_types.map(normalizeCommercialConditionType).filter(Boolean)
+      : [],
+    attrs
+  };
+}
+
+function buildCommercialConditionStructuredValues(effect = {}, attrs = {}, fieldCatalog = []) {
+  const stored = Array.isArray(attrs.structured_values) ? attrs.structured_values : [];
+  const byCode = new Map(stored.map((item) => [normalizeCommercialConditionFieldCode(item?.field_code || item?.code), item]));
+  const values = [];
+  for (const field of fieldCatalog || []) {
+    const fromEffect = getNestedValue(effect, field.effect_path);
+    const storedValue = byCode.get(field.code);
+    const value = fromEffect !== undefined ? fromEffect : storedValue?.value;
+    if (value === undefined || value === null || value === "") continue;
+    values.push({
+      field_code: field.code,
+      label: field.label,
+      value,
+      data_type: field.data_type,
+      unit: field.unit || null,
+      effect_path: field.effect_path
+    });
+  }
+  for (const item of stored) {
+    const code = normalizeCommercialConditionFieldCode(item?.field_code || item?.code);
+    if (!code || values.some((entry) => entry.field_code === code)) continue;
+    values.push({
+      field_code: code,
+      label: normalizeCommercialConditionFieldLabel(item?.label, code),
+      value: item?.value,
+      data_type: normalizeText(item?.data_type || "text").toLowerCase(),
+      unit: normalizeOptionalText(item?.unit),
+      effect_path: normalizeOptionalText(item?.effect_path) || `custom.${code}`
+    });
+  }
+  return values;
+}
+
+function applyCommercialStructuredValues(effectInput = {}, structuredValues = [], fieldCatalog = []) {
+  const fieldMap = new Map((fieldCatalog || []).map((field) => [field.code, field]));
+  const effect = JSON.parse(JSON.stringify(safeJsonObject(effectInput)));
+  const normalized = [];
+  for (const entry of Array.isArray(structuredValues) ? structuredValues : []) {
+    const fieldCode = normalizeCommercialConditionFieldCode(entry?.field_code || entry?.code);
+    if (!fieldCode) continue;
+    const field = fieldMap.get(fieldCode);
+    if (!field) return { ok: false, error: "COMMERCIAL_FIELD_NOT_FOUND", field_code: fieldCode };
+    const parsed = normalizeCommercialFieldValue(entry?.value, field);
+    if (parsed.empty) continue;
+    if (!parsed.ok) return { ok: false, error: parsed.error, field_code: fieldCode };
+    setNestedCommercialEffectValue(effect, field.effect_path, parsed.value);
+    normalized.push({
+      field_code: field.code,
+      label: field.label,
+      value: parsed.value,
+      data_type: field.data_type,
+      unit: field.unit || null,
+      effect_path: field.effect_path
+    });
+  }
+  return { ok: true, effect, structured_values: normalized };
+}
+
+function mapCommercialConditionRow(row, fieldCatalog = []) {
   const attrs = safeJsonObject(row?.attrs);
   const scope = safeJsonObject(row?.scope);
   const effect = safeJsonObject(row?.effect);
@@ -202,6 +484,7 @@ function mapCommercialConditionRow(row) {
     scope,
     effect,
     attrs,
+    structured_values: buildCommercialConditionStructuredValues(effect, attrs, fieldCatalog),
     summary: normalizeOptionalText(attrs.summary || effect.summary || row.label),
     status: row.is_active === false ? "inactive" : "active",
     created_at: row.created_at,
@@ -254,7 +537,8 @@ async function loadCommercialConditionsForProducts(client, tenantId, products = 
   const ids = productRows.map((row) => String(row.id || "")).filter(Boolean);
   const codes = productRows.map((row) => String(row.code || "")).filter(Boolean);
   if (!ids.length && !codes.length) return new Map();
-  const r = await client.query(
+  const [r, fieldCatalog] = await Promise.all([
+    client.query(
     `
     SELECT *
     FROM eip_core.commercial_condition
@@ -268,10 +552,12 @@ async function loadCommercialConditionsForProducts(client, tenantId, products = 
     ORDER BY priority ASC, created_at DESC
     `,
     [tenantId, ids, codes]
-  );
+    ),
+    loadCommercialConditionFieldCatalog(client, tenantId)
+  ]);
   const byProduct = new Map();
   for (const row of r.rows || []) {
-    const mapped = mapCommercialConditionRow(row);
+    const mapped = mapCommercialConditionRow(row, fieldCatalog);
     const keys = [
       mapped.scope.material_id,
       mapped.scope.product_id,
@@ -2801,6 +3087,125 @@ async function loadVariantHeaderCatalog(client, tenantId, options = {}) {
       };
     })
     .filter(Boolean);
+}
+
+async function ensureCommercialConditionFieldList(client, tenantId) {
+  const existing = await client.query(
+    `
+    SELECT id
+    FROM eip_core.dropdown_list
+    WHERE tenant_id = $1::uuid
+      AND module = $2
+      AND code = $3
+      AND version = 1
+      AND is_active = true
+    LIMIT 1
+    `,
+    [tenantId, COMMERCIAL_CONDITION_FIELD_LIST_MODULE, COMMERCIAL_CONDITION_FIELD_LIST_CODE]
+  );
+  let listId = existing.rows[0]?.id || null;
+  if (!listId) {
+    const inserted = await client.query(
+      `
+      INSERT INTO eip_core.dropdown_list
+        (tenant_id, module, code, name, version, is_active, attrs)
+      VALUES
+        ($1::uuid, $2, $3, $4, 1, true, $5::jsonb)
+      ON CONFLICT (tenant_id, module, code, version) DO UPDATE
+        SET is_active = true,
+            updated_at = now()
+      RETURNING id
+      `,
+      [
+        tenantId,
+        COMMERCIAL_CONDITION_FIELD_LIST_MODULE,
+        COMMERCIAL_CONDITION_FIELD_LIST_CODE,
+        "Ecommerce Commercial Condition Field",
+        JSON.stringify({
+          scope: "commercial_condition_fields",
+          delegated: true,
+          managed_by: "tenant",
+          target_table: "eip_core.commercial_condition",
+          target_column: "effect"
+        })
+      ]
+    );
+    listId = inserted.rows[0]?.id || null;
+  }
+
+  for (const field of DEFAULT_COMMERCIAL_CONDITION_FIELDS) {
+    // eslint-disable-next-line no-await-in-loop
+    await client.query(
+      `
+      INSERT INTO eip_core.dropdown_value
+        (list_id, code, label, sort_order, is_active, attrs)
+      VALUES
+        ($1, $2, $3, $4, true, $5::jsonb)
+      ON CONFLICT (list_id, code) DO UPDATE
+        SET label = EXCLUDED.label,
+            sort_order = EXCLUDED.sort_order,
+            attrs = COALESCE(eip_core.dropdown_value.attrs,'{}'::jsonb) || EXCLUDED.attrs,
+            is_active = true,
+            updated_at = now()
+      `,
+      [
+        listId,
+        field.code,
+        field.label,
+        field.sort_order,
+        JSON.stringify({
+          ...(field.attrs || {}),
+          governed: true,
+          source: "commercial_condition_field_defaults"
+        })
+      ]
+    );
+  }
+
+  return listId;
+}
+
+async function loadCommercialConditionFieldCatalog(client, tenantId, options = {}) {
+  const includeInactive = options.includeInactive === true;
+  await ensureCommercialConditionFieldList(client, tenantId);
+  const rows = await client.query(
+    `
+    WITH ranked AS (
+      SELECT
+        dv.code,
+        dv.label,
+        dv.sort_order,
+        dv.is_active,
+        dv.attrs,
+        row_number() OVER (
+          PARTITION BY lower(dv.code)
+          ORDER BY
+            (dl.tenant_id = $1::uuid) DESC,
+            dl.version DESC,
+            dv.sort_order ASC,
+            dv.code ASC
+        ) AS rn
+      FROM eip_core.dropdown_list dl
+      JOIN eip_core.dropdown_value dv ON dv.list_id = dl.id
+      WHERE dl.module = $2
+        AND dl.code = $3
+        AND dl.is_active = true
+        AND (dl.tenant_id = $1::uuid OR dl.tenant_id IS NULL)
+        AND ($4::boolean OR dv.is_active = true)
+    )
+    SELECT code, label, sort_order, is_active, attrs
+    FROM ranked
+    WHERE rn = 1
+    ORDER BY sort_order ASC NULLS LAST, code ASC
+    `,
+    [
+      tenantId,
+      COMMERCIAL_CONDITION_FIELD_LIST_MODULE,
+      COMMERCIAL_CONDITION_FIELD_LIST_CODE,
+      includeInactive
+    ]
+  );
+  return (rows.rows || []).map(mapCommercialConditionFieldRow).filter(Boolean);
 }
 
 async function ensureProductCategoryList(client, tenantId) {
@@ -5741,6 +6146,119 @@ export default async function ecomRoutes(app) {
   );
 
   app.get(
+    "/commercial-condition-fields",
+    async (req, reply) => {
+      const session = await requirePerm(app, req, reply, "ECOM_PRODUCT_READ");
+      if (!session) return;
+
+      try {
+        const items = await loadCommercialConditionFieldCatalog(app.db, session.tenant_id, { includeInactive: true });
+        return reply.send({ ok: true, items });
+      } catch (err) {
+        app.log.error({
+          event: "commercial_condition_field_catalog_list_failed",
+          tenant_id: session.tenant_id,
+          error: err?.message || String(err)
+        });
+        return reply.code(500).send({ ok: false, error: "COMMERCIAL_CONDITION_FIELD_LIST_FAILED" });
+      }
+    }
+  );
+
+  app.post(
+    "/commercial-condition-fields",
+    {
+      schema: {
+        body: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            code: { type: "string", maxLength: 80 },
+            label: { type: "string", maxLength: 120 },
+            data_type: { type: "string", maxLength: 30 },
+            unit: { type: "string", maxLength: 40 },
+            effect_path: { type: "string", maxLength: 160 },
+            condition_category: { type: "string", maxLength: 100 },
+            allowed_condition_types: { type: "array", maxItems: 20 },
+            sort_order: { type: "integer", minimum: 1, maximum: 100000 }
+          }
+        }
+      }
+    },
+    async (req, reply) => {
+      const session = await requireWrite(app, req, reply, ["ECOM_PRODUCT_WRITE", "ECOM_SETTINGS_WRITE"]);
+      if (!session) return;
+
+      const code = normalizeCommercialConditionFieldCode(req.body?.code || req.body?.label || "");
+      const label = normalizeCommercialConditionFieldLabel(req.body?.label, code);
+      if (!code || !label) {
+        return reply.code(400).send({ ok: false, error: "COMMERCIAL_FIELD_CODE_OR_LABEL_REQUIRED" });
+      }
+      const dataType = normalizeText(req.body?.data_type || "number").toLowerCase();
+      const safeType = ["text", "number", "integer", "boolean", "date"].includes(dataType) ? dataType : "number";
+      const effectPath = normalizeOptionalText(req.body?.effect_path) || `custom.${code}`;
+      const allowedTypes = Array.isArray(req.body?.allowed_condition_types)
+        ? req.body.allowed_condition_types.map(normalizeCommercialConditionType).filter(Boolean)
+        : [];
+      const client = await app.db.connect();
+      try {
+        await client.query("BEGIN");
+        const listId = await ensureCommercialConditionFieldList(client, session.tenant_id);
+        const maxSort = await client.query(
+          `
+          SELECT COALESCE(MAX(sort_order), 0) AS max_sort
+          FROM eip_core.dropdown_value
+          WHERE list_id = $1
+          `,
+          [listId]
+        );
+        const sortOrder = Number.isInteger(Number(req.body?.sort_order)) && Number(req.body.sort_order) > 0
+          ? Number(req.body.sort_order)
+          : Number(maxSort.rows[0]?.max_sort || 0) + 10;
+        const attrs = {
+          data_type: safeType,
+          unit: normalizeOptionalText(req.body?.unit),
+          effect_path: effectPath,
+          condition_category: normalizeOptionalText(req.body?.condition_category),
+          allowed_condition_types: allowedTypes,
+          governed: true,
+          source: "commercial_condition_field_ui"
+        };
+        const inserted = await client.query(
+          `
+          INSERT INTO eip_core.dropdown_value
+            (list_id, code, label, sort_order, is_active, attrs)
+          VALUES
+            ($1, $2, $3, $4, true, $5::jsonb)
+          ON CONFLICT (list_id, code) DO UPDATE
+            SET label = EXCLUDED.label,
+                sort_order = EXCLUDED.sort_order,
+                attrs = COALESCE(eip_core.dropdown_value.attrs,'{}'::jsonb) || EXCLUDED.attrs,
+                is_active = true,
+                updated_at = now()
+          RETURNING code, label, sort_order, is_active, attrs
+          `,
+          [listId, code, label, sortOrder, JSON.stringify(attrs)]
+        );
+        const items = await loadCommercialConditionFieldCatalog(client, session.tenant_id, { includeInactive: true });
+        await client.query("COMMIT");
+        return reply.send({ ok: true, item: mapCommercialConditionFieldRow(inserted.rows[0]), items });
+      } catch (err) {
+        await client.query("ROLLBACK");
+        app.log.error({
+          event: "commercial_condition_field_catalog_upsert_failed",
+          tenant_id: session.tenant_id,
+          code,
+          error: err?.message || String(err)
+        });
+        return reply.code(500).send({ ok: false, error: "COMMERCIAL_CONDITION_FIELD_SAVE_FAILED" });
+      } finally {
+        client.release();
+      }
+    }
+  );
+
+  app.get(
     "/commercial-conditions",
     {
       schema: {
@@ -5771,6 +6289,7 @@ export default async function ecomRoutes(app) {
       const includeInactive = req.query?.include_inactive === true;
       const limit = clampLimit(req.query?.limit, 100);
       const offset = Number(req.query?.offset || 0);
+      const fieldCatalog = await loadCommercialConditionFieldCatalog(app.db, tenantId);
 
       let product = null;
       if (productId || productCode) {
@@ -5813,7 +6332,8 @@ export default async function ecomRoutes(app) {
 
       return reply.send({
         ok: true,
-        items: r.rows.map(mapCommercialConditionRow),
+        items: r.rows.map((row) => mapCommercialConditionRow(row, fieldCatalog)),
+        fields: fieldCatalog,
         product,
         limit,
         offset
@@ -5840,6 +6360,7 @@ export default async function ecomRoutes(app) {
             valid_to: { type: "string", maxLength: 80 },
             is_active: { type: "boolean" },
             summary: { type: "string", maxLength: 1000 },
+            structured_values: { type: "array", maxItems: 50 },
             scope: { type: "object" },
             effect: { type: "object" },
             attrs: { type: "object" }
@@ -5871,6 +6392,7 @@ export default async function ecomRoutes(app) {
         const conditionCategory = normalizeCommercialConditionType(req.body?.condition_category || "TRADE");
         const codeSeed = req.body?.code || `${conditionType}_${product?.code || label || "TENANT"}`;
         const code = await generateCommercialConditionCode(client, tenantId, codeSeed);
+        const fieldCatalog = await loadCommercialConditionFieldCatalog(client, tenantId);
         const scope = {
           ...safeJsonObject(req.body?.scope),
           ...(product
@@ -5881,10 +6403,24 @@ export default async function ecomRoutes(app) {
               }
             : {})
         };
-        const effect = safeJsonObject(req.body?.effect);
+        const structured = applyCommercialStructuredValues(
+          safeJsonObject(req.body?.effect),
+          req.body?.structured_values || [],
+          fieldCatalog
+        );
+        if (!structured.ok) {
+          await client.query("ROLLBACK");
+          return reply.code(400).send({
+            ok: false,
+            error: structured.error || "INVALID_STRUCTURED_VALUE",
+            field_code: structured.field_code || null
+          });
+        }
+        const effect = structured.effect;
         const attrs = {
           ...safeJsonObject(req.body?.attrs),
           ...(normalizeOptionalText(req.body?.summary) ? { summary: normalizeOptionalText(req.body.summary) } : {}),
+          structured_values: structured.structured_values,
           governance_source: "commercial_condition_ui"
         };
 
@@ -5913,7 +6449,7 @@ export default async function ecomRoutes(app) {
         );
 
         await client.query("COMMIT");
-        return reply.send({ ok: true, item: mapCommercialConditionRow(r.rows[0]), product });
+        return reply.send({ ok: true, item: mapCommercialConditionRow(r.rows[0], fieldCatalog), product });
       } catch (err) {
         await client.query("ROLLBACK");
         app.log.error({
@@ -5949,6 +6485,7 @@ export default async function ecomRoutes(app) {
             valid_to: { type: "string", maxLength: 80 },
             is_active: { type: "boolean" },
             summary: { type: "string", maxLength: 1000 },
+            structured_values: { type: "array", maxItems: 50 },
             scope: { type: "object" },
             effect: { type: "object" },
             attrs: { type: "object" }
@@ -5972,13 +6509,29 @@ export default async function ecomRoutes(app) {
       if (!existing.rowCount) return reply.code(404).send({ ok: false, error: "COMMERCIAL_CONDITION_NOT_FOUND" });
 
       const current = existing.rows[0];
+      const fieldCatalog = await loadCommercialConditionFieldCatalog(app.db, session.tenant_id);
       const currentAttrs = safeJsonObject(current.attrs);
+      const hasStructured = Object.prototype.hasOwnProperty.call(req.body || {}, "structured_values");
+      const effectBase = Object.prototype.hasOwnProperty.call(req.body || {}, "effect")
+        ? safeJsonObject(req.body?.effect)
+        : safeJsonObject(current.effect);
+      const structured = hasStructured
+        ? applyCommercialStructuredValues(effectBase, req.body?.structured_values || [], fieldCatalog)
+        : { ok: true, effect: effectBase, structured_values: buildCommercialConditionStructuredValues(effectBase, currentAttrs, fieldCatalog) };
+      if (!structured.ok) {
+        return reply.code(400).send({
+          ok: false,
+          error: structured.error || "INVALID_STRUCTURED_VALUE",
+          field_code: structured.field_code || null
+        });
+      }
       const nextAttrs = {
         ...currentAttrs,
         ...safeJsonObject(req.body?.attrs),
         ...(Object.prototype.hasOwnProperty.call(req.body || {}, "summary")
           ? { summary: normalizeOptionalText(req.body?.summary) }
           : {}),
+        structured_values: structured.structured_values,
         governance_source: currentAttrs.governance_source || "commercial_condition_ui"
       };
 
@@ -5993,7 +6546,7 @@ export default async function ecomRoutes(app) {
             valid_to = CASE WHEN $8::text IS NULL THEN valid_to ELSE $8::timestamptz END,
             is_active = COALESCE($9, is_active),
             scope = COALESCE($10::jsonb, scope),
-            effect = COALESCE($11::jsonb, effect),
+            effect = $11::jsonb,
             attrs = $12::jsonb,
             updated_at = now()
         WHERE tenant_id=$1 AND id=$2
@@ -6014,12 +6567,12 @@ export default async function ecomRoutes(app) {
           Object.prototype.hasOwnProperty.call(req.body || {}, "valid_to") ? normalizeOptionalText(req.body.valid_to) : null,
           Object.prototype.hasOwnProperty.call(req.body || {}, "is_active") ? req.body.is_active === true : null,
           Object.prototype.hasOwnProperty.call(req.body || {}, "scope") ? JSON.stringify(safeJsonObject(req.body.scope)) : null,
-          Object.prototype.hasOwnProperty.call(req.body || {}, "effect") ? JSON.stringify(safeJsonObject(req.body.effect)) : null,
+          JSON.stringify(structured.effect),
           JSON.stringify(nextAttrs)
         ]
       );
 
-      return reply.send({ ok: true, item: mapCommercialConditionRow(r.rows[0]) });
+      return reply.send({ ok: true, item: mapCommercialConditionRow(r.rows[0], fieldCatalog) });
     }
   );
 

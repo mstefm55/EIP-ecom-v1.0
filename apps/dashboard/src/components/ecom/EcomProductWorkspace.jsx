@@ -8353,6 +8353,15 @@ function TradeConditionsDrawer({ open, product, ui, isDigital, needsInventorySet
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [conditionFields, setConditionFields] = useState([]);
+  const [conditionFieldsLoading, setConditionFieldsLoading] = useState(false);
+  const [structuredRows, setStructuredRows] = useState([{ field_code: "payment_due_days", value: "" }]);
+  const [fieldDraft, setFieldDraft] = useState({
+    label: "",
+    data_type: "number",
+    unit: "",
+    effect_group: "payment_terms"
+  });
   const [draft, setDraft] = useState({
     label: "",
     condition_type: ui?.typeOptions?.[0]?.value || "TRADE_TERMS",
@@ -8363,6 +8372,26 @@ function TradeConditionsDrawer({ open, product, ui, isDigital, needsInventorySet
   });
 
   const productId = product?.id || "";
+  const normalizedFieldCode = (value) => toVariantFieldKey(value, "");
+  const conditionFieldOptions = conditionFields.filter((field) => field?.is_active !== false);
+  const conditionFieldByCode = new Map(conditionFieldOptions.map((field) => [field.code, field]));
+
+  const loadConditionFields = async () => {
+    setConditionFieldsLoading(true);
+    try {
+      const data = await apiFetch("/api/eip/ecom/commercial-condition-fields");
+      const items = Array.isArray(data?.items) ? data.items : [];
+      setConditionFields(items);
+      return items;
+    } catch (err) {
+      setError(err?.message || "Failed to load commercial condition fields.");
+      setConditionFields([]);
+      return [];
+    } finally {
+      setConditionFieldsLoading(false);
+    }
+  };
+
   const loadConditions = async () => {
     if (!open || !productId) return;
     setLoading(true);
@@ -8371,6 +8400,7 @@ function TradeConditionsDrawer({ open, product, ui, isDigital, needsInventorySet
       const qs = new URLSearchParams({ product_id: productId, include_inactive: "true" });
       const data = await apiFetch(`/api/eip/ecom/commercial-conditions?${qs.toString()}`);
       const nextItems = Array.isArray(data?.items) ? data.items : [];
+      if (Array.isArray(data?.fields)) setConditionFields(data.fields);
       setConditions(nextItems);
       if (onChanged) onChanged(nextItems);
     } catch (err) {
@@ -8392,9 +8422,66 @@ function TradeConditionsDrawer({ open, product, ui, isDigital, needsInventorySet
       valid_to: "",
       is_active: true
     });
+    setStructuredRows([{ field_code: "payment_due_days", value: "" }]);
+    setFieldDraft({ label: "", data_type: "number", unit: "", effect_group: "payment_terms" });
+    loadConditionFields();
     loadConditions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, productId]);
+
+  const createConditionField = async () => {
+    const label = String(fieldDraft.label || "").trim();
+    const code = normalizedFieldCode(label);
+    if (!label || !code) {
+      setError("Field label is required.");
+      return;
+    }
+    const effectGroup = String(fieldDraft.effect_group || "custom").trim() || "custom";
+    setConditionFieldsLoading(true);
+    setError("");
+    try {
+      const data = await apiFetch("/api/eip/ecom/commercial-condition-fields", {
+        method: "POST",
+        body: {
+          code,
+          label,
+          data_type: fieldDraft.data_type || "number",
+          unit: fieldDraft.unit || null,
+          effect_path: `${effectGroup}.${code}`,
+          condition_category: effectGroup === "payment_terms" ? "FINANCE" : effectGroup === "reorder_policy" ? "INVENTORY" : "TRADE",
+          allowed_condition_types: [draft.condition_type || "TRADE_TERMS"]
+        }
+      });
+      const items = Array.isArray(data?.items) ? data.items : [];
+      setConditionFields(items);
+      setStructuredRows((current) => [...current, { field_code: code, value: "" }]);
+      setFieldDraft({ label: "", data_type: "number", unit: "", effect_group: "payment_terms" });
+    } catch (err) {
+      setError(err?.message || "Failed to create condition field.");
+    } finally {
+      setConditionFieldsLoading(false);
+    }
+  };
+
+  const updateStructuredRow = (index, patch) => {
+    setStructuredRows((current) => current.map((row, rowIndex) => (
+      rowIndex === index ? { ...row, ...patch } : row
+    )));
+  };
+
+  const removeStructuredRow = (index) => {
+    setStructuredRows((current) => {
+      const next = current.filter((_, rowIndex) => rowIndex !== index);
+      return next.length ? next : [{ field_code: conditionFieldOptions[0]?.code || "payment_due_days", value: "" }];
+    });
+  };
+
+  const addStructuredRow = () => {
+    setStructuredRows((current) => [
+      ...current,
+      { field_code: conditionFieldOptions[0]?.code || "payment_due_days", value: "" }
+    ]);
+  };
 
   const createCondition = async (event) => {
     event.preventDefault();
@@ -8415,6 +8502,12 @@ function TradeConditionsDrawer({ open, product, ui, isDigital, needsInventorySet
           condition_type: draft.condition_type || "TRADE_TERMS",
           condition_category: draft.condition_category || "TRADE",
           summary: draft.summary,
+          structured_values: structuredRows
+            .map((row) => ({
+              field_code: row.field_code,
+              value: row.value
+            }))
+            .filter((row) => row.field_code && row.value !== ""),
           valid_to: draft.valid_to || null,
           is_active: draft.is_active !== false,
           attrs: {
@@ -8430,6 +8523,7 @@ function TradeConditionsDrawer({ open, product, ui, isDigital, needsInventorySet
         valid_to: "",
         is_active: true
       });
+      setStructuredRows([{ field_code: conditionFieldOptions[0]?.code || "payment_due_days", value: "" }]);
       await loadConditions();
     } catch (err) {
       setError(err?.message || "Failed to create commercial condition.");
@@ -8529,6 +8623,131 @@ function TradeConditionsDrawer({ open, product, ui, isDigital, needsInventorySet
                 />
               </label>
             </div>
+            <div className="mt-4 rounded-2xl border border-ink-100 bg-white/80 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-[0.6rem] font-semibold uppercase tracking-[0.2em] text-ink-400">Structured values</p>
+                  <p className="mt-1 text-xs text-ink-500">Typed values are saved into condition effect paths for workbench and process calculations.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={addStructuredRow}
+                  className="rounded-full border border-ink-100 bg-white px-3 py-1.5 text-xs font-semibold text-ink-600"
+                >
+                  Add value
+                </button>
+              </div>
+              <div className="mt-3 space-y-2">
+                {structuredRows.map((row, index) => {
+                  const field = conditionFieldByCode.get(row.field_code) || conditionFieldOptions[0] || {};
+                  const inputType = field.data_type === "date" ? "date" : field.data_type === "number" || field.data_type === "integer" ? "number" : "text";
+                  return (
+                    <div key={`structured-${index}`} className="grid gap-2 rounded-xl border border-ink-100 bg-ink-50/60 p-2 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto]">
+                      <label className="text-[0.65rem] font-semibold text-ink-500">
+                        Field
+                        <select
+                          value={row.field_code}
+                          onChange={(event) => updateStructuredRow(index, { field_code: event.target.value, value: "" })}
+                          className="mt-1 w-full rounded-xl border border-ink-100 bg-white px-3 py-2 text-sm text-ink-800 outline-none focus:border-brand-300"
+                        >
+                          {conditionFieldsLoading ? <option value="">Loading fields...</option> : null}
+                          {conditionFieldOptions.map((option) => (
+                            <option key={option.code} value={option.code}>
+                              {option.label}{option.unit ? ` (${option.unit})` : ""}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="text-[0.65rem] font-semibold text-ink-500">
+                        Value
+                        {field.data_type === "boolean" ? (
+                          <select
+                            value={String(row.value)}
+                            onChange={(event) => updateStructuredRow(index, { value: event.target.value })}
+                            className="mt-1 w-full rounded-xl border border-ink-100 bg-white px-3 py-2 text-sm text-ink-800 outline-none focus:border-brand-300"
+                          >
+                            <option value="">Select</option>
+                            <option value="true">Yes</option>
+                            <option value="false">No</option>
+                          </select>
+                        ) : (
+                          <input
+                            type={inputType}
+                            value={row.value}
+                            step={field.data_type === "integer" ? "1" : "any"}
+                            onChange={(event) => updateStructuredRow(index, { value: event.target.value })}
+                            className="mt-1 w-full rounded-xl border border-ink-100 bg-white px-3 py-2 text-sm text-ink-800 outline-none focus:border-brand-300"
+                            placeholder={field.unit ? `Value in ${field.unit}` : "Value"}
+                          />
+                        )}
+                      </label>
+                      <div className="flex items-end">
+                        <button
+                          type="button"
+                          onClick={() => removeStructuredRow(index)}
+                          className="w-full rounded-full border border-ink-100 bg-white px-3 py-2 text-xs font-semibold text-ink-500"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                      {field.effect_path ? (
+                        <p className="md:col-span-3 text-[0.62rem] text-ink-400">
+                          Effect path: <span className="font-mono">{field.effect_path}</span>
+                        </p>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="mt-3 rounded-xl border border-dashed border-ink-200 bg-white p-3">
+                <p className="text-[0.6rem] font-semibold uppercase tracking-[0.2em] text-ink-400">Create field</p>
+                <div className="mt-2 grid gap-2 md:grid-cols-[minmax(0,1fr)_9rem_7rem_10rem_auto]">
+                  <input
+                    value={fieldDraft.label}
+                    onChange={(event) => setFieldDraft((current) => ({ ...current, label: event.target.value }))}
+                    className="rounded-xl border border-ink-100 bg-white px-3 py-2 text-sm text-ink-800 outline-none focus:border-brand-300"
+                    placeholder="Credit limit days"
+                  />
+                  <select
+                    value={fieldDraft.data_type}
+                    onChange={(event) => setFieldDraft((current) => ({ ...current, data_type: event.target.value }))}
+                    className="rounded-xl border border-ink-100 bg-white px-3 py-2 text-sm text-ink-800 outline-none focus:border-brand-300"
+                  >
+                    <option value="number">Number</option>
+                    <option value="integer">Integer</option>
+                    <option value="boolean">Yes/No</option>
+                    <option value="text">Text</option>
+                    <option value="date">Date</option>
+                  </select>
+                  <input
+                    value={fieldDraft.unit}
+                    onChange={(event) => setFieldDraft((current) => ({ ...current, unit: event.target.value }))}
+                    className="rounded-xl border border-ink-100 bg-white px-3 py-2 text-sm text-ink-800 outline-none focus:border-brand-300"
+                    placeholder="days"
+                  />
+                  <select
+                    value={fieldDraft.effect_group}
+                    onChange={(event) => setFieldDraft((current) => ({ ...current, effect_group: event.target.value }))}
+                    className="rounded-xl border border-ink-100 bg-white px-3 py-2 text-sm text-ink-800 outline-none focus:border-brand-300"
+                  >
+                    <option value="payment_terms">Payment terms</option>
+                    <option value="procurement_policy">Procurement policy</option>
+                    <option value="cash_purchase_policy">Cash purchase</option>
+                    <option value="reorder_policy">Reorder policy</option>
+                    <option value="discount">Discount</option>
+                    <option value="custom">Custom</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={createConditionField}
+                    disabled={conditionFieldsLoading}
+                    className="rounded-full border border-brand-100 bg-brand-50 px-3 py-2 text-xs font-semibold text-brand-700 disabled:opacity-50"
+                  >
+                    Create field
+                  </button>
+                </div>
+              </div>
+            </div>
             {error ? <p className="mt-3 rounded-xl border border-rose-100 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">{error}</p> : null}
           </form>
 
@@ -8568,7 +8787,7 @@ function TradeConditionsDrawer({ open, product, ui, isDigital, needsInventorySet
           </div>
         </div>
         <div className="sticky bottom-0 flex items-center justify-between gap-3 border-t border-ink-100 bg-white px-5 py-3 shadow-soft">
-          <p className="text-xs text-ink-400">Read-only governance view. Edit flows stay process/schema governed.</p>
+          <p className="text-xs text-ink-400">Governed commercial-condition editor. Structured values are stored in effect paths for runtime use.</p>
           <button type="button" onClick={onClose} className="rounded-full bg-ink-900 px-4 py-2 text-xs font-semibold text-white">
             Close
           </button>
@@ -8608,6 +8827,16 @@ function ConditionCard({ item }) {
         <span className="rounded-full bg-white/70 px-2 py-0.5 text-[0.6rem] font-semibold uppercase tracking-[0.16em]">{status}</span>
       </div>
       <p className="mt-2">{item.summary || item.effect || item.description || "Governed commercial condition."}</p>
+      {Array.isArray(item.structured_values) && item.structured_values.length ? (
+        <div className="mt-2 grid gap-1">
+          {item.structured_values.slice(0, 6).map((value) => (
+            <p key={`${item.id || item.code || item.condition_type}-${value.field_code}`} className="rounded-lg bg-white/70 px-2 py-1 text-xs">
+              <span className="font-semibold">{value.label || value.field_code}:</span>{" "}
+              {String(value.value)}{value.unit ? ` ${value.unit}` : ""}
+            </p>
+          ))}
+        </div>
+      ) : null}
       {(item.valid_from || item.valid_to || item.renewal_task_status) ? (
         <p className="mt-2 text-xs opacity-80">
           {item.valid_from || "open"} to {item.valid_to || "open"} {item.renewal_task_status ? `· renewal ${item.renewal_task_status}` : ""}

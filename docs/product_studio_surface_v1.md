@@ -47,6 +47,29 @@ PATCH /api/eip/ecom/commercial-conditions/:id
 
 Product rows are hydrated with governed commercial-condition records for display and focus detection. Product attrs may still provide backward-compatible display fallback data, but attrs are not the policy authority and the drawer does not create free-text-only condition records.
 
+## Structured Commercial Values
+
+Human summary text is only explanatory. Calculation-ready values are stored in `commercial_condition.effect` through a governed field catalog:
+
+```text
+dropdown_list.code = ECOM_COMMERCIAL_CONDITION_FIELD
+dropdown_value.attrs.effect_path = payment_terms.credit_limit_days
+dropdown_value.attrs.data_type = integer
+dropdown_value.attrs.unit = days
+```
+
+Examples:
+
+- `credit_limit_days = 70` -> `effect.payment_terms.credit_limit_days`
+- `payment_due_days = 30` -> `effect.payment_terms.payment_due_days`
+- `credit_available = true` -> `effect.payment_terms.credit_available`
+- `approval_threshold_value = 250` -> `effect.procurement_policy.approval_threshold_value`
+- `reorder_point_qty = 12` -> `effect.reorder_policy.reorder_point_qty`
+
+The field catalog is metadata-driven and tenant-scoped. Users can create additional fields in the drawer, similar to variant headers. Custom fields are stored under `effect.custom.<field_code>` unless a specific effect path is configured; they become process-consumable when a process/template or resolver is configured to read that path.
+
+Migration `0120_commercial_condition_structured_fields.sql` seeds the default field catalog without adding tables.
+
 The drawer has a fixed header, scrollable body, and visible footer with a Close action so long condition sets do not hide the controls.
 
 ## Inventory Boundary
@@ -80,4 +103,5 @@ npm run build
 ## Known Limits
 
 - Trade-condition create/edit is available as a UI primitive over existing governed metadata. Full condition lifecycle review/renewal remains process/task governed.
+- Custom structured fields under `effect.custom` are stored safely but require process/template configuration before they influence business decisions.
 - Broader product analytics should live in a later product intelligence composition, not as a copied Command Center tab.
