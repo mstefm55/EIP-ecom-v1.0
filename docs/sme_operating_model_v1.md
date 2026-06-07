@@ -18,7 +18,7 @@ customer messages
 The product should feel like a practical operating system, not an enterprise planning suite. The dashboard is organized around:
 
 ```text
-Command Center -> Workload/Scheduling -> Module Workbench -> Timeline/Tasks
+Command Center -> Tasks -> Module Workbench -> Timeline
 ```
 
 ## Command Center
@@ -27,11 +27,22 @@ Command Center is the cockpit:
 
 - business statistics on top
 - Burning Topics for urgent pinned categories
-- Task Browser for all user actionables
-- Workload tab for due dates, delegation, and scheduling
+- compact Task Browser for urgent user actionables
 - Analytics tab for lightweight signal graphs
 
-The Task Browser opens governed module workspaces for business actions. It does not own approvals, replies, purchasing, or stock policy.
+The Task Browser opens governed module workspaces for business actions. It does not own approvals, replies, purchasing, stock policy, or the full scheduler.
+
+## Tasks Module
+
+The Tasks sidebar module is the operational task center:
+
+- My Tasks
+- Calendar
+- Delegated
+- Overdue
+- Workload
+
+It uses real `eip_core.task` records and the governed schedule/delegate endpoints. If task or due-date data is unavailable, it shows production empty states rather than sample task cards.
 
 ## Module Ownership
 
@@ -41,7 +52,8 @@ The Task Browser opens governed module workspaces for business actions. It does 
 | Orders & Payments | Sales orders, payment records, returns, refunds, operational actions | Payment provider secrets, tenant payment preferences, stock planning |
 | Inventory | Stock Signals Queue, material stock profile, stock movements, stockout prediction, policy-backed reorder suggestions, stock review tasks, Procurement handoff | Purchase order commitment, supplier outbound transmission, accounting valuation, MRP |
 | Procurement | Purchase Need Workbench, supplier options, governed buying-route recommendation, requisition review, RFQ/supplier offer comparison, low-value cash/shop purchase receipt | Full PO execution, supplier integrations, accounting ledger, MRP |
-| Product Studio | Product setup, product card data, product/media/category attrs, pricing visibility, trade-condition visibility, initial inventory setup before activation | Operational inventory movements, warehouse execution, purchase commitment, supplier outbound transmission |
+| Product Studio | Product setup, product card data, product/media/category attrs, pricing visibility, trade-condition visibility, initial inventory setup before activation | Operational inventory movements, warehouse execution, purchase commitment, supplier outbound transmission, business-wide scheduling |
+| Tasks | Task queue, internal due-date scheduling, delegation, overdue and workload views | Module-specific approvals, purchase commitment, payment execution, business policy decisions |
 | Settings | Tenant-local business preferences and readiness panels | Provider secrets, raw credentials, operational queues |
 | Admin Console -> Connections | Technical connector setup, provider credentials, keys, webhook secrets, rotation, health checks | Operational payment/refund/order work |
 
@@ -149,12 +161,10 @@ Writes are session, CSRF, RBAC, and tenant scoped.
 
 ## Product Studio
 
-Product Studio follows the same tabbed surface idea without becoming another Command Center:
+Product Studio remains intentionally untouched in this Command Center/Tasks wave. Its current descriptor-backed tabs are:
 
 - `Studio`: existing product editor
 - `Focus`: product master-data issues
-- `Analytics`: product readiness metrics from existing data
-- `Workload`: product review and condition work signals
 
 Product Studio owns product setup, product card data, categorization, media, pricing entries, trade-condition visibility, and initial inventory setup before activation.
 

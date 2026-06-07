@@ -34,11 +34,10 @@ export const dashboardSurface = {
           props: {
             endpoint: "/api/eip/user/dashboard/command-center",
             title: "Run the business, not the system",
-            subtitle: "Stats on top, burning topics below. The Task Browser shows all actionables and expands like the Admin data browser.",
+            subtitle: "Live business signals, urgent topics, and actionables from existing task and module data.",
             tabs: [
               { code: "command", label: "Command Center" },
               { code: "analytics", label: "Analytics" },
-              { code: "workload", label: "Workload" },
             ],
             widgets: [
               { code: "open_work", label: "Open work" },
@@ -50,7 +49,7 @@ export const dashboardSurface = {
             labels: {
               refresh: "Refresh",
               businessStats: "Business statistics",
-              businessStatsHint: "Role/template-driven graph set",
+              businessStatsHint: "Live task, module, report, and operational signals",
               openDetail: "Open detail",
               burningTopics: "Burning topics",
               burningHint: "Top urgent items only. User pins 2-3 categories from the Task Browser.",
@@ -519,11 +518,20 @@ export const dashboardSurface = {
         props: { tab: "tasks" },
         children: [
           {
-            id: "user-tasks-placeholder",
-            type: "UserPlaceholderPanel",
+            id: "user-tasks",
+            type: "UserTasksPanel",
             props: {
               title: "Tasks",
-              subtitle: "Your assigned tasks and approvals will appear here.",
+              subtitle: "Full task management, scheduling, delegation, and workload from real task engine records.",
+              endpoint: "/api/eip/user/dashboard/command-center",
+              defaultView: "my_tasks",
+              views: [
+                { code: "my_tasks", label: "My Tasks" },
+                { code: "calendar", label: "Calendar" },
+                { code: "delegated", label: "Delegated" },
+                { code: "overdue", label: "Overdue" },
+                { code: "workload", label: "Workload" },
+              ],
             },
           },
         ],

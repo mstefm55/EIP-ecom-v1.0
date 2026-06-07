@@ -18,15 +18,14 @@ import { apiFetch } from "../../services/apiClient";
 const DATE_FILTERS = ["all", "overdue", "today", "tomorrow", "future", "unscheduled"];
 const ASSIGNMENT_FILTERS = ["all", "my_tasks", "delegated", "unassigned"];
 
-const DEFAULT_CONFIG = {
+export const DEFAULT_CONFIG = {
   endpoint: "/api/eip/user/dashboard/command-center",
   title: "Run the business, not the system",
   subtitle:
-    "Stats on top, burning topics below. The Task Browser shows all actionables and expands like the Admin data browser.",
+    "Live business signals, urgent topics, and actionables from existing task and module data.",
   tabs: [
     { code: "command", label: "Command Center" },
-    { code: "analytics", label: "Analytics" },
-    { code: "workload", label: "Workload" }
+    { code: "analytics", label: "Analytics" }
   ],
   widgets: [
     { code: "open_work", label: "Open work" },
@@ -38,7 +37,7 @@ const DEFAULT_CONFIG = {
   labels: {
     refresh: "Refresh",
     businessStats: "Business statistics",
-    businessStatsHint: "Role/template-driven graph set",
+    businessStatsHint: "Live task, module, report, and operational signals",
     openDetail: "Open detail",
     burningTopics: "Burning topics",
     burningHint: "Top urgent items only. User pins 2-3 categories from the Task Browser.",
@@ -50,7 +49,7 @@ const DEFAULT_CONFIG = {
     actionables: "Actionables",
     controls: "Filters, delegation rules and category pinning",
     analytics: "Signal analytics",
-    workload: "Workload balance",
+    workload: "Workload",
     delegate: "Delegate",
     assign: "Assign",
     cancel: "Cancel",
@@ -186,7 +185,7 @@ const URGENCY_CLASSES = {
   normal: "border-ink-100 bg-white text-ink-500"
 };
 
-function mergeConfig(props = {}) {
+export function mergeConfig(props = {}) {
   return {
     ...DEFAULT_CONFIG,
     ...props,
@@ -200,7 +199,7 @@ function mergeConfig(props = {}) {
   };
 }
 
-function resolveCommandTheme(theme = {}) {
+export function resolveCommandTheme(theme = {}) {
   const base = COMMAND_CENTER_THEMES[theme.variant] || COMMAND_CENTER_THEMES.eip_v1;
   return { ...base, ...(theme.classes || {}) };
 }
@@ -209,14 +208,14 @@ function normalizeText(value) {
   return String(value || "").trim();
 }
 
-function formatDate(value) {
+export function formatDate(value) {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return normalizeText(value);
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-function parseLocalDate(value) {
+export function parseLocalDate(value) {
   if (!value) return null;
   if (value instanceof Date) {
     const date = new Date(value);
@@ -231,7 +230,7 @@ function parseLocalDate(value) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-function formatLocalDateKey(value = new Date()) {
+export function formatLocalDateKey(value = new Date()) {
   const date = parseLocalDate(value);
   if (!date) return "";
   const year = date.getFullYear();
@@ -240,23 +239,23 @@ function formatLocalDateKey(value = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
-function toDateInputValue(value) {
+export function toDateInputValue(value) {
   return formatLocalDateKey(value);
 }
 
-function startOfLocalDay(value = new Date()) {
+export function startOfLocalDay(value = new Date()) {
   const date = new Date(value);
   date.setHours(0, 0, 0, 0);
   return date;
 }
 
-function addDays(value, days) {
+export function addDays(value, days) {
   const date = startOfLocalDay(value);
   date.setDate(date.getDate() + days);
   return date;
 }
 
-function addMonths(value, months) {
+export function addMonths(value, months) {
   const date = startOfLocalDay(value);
   date.setMonth(date.getMonth() + months);
   return date;
@@ -275,7 +274,7 @@ function startOfCalendarMonth(value = new Date()) {
   return date;
 }
 
-function calendarRange(view, anchorDate) {
+export function calendarRange(view, anchorDate) {
   const anchor = parseLocalDate(anchorDate) || new Date();
   if (view === "day") return [startOfLocalDay(anchor)];
   if (view === "month") {
@@ -287,7 +286,7 @@ function calendarRange(view, anchorDate) {
   return Array.from({ length: 7 }, (_, index) => addDays(weekStart, index));
 }
 
-function dueState(value, status) {
+export function dueState(value, status) {
   const normalizedStatus = normalizeText(status).toLowerCase();
   if (["done", "closed", "completed", "cancelled"].includes(normalizedStatus)) {
     return { code: "complete", label: "Complete", className: "border-ink-100 bg-ink-50 text-ink-400" };
@@ -304,12 +303,12 @@ function dueState(value, status) {
   return { code: "future", label: formatDate(value), className: "border-ink-100 bg-white text-ink-500" };
 }
 
-function matchesDateFilter(task, filter) {
+export function matchesDateFilter(task, filter) {
   if (!filter || filter === "all") return true;
   return dueState(task.due_at, task.status).code === filter;
 }
 
-function matchesAssignmentFilter(task, filter, actorAgentId) {
+export function matchesAssignmentFilter(task, filter, actorAgentId) {
   if (!filter || filter === "all") return true;
   if (filter === "my_tasks") return Boolean(actorAgentId && task.assigned_agent_id === actorAgentId);
   if (filter === "delegated") return Boolean(task.delegated_at);
@@ -322,7 +321,7 @@ function percentOf(value, total) {
   return Math.max(5, Math.min(100, Math.round((Number(value || 0) / total) * 100)));
 }
 
-function decorateCategory(category, config) {
+export function decorateCategory(category, config) {
   const presentation = config.categoryPresentation?.[category.code] || {};
   const tone = TONE[presentation.tone] || TONE.slate;
   return {
@@ -337,7 +336,8 @@ function decorateCategory(category, config) {
 function makeSparkValues(series) {
   const values = Array.isArray(series) && series.length
     ? series.map((item) => Number(item.value || item.count || 0))
-    : [2, 4, 3, 6, 8, 10];
+    : [];
+  if (!values.length) return [];
   if (values.length >= 5) return values;
 
   if (values.length === 1) {
@@ -361,6 +361,7 @@ function makeSparkValues(series) {
 
 function makeSparklinePoints(series) {
   const values = makeSparkValues(series);
+  if (!values.length) return "";
   const max = Math.max(...values, 1);
   const min = Math.min(...values, 0);
   const range = Math.max(max - min, 1);
@@ -373,11 +374,13 @@ function makeSparklinePoints(series) {
 
 function makeSparkAreaPoints(series) {
   const points = makeSparklinePoints(series);
+  if (!points) return "";
   return `0,50 ${points} 100,50`;
 }
 
 function lastSparkPoint(series) {
   const points = makeSparklinePoints(series).split(" ");
+  if (!points[0]) return { x: 100, y: 46 };
   const last = points[points.length - 1] || "100,46";
   const [x, y] = last.split(",").map(Number);
   return { x: Number.isFinite(x) ? x : 100, y: Number.isFinite(y) ? y : 46 };
@@ -395,7 +398,6 @@ export default function UserDashboardPanel({ node, ctx }) {
   const [globalSearch, setGlobalSearch] = useState("");
   const [taskBrowserCollapsed, setTaskBrowserCollapsed] = useState(false);
   const [schedulingTask, setSchedulingTask] = useState(null);
-  const [workloadDateFocus, setWorkloadDateFocus] = useState("");
 
   const loadCommandCenter = useCallback(async () => {
     setLoading(true);
@@ -556,20 +558,6 @@ export default function UserDashboardPanel({ node, ctx }) {
           {activeTab === "analytics" ? (
             <AnalyticsView loading={loading} payload={payload} labels={config.labels} theme={theme} />
           ) : null}
-          {activeTab === "workload" ? (
-            <WorkloadView
-              loading={loading}
-              theme={theme}
-              labels={config.labels}
-              categories={decoratedCategories}
-              tasks={allTasks}
-              actorAgentId={payload?.workload?.assigned_agent_id}
-              onAction={handleAction}
-              onSchedule={(task) => setSchedulingTask(task)}
-              focusedDate={workloadDateFocus}
-              onFocusDate={setWorkloadDateFocus}
-            />
-          ) : null}
         </main>
 
         <TaskBrowser
@@ -587,15 +575,15 @@ export default function UserDashboardPanel({ node, ctx }) {
           onDelegate={handleDelegate}
           onSchedule={(task) => setSchedulingTask(task)}
           globalSearch={globalSearch}
-          dateFocus={activeTab === "workload" ? workloadDateFocus : ""}
-          onClearDateFocus={() => setWorkloadDateFocus("")}
+          dateFocus=""
+          onClearDateFocus={() => {}}
           collapsed={taskBrowserCollapsed}
           setCollapsed={setTaskBrowserCollapsed}
           theme={theme}
         />
       </div>
       <p className={`mt-2 text-xs font-semibold ${theme.muted}`}>
-        UI rule: Task Browser = all user actionables; Workload calendar focuses the Task Browser by selected date instead of duplicating the task list.
+        UI rule: Dashboard is the compact business cockpit. Open Tasks for full scheduling, delegation, and workload management.
       </p>
       <ScheduleTaskModal
         task={schedulingTask}
@@ -729,6 +717,7 @@ function CommandView({
 
 function StatTile({ widget, loading, labels, onOpenDetail, theme }) {
   const series = Array.isArray(widget.series) ? widget.series : [];
+  const hasSeries = series.some((item) => Number(item?.value || item?.count || 0) > 0);
   const sparkId = `spark-${String(widget.code || "card").replace(/[^a-z0-9_-]/gi, "-")}`;
   const sparkTone = widget.tone === "rose"
     ? { line: "stroke-rose-500", text: "text-rose-500", fill: "fill-rose-500", color: "#f43f5e" }
@@ -744,6 +733,7 @@ function StatTile({ widget, loading, labels, onOpenDetail, theme }) {
         {widget.helper || "live signal"}
       </p>
       <div className="mt-auto">
+        {hasSeries ? (
         <svg viewBox="0 0 100 56" className="h-20 w-full overflow-visible" aria-hidden="true">
           <defs>
             <linearGradient id={sparkId} x1="0" x2="0" y1="0" y2="1">
@@ -756,6 +746,11 @@ function StatTile({ widget, loading, labels, onOpenDetail, theme }) {
           <polyline points={makeSparklinePoints(series)} fill="none" className={sparkTone.line} strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
           <circle cx={point.x} cy={point.y} r="3.5" className={`${sparkTone.fill} stroke-white`} strokeWidth="2" />
         </svg>
+        ) : (
+          <div className="flex h-20 items-center rounded-2xl border border-dashed border-ink-200 bg-white/70 px-3 text-xs font-semibold text-ink-400">
+            No trend data available yet.
+          </div>
+        )}
         <button
           type="button"
           onClick={() => onOpenDetail?.(widget)}
@@ -831,7 +826,7 @@ function AnalyticsView({ loading, payload, labels, theme }) {
   );
 }
 
-function WorkloadView({ loading, labels, categories, theme, tasks, actorAgentId, onAction, onSchedule, focusedDate, onFocusDate }) {
+export function WorkloadView({ loading, labels, categories, theme, tasks, actorAgentId, onAction, onSchedule, focusedDate, onFocusDate }) {
   const [calendarView, setCalendarView] = useState("week");
   const [anchorDate, setAnchorDate] = useState(() => startOfLocalDay());
   const [selectedDate, setSelectedDate] = useState(() => focusedDate || formatLocalDateKey(new Date()));
@@ -1518,7 +1513,7 @@ function TaskRow({
   );
 }
 
-function ScheduleTaskModal({ task, labels, onClose, onSubmit, theme }) {
+export function ScheduleTaskModal({ task, labels, onClose, onSubmit, theme }) {
   const [view, setView] = useState("day");
   const [form, setForm] = useState({
     due_at: "",

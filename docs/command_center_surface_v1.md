@@ -8,18 +8,27 @@ The Command Center is the tenant dashboard landing surface for SME owners. It is
 
 - Left navigation remains the existing collapsible dashboard sidebar.
 - Main dashboard uses a light, spacious owner workbench layout rather than nested operational tables.
-- Top navigation has three active working tabs:
+- Top navigation has two active cockpit tabs:
   - Command Center
   - Analytics
-  - Workload
 - A centered signal search supports quick scanning without turning the surface into a dense filter bar.
 - The primary headline is: "Run the business, not the system."
 - The center column shows compact business statistic cards with lightweight trend graphics above focused Burning Topics.
 - The right rail is a full-height Task Browser sized for roughly one quarter of the viewport.
 - Task Browser category cards are stacked. One category opens by default, and the task list inside that category is scroll bounded.
 - Task Browser filters, sorting, and category pinning are opened from a top header modal so the expanded task list remains readable.
-- Workload is the calendar scheduling tab. It does not render a second task list; selecting a calendar date focuses the existing Task Browser on that due date.
-- Workload does not repeat category cards or analytics panels below the calendar; those stay in Command Center/Analytics/Task Browser.
+- The dedicated sidebar Tasks module owns detailed scheduling, delegation, calendar, and workload management.
+- Dashboard remains the compact business cockpit; it does not render the full scheduler.
+
+## Production Data Rule
+
+The Dashboard may show only:
+
+- real backend values from the Command Center read model
+- descriptor-backed labels, tabs, filters, categories, and theme tokens
+- honest production empty states
+
+If no real series is available for a statistics card, the UI shows `No trend data available yet.` It must not invent sales, cash, profit, stock, order, customer, or task values.
 
 ## Backend Composition
 
@@ -138,19 +147,19 @@ cd services/api
 npm run migrate
 ```
 
-Migration `0113_command_center_dashboard_descriptor.sql` is metadata-only. Migration `0114_command_center_theme_descriptor_refresh.sql` is the additive hosted refresh for environments where `0113` was already applied. It patches active/published `dashboard` UI surface descriptors so Command Center labels, tabs, widgets, category presentation, Task Browser settings, and theme tokens come from persisted surface metadata rather than only React fallback defaults. Migration `0118_task_command_center_permission_backfill.sql` adds governed `TASK_DELEGATE` and `TASK_SCHEDULE` permissions to current role rows and role templates so cloned tenants receive the same Command Center task-operation authority.
+Migration `0113_command_center_dashboard_descriptor.sql` is metadata-only. Migration `0114_command_center_theme_descriptor_refresh.sql` is the additive hosted refresh for environments where `0113` was already applied. It patches active/published `dashboard` UI surface descriptors so Command Center labels, tabs, widgets, category presentation, Task Browser settings, and theme tokens come from persisted surface metadata rather than only React fallback defaults. Migration `0118_task_command_center_permission_backfill.sql` adds governed `TASK_DELEGATE` and `TASK_SCHEDULE` permissions to current role rows and role templates so cloned tenants receive the same Command Center task-operation authority. Migration `0119_command_center_tasks_module_production.sql` removes the detailed Workload scheduler from Dashboard metadata and registers the production `UserTasksPanel` under the existing Tasks sidebar item.
 
 Manual dashboard check:
 
 1. Sign in to a tenant dashboard.
 2. Open Dashboard.
-3. Confirm Command Center, Analytics, and Workload tabs render.
+3. Confirm Command Center and Analytics tabs render.
 4. Confirm right-side Task Browser appears.
 5. Open a category and verify the task list scrolls inside the category instead of expanding the whole page.
 6. Open the Task Browser filter button in the header and verify search, due, assignment, category, sort, and pinning live inside the modal.
 7. Pin or unpin categories and verify Burning Topics only shows urgent tasks from pinned categories.
-8. Open Workload and verify the right Task Browser remains visible, no duplicate scheduler task list appears, and selected calendar dates focus the Task Browser with a clearable date chip.
-9. Use Open on a task from either calendar chips or Task Browser and confirm it routes to the governed module workspace.
+8. Open Tasks from the sidebar and verify My Tasks, Calendar, Delegated, Overdue, and Workload views render from live task data or production empty states.
+9. Use Open on a task from Task Browser or Tasks and confirm it routes to the governed module workspace.
 10. Delegate a task you own or an unassigned task and confirm the task assignment updates after refresh.
 11. Schedule a task on the 10th and confirm the date input remains the 10th in the local browser timezone.
 

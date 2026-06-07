@@ -30,6 +30,7 @@ import AdminUsersPanel from "../components/admin/AdminUsersPanel";
 import AdminModulesPanel from "../components/admin/AdminModulesPanel";
 import UserShell from "../components/user/UserShell";
 import UserDashboardPanel from "../components/user/UserDashboardPanel";
+import UserTasksPanel from "../components/user/UserTasksPanel";
 import UserPanel from "../components/user/UserPanel";
 import TenantAdminAccessPanel from "../components/user/TenantAdminAccessPanel";
 import UserSecurityPanel from "../components/user/UserSecurityPanel";
@@ -83,6 +84,7 @@ export const registry = {
   AdminModulesPanel,
   UserShell,
   UserDashboardPanel,
+  UserTasksPanel,
   UserPanel,
   TenantAdminAccessPanel,
   UserSecurityPanel,

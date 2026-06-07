@@ -230,10 +230,22 @@ function buildContext(row) {
   return [...new Set(parts)].slice(0, 2).join(" - ") || normalizeText(row.task_type) || "Task";
 }
 
+function normalizeReferenceDisplay(value) {
+  const text = normalizeText(value);
+  if (!text.includes(" - ")) return text;
+  const [left, ...rest] = text.split(" - ");
+  const right = rest.join(" - ").trim();
+  if (!left || !right) return text;
+  const leftText = left.trim();
+  const rightLower = right.toLowerCase();
+  if (rightLower.includes(leftText.toLowerCase())) return right;
+  return text;
+}
+
 function toTaskItem(row) {
   const category = deriveCategory(row);
   const urgency = computeUrgency(row);
-  const title = normalizeText(row.title) || normalizeText(row.task_type) || "Task";
+  const title = normalizeReferenceDisplay(row.title) || normalizeText(row.task_type) || "Task";
   const openLabel = category.code === "crm" && normalizeLower(row.task_type).includes("reply")
     ? "Reply"
     : category.code === "procurement"
@@ -256,7 +268,7 @@ function toTaskItem(row) {
     urgency_label: urgency.label,
     urgency_score: urgency.score,
     urgency_reason: urgency.reason,
-    context: buildContext(row),
+    context: normalizeReferenceDisplay(buildContext(row)),
     assigned_agent_id: row.assigned_agent_id,
     assigned_agent_name: row.assigned_agent_name || row.assigned_agent_code || "",
     delegated_by_agent_id: readAttr(row, "last_delegation")?.actor_agent_id || null,

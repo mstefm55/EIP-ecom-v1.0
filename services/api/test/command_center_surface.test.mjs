@@ -54,7 +54,6 @@ test("command center dashboard UI is descriptor-driven and keeps the task browse
   assert.match(component, /resolveCommandTheme/);
   assert.match(component, /Run the business, not the system/);
   assert.match(component, /Analytics/);
-  assert.match(component, /Workload/);
   assert.match(component, /TaskBrowser/);
   assert.match(component, /ScheduleTaskModal/);
   assert.match(component, /CalendarWorkbench/);
@@ -65,11 +64,12 @@ test("command center dashboard UI is descriptor-driven and keeps the task browse
   assert.match(component, /assignmentFilters/);
   assert.match(component, /category_surface: category\.surface/);
   assert.match(component, /const targetSurface = action\?\.surface \|\| task\?\.surface \|\| task\?\.category_surface \|\| task\?\.category_code/);
-  assert.match(component, /dateFocus=\{activeTab === "workload" \? workloadDateFocus : ""\}/);
   assert.match(component, /Focused on \{formatDate\(dateFocus\)\}/);
-  assert.match(component, /Workload calendar focuses the Task Browser by selected date instead of duplicating the task list/);
+  assert.match(component, /Open Tasks for full scheduling, delegation, and workload management/);
   assert.match(component, /max-h-\[42vh\] min-h-\[14rem\]/);
   assert.match(component, /max-h-\[calc\(100vh-16rem\)\]/);
+  assert.match(component, /No trend data available yet/);
+  assert.doesNotMatch(component, /\[2, 4, 3, 6, 8, 10\]/);
   assert.doesNotMatch(component, /Delegation pool/);
   assert.doesNotMatch(component, /sticky bottom-0/);
   assert.doesNotMatch(component, /toISOString\(\)\.slice\(0, 10\)/);
@@ -96,6 +96,9 @@ test("command center dashboard UI is descriptor-driven and keeps the task browse
   assert.match(descriptor, /variant: "eip_v1"/);
   assert.match(descriptor, /categoryPresentation/);
   assert.match(descriptor, /widgets/);
+  assert.match(descriptor, /type: "UserTasksPanel"/);
+  assert.match(descriptor, /defaultView: "my_tasks"/);
+  assert.doesNotMatch(descriptor, /id: "user-tasks-placeholder"/);
   assert.match(seed, /"endpoint": "\/api\/eip\/user\/dashboard\/command-center"/);
   assert.match(seed, /"categoryPresentation"/);
   assert.match(seed, /"taskBrowser"/);
@@ -104,6 +107,9 @@ test("command center dashboard UI is descriptor-driven and keeps the task browse
   assert.match(seed, /"theme"/);
   assert.match(seed, /"variant": "eip_v1"/);
   assert.match(seed, /"controls": "Filters, delegation rules and category pinning"/);
+  assert.match(seed, /"type": "UserTasksPanel"/);
+  assert.match(seed, /"defaultView": "my_tasks"/);
+  assert.doesNotMatch(seed, /"id": "user-tasks-placeholder"/);
   assert.match(migration, /command_center_props/);
   assert.match(migration, /"theme"/);
   assert.match(migration, /"density": "comfortable"/);
@@ -113,6 +119,26 @@ test("command center dashboard UI is descriptor-driven and keeps the task browse
   assert.match(refreshMigration, /"variant": "eip_v1"/);
   const surfacePolishMigration = read("services/api/db/migrations/0115_command_center_product_studio_surface_polish.sql");
   assert.match(surfacePolishMigration, /command_center_scheduling/);
+  const productionMigration = read("services/api/db/migrations/0119_command_center_tasks_module_production.sql");
+  assert.match(productionMigration, /Dashboard stays the business cockpit/);
+  assert.match(productionMigration, /"type": "UserTasksPanel"/);
+  assert.match(productionMigration, /"production_data_only":true/);
+});
+
+test("tasks module is production-backed and does not render a placeholder shell", () => {
+  const tasksPanel = read("apps/dashboard/src/components/user/UserTasksPanel.jsx");
+  const registry = read("apps/dashboard/src/engine/registry.jsx");
+
+  assert.match(registry, /import UserTasksPanel/);
+  assert.match(registry, /UserTasksPanel/);
+  assert.match(tasksPanel, /apiFetch\(config\.endpoint \|\| DEFAULT_CONFIG\.endpoint\)/);
+  assert.match(tasksPanel, /Full task management, scheduling, delegation, and workload from real task engine records/);
+  assert.match(tasksPanel, /No tasks found/);
+  assert.match(tasksPanel, /Delegation unavailable: assignee source not configured/);
+  assert.match(tasksPanel, /ScheduleTaskModal/);
+  assert.match(tasksPanel, /WorkloadView/);
+  assert.match(tasksPanel, /dueState\(task\.due_at, task\.status\)/);
+  assert.doesNotMatch(tasksPanel, /sales vs cost|cash forecast|profit trend|sample customer|mockTasks|demoTasks/i);
 });
 
 test("command center task operation permissions are governed and clone-safe", () => {
