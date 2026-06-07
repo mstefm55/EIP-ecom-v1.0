@@ -46,7 +46,8 @@ const DEFAULT_VIEWS = [
   { id: "movements", label: "Movements" },
   { id: "locations", label: "Locations / States" },
   { id: "counts", label: "Counts / Adjustments" },
-  { id: "policy", label: "Policy View" }
+  { id: "policy", label: "Policy View" },
+  { id: "bridge", label: "Procurement Bridge" }
 ];
 
 const STATUS_TONES = {
@@ -1601,6 +1602,192 @@ export default function InventoryWorkspace({ node, ctx } = {}) {
     );
   };
 
+  const renderBridgeActionButton = (action) => (
+    <button
+      key={action.code}
+      type="button"
+      onClick={() => handleWorkbenchAction(action)}
+      disabled={actionLoading}
+      className={`rounded-2xl px-4 py-3 text-left text-sm font-semibold disabled:opacity-60 ${
+        action.tone === "danger"
+          ? "bg-rose-50 text-rose-700"
+          : action.tone === "primary"
+            ? "bg-ink-900 text-white"
+            : "border border-ink-100 bg-white text-ink-700"
+      }`}
+    >
+      <span className="flex items-center justify-between gap-2">
+        {action.label}
+        {actionLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+      </span>
+      <span className={`mt-1 block text-xs font-normal ${action.tone === "primary" ? "text-white/75" : "text-ink-500"}`}>
+        {action.reason}
+      </span>
+    </button>
+  );
+
+  const renderProcurementBridgeView = () => {
+    const bridge = workbench?.procurement_bridge || null;
+    const bridgeActions = workbenchActions.filter((action) => [
+      "approve_reorder_suggestion",
+      "ignore_signal",
+      "open_procurement_workbench",
+      "create_supplier_check_task",
+      "adjust_reorder_policy"
+    ].includes(action.code));
+    const tasks = workbench?.open_tasks || [];
+
+    return (
+      <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
+        <aside className="glass-panel p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-ink-900">Bridge queue</h2>
+              <p className="text-xs text-ink-500">Only real stock signals and reorder suggestions appear here.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => runReorder()}
+              disabled={actionLoading}
+              className="rounded-full bg-ink-900 px-3 py-2 text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-white disabled:opacity-60"
+            >
+              Scan
+            </button>
+          </div>
+          {renderQueue()}
+        </aside>
+
+        <main className="space-y-5">
+          <div className="glass-panel p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold text-ink-900">Procurement Bridge</h2>
+                <p className="mt-1 max-w-3xl text-sm text-ink-500">
+                  Inventory approves stock risk. Procurement owns supplier options, buying route, RFQ, quotes, and purchase preparation.
+                </p>
+              </div>
+              {bridge ? <StatusPill status={bridge.status} /> : null}
+            </div>
+
+            {workbenchLoading ? (
+              <div className="mt-5 flex min-h-[16rem] items-center justify-center rounded-2xl border border-white/70 bg-white/60 text-sm text-ink-500">
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Loading bridge...
+              </div>
+            ) : bridge ? (
+              <div className="mt-5 space-y-5">
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <Detail label="Bridge status" value={formatLabel(bridge.status)} />
+                  <Detail label="Purchase need" value={bridge.purchase_need?.label || "Inventory signal"} />
+                  <Detail label="Requisition" value={bridge.requisition?.label || "Not started"} />
+                  <Detail label="RFQ phase" value={bridge.rfq?.label || "Not started"} />
+                </div>
+
+                <div className="grid gap-4 lg:grid-cols-3">
+                  <div className="rounded-2xl border border-white/70 bg-white/75 p-4">
+                    <p className="text-[0.62rem] font-semibold uppercase tracking-[0.2em] text-ink-400">Inventory review</p>
+                    <h3 className="mt-2 text-base font-semibold text-ink-900">{bridge.purchase_need?.label || workbench.signal?.label || "Stock signal"}</h3>
+                    <p className="mt-1 text-sm text-ink-500">{workbench.risk_explanation?.headline || workbench.signal?.reason || "Real stock signal selected."}</p>
+                    <div className="mt-3">
+                      <StatusPill status={workbench.signal?.status || bridge.purchase_need?.status} />
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-white/70 bg-white/75 p-4">
+                    <p className="text-[0.62rem] font-semibold uppercase tracking-[0.2em] text-ink-400">Procurement handoff</p>
+                    <h3 className="mt-2 text-base font-semibold text-ink-900">{bridge.requisition?.label || "No requisition linked yet"}</h3>
+                    <p className="mt-1 text-sm text-ink-500">
+                      {bridge.requisition ? "A linked purchase need is available for Procurement." : "Approve the reorder signal before the buying journey continues."}
+                    </p>
+                    <div className="mt-3">
+                      <StatusPill status={bridge.requisition?.status || (bridge.ready_for_procurement ? "ready" : "pending")} />
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-white/70 bg-white/75 p-4">
+                    <p className="text-[0.62rem] font-semibold uppercase tracking-[0.2em] text-ink-400">Supplier quote phase</p>
+                    <h3 className="mt-2 text-base font-semibold text-ink-900">{bridge.rfq?.label || "Not started in Inventory"}</h3>
+                    <p className="mt-1 text-sm text-ink-500">RFQ and supplier comparison stay in Procurement, not Inventory.</p>
+                    <div className="mt-3">
+                      <StatusPill status={bridge.rfq?.status || "not_started"} />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+                  <section className="rounded-2xl border border-white/70 bg-white/75 p-4">
+                    <h3 className="text-base font-semibold text-ink-900">Linked work</h3>
+                    <div className="mt-3 space-y-2">
+                      {tasks.length ? tasks.map((task) => (
+                        <div key={task.id} className="rounded-xl border border-ink-100 bg-white/70 px-3 py-2 text-sm">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-semibold text-ink-800">{task.title || formatLabel(task.task_type)}</span>
+                            <StatusPill status={task.status} />
+                          </div>
+                          <p className="mt-1 text-xs text-ink-500">{task.due_at ? `Due ${formatDate(task.due_at)}` : "No due date"}</p>
+                        </div>
+                      )) : (
+                        <EmptyState
+                          title="No linked inventory task yet."
+                          body="A supplier-check task can be created only through the governed inventory task endpoint."
+                        />
+                      )}
+                    </div>
+                  </section>
+
+                  <aside className="rounded-2xl border border-white/70 bg-white/75 p-4">
+                    <h3 className="text-base font-semibold text-ink-900">Allowed actions</h3>
+                    <p className="mt-1 text-xs text-ink-500">Only backend-returned governed actions are enabled.</p>
+                    <div className="mt-3 grid gap-2">
+                      {bridgeActions.length ? bridgeActions.map(renderBridgeActionButton) : (
+                        <div className="rounded-2xl border border-dashed border-ink-200 bg-white/60 px-4 py-6 text-sm text-ink-400">
+                          No bridge action is currently available for this signal.
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setActiveView("policy")}
+                        className="rounded-2xl border border-ink-100 bg-white px-4 py-3 text-left text-sm font-semibold text-ink-700"
+                      >
+                        View policy details
+                        <span className="mt-1 block text-xs font-normal text-ink-500">Open the effective policy and material override view.</span>
+                      </button>
+                    </div>
+                  </aside>
+                </div>
+              </div>
+            ) : selectedQueueItem ? (
+              <div className="mt-5">
+                <EmptyState
+                  title="Create a reorder suggestion before procurement handoff."
+                  body="This material has a stock signal, but no governed reorder suggestion workbench is linked yet."
+                  action={isPhysicalInventoryOperational(selectedQueueItem.material || activeMaterial) ? (
+                    <button
+                      type="button"
+                      onClick={() => runReorder(selectedQueueItem.material_id, true)}
+                      disabled={actionLoading}
+                      className="inline-flex items-center gap-2 rounded-full bg-ink-900 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-white disabled:opacity-60"
+                    >
+                      {actionLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ClipboardList className="h-4 w-4" />}
+                      {actions.createSuggestion}
+                    </button>
+                  ) : null}
+                />
+              </div>
+            ) : (
+              <div className="mt-5">
+                <EmptyState
+                  title="No procurement bridge yet."
+                  body="Run the low-stock scan or approve a real reorder signal. Inventory will not fabricate purchase needs or supplier work."
+                />
+              </div>
+            )}
+          </div>
+        </main>
+      </div>
+    );
+  };
+
   return (
     <section className="space-y-5">
       {renderHeader()}
@@ -1621,6 +1808,7 @@ export default function InventoryWorkspace({ node, ctx } = {}) {
       {activeView === "locations" ? renderLocationsView() : null}
       {activeView === "counts" ? renderCountsView() : null}
       {activeView === "policy" ? renderPolicyView() : null}
+      {activeView === "bridge" ? renderProcurementBridgeView() : null}
     </section>
   );
 }

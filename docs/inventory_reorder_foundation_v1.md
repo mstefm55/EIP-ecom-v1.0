@@ -190,6 +190,7 @@ Inventory Operations
 -> Locations / States
 -> Counts / Adjustments
 -> Policy View
+-> Procurement Bridge
 ```
 
 The workbench starts from one stock signal or reorder suggestion and composes a read model from existing kernel data:
@@ -228,6 +229,8 @@ next_actions
 ```
 
 `next_actions` is a display/action read model derived from the current suggestion status, active process state, open tasks, policy-backed recommendation, and linked procurement state. Inventory actions approve/ignore the reorder suggestion through the process engine, create follow-up tasks, or hand off to Procurement. Inventory does not execute PO lifecycle work or supplier outbound transmission.
+
+The Inventory workspace exposes `Procurement Bridge` as its own descriptor-backed view. It shows only real linked purchase need, requisition, RFQ phase, open task, and process-state references from the selected reorder signal workbench. If no linked procurement work exists, it shows a production empty state and does not fabricate supplier, RFQ, quote, warehouse, or purchase rows.
 
 Rejected materials are displayed as `Rejected` and are not counted as out of stock. Digital/download/service/virtual products are excluded from physical stock signals unless stock tracking is explicitly configured on the material.
 

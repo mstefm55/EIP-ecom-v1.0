@@ -396,7 +396,8 @@ SELECT
               { "id": "movements", "label": "Movements" },
               { "id": "locations", "label": "Locations / States" },
               { "id": "counts", "label": "Counts / Adjustments" },
-              { "id": "policy", "label": "Policy View" }
+              { "id": "policy", "label": "Policy View" },
+              { "id": "bridge", "label": "Procurement Bridge" }
             ],
             "actions": {
               "refresh": "Refresh",

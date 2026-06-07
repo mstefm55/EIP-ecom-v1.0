@@ -470,11 +470,13 @@ test("inventory dashboard is descriptor registered and module gated", () => {
   assert.match(dashboardSurface, /Locations \/ States/);
   assert.match(dashboardSurface, /Counts \/ Adjustments/);
   assert.match(dashboardSurface, /Policy View/);
+  assert.match(dashboardSurface, /Procurement Bridge/);
   assert.match(surfaceSeed, /"code": "inventory"/);
   assert.match(surfaceSeed, /"type": "InventoryWorkspace"/);
   assert.match(surfaceSeed, /"workbench": "\/api\/eip\/inventory\/reorder-suggestions"/);
   assert.match(surfaceSeed, /"Stock Position"/);
   assert.match(surfaceSeed, /"Policy View"/);
+  assert.match(surfaceSeed, /"Procurement Bridge"/);
   assert.match(workspace, /export default function InventoryWorkspace/);
   assert.ok(workspace.includes("apiFetch(`${endpoints.suggestions}/run`"));
   assert.match(workspace, /decision_card/);
@@ -490,6 +492,10 @@ test("inventory dashboard is descriptor registered and module gated", () => {
   assert.match(workspace, /Material overrides/);
   assert.match(workspace, /Current stock state/);
   assert.match(workspace, /Procurement bridge/);
+  assert.match(workspace, /const renderProcurementBridgeView/);
+  assert.match(workspace, /Bridge queue/);
+  assert.match(workspace, /Only backend-returned governed actions are enabled/);
+  assert.match(workspace, /No procurement bridge yet/);
   assert.match(workspace, /Open in Procurement/);
   assert.match(workspace, /Recent stock movements/);
   assert.match(workspace, /Preferred supplier reference/);

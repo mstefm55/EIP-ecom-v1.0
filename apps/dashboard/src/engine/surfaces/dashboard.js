@@ -422,6 +422,7 @@ export const dashboardSurface = {
               { id: "locations", label: "Locations / States" },
               { id: "counts", label: "Counts / Adjustments" },
               { id: "policy", label: "Policy View" },
+              { id: "bridge", label: "Procurement Bridge" },
             ],
             actions: {
               refresh: "Refresh",
