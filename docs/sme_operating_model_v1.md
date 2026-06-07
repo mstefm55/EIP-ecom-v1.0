@@ -50,7 +50,7 @@ It uses real `eip_core.task` records and the governed schedule/delegate endpoint
 | --- | --- | --- |
 | CRM | Customers, leads, interactions, cases, opportunities, intake, mailbox, CRM signals | Stock quantities, payment credentials, purchase orders |
 | Orders & Payments | Sales orders, payment records, returns, refunds, operational actions | Payment provider secrets, tenant payment preferences, stock planning |
-| Inventory | Stock Signals Queue, material stock profile, stock movements, stockout prediction, policy-backed reorder suggestions, stock review tasks, Procurement handoff | Purchase order commitment, supplier outbound transmission, accounting valuation, MRP |
+| Inventory | Stock Signals, Stock Position, Movements, Locations / States where real data exists, Counts / Adjustments where governed, Policy View, stockout prediction, policy-backed reorder suggestions, Procurement handoff | Purchase order commitment, supplier outbound transmission, accounting valuation, fabricated warehouse/bin/location rows, MRP |
 | Procurement | Purchase Need Workbench, supplier options, governed buying-route recommendation, requisition review, RFQ/supplier offer comparison, low-value cash/shop purchase receipt | Full PO execution, supplier integrations, accounting ledger, MRP |
 | Product Studio | Product setup, product card data, product/media/category attrs, pricing visibility, trade-condition visibility, initial inventory setup before activation | Operational inventory movements, warehouse execution, purchase commitment, supplier outbound transmission, business-wide scheduling |
 | Tasks | Task queue, internal due-date scheduling, delegation, overdue and workload views | Module-specific approvals, purchase commitment, payment execution, business policy decisions |
@@ -81,6 +81,8 @@ stock signal
 -> Action Rail
 -> Procurement Purchase Need Workbench handoff
 ```
+
+The dashboard Inventory module is organized as Stock Signals, Stock Position, Movements, Locations / States, Counts / Adjustments, and Policy View. Stock Position is material-level unless real location/state data exists. Rejected materials must display as `Rejected`, not `Out of stock`. Digital products do not show physical inventory operations unless stock tracking is explicitly configured.
 
 Machine actions may detect stockout risk, calculate suggested quantity, warn about cash impact, flag supplier risk, and prepare purchase-need metadata. Human approval remains required for purchase commitment, supplier changes, high-value reorders, risky supplier decisions, and cash-impacting actions. Inventory does not own supplier selection, RFQ/direct/cash route decisions, purchase order execution, or supplier outbound transmission; those belong to Procurement and later governed purchase execution waves.
 

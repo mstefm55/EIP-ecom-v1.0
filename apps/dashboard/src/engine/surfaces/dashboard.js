@@ -408,7 +408,7 @@ export const dashboardSurface = {
           props: {
             module: "inventory",
             title: "Inventory",
-            subtitle: "Stock signal queue, policy-backed recommendation, procurement handoff, and timeline.",
+            subtitle: "Operational stock signals, position, movements, policy evidence, and procurement handoff.",
             endpoints: {
               overview: "/api/eip/inventory/overview",
               materials: "/api/eip/inventory/materials",
@@ -416,16 +416,18 @@ export const dashboardSurface = {
               workbench: "/api/eip/inventory/reorder-suggestions",
             },
             tabs: [
-              { id: "queue", label: "Stock Signals Queue" },
-              { id: "workbench", label: "Inventory Signal Workbench" },
-              { id: "actions", label: "Action Rail" },
-              { id: "tools", label: "Material Policy Tools" },
+              { id: "signals", label: "Stock Signals" },
+              { id: "position", label: "Stock Position" },
+              { id: "movements", label: "Movements" },
+              { id: "locations", label: "Locations / States" },
+              { id: "counts", label: "Counts / Adjustments" },
+              { id: "policy", label: "Policy View" },
             ],
             actions: {
               refresh: "Refresh",
               runReorder: "Run low-stock scan",
-              adjust: "Adjust stock",
-              policy: "Set reorder policy",
+              adjust: "Record adjustment",
+              policy: "Save material override",
               movements: "View movements",
               createSuggestion: "Create reorder suggestion",
               approve: "Approve",

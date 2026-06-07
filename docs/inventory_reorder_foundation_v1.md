@@ -180,6 +180,18 @@ The dashboard now uses a journey-first layout:
 Stock Signals Queue -> Inventory Signal Workbench -> Action Rail -> Timeline
 ```
 
+The production workspace is organized as operational stock views:
+
+```text
+Inventory Operations
+-> Stock Signals
+-> Stock Position
+-> Movements
+-> Locations / States
+-> Counts / Adjustments
+-> Policy View
+```
+
 The workbench starts from one stock signal or reorder suggestion and composes a read model from existing kernel data:
 
 ```text
@@ -217,6 +229,10 @@ next_actions
 
 `next_actions` is a display/action read model derived from the current suggestion status, active process state, open tasks, policy-backed recommendation, and linked procurement state. Inventory actions approve/ignore the reorder suggestion through the process engine, create follow-up tasks, or hand off to Procurement. Inventory does not execute PO lifecycle work or supplier outbound transmission.
 
+Rejected materials are displayed as `Rejected` and are not counted as out of stock. Digital/download/service/virtual products are excluded from physical stock signals unless stock tracking is explicitly configured on the material.
+
+Stock Position is material-level when only `material.attrs.inventory` exists. Location/state rows render only when real tenant data such as `locations`, `stock_by_location`, `stock_states`, or material-level state fields exist. The UI does not fabricate warehouse, bin, WIP, in-transit, lot, or serial rows.
+
 ## Stock Movements
 
 Authenticated operators can record movements. Each movement updates `material.attrs.inventory` and writes an `INVENTORY_STOCK_MOVEMENT` information record.
@@ -242,6 +258,8 @@ reserve
 release
 adjust
 ```
+
+Counts / Adjustments exposes the existing movement path for physical inventory. A future stock-count task workflow is shown as unavailable until process/task governance is configured; it is not simulated in the UI.
 
 ## Reorder Suggestions
 
@@ -367,17 +385,17 @@ Dashboard -> Inventory
 Sections:
 
 ```text
-Stock Signals Queue
-Inventory Signal Workbench
-Action Rail
-Process timeline
-Recent stock movements
-Material lookup and policy tools
+Stock Signals
+Stock Position
+Movements
+Locations / States
+Counts / Adjustments
+Policy View
 ```
 
 The menu item is descriptor registered and module-gated by active `inventory` tenant settings. The React widget is a low-level reusable renderer for the descriptor-provided endpoints, tabs, labels, and actions.
 
-The default UI is journey-led, not a technical planning table. It starts from one stock signal, explains the material risk, shows the governed policy source, separates material overrides from commercial-condition policy, presents one action rail, and hands the buying journey to Procurement. Advanced fields remain in the selected material policy tools for operators who need to tune reorder behavior. Raw UUIDs are not primary labels where material names, codes, suggestion titles, or condition codes exist.
+The default UI is journey-led, not a technical planning table. It starts from one stock signal, explains the material risk, shows the governed policy source, separates material overrides from commercial-condition policy, presents one action rail, and hands the buying journey to Procurement. Policy View shows the effective commercial-condition policy and keeps material override editing collapsed. Raw JSON is not dumped into the main UI, and raw UUIDs are not primary labels where material names, codes, suggestion titles, or condition codes exist.
 
 ## Payment And Order Boundary
 
@@ -428,12 +446,14 @@ npm run build
 3. Redeploy dashboard.
 4. Ensure the tenant has the Inventory module enabled.
 5. Open Dashboard -> Inventory.
-6. Verify Stock Signals Queue, Inventory Signal Workbench, Action Rail, and timeline load.
+6. Verify Stock Signals, Stock Position, Movements, Locations / States, Counts / Adjustments, and Policy View are visible.
 7. Run low-stock scan if no signals exist.
 8. Select one stock signal and verify material context, effective policy, material overrides, recommendation, recent movements, and procurement bridge display.
-9. Approve or ignore the created reorder suggestion.
-10. Use Open in Procurement to continue the purchase need journey.
-11. Open material lookup/policy tools only for policy tuning or stock movement recording.
+9. Confirm digital/untracked products do not show physical stock actions unless explicitly tracked.
+10. Confirm rejected items show as Rejected and not Out of stock.
+11. Approve or ignore the created reorder suggestion.
+12. Use Open in Procurement to continue the purchase need journey.
+13. Use Counts / Adjustments only for backed stock movement recording.
 
 ## Known Limitations
 
