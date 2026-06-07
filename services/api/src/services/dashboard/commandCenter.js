@@ -628,6 +628,7 @@ export async function delegateCommandCenterTask(app, { tenantId, identityId, tas
     }
 
     const canDelegateAny = await hasPermission(app, tenantId, identityId, "TASK_DELEGATE")
+      || await hasPermission(app, tenantId, identityId, "core.task.write")
       || await hasPermission(app, tenantId, identityId, "CRM_TASK_WRITE")
       || await hasPermission(app, tenantId, identityId, "PROCESS_INSTANCE_WRITE");
     const ownsTask = !task.assigned_agent_id || task.assigned_agent_id === actorAgentId;
@@ -725,6 +726,7 @@ export async function scheduleCommandCenterTask(app, { tenantId, identityId, tas
     }
 
     const canScheduleAny = await hasPermission(app, tenantId, identityId, "TASK_SCHEDULE")
+      || await hasPermission(app, tenantId, identityId, "core.task.write")
       || await hasPermission(app, tenantId, identityId, "TASK_DELEGATE")
       || await hasPermission(app, tenantId, identityId, "CRM_TASK_WRITE")
       || await hasPermission(app, tenantId, identityId, "PROCESS_INSTANCE_WRITE");

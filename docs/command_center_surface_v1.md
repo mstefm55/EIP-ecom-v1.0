@@ -47,7 +47,7 @@ Task delegation uses:
 POST /api/eip/user/tasks/:id/delegate
 ```
 
-It requires an EIP session, CSRF, tenant scoping, an actor agent, and either ownership of the task or an existing task/process write permission. It updates the existing task assignment and writes a `task_status_event` with reason `delegated`.
+It requires an EIP session, CSRF, tenant scoping, an actor agent, and either ownership of the task or a governed task/process permission such as `TASK_DELEGATE`, `core.task.write`, `CRM_TASK_WRITE`, or `PROCESS_INSTANCE_WRITE`. It updates the existing task assignment and writes a `task_status_event` with reason `delegated`.
 
 Task scheduling uses:
 
@@ -55,7 +55,7 @@ Task scheduling uses:
 POST /api/eip/user/tasks/:id/schedule
 ```
 
-It reuses existing `eip_core.task.due_at`, `started_at`, assignment, status, and `attrs`. Planned start/end, reminder, priority, and scheduling metadata are stored in task attrs until the process engine exposes richer first-class scheduling effects. The route requires EIP session, CSRF, tenant scope, actor agent resolution, and ownership or existing task/process permissions. It writes a `task_status_event` with reason `scheduled`.
+It reuses existing `eip_core.task.due_at`, `started_at`, assignment, status, and `attrs`. Planned start/end, reminder, priority, and scheduling metadata are stored in task attrs until the process engine exposes richer first-class scheduling effects. The route requires EIP session, CSRF, tenant scope, actor agent resolution, and ownership or a governed task/process permission such as `TASK_SCHEDULE`, `core.task.write`, `TASK_DELEGATE`, `CRM_TASK_WRITE`, or `PROCESS_INSTANCE_WRITE`. It writes a `task_status_event` with reason `scheduled`.
 
 ## UI Descriptor Governance
 
@@ -138,7 +138,7 @@ cd services/api
 npm run migrate
 ```
 
-Migration `0113_command_center_dashboard_descriptor.sql` is metadata-only. Migration `0114_command_center_theme_descriptor_refresh.sql` is the additive hosted refresh for environments where `0113` was already applied. It patches active/published `dashboard` UI surface descriptors so Command Center labels, tabs, widgets, category presentation, Task Browser settings, and theme tokens come from persisted surface metadata rather than only React fallback defaults.
+Migration `0113_command_center_dashboard_descriptor.sql` is metadata-only. Migration `0114_command_center_theme_descriptor_refresh.sql` is the additive hosted refresh for environments where `0113` was already applied. It patches active/published `dashboard` UI surface descriptors so Command Center labels, tabs, widgets, category presentation, Task Browser settings, and theme tokens come from persisted surface metadata rather than only React fallback defaults. Migration `0118_task_command_center_permission_backfill.sql` adds governed `TASK_DELEGATE` and `TASK_SCHEDULE` permissions to current role rows and role templates so cloned tenants receive the same Command Center task-operation authority.
 
 Manual dashboard check:
 

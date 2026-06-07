@@ -29,6 +29,13 @@ test("command center backend stays a thin tenant-scoped composition surface", ()
   assert.match(service, /scheduleCommandCenterTask/);
   assert.match(service, /reason_code, note, actor_agent_id, attrs/);
   assert.match(service, /'scheduled'/);
+  assert.match(service, /TASK_DELEGATE/);
+  assert.match(service, /TASK_SCHEDULE/);
+  assert.match(service, /core\.task\.write/);
+  assert.match(service, /CRM_TASK_WRITE/);
+  assert.match(service, /PROCESS_INSTANCE_WRITE/);
+  assert.match(service, /!ownsTask && !canDelegateAny/);
+  assert.match(service, /!ownsTask && !canScheduleAny/);
   assert.doesNotMatch(service, /CREATE TABLE/i);
   assert.doesNotMatch(service, /samara|samarapattern|samara-web-storefront/i);
 });
@@ -106,6 +113,34 @@ test("command center dashboard UI is descriptor-driven and keeps the task browse
   assert.match(refreshMigration, /"variant": "eip_v1"/);
   const surfacePolishMigration = read("services/api/db/migrations/0115_command_center_product_studio_surface_polish.sql");
   assert.match(surfacePolishMigration, /command_center_scheduling/);
+});
+
+test("command center task operation permissions are governed and clone-safe", () => {
+  const migration = read("services/api/db/migrations/0118_task_command_center_permission_backfill.sql");
+
+  assert.match(migration, /INSERT INTO eip_authz\.permission/);
+  assert.match(migration, /TASK_DELEGATE/);
+  assert.match(migration, /TASK_SCHEDULE/);
+  assert.match(migration, /INSERT INTO eip_authz\.role_template_permission/);
+  assert.match(migration, /INSERT INTO eip_authz\.role_permission/);
+  for (const role of [
+    "ADMIN_SUPER",
+    "ADMIN_EXEC",
+    "ECOM_ADMIN",
+    "ERP_USER",
+    "CRM_ADMIN",
+    "CRM_USER",
+    "ACCESS_UNIVERSAL",
+    "ACCESS_ECOM_FULL",
+    "ACCESS_ECOM_CATALOG",
+    "ACCESS_ECOM_ORDERS",
+    "ACCESS_CRM_FULL"
+  ]) {
+    assert.match(migration, new RegExp(`'${role}'`));
+  }
+  assert.doesNotMatch(migration, /'ACCESS_READ_ONLY', 'TASK_SCHEDULE'/);
+  assert.doesNotMatch(migration, /'ACCESS_READ_ONLY', 'TASK_DELEGATE'/);
+  assert.doesNotMatch(migration, /CREATE TABLE/i);
 });
 
 test("command center category routing uses scored metadata instead of broad text includes", () => {
