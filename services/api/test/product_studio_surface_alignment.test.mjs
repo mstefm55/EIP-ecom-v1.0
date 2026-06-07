@@ -25,7 +25,8 @@ test("product studio surface alignment is descriptor-backed and keeps existing s
   assert.match(component, /TradeConditionsDrawer/);
   assert.match(component, /Complete product setup work/);
   assert.match(component, /Complete trade terms/);
-  assert.match(component, /Create governed condition/);
+  assert.match(component, /Create a product rule/);
+  assert.match(component, /Business values/);
   assert.match(component, /\/api\/eip\/ecom\/commercial-conditions/);
   assert.match(component, /sticky bottom-0/);
   assert.match(component, /overflow-y-auto/);
@@ -75,11 +76,13 @@ test("product studio commercial conditions use governed commercial_condition row
   assert.match(route, /payment_terms\.credit_limit_days/);
   assert.match(route, /ECOM_PRODUCT_WRITE/);
   assert.match(route, /ECOM_SETTINGS_WRITE/);
-  assert.match(component, /Saved in commercial_condition/);
-  assert.match(component, /Structured values/);
-  assert.match(component, /Create field/);
-  assert.match(component, /effect_group/);
-  assert.match(component, /Product attrs are not the policy authority/);
+  assert.match(component, /Product rule/);
+  assert.match(component, /Business values/);
+  assert.match(component, /Add a new value type/);
+  assert.match(component, /Use clear values such as payment days, credit limit, reorder point, or discount/);
+  assert.doesNotMatch(component, /Saved in commercial_condition/);
+  assert.doesNotMatch(component, /Product attrs are not the policy authority/);
+  assert.doesNotMatch(component, /Effect path:/);
   assert.doesNotMatch(route, /CREATE TABLE/i);
   const structuredMigration = read("services/api/db/migrations/0120_commercial_condition_structured_fields.sql");
   assert.match(structuredMigration, /ECOM_COMMERCIAL_CONDITION_FIELD/);

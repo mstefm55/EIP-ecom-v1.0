@@ -82,9 +82,9 @@ const DEFAULT_PRODUCT_STUDIO_UI = {
   ],
   tradeConditions: {
     title: "Trade conditions",
-    subtitle: "Commercial rules, pricing terms, supplier/customer terms, validity, and renewal tasks.",
-    createLabel: "Create condition",
-    savedLabel: "Saved in commercial_condition",
+    subtitle: "Customer, supplier, payment, pricing, and inventory rules that affect this product.",
+    createLabel: "Save rule",
+    savedLabel: "Product rule",
     typeOptions: [
       { value: "TRADE_TERMS", label: "Trade terms" },
       { value: "PRICE", label: "Price" },
@@ -8384,7 +8384,7 @@ function TradeConditionsDrawer({ open, product, ui, isDigital, needsInventorySet
       setConditionFields(items);
       return items;
     } catch (err) {
-      setError(err?.message || "Failed to load commercial condition fields.");
+      setError(err?.message || "Failed to load value types.");
       setConditionFields([]);
       return [];
     } finally {
@@ -8404,7 +8404,7 @@ function TradeConditionsDrawer({ open, product, ui, isDigital, needsInventorySet
       setConditions(nextItems);
       if (onChanged) onChanged(nextItems);
     } catch (err) {
-      setError(err?.message || "Failed to load commercial conditions.");
+      setError(err?.message || "Failed to load product rules.");
       setConditions(fallbackConditions);
     } finally {
       setLoading(false);
@@ -8433,7 +8433,7 @@ function TradeConditionsDrawer({ open, product, ui, isDigital, needsInventorySet
     const label = String(fieldDraft.label || "").trim();
     const code = normalizedFieldCode(label);
     if (!label || !code) {
-      setError("Field label is required.");
+      setError("Value type name is required.");
       return;
     }
     const effectGroup = String(fieldDraft.effect_group || "custom").trim() || "custom";
@@ -8457,7 +8457,7 @@ function TradeConditionsDrawer({ open, product, ui, isDigital, needsInventorySet
       setStructuredRows((current) => [...current, { field_code: code, value: "" }]);
       setFieldDraft({ label: "", data_type: "number", unit: "", effect_group: "payment_terms" });
     } catch (err) {
-      setError(err?.message || "Failed to create condition field.");
+      setError(err?.message || "Failed to create value type.");
     } finally {
       setConditionFieldsLoading(false);
     }
@@ -8488,7 +8488,7 @@ function TradeConditionsDrawer({ open, product, ui, isDigital, needsInventorySet
     if (!productId || saving) return;
     const label = String(draft.label || "").trim();
     if (!label) {
-      setError("Condition name is required.");
+      setError("Rule name is required.");
       return;
     }
     setSaving(true);
@@ -8526,7 +8526,7 @@ function TradeConditionsDrawer({ open, product, ui, isDigital, needsInventorySet
       setStructuredRows([{ field_code: conditionFieldOptions[0]?.code || "payment_due_days", value: "" }]);
       await loadConditions();
     } catch (err) {
-      setError(err?.message || "Failed to create commercial condition.");
+      setError(err?.message || "Failed to save product rule.");
     } finally {
       setSaving(false);
     }
@@ -8541,7 +8541,7 @@ function TradeConditionsDrawer({ open, product, ui, isDigital, needsInventorySet
         <div className="border-b border-ink-100 px-5 py-4">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-[0.6rem] font-semibold uppercase tracking-[0.25em] text-ink-400">Product governance</p>
+              <p className="text-[0.6rem] font-semibold uppercase tracking-[0.25em] text-ink-400">Product rules</p>
               <h3 className="mt-1 text-xl font-semibold text-ink-900">{ui?.title || "Trade conditions"}</h3>
               <p className="mt-1 text-sm text-ink-500">{ui?.subtitle || DEFAULT_PRODUCT_STUDIO_UI.tradeConditions.subtitle}</p>
             </div>
@@ -8558,8 +8558,8 @@ function TradeConditionsDrawer({ open, product, ui, isDigital, needsInventorySet
                 <p className="text-[0.6rem] font-semibold uppercase tracking-[0.2em] text-brand-500">
                   {ui?.savedLabel || DEFAULT_PRODUCT_STUDIO_UI.tradeConditions.savedLabel}
                 </p>
-                <h4 className="mt-1 text-base font-semibold text-ink-900">Create governed condition</h4>
-                <p className="mt-1 text-xs text-ink-500">Saved as a tenant-scoped commercial condition linked to this product. Product attrs are not the policy authority.</p>
+                <h4 className="mt-1 text-base font-semibold text-ink-900">Create a product rule</h4>
+                <p className="mt-1 text-xs text-ink-500">Use clear values such as payment days, credit limit, reorder point, or discount. EIP can then use them in workbenches and approvals.</p>
               </div>
               <button
                 type="submit"
@@ -8572,7 +8572,7 @@ function TradeConditionsDrawer({ open, product, ui, isDigital, needsInventorySet
             </div>
             <div className="mt-3 grid gap-3 md:grid-cols-2">
               <label className="text-xs font-semibold text-ink-500">
-                Condition name
+                Rule name
                 <input
                   value={draft.label}
                   onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value }))}
@@ -8581,7 +8581,7 @@ function TradeConditionsDrawer({ open, product, ui, isDigital, needsInventorySet
                 />
               </label>
               <label className="text-xs font-semibold text-ink-500">
-                Type
+                Rule type
                 <select
                   value={draft.condition_type}
                   onChange={(event) => setDraft((current) => ({ ...current, condition_type: event.target.value }))}
@@ -8593,7 +8593,7 @@ function TradeConditionsDrawer({ open, product, ui, isDigital, needsInventorySet
                 </select>
               </label>
               <label className="text-xs font-semibold text-ink-500">
-                Category
+                Area
                 <select
                   value={draft.condition_category}
                   onChange={(event) => setDraft((current) => ({ ...current, condition_category: event.target.value }))}
@@ -8614,27 +8614,27 @@ function TradeConditionsDrawer({ open, product, ui, isDigital, needsInventorySet
                 />
               </label>
               <label className="md:col-span-2 text-xs font-semibold text-ink-500">
-                Summary / effect
+                Short note
                 <textarea
                   value={draft.summary}
                   onChange={(event) => setDraft((current) => ({ ...current, summary: event.target.value }))}
                   className="mt-1 min-h-[5rem] w-full rounded-xl border border-ink-100 bg-white px-3 py-2 text-sm text-ink-800 outline-none focus:border-brand-300"
-                  placeholder="Describe the governed business effect or policy note."
+                  placeholder="Explain the rule in plain language for the team."
                 />
               </label>
             </div>
             <div className="mt-4 rounded-2xl border border-ink-100 bg-white/80 p-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <p className="text-[0.6rem] font-semibold uppercase tracking-[0.2em] text-ink-400">Structured values</p>
-                  <p className="mt-1 text-xs text-ink-500">Typed values are saved into condition effect paths for workbench and process calculations.</p>
+                  <p className="text-[0.6rem] font-semibold uppercase tracking-[0.2em] text-ink-400">Business values</p>
+                  <p className="mt-1 text-xs text-ink-500">Add the numbers, dates, or yes/no answers EIP should use when it makes recommendations.</p>
                 </div>
                 <button
                   type="button"
                   onClick={addStructuredRow}
                   className="rounded-full border border-ink-100 bg-white px-3 py-1.5 text-xs font-semibold text-ink-600"
                 >
-                  Add value
+                  Add another value
                 </button>
               </div>
               <div className="mt-3 space-y-2">
@@ -8644,13 +8644,13 @@ function TradeConditionsDrawer({ open, product, ui, isDigital, needsInventorySet
                   return (
                     <div key={`structured-${index}`} className="grid gap-2 rounded-xl border border-ink-100 bg-ink-50/60 p-2 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto]">
                       <label className="text-[0.65rem] font-semibold text-ink-500">
-                        Field
+                        Value type
                         <select
                           value={row.field_code}
                           onChange={(event) => updateStructuredRow(index, { field_code: event.target.value, value: "" })}
                           className="mt-1 w-full rounded-xl border border-ink-100 bg-white px-3 py-2 text-sm text-ink-800 outline-none focus:border-brand-300"
                         >
-                          {conditionFieldsLoading ? <option value="">Loading fields...</option> : null}
+                          {conditionFieldsLoading ? <option value="">Loading value types...</option> : null}
                           {conditionFieldOptions.map((option) => (
                             <option key={option.code} value={option.code}>
                               {option.label}{option.unit ? ` (${option.unit})` : ""}
@@ -8677,7 +8677,7 @@ function TradeConditionsDrawer({ open, product, ui, isDigital, needsInventorySet
                             step={field.data_type === "integer" ? "1" : "any"}
                             onChange={(event) => updateStructuredRow(index, { value: event.target.value })}
                             className="mt-1 w-full rounded-xl border border-ink-100 bg-white px-3 py-2 text-sm text-ink-800 outline-none focus:border-brand-300"
-                            placeholder={field.unit ? `Value in ${field.unit}` : "Value"}
+                            placeholder={field.unit ? `Enter ${field.unit}` : "Enter value"}
                           />
                         )}
                       </label>
@@ -8690,17 +8690,13 @@ function TradeConditionsDrawer({ open, product, ui, isDigital, needsInventorySet
                           Remove
                         </button>
                       </div>
-                      {field.effect_path ? (
-                        <p className="md:col-span-3 text-[0.62rem] text-ink-400">
-                          Effect path: <span className="font-mono">{field.effect_path}</span>
-                        </p>
-                      ) : null}
                     </div>
                   );
                 })}
               </div>
-              <div className="mt-3 rounded-xl border border-dashed border-ink-200 bg-white p-3">
-                <p className="text-[0.6rem] font-semibold uppercase tracking-[0.2em] text-ink-400">Create field</p>
+              <details className="mt-3 rounded-xl border border-dashed border-ink-200 bg-white p-3">
+                <summary className="cursor-pointer text-xs font-semibold text-ink-600">Add a new value type</summary>
+                <p className="mt-2 text-xs text-ink-500">Use this only when the value you need is not already in the list.</p>
                 <div className="mt-2 grid gap-2 md:grid-cols-[minmax(0,1fr)_9rem_7rem_10rem_auto]">
                   <input
                     value={fieldDraft.label}
@@ -8731,11 +8727,11 @@ function TradeConditionsDrawer({ open, product, ui, isDigital, needsInventorySet
                     className="rounded-xl border border-ink-100 bg-white px-3 py-2 text-sm text-ink-800 outline-none focus:border-brand-300"
                   >
                     <option value="payment_terms">Payment terms</option>
-                    <option value="procurement_policy">Procurement policy</option>
-                    <option value="cash_purchase_policy">Cash purchase</option>
-                    <option value="reorder_policy">Reorder policy</option>
+                    <option value="procurement_policy">Buying approval</option>
+                    <option value="cash_purchase_policy">Cash buying</option>
+                    <option value="reorder_policy">Reorder planning</option>
                     <option value="discount">Discount</option>
-                    <option value="custom">Custom</option>
+                    <option value="custom">Other</option>
                   </select>
                   <button
                     type="button"
@@ -8743,10 +8739,10 @@ function TradeConditionsDrawer({ open, product, ui, isDigital, needsInventorySet
                     disabled={conditionFieldsLoading}
                     className="rounded-full border border-brand-100 bg-brand-50 px-3 py-2 text-xs font-semibold text-brand-700 disabled:opacity-50"
                   >
-                    Create field
+                    Add type
                   </button>
                 </div>
-              </div>
+              </details>
             </div>
             {error ? <p className="mt-3 rounded-xl border border-rose-100 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">{error}</p> : null}
           </form>
@@ -8761,7 +8757,7 @@ function TradeConditionsDrawer({ open, product, ui, isDigital, needsInventorySet
               )) : <EmptyCondition text="No linked agent/supplier/customer terms recorded on this product." />}
             </ConditionSection>
             <ConditionSection title="Trade conditions">
-              {loading ? <EmptyCondition text="Loading governed commercial conditions..." /> : <ConditionList items={conditions} />}
+              {loading ? <EmptyCondition text="Loading product rules..." /> : <ConditionList items={conditions} />}
             </ConditionSection>
             <ConditionSection title="Pricing conditions">
               {pricing.length ? pricing.map((tier, index) => (
@@ -8771,7 +8767,7 @@ function TradeConditionsDrawer({ open, product, ui, isDigital, needsInventorySet
             <ConditionSection title="Validity and renewal">
               <ConditionList items={conditions.filter((item) => item.valid_from || item.valid_to || item.renewal_task_status)} empty="No validity window or renewal task metadata recorded." />
             </ConditionSection>
-            <ConditionSection title="Product / Inventory boundary">
+            <ConditionSection title="Product type and stock">
               <ConditionCard
                 item={{
                   condition_type: isDigital ? "DIGITAL_PRODUCT" : "PHYSICAL_PRODUCT",
@@ -8780,14 +8776,14 @@ function TradeConditionsDrawer({ open, product, ui, isDigital, needsInventorySet
                     : needsInventorySetup
                       ? "Initial inventory setup can be completed here before activation; operational movements stay in Inventory."
                       : "Operational stock movements stay in the Inventory module.",
-                  status: needsInventorySetup ? "needs_setup" : "governed"
+                  status: needsInventorySetup ? "needs_setup" : "ready"
                 }}
               />
             </ConditionSection>
           </div>
         </div>
         <div className="sticky bottom-0 flex items-center justify-between gap-3 border-t border-ink-100 bg-white px-5 py-3 shadow-soft">
-          <p className="text-xs text-ink-400">Governed commercial-condition editor. Structured values are stored in effect paths for runtime use.</p>
+          <p className="text-xs text-ink-400">Save clear values now so EIP can use them in recommendations and approvals later.</p>
           <button type="button" onClick={onClose} className="rounded-full bg-ink-900 px-4 py-2 text-xs font-semibold text-white">
             Close
           </button>
@@ -8806,12 +8802,17 @@ function ConditionSection({ title, children }) {
   );
 }
 
-function ConditionList({ items, empty = "No governed condition records available for this section." }) {
+function ConditionList({ items, empty = "No product rules available for this section." }) {
   return items?.length ? items.map((item, index) => <ConditionCard key={`condition-${index}`} item={item} />) : <EmptyCondition text={empty} />;
 }
 
 function ConditionCard({ item }) {
   const status = String(item.status || item.condition_status || "active").toLowerCase();
+  const summaryText = typeof item.summary === "string" && item.summary.trim()
+    ? item.summary
+    : typeof item.description === "string" && item.description.trim()
+      ? item.description
+      : "Product rule.";
   const tone = status.includes("expired")
     ? "border-rose-200 bg-rose-50 text-rose-700"
     : status.includes("expir")
@@ -8826,7 +8827,7 @@ function ConditionCard({ item }) {
         </div>
         <span className="rounded-full bg-white/70 px-2 py-0.5 text-[0.6rem] font-semibold uppercase tracking-[0.16em]">{status}</span>
       </div>
-      <p className="mt-2">{item.summary || item.effect || item.description || "Governed commercial condition."}</p>
+      <p className="mt-2">{summaryText}</p>
       {Array.isArray(item.structured_values) && item.structured_values.length ? (
         <div className="mt-2 grid gap-1">
           {item.structured_values.slice(0, 6).map((value) => (
