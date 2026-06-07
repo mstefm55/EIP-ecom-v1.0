@@ -464,18 +464,28 @@ test("inventory dashboard is descriptor registered and module gated", () => {
   assert.match(dashboardSurface, /type: "InventoryWorkspace"/);
   assert.match(dashboardSurface, /\/api\/eip\/inventory\/overview/);
   assert.match(dashboardSurface, /\/api\/eip\/inventory\/reorder-suggestions/);
-  assert.match(dashboardSurface, /Stock Signals Queue/);
-  assert.match(dashboardSurface, /Inventory Signal Workbench/);
-  assert.match(dashboardSurface, /Action Rail/);
+  assert.match(dashboardSurface, /Stock Signals/);
+  assert.match(dashboardSurface, /Stock Position/);
+  assert.match(dashboardSurface, /Movements/);
+  assert.match(dashboardSurface, /Locations \/ States/);
+  assert.match(dashboardSurface, /Counts \/ Adjustments/);
+  assert.match(dashboardSurface, /Policy View/);
   assert.match(surfaceSeed, /"code": "inventory"/);
   assert.match(surfaceSeed, /"type": "InventoryWorkspace"/);
   assert.match(surfaceSeed, /"workbench": "\/api\/eip\/inventory\/reorder-suggestions"/);
+  assert.match(surfaceSeed, /"Stock Position"/);
+  assert.match(surfaceSeed, /"Policy View"/);
   assert.match(workspace, /export default function InventoryWorkspace/);
   assert.ok(workspace.includes("apiFetch(`${endpoints.suggestions}/run`"));
   assert.match(workspace, /decision_card/);
   assert.match(workspace, /Stock Signals Queue/);
   assert.match(workspace, /Inventory Signal Workbench/);
   assert.match(workspace, /Action Rail/);
+  assert.match(workspace, /Stock Position/);
+  assert.match(workspace, /Locations \/ States/);
+  assert.match(workspace, /Counts \/ Adjustments/);
+  assert.match(workspace, /Digital product does not require physical inventory/);
+  assert.match(workspace, /Rejected items are shown as rejected, not out of stock/);
   assert.match(workspace, /Governed policy source/);
   assert.match(workspace, /Material overrides/);
   assert.match(workspace, /Current stock state/);
@@ -485,6 +495,15 @@ test("inventory dashboard is descriptor registered and module gated", () => {
   assert.match(workspace, /Preferred supplier reference/);
   assert.doesNotMatch(workspace, /Approve requisition/);
   assert.doesNotMatch(workspace, /Preferred supplier agent id/);
+});
+
+test("inventory routes keep digital and rejected items out of physical stock signal operations", () => {
+  assert.match(route, /function isOperationalInventoryMaterial/);
+  assert.match(route, /digital_untracked_items/);
+  assert.match(route, /rejected_items/);
+  assert.match(route, /material_rejected/);
+  assert.match(route, /not_physical_inventory_item/);
+  assert.match(route, /operationalMaterials\.filter/);
 });
 
 test("inventory workspace remains tenant agnostic and separate from payment operations", () => {

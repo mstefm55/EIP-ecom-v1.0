@@ -66,6 +66,51 @@ function serializeMaterial(row, conditions = []) {
   };
 }
 
+function materialLifecycleStatus(material = {}) {
+  const attrs = material.attrs && typeof material.attrs === "object" ? material.attrs : {};
+  return normalizeText(
+    attrs.workflow?.stage ||
+      attrs.workflow?.status ||
+      attrs.product?.status ||
+      attrs.status ||
+      material.status
+  ).toLowerCase();
+}
+
+function materialProductType(material = {}) {
+  const attrs = material.attrs && typeof material.attrs === "object" ? material.attrs : {};
+  return normalizeText(
+    attrs.product_type ||
+      attrs.material_type ||
+      attrs.product?.type ||
+      attrs.product?.product_type ||
+      attrs.taxonomy?.product_type ||
+      material.material_type
+  ).toLowerCase();
+}
+
+function hasExplicitStockTracking(material = {}, profile = material.stock_profile) {
+  const attrs = material.attrs && typeof material.attrs === "object" ? material.attrs : {};
+  const inventory = attrs.inventory && typeof attrs.inventory === "object" ? attrs.inventory : {};
+  return inventory.track_stock === true || inventory.track_inventory === true || profile?.track_stock === true;
+}
+
+function isRejectedMaterial(material = {}) {
+  return materialLifecycleStatus(material) === "rejected";
+}
+
+function isDigitalMaterial(material = {}) {
+  const type = materialProductType(material);
+  return ["digital", "download", "service", "virtual"].some((token) => type.includes(token));
+}
+
+function isOperationalInventoryMaterial(material = {}, profile = material.stock_profile) {
+  if (!material) return false;
+  if (isRejectedMaterial(material)) return false;
+  if (isDigitalMaterial(material) && !hasExplicitStockTracking(material, profile)) return false;
+  return true;
+}
+
 function serializeSuggestion(row) {
   if (!row) return null;
   const attrs = row.attrs && typeof row.attrs === "object" ? row.attrs : {};
@@ -433,13 +478,17 @@ export default async function inventoryRoutes(app) {
       )
     ]);
 
-    const profiles = materials.map((item) => item.stock_profile);
-    const stockAlerts = materials.filter((item) => {
+    const operationalMaterials = materials.filter(isOperationalInventoryMaterial);
+    const profiles = operationalMaterials.map((item) => item.stock_profile);
+    const stockAlerts = operationalMaterials.filter((item) => {
       const profile = item.stock_profile || {};
       return profile.needs_reorder || ["watch", "reorder_now", "stockout_predicted", "already_out_of_stock"].includes(profile.risk_status);
     });
     const stats = {
       total_active_materials: materials.length,
+      operational_stock_items: operationalMaterials.length,
+      digital_untracked_items: materials.filter((item) => isDigitalMaterial(item) && !hasExplicitStockTracking(item)).length,
+      rejected_items: materials.filter(isRejectedMaterial).length,
       in_stock: profiles.filter((item) => item.stock_status === "in_stock").length,
       low_stock: profiles.filter((item) => item.stock_status === "low_stock").length,
       out_of_stock: profiles.filter((item) => item.stock_status === "out_of_stock").length,
@@ -691,6 +740,15 @@ export default async function inventoryRoutes(app) {
           attrs: item.attrs || {}
         } : item;
         const profile = item.stock_profile || normalizeInventoryProfile(material, { conditions });
+        if (!isOperationalInventoryMaterial(material, profile)) {
+          skipped.push({
+            material_id: material.id,
+            reason: isRejectedMaterial(material) ? "material_rejected" : "not_physical_inventory_item",
+            risk_status: null,
+            days_of_cover: null
+          });
+          continue;
+        }
         if (!profile.needs_reorder && !force) {
           skipped.push({
             material_id: material.id,
