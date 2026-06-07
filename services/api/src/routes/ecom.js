@@ -167,6 +167,145 @@ function normalizeOptionalText(value) {
   return trimmed.length ? trimmed : null;
 }
 
+function normalizeCommercialConditionCode(value, fallbackPrefix = "COMM_COND") {
+  const normalized = normalizeText(value)
+    .toUpperCase()
+    .replace(/[^A-Z0-9_-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 80);
+  if (normalized) return normalized;
+  return `${fallbackPrefix}_${Date.now().toString(36).toUpperCase()}`;
+}
+
+function normalizeCommercialConditionType(value) {
+  return normalizeCommercialConditionCode(value || "TRADE_TERMS", "TRADE_TERMS").slice(0, 80);
+}
+
+function safeJsonObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function mapCommercialConditionRow(row) {
+  const attrs = safeJsonObject(row?.attrs);
+  const scope = safeJsonObject(row?.scope);
+  const effect = safeJsonObject(row?.effect);
+  return {
+    id: row.id,
+    code: row.code,
+    label: row.label,
+    condition_type: row.condition_type,
+    condition_category: row.condition_category,
+    priority: row.priority,
+    valid_from: row.valid_from,
+    valid_to: row.valid_to,
+    is_active: row.is_active,
+    scope,
+    effect,
+    attrs,
+    summary: normalizeOptionalText(attrs.summary || effect.summary || row.label),
+    status: row.is_active === false ? "inactive" : "active",
+    created_at: row.created_at,
+    updated_at: row.updated_at
+  };
+}
+
+async function generateCommercialConditionCode(client, tenantId, seed = "") {
+  const base = normalizeCommercialConditionCode(seed || "COMM_COND");
+  for (let i = 0; i < 20; i += 1) {
+    const candidate = i === 0 ? base : `${base}_${i + 1}`;
+    // eslint-disable-next-line no-await-in-loop
+    const r = await client.query(
+      `SELECT 1 FROM eip_core.commercial_condition WHERE tenant_id=$1 AND code=$2 LIMIT 1`,
+      [tenantId, candidate]
+    );
+    if (r.rowCount === 0) return candidate;
+  }
+  return `${base}_${Date.now().toString(36).toUpperCase()}`;
+}
+
+async function resolveProductForCondition(client, tenantId, productId = null, productCode = null) {
+  const id = normalizeOptionalText(productId);
+  const code = normalizeOptionalText(productCode);
+  if (!id && !code) return null;
+  const params = [tenantId, MATERIAL_TYPE];
+  const filters = ["tenant_id=$1", "material_type=$2"];
+  if (id) {
+    params.push(id);
+    filters.push(`id=$${params.length}`);
+  } else {
+    params.push(code);
+    filters.push(`code=$${params.length}`);
+  }
+  const r = await client.query(
+    `
+    SELECT id, code, name AS title
+    FROM eip_core.material
+    WHERE ${filters.join(" AND ")}
+    LIMIT 1
+    `,
+    params
+  );
+  return r.rows[0] || null;
+}
+
+async function loadCommercialConditionsForProducts(client, tenantId, products = []) {
+  const productRows = (products || []).filter(Boolean);
+  if (!productRows.length) return new Map();
+  const ids = productRows.map((row) => String(row.id || "")).filter(Boolean);
+  const codes = productRows.map((row) => String(row.code || "")).filter(Boolean);
+  if (!ids.length && !codes.length) return new Map();
+  const r = await client.query(
+    `
+    SELECT *
+    FROM eip_core.commercial_condition
+    WHERE tenant_id=$1
+      AND (
+        scope->>'material_id' = ANY($2::text[])
+        OR scope->>'material_code' = ANY($3::text[])
+        OR scope->>'product_id' = ANY($2::text[])
+        OR scope->>'product_code' = ANY($3::text[])
+      )
+    ORDER BY priority ASC, created_at DESC
+    `,
+    [tenantId, ids, codes]
+  );
+  const byProduct = new Map();
+  for (const row of r.rows || []) {
+    const mapped = mapCommercialConditionRow(row);
+    const keys = [
+      mapped.scope.material_id,
+      mapped.scope.product_id,
+      mapped.scope.material_code,
+      mapped.scope.product_code
+    ].filter(Boolean).map(String);
+    for (const key of keys) {
+      const current = byProduct.get(key) || [];
+      current.push(mapped);
+      byProduct.set(key, current);
+    }
+  }
+  return byProduct;
+}
+
+async function hydrateProductRowsWithCommercialConditions(client, tenantId, rows = []) {
+  const conditionMap = await loadCommercialConditionsForProducts(client, tenantId, rows);
+  return (rows || []).map((row) => {
+    const attrs = safeJsonObject(row.attrs);
+    const conditions = [
+      ...(conditionMap.get(String(row.id || "")) || []),
+      ...(conditionMap.get(String(row.code || "")) || [])
+    ];
+    const deduped = Array.from(new Map(conditions.map((item) => [item.id, item])).values());
+    return {
+      ...row,
+      attrs: {
+        ...attrs,
+        commercial_conditions: deduped
+      }
+    };
+  });
+}
+
 function stripRichTextToPlain(value) {
   const raw = String(value || "");
   if (!raw) return "";
@@ -5561,7 +5700,8 @@ export default async function ecomRoutes(app) {
         params
       );
 
-      return reply.send({ ok: true, items: r.rows, limit, offset });
+      const items = await hydrateProductRowsWithCommercialConditions(app.db, tenantId, r.rows);
+      return reply.send({ ok: true, items, limit, offset });
     }
   );
 
@@ -5595,7 +5735,291 @@ export default async function ecomRoutes(app) {
         [session.tenant_id, req.params.id, MATERIAL_TYPE]
       );
       if (r.rowCount === 0) return reply.code(404).send({ ok: false, error: "NOT_FOUND" });
-      return reply.send({ ok: true, item: r.rows[0] });
+      const [item] = await hydrateProductRowsWithCommercialConditions(app.db, session.tenant_id, r.rows);
+      return reply.send({ ok: true, item });
+    }
+  );
+
+  app.get(
+    "/commercial-conditions",
+    {
+      schema: {
+        querystring: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            product_id: { type: "string", minLength: 36, maxLength: 36 },
+            product_code: { type: "string", maxLength: 100 },
+            condition_type: { type: "string", maxLength: 100 },
+            condition_category: { type: "string", maxLength: 100 },
+            include_inactive: { type: "boolean" },
+            limit: { type: "integer", minimum: 1, maximum: MAX_LIMIT, default: 100 },
+            offset: { type: "integer", minimum: 0, default: 0 }
+          }
+        }
+      }
+    },
+    async (req, reply) => {
+      const session = await requirePerm(app, req, reply, "ECOM_PRODUCT_READ");
+      if (!session) return;
+
+      const tenantId = session.tenant_id;
+      const productId = normalizeOptionalText(req.query?.product_id);
+      const productCode = normalizeOptionalText(req.query?.product_code);
+      const conditionType = normalizeOptionalText(req.query?.condition_type);
+      const conditionCategory = normalizeOptionalText(req.query?.condition_category);
+      const includeInactive = req.query?.include_inactive === true;
+      const limit = clampLimit(req.query?.limit, 100);
+      const offset = Number(req.query?.offset || 0);
+
+      let product = null;
+      if (productId || productCode) {
+        product = await resolveProductForCondition(app.db, tenantId, productId, productCode);
+        if (!product) return reply.code(404).send({ ok: false, error: "PRODUCT_NOT_FOUND" });
+      }
+
+      const params = [tenantId];
+      const filters = ["tenant_id=$1"];
+      if (!includeInactive) filters.push("is_active=true");
+      if (conditionType) {
+        params.push(normalizeCommercialConditionType(conditionType));
+        filters.push(`condition_type=$${params.length}`);
+      }
+      if (conditionCategory) {
+        params.push(normalizeCommercialConditionType(conditionCategory));
+        filters.push(`condition_category=$${params.length}`);
+      }
+      if (product) {
+        params.push(String(product.id), String(product.code || ""));
+        filters.push(`(
+          scope->>'material_id' = $${params.length - 1}
+          OR scope->>'product_id' = $${params.length - 1}
+          OR scope->>'material_code' = $${params.length}
+          OR scope->>'product_code' = $${params.length}
+        )`);
+      }
+      params.push(limit, offset);
+
+      const r = await app.db.query(
+        `
+        SELECT *
+        FROM eip_core.commercial_condition
+        WHERE ${filters.join(" AND ")}
+        ORDER BY priority ASC, created_at DESC
+        LIMIT $${params.length - 1} OFFSET $${params.length}
+        `,
+        params
+      );
+
+      return reply.send({
+        ok: true,
+        items: r.rows.map(mapCommercialConditionRow),
+        product,
+        limit,
+        offset
+      });
+    }
+  );
+
+  app.post(
+    "/commercial-conditions",
+    {
+      schema: {
+        body: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            product_id: { type: "string", minLength: 36, maxLength: 36 },
+            product_code: { type: "string", maxLength: 100 },
+            code: { type: "string", maxLength: 100 },
+            label: { type: "string", maxLength: 200 },
+            condition_type: { type: "string", maxLength: 100 },
+            condition_category: { type: "string", maxLength: 100 },
+            priority: { type: "integer", minimum: 0, maximum: 10000 },
+            valid_from: { type: "string", maxLength: 80 },
+            valid_to: { type: "string", maxLength: 80 },
+            is_active: { type: "boolean" },
+            summary: { type: "string", maxLength: 1000 },
+            scope: { type: "object" },
+            effect: { type: "object" },
+            attrs: { type: "object" }
+          }
+        }
+      }
+    },
+    async (req, reply) => {
+      const session = await requireWrite(app, req, reply, ["ECOM_PRODUCT_WRITE", "ECOM_SETTINGS_WRITE"]);
+      if (!session) return;
+
+      const tenantId = session.tenant_id;
+      const client = await app.db.connect();
+      try {
+        await client.query("BEGIN");
+        const product = await resolveProductForCondition(
+          client,
+          tenantId,
+          req.body?.product_id,
+          req.body?.product_code
+        );
+        if ((req.body?.product_id || req.body?.product_code) && !product) {
+          await client.query("ROLLBACK");
+          return reply.code(404).send({ ok: false, error: "PRODUCT_NOT_FOUND" });
+        }
+
+        const label = normalizeOptionalText(req.body?.label);
+        const conditionType = normalizeCommercialConditionType(req.body?.condition_type || "TRADE_TERMS");
+        const conditionCategory = normalizeCommercialConditionType(req.body?.condition_category || "TRADE");
+        const codeSeed = req.body?.code || `${conditionType}_${product?.code || label || "TENANT"}`;
+        const code = await generateCommercialConditionCode(client, tenantId, codeSeed);
+        const scope = {
+          ...safeJsonObject(req.body?.scope),
+          ...(product
+            ? {
+                object_type: PRODUCT_OBJECT_TYPE,
+                material_id: String(product.id),
+                material_code: product.code || null
+              }
+            : {})
+        };
+        const effect = safeJsonObject(req.body?.effect);
+        const attrs = {
+          ...safeJsonObject(req.body?.attrs),
+          ...(normalizeOptionalText(req.body?.summary) ? { summary: normalizeOptionalText(req.body.summary) } : {}),
+          governance_source: "commercial_condition_ui"
+        };
+
+        const r = await client.query(
+          `
+          INSERT INTO eip_core.commercial_condition
+            (tenant_id, code, label, condition_type, condition_category, priority, valid_from, valid_to, is_active, scope, effect, attrs)
+          VALUES
+            ($1,$2,$3,$4,$5,$6,$7::timestamptz,$8::timestamptz,$9,$10::jsonb,$11::jsonb,$12::jsonb)
+          RETURNING *
+          `,
+          [
+            tenantId,
+            code,
+            label || code,
+            conditionType,
+            conditionCategory,
+            Number(req.body?.priority ?? 100),
+            normalizeOptionalText(req.body?.valid_from),
+            normalizeOptionalText(req.body?.valid_to),
+            req.body?.is_active !== false,
+            JSON.stringify(scope),
+            JSON.stringify(effect),
+            JSON.stringify(attrs)
+          ]
+        );
+
+        await client.query("COMMIT");
+        return reply.send({ ok: true, item: mapCommercialConditionRow(r.rows[0]), product });
+      } catch (err) {
+        await client.query("ROLLBACK");
+        app.log.error({
+          event: "commercial_condition_create_failed",
+          tenant_id: tenantId,
+          error: err?.message || String(err)
+        });
+        return reply.code(500).send({ ok: false, error: "COMMERCIAL_CONDITION_CREATE_FAILED" });
+      } finally {
+        client.release();
+      }
+    }
+  );
+
+  app.patch(
+    "/commercial-conditions/:id",
+    {
+      schema: {
+        params: {
+          type: "object",
+          required: ["id"],
+          properties: { id: { type: "string", minLength: 36, maxLength: 36 } }
+        },
+        body: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            label: { type: "string", maxLength: 200 },
+            condition_type: { type: "string", maxLength: 100 },
+            condition_category: { type: "string", maxLength: 100 },
+            priority: { type: "integer", minimum: 0, maximum: 10000 },
+            valid_from: { type: "string", maxLength: 80 },
+            valid_to: { type: "string", maxLength: 80 },
+            is_active: { type: "boolean" },
+            summary: { type: "string", maxLength: 1000 },
+            scope: { type: "object" },
+            effect: { type: "object" },
+            attrs: { type: "object" }
+          }
+        }
+      }
+    },
+    async (req, reply) => {
+      const session = await requireWrite(app, req, reply, ["ECOM_PRODUCT_WRITE", "ECOM_SETTINGS_WRITE"]);
+      if (!session) return;
+
+      const existing = await app.db.query(
+        `
+        SELECT *
+        FROM eip_core.commercial_condition
+        WHERE tenant_id=$1 AND id=$2
+        LIMIT 1
+        `,
+        [session.tenant_id, req.params.id]
+      );
+      if (!existing.rowCount) return reply.code(404).send({ ok: false, error: "COMMERCIAL_CONDITION_NOT_FOUND" });
+
+      const current = existing.rows[0];
+      const currentAttrs = safeJsonObject(current.attrs);
+      const nextAttrs = {
+        ...currentAttrs,
+        ...safeJsonObject(req.body?.attrs),
+        ...(Object.prototype.hasOwnProperty.call(req.body || {}, "summary")
+          ? { summary: normalizeOptionalText(req.body?.summary) }
+          : {}),
+        governance_source: currentAttrs.governance_source || "commercial_condition_ui"
+      };
+
+      const r = await app.db.query(
+        `
+        UPDATE eip_core.commercial_condition
+        SET label = COALESCE($3, label),
+            condition_type = COALESCE($4, condition_type),
+            condition_category = COALESCE($5, condition_category),
+            priority = COALESCE($6, priority),
+            valid_from = CASE WHEN $7::text IS NULL THEN valid_from ELSE $7::timestamptz END,
+            valid_to = CASE WHEN $8::text IS NULL THEN valid_to ELSE $8::timestamptz END,
+            is_active = COALESCE($9, is_active),
+            scope = COALESCE($10::jsonb, scope),
+            effect = COALESCE($11::jsonb, effect),
+            attrs = $12::jsonb,
+            updated_at = now()
+        WHERE tenant_id=$1 AND id=$2
+        RETURNING *
+        `,
+        [
+          session.tenant_id,
+          req.params.id,
+          Object.prototype.hasOwnProperty.call(req.body || {}, "label") ? normalizeOptionalText(req.body.label) : null,
+          Object.prototype.hasOwnProperty.call(req.body || {}, "condition_type")
+            ? normalizeCommercialConditionType(req.body.condition_type)
+            : null,
+          Object.prototype.hasOwnProperty.call(req.body || {}, "condition_category")
+            ? normalizeCommercialConditionType(req.body.condition_category)
+            : null,
+          Object.prototype.hasOwnProperty.call(req.body || {}, "priority") ? Number(req.body.priority) : null,
+          Object.prototype.hasOwnProperty.call(req.body || {}, "valid_from") ? normalizeOptionalText(req.body.valid_from) : null,
+          Object.prototype.hasOwnProperty.call(req.body || {}, "valid_to") ? normalizeOptionalText(req.body.valid_to) : null,
+          Object.prototype.hasOwnProperty.call(req.body || {}, "is_active") ? req.body.is_active === true : null,
+          Object.prototype.hasOwnProperty.call(req.body || {}, "scope") ? JSON.stringify(safeJsonObject(req.body.scope)) : null,
+          Object.prototype.hasOwnProperty.call(req.body || {}, "effect") ? JSON.stringify(safeJsonObject(req.body.effect)) : null,
+          JSON.stringify(nextAttrs)
+        ]
+      );
+
+      return reply.send({ ok: true, item: mapCommercialConditionRow(r.rows[0]) });
     }
   );
 

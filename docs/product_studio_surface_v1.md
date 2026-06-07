@@ -27,7 +27,7 @@ Focus is not a duplicate task browser. It is a product setup completion workbenc
 
 ## Trade Conditions Drawer
 
-The drawer is a reusable React primitive for existing governed data:
+The drawer is a reusable React primitive for governed commercial-condition data:
 
 - marketplace conditions
 - linked agents/suppliers/customers
@@ -37,7 +37,15 @@ The drawer is a reusable React primitive for existing governed data:
 - validity and renewal metadata
 - condition tasks/warnings when present
 
-It reads condition-shaped data from existing product attrs and pricing structures. It does not create free-text-only condition records and does not replace `commercial_condition`.
+The canonical data structure is the existing `eip_core.commercial_condition` table. The drawer can create product-scoped rows through:
+
+```text
+GET /api/eip/ecom/commercial-conditions?product_id=...
+POST /api/eip/ecom/commercial-conditions
+PATCH /api/eip/ecom/commercial-conditions/:id
+```
+
+Product rows are hydrated with governed commercial-condition records for display and focus detection. Product attrs may still provide backward-compatible display fallback data, but attrs are not the policy authority and the drawer does not create free-text-only condition records.
 
 The drawer has a fixed header, scrollable body, and visible footer with a Close action so long condition sets do not hide the controls.
 
@@ -71,5 +79,5 @@ npm run build
 
 ## Known Limits
 
-- Trade-condition editing remains a UI primitive over existing governed metadata. Full condition lifecycle review/renewal remains process/task governed.
+- Trade-condition create/edit is available as a UI primitive over existing governed metadata. Full condition lifecycle review/renewal remains process/task governed.
 - Broader product analytics should live in a later product intelligence composition, not as a copied Command Center tab.

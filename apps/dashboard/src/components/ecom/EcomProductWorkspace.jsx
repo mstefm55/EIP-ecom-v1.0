@@ -82,7 +82,27 @@ const DEFAULT_PRODUCT_STUDIO_UI = {
   ],
   tradeConditions: {
     title: "Trade conditions",
-    subtitle: "Commercial rules, pricing terms, supplier/customer terms, validity, and renewal tasks."
+    subtitle: "Commercial rules, pricing terms, supplier/customer terms, validity, and renewal tasks.",
+    createLabel: "Create condition",
+    savedLabel: "Saved in commercial_condition",
+    typeOptions: [
+      { value: "TRADE_TERMS", label: "Trade terms" },
+      { value: "PRICE", label: "Price" },
+      { value: "DISCOUNT", label: "Discount" },
+      { value: "TAX", label: "Tax" },
+      { value: "PAYMENT_TERMS", label: "Payment terms" },
+      { value: "SUPPLIER_PURCHASE_CONDITION", label: "Supplier purchase" },
+      { value: "INVENTORY_REORDER_POLICY", label: "Inventory reorder" }
+    ],
+    categoryOptions: [
+      { value: "TRADE", label: "Trade" },
+      { value: "PRICING", label: "Pricing" },
+      { value: "MARKETPLACE", label: "Marketplace" },
+      { value: "PAYMENT", label: "Payment" },
+      { value: "SUPPLIER", label: "Supplier" },
+      { value: "CUSTOMER", label: "Customer" },
+      { value: "INVENTORY", label: "Inventory" }
+    ]
   }
 };
 const DEFAULT_STOREFRONT_MAPPING_UI = {
@@ -1520,6 +1540,31 @@ export default function EcomProductWorkspace({ node }) {
   );
   const currentProductIsDigital = isDigitalProduct(draft);
   const currentProductNeedsInventorySetup = needsInitialInventorySetup(draft);
+  const applyProductCommercialConditions = (productId, conditions = []) => {
+    if (!productId) return;
+    const nextConditions = Array.isArray(conditions) ? conditions : [];
+    setDraft((current) => {
+      if (!current || current.id !== productId) return current;
+      return {
+        ...current,
+        attrs: {
+          ...(current.attrs || {}),
+          commercial_conditions: nextConditions
+        }
+      };
+    });
+    setProducts((current) => (current || []).map((item) => (
+      item.id === productId
+        ? {
+            ...item,
+            attrs: {
+              ...(item.attrs || {}),
+              commercial_conditions: nextConditions
+            }
+          }
+        : item
+    )));
+  };
   const storefrontStage = String(
     storefrontDraft?.attrs?.workflow?.stage ||
       storefrontDraft?.status ||
@@ -8192,6 +8237,7 @@ export default function EcomProductWorkspace({ node }) {
         ui={productStudioUi.tradeConditions}
         isDigital={currentProductIsDigital}
         needsInventorySetup={currentProductNeedsInventorySetup}
+        onChanged={(conditions) => applyProductCommercialConditions(draft?.id, conditions)}
         onClose={() => setShowTradeConditions(false)}
       />
     </section>
@@ -8301,9 +8347,98 @@ function ProductFocusPanel({ focusItems, onSelectProduct, onOpenTradeConditions 
   );
 }
 
-function TradeConditionsDrawer({ open, product, ui, isDigital, needsInventorySetup, onClose }) {
+function TradeConditionsDrawer({ open, product, ui, isDigital, needsInventorySetup, onChanged, onClose }) {
+  const fallbackConditions = productTradeConditions(product);
+  const [conditions, setConditions] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [draft, setDraft] = useState({
+    label: "",
+    condition_type: ui?.typeOptions?.[0]?.value || "TRADE_TERMS",
+    condition_category: ui?.categoryOptions?.[0]?.value || "TRADE",
+    summary: "",
+    valid_to: "",
+    is_active: true
+  });
+
+  const productId = product?.id || "";
+  const loadConditions = async () => {
+    if (!open || !productId) return;
+    setLoading(true);
+    setError("");
+    try {
+      const qs = new URLSearchParams({ product_id: productId, include_inactive: "true" });
+      const data = await apiFetch(`/api/eip/ecom/commercial-conditions?${qs.toString()}`);
+      const nextItems = Array.isArray(data?.items) ? data.items : [];
+      setConditions(nextItems);
+      if (onChanged) onChanged(nextItems);
+    } catch (err) {
+      setError(err?.message || "Failed to load commercial conditions.");
+      setConditions(fallbackConditions);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    setConditions(fallbackConditions);
+    setDraft({
+      label: "",
+      condition_type: ui?.typeOptions?.[0]?.value || "TRADE_TERMS",
+      condition_category: ui?.categoryOptions?.[0]?.value || "TRADE",
+      summary: "",
+      valid_to: "",
+      is_active: true
+    });
+    loadConditions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, productId]);
+
+  const createCondition = async (event) => {
+    event.preventDefault();
+    if (!productId || saving) return;
+    const label = String(draft.label || "").trim();
+    if (!label) {
+      setError("Condition name is required.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      await apiFetch("/api/eip/ecom/commercial-conditions", {
+        method: "POST",
+        body: {
+          product_id: productId,
+          label,
+          condition_type: draft.condition_type || "TRADE_TERMS",
+          condition_category: draft.condition_category || "TRADE",
+          summary: draft.summary,
+          valid_to: draft.valid_to || null,
+          is_active: draft.is_active !== false,
+          attrs: {
+            source_ui: "product_studio_trade_conditions"
+          }
+        }
+      });
+      setDraft({
+        label: "",
+        condition_type: ui?.typeOptions?.[0]?.value || "TRADE_TERMS",
+        condition_category: ui?.categoryOptions?.[0]?.value || "TRADE",
+        summary: "",
+        valid_to: "",
+        is_active: true
+      });
+      await loadConditions();
+    } catch (err) {
+      setError(err?.message || "Failed to create commercial condition.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (!open) return null;
-  const conditions = productTradeConditions(product);
   const pricing = Array.isArray(product?.attrs?.pricing?.tiers) ? product.attrs.pricing.tiers : [];
   const links = Array.isArray(product?.attrs?.agent_links) ? product.attrs.agent_links : [];
   return (
@@ -8323,6 +8458,80 @@ function TradeConditionsDrawer({ open, product, ui, isDigital, needsInventorySet
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          <form onSubmit={createCondition} className="mb-4 rounded-2xl border border-brand-100 bg-brand-50/50 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-[0.6rem] font-semibold uppercase tracking-[0.2em] text-brand-500">
+                  {ui?.savedLabel || DEFAULT_PRODUCT_STUDIO_UI.tradeConditions.savedLabel}
+                </p>
+                <h4 className="mt-1 text-base font-semibold text-ink-900">Create governed condition</h4>
+                <p className="mt-1 text-xs text-ink-500">Saved as a tenant-scoped commercial condition linked to this product. Product attrs are not the policy authority.</p>
+              </div>
+              <button
+                type="submit"
+                disabled={saving || !productId}
+                className="inline-flex items-center gap-2 rounded-full bg-ink-900 px-4 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                {ui?.createLabel || DEFAULT_PRODUCT_STUDIO_UI.tradeConditions.createLabel}
+              </button>
+            </div>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <label className="text-xs font-semibold text-ink-500">
+                Condition name
+                <input
+                  value={draft.label}
+                  onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-ink-100 bg-white px-3 py-2 text-sm text-ink-800 outline-none focus:border-brand-300"
+                  placeholder="Wholesale minimum order"
+                />
+              </label>
+              <label className="text-xs font-semibold text-ink-500">
+                Type
+                <select
+                  value={draft.condition_type}
+                  onChange={(event) => setDraft((current) => ({ ...current, condition_type: event.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-ink-100 bg-white px-3 py-2 text-sm text-ink-800 outline-none focus:border-brand-300"
+                >
+                  {(ui?.typeOptions || DEFAULT_PRODUCT_STUDIO_UI.tradeConditions.typeOptions).map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-xs font-semibold text-ink-500">
+                Category
+                <select
+                  value={draft.condition_category}
+                  onChange={(event) => setDraft((current) => ({ ...current, condition_category: event.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-ink-100 bg-white px-3 py-2 text-sm text-ink-800 outline-none focus:border-brand-300"
+                >
+                  {(ui?.categoryOptions || DEFAULT_PRODUCT_STUDIO_UI.tradeConditions.categoryOptions).map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-xs font-semibold text-ink-500">
+                Valid until
+                <input
+                  type="date"
+                  value={draft.valid_to}
+                  onChange={(event) => setDraft((current) => ({ ...current, valid_to: event.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-ink-100 bg-white px-3 py-2 text-sm text-ink-800 outline-none focus:border-brand-300"
+                />
+              </label>
+              <label className="md:col-span-2 text-xs font-semibold text-ink-500">
+                Summary / effect
+                <textarea
+                  value={draft.summary}
+                  onChange={(event) => setDraft((current) => ({ ...current, summary: event.target.value }))}
+                  className="mt-1 min-h-[5rem] w-full rounded-xl border border-ink-100 bg-white px-3 py-2 text-sm text-ink-800 outline-none focus:border-brand-300"
+                  placeholder="Describe the governed business effect or policy note."
+                />
+              </label>
+            </div>
+            {error ? <p className="mt-3 rounded-xl border border-rose-100 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">{error}</p> : null}
+          </form>
+
           <div className="grid gap-3 lg:grid-cols-2">
             <ConditionSection title="Marketplace conditions">
               <ConditionList items={conditions.filter((item) => String(item.category || item.condition_category || "").toLowerCase().includes("marketplace"))} />
@@ -8333,7 +8542,7 @@ function TradeConditionsDrawer({ open, product, ui, isDigital, needsInventorySet
               )) : <EmptyCondition text="No linked agent/supplier/customer terms recorded on this product." />}
             </ConditionSection>
             <ConditionSection title="Trade conditions">
-              <ConditionList items={conditions} />
+              {loading ? <EmptyCondition text="Loading governed commercial conditions..." /> : <ConditionList items={conditions} />}
             </ConditionSection>
             <ConditionSection title="Pricing conditions">
               {pricing.length ? pricing.map((tier, index) => (

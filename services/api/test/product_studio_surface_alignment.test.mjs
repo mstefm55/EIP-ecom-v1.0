@@ -25,7 +25,8 @@ test("product studio surface alignment is descriptor-backed and keeps existing s
   assert.match(component, /TradeConditionsDrawer/);
   assert.match(component, /Complete product setup work/);
   assert.match(component, /Complete trade terms/);
-  assert.match(component, /Read-only governance view/);
+  assert.match(component, /Create governed condition/);
+  assert.match(component, /\/api\/eip\/ecom\/commercial-conditions/);
   assert.match(component, /sticky bottom-0/);
   assert.match(component, /overflow-y-auto/);
   assert.match(component, /productStudioTab === "studio"/);
@@ -55,4 +56,22 @@ test("product studio preserves product/inventory boundary and rejected status di
   assert.match(component, /Operational stock movements stay in the Inventory module/);
   assert.doesNotMatch(component, /Purchase Order|PO lifecycle|supplier outbound transmission/i);
   assert.doesNotMatch(component, /samara|samarapattern|samara-web-storefront/i);
+});
+
+test("product studio commercial conditions use governed commercial_condition rows", () => {
+  const component = read("apps/dashboard/src/components/ecom/EcomProductWorkspace.jsx");
+  const route = read("services/api/src/routes/ecom.js");
+  const migration = read("services/api/db/migrations/0051_commercial_conditions.sql");
+
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS eip_core\.commercial_condition/);
+  assert.match(route, /app\.get\(\s*"\/commercial-conditions"/);
+  assert.match(route, /app\.post\(\s*"\/commercial-conditions"/);
+  assert.match(route, /app\.patch\(\s*"\/commercial-conditions\/:id"/);
+  assert.match(route, /hydrateProductRowsWithCommercialConditions/);
+  assert.match(route, /scope->>'material_id'/);
+  assert.match(route, /ECOM_PRODUCT_WRITE/);
+  assert.match(route, /ECOM_SETTINGS_WRITE/);
+  assert.match(component, /Saved in commercial_condition/);
+  assert.match(component, /Product attrs are not the policy authority/);
+  assert.doesNotMatch(route, /CREATE TABLE/i);
 });
