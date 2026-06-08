@@ -15,7 +15,7 @@ SELECT
   "type": "UserShell",
   "props": {
     "brand": "EIP Core",
-    "nav": ["Dashboard", "Product Studio", "Content Studio", "Orders & Payments", "Inventory", "Procurement", "Tasks", "Reports", "Settings"],
+    "nav": ["Dashboard", "Product Studio", "Content Studio", "Orders & Payments", "Inventory", "Procurement", "Policies & Conditions", "Tasks", "Reports", "Settings"],
     "menu": [
       { "code": "dashboard", "label": "Dashboard", "icon": "LayoutGrid" },
       { "code": "catalog", "label": "Product Studio", "icon": "Package" },
@@ -23,6 +23,7 @@ SELECT
       { "code": "commerce", "label": "Orders & Payments", "icon": "CreditCard" },
       { "code": "inventory", "label": "Inventory", "icon": "Package", "module": "inventory" },
       { "code": "procurement", "label": "Procurement", "icon": "ShoppingCart", "module": "procurement" },
+      { "code": "policies", "label": "Policies & Conditions", "icon": "FileClock" },
       { "code": "crm", "label": "CRM", "icon": "Users", "module": "crm" },
       { "code": "tasks", "label": "Tasks", "icon": "Activity" },
       { "code": "reports", "label": "Reports", "icon": "BarChart3" },
@@ -483,6 +484,41 @@ SELECT
               "saveSupplierLink": "Save supplier link",
               "recordCashPurchase": "Record cash purchase"
             }
+          }
+        }
+      ]
+    },
+    {
+      "id": "user-policies-panel",
+      "type": "UserPanel",
+      "props": { "tab": "policies" },
+      "children": [
+        {
+          "id": "policies-conditions-workspace",
+          "type": "PoliciesConditionsWorkspace",
+          "props": {
+            "title": "Policies & Conditions",
+            "subtitle": "Read-only business rules that explain recommendations and approvals.",
+            "endpoints": {
+              "list": "/api/eip/policies-conditions",
+              "detail": "/api/eip/policies-conditions/:id",
+              "overview": "/api/eip/policies-conditions/overview"
+            },
+            "tabs": [
+              { "id": "overview", "label": "Overview" },
+              { "id": "library", "label": "Policy Library" },
+              { "id": "needs_review", "label": "Needs Review" }
+            ],
+            "labels": {
+              "search": "Search policies...",
+              "refresh": "Refresh",
+              "readOnly": "Create/edit will be added in a later governed wave.",
+              "emptyTitle": "No policies or conditions yet",
+              "emptyMessage": "Create governed business rules before EIP can explain recommendations for this area.",
+              "detailTitle": "Condition detail",
+              "noSelection": "Select a policy or condition to inspect the read model."
+            },
+            "pageSizes": [12, 25, 50]
           }
         }
       ]
