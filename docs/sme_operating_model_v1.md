@@ -57,6 +57,12 @@ It uses real `eip_core.task` records and the governed schedule/delegate endpoint
 | Settings | Tenant-local business preferences and readiness panels | Provider secrets, raw credentials, operational queues |
 | Admin Console -> Connections | Technical connector setup, provider credentials, keys, webhook secrets, rotation, health checks | Operational payment/refund/order work |
 
+## Policies & Conditions
+
+Business policy belongs in the Business Policy & Condition Registry, represented in V1 by `eip_core.commercial_condition`. The recommended UI label is `Policies & Conditions`. This registry covers internal management policy and external trade conditions across procurement, selling, inventory, finance/approval, trade parties, marketplace, logistics/delivery, and fiscal/tax treatment. It stores operational classifications and structured effect values, not raw legal or regulatory text.
+
+See `docs/business_policy_condition_registry_v1.md` for the concept lock.
+
 ## Inventory/Reorder Position
 
 The Inventory & Reorder Foundation adds the lightweight stock layer needed before purchase orders:
