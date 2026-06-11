@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -62,6 +62,18 @@ const MAPPING_TONES = {
   needs_review: "border-amber-100 bg-amber-50 text-amber-700",
   legacy_ambiguous: "border-orange-100 bg-orange-50 text-orange-700",
 };
+
+const DEFAULT_DOMAIN_OPTIONS = [
+  "PROCUREMENT",
+  "SELLING",
+  "INVENTORY",
+  "FINANCE_APPROVAL",
+  "TRADE_PARTY",
+  "MARKETPLACE",
+  "LOGISTICS_DELIVERY",
+  "FISCAL_TAX_TREATMENT",
+  "NEEDS_REVIEW",
+];
 
 function formatLabel(value) {
   const text = String(value || "").replace(/_/g, " ").trim();
@@ -150,6 +162,7 @@ export default function PoliciesConditionsWorkspace({ node } = {}) {
     { id: "needs_review", label: labels.needsReview },
   ];
   const pageSizes = props.pageSizes || [12, 25, 50];
+  const domainOptions = props.domainOptions || DEFAULT_DOMAIN_OPTIONS;
 
   const [tab, setTab] = useState(tabs[0]?.id || "overview");
   const [query, setQuery] = useState("");
@@ -175,28 +188,33 @@ export default function PoliciesConditionsWorkspace({ node } = {}) {
   };
   const totalPages = payload?.total_pages || 0;
 
-  const domainOptions = useMemo(() => {
-    const values = new Set(items.map((item) => item.classification?.policy_domain).filter(Boolean));
-    return [...values].sort();
-  }, [items]);
-
-  const loadList = async () => {
+  const loadList = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
       const qs = buildQuery({ page, pageSize, query, tab, filters });
       const result = await apiFetch(`${endpoints.list}?${qs}`);
       setPayload(result);
-      if (selectedId && !result.items?.some((item) => item.id === selectedId)) {
-        setSelectedId("");
-        setDetail(null);
-      }
+      setSelectedId((current) => {
+        if (current && !result.items?.some((item) => item.id === current)) {
+          setDetail(null);
+          return "";
+        }
+        return current;
+      });
     } catch (err) {
       setError(parseApiError(err));
     } finally {
       setLoading(false);
     }
-  };
+  }, [
+    endpoints.list,
+    page,
+    pageSize,
+    query,
+    tab,
+    filters,
+  ]);
 
   const loadDetail = async (id) => {
     if (!id) return;
@@ -217,18 +235,9 @@ export default function PoliciesConditionsWorkspace({ node } = {}) {
   };
 
   useEffect(() => {
-    loadList();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, pageSize, tab, filters.policy_domain, filters.condition_type, filters.condition_category]);
-
-  useEffect(() => {
-    const handle = setTimeout(() => {
-      setPage(1);
-      loadList();
-    }, 250);
+    const handle = setTimeout(loadList, 250);
     return () => clearTimeout(handle);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query]);
+  }, [loadList]);
 
   const selected = detail || items.find((item) => item.id === selectedId) || null;
 
@@ -336,53 +345,55 @@ export default function PoliciesConditionsWorkspace({ node } = {}) {
             </div>
           ) : null}
 
-          <div className="mt-4 overflow-hidden rounded-2xl border border-ink-100 bg-white">
-            <div className="grid grid-cols-[minmax(16rem,1.4fr)_minmax(10rem,0.8fr)_minmax(10rem,0.8fr)_8rem] gap-3 border-b border-ink-100 bg-ink-50/80 px-4 py-3 text-[0.62rem] font-semibold uppercase tracking-[0.2em] text-ink-400">
-              <span>Condition</span>
-              <span>Classification</span>
-              <span>Legacy</span>
-              <span>Status</span>
+          <div className="mt-4 overflow-x-auto rounded-2xl border border-ink-100 bg-white">
+            <div className="min-w-[56rem]">
+              <div className="grid grid-cols-[minmax(16rem,1.4fr)_minmax(10rem,0.8fr)_minmax(10rem,0.8fr)_8rem] gap-3 border-b border-ink-100 bg-ink-50/80 px-4 py-3 text-[0.62rem] font-semibold uppercase tracking-[0.2em] text-ink-400">
+                <span>Condition</span>
+                <span>Classification</span>
+                <span>Legacy</span>
+                <span>Status</span>
+              </div>
+              {loading ? (
+                <div className="flex items-center justify-center gap-2 px-4 py-12 text-sm font-semibold text-ink-400">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading policies...
+                </div>
+              ) : items.length ? (
+                <div className="divide-y divide-ink-100">
+                  {items.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => loadDetail(item.id)}
+                      className={`grid w-full grid-cols-[minmax(16rem,1.4fr)_minmax(10rem,0.8fr)_minmax(10rem,0.8fr)_8rem] gap-3 px-4 py-3 text-left transition hover:bg-brand-50/60 ${
+                        selectedId === item.id ? "bg-brand-50" : "bg-white"
+                      }`}
+                    >
+                      <span>
+                        <span className="block text-sm font-semibold text-ink-900">{item.label || item.code}</span>
+                        <span className="mt-1 block text-xs text-ink-400">{item.code}</span>
+                      </span>
+                      <span className="space-y-1">
+                        <span className="block text-sm font-semibold text-ink-700">{formatLabel(item.classification?.policy_domain)}</span>
+                        <Pill value={item.classification?.mapping_status} tones={MAPPING_TONES} labels={labels} />
+                      </span>
+                      <span className="text-xs text-ink-500">
+                        <strong className="block text-sm text-ink-700">{item.legacy?.condition_type || "-"}</strong>
+                        {item.legacy?.condition_category || "-"}
+                      </span>
+                      <span>
+                        <Pill value={item.status} labels={labels} />
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="px-4 py-12 text-center">
+                  <p className="text-lg font-semibold text-ink-800">{emptyState.title || labels.emptyTitle}</p>
+                  <p className="mt-1 text-sm text-ink-500">{emptyState.message || labels.emptyMessage}</p>
+                </div>
+              )}
             </div>
-            {loading ? (
-              <div className="flex items-center justify-center gap-2 px-4 py-12 text-sm font-semibold text-ink-400">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Loading policies...
-              </div>
-            ) : items.length ? (
-              <div className="divide-y divide-ink-100">
-                {items.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => loadDetail(item.id)}
-                    className={`grid w-full grid-cols-[minmax(16rem,1.4fr)_minmax(10rem,0.8fr)_minmax(10rem,0.8fr)_8rem] gap-3 px-4 py-3 text-left transition hover:bg-brand-50/60 ${
-                      selectedId === item.id ? "bg-brand-50" : "bg-white"
-                    }`}
-                  >
-                    <span>
-                      <span className="block text-sm font-semibold text-ink-900">{item.label || item.code}</span>
-                      <span className="mt-1 block text-xs text-ink-400">{item.code}</span>
-                    </span>
-                    <span className="space-y-1">
-                      <span className="block text-sm font-semibold text-ink-700">{formatLabel(item.classification?.policy_domain)}</span>
-                      <Pill value={item.classification?.mapping_status} tones={MAPPING_TONES} labels={labels} />
-                    </span>
-                    <span className="text-xs text-ink-500">
-                      <strong className="block text-sm text-ink-700">{item.legacy?.condition_type || "-"}</strong>
-                      {item.legacy?.condition_category || "-"}
-                    </span>
-                    <span>
-                      <Pill value={item.status} labels={labels} />
-                    </span>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <div className="px-4 py-12 text-center">
-                <p className="text-lg font-semibold text-ink-800">{emptyState.title || labels.emptyTitle}</p>
-                <p className="mt-1 text-sm text-ink-500">{emptyState.message || labels.emptyMessage}</p>
-              </div>
-            )}
           </div>
 
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-ink-500">

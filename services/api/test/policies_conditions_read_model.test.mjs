@@ -52,7 +52,7 @@ function buildDb(rows = [], { permissionAllowed = true, queries = [] } = {}) {
       }
       if (sql.includes("FROM eip_core.commercial_condition")) {
         const tenantId = params[0];
-        const id = params[1];
+        const id = sql.includes("AND id=$2") ? params[1] : null;
         const scoped = rows.filter((row) => row.tenant_id === tenantId);
         const resultRows = id ? scoped.filter((row) => row.id === id) : scoped;
         return { rowCount: resultRows.length, rows: resultRows };
@@ -143,6 +143,7 @@ test("list read model returns real tenant rows with pagination, filters, and emp
   assert.equal(pageOne.total_pages, 2);
   assert.equal(pageOne.items.length, 1);
   assert.equal(pageOne.items.some((item) => item.code === "B_PRICE"), false);
+  assert.equal(Object.hasOwn(pageOne.items[0], "tenant_id"), false);
   assert.equal(queries.some((query) => query.params[0] === TENANT_A), true);
 
   const filtered = await listPolicyConditions(app, { tenant_id: TENANT_A }, { condition_type: "TAX" });
@@ -175,10 +176,13 @@ test("detail read model is tenant-scoped and redacts sensitive machine fields", 
   ];
   const app = { db: buildDb(rows) };
   const detail = await getPolicyConditionDetail(app, { tenant_id: TENANT_A }, rows[0].id);
-  assert.equal(detail.item.safe_machine_fields.effect.price.api_key, "[redacted]");
-  assert.equal(detail.item.safe_machine_fields.effect.raw_legal_text, "[redacted]");
-  assert.equal(detail.item.safe_machine_fields.attrs.credential, "[redacted]");
-  assert.equal(detail.item.safe_machine_fields.scope.signature_secret, "[redacted]");
+  assert.equal(Object.hasOwn(detail.item, "tenant_id"), false);
+  assert.deepEqual(detail.item.safe_machine_fields.effect_blocks, ["price"]);
+  assert.deepEqual(detail.item.safe_machine_fields.scope_keys, ["channel"]);
+  assert.deepEqual(detail.item.safe_machine_fields.attrs_keys, ["governance_source"]);
+  assert.equal(JSON.stringify(detail.item.safe_machine_fields).includes("secret-key"), false);
+  assert.equal(JSON.stringify(detail.item.safe_machine_fields).includes("do not expose"), false);
+  assert.equal(JSON.stringify(detail.item.safe_machine_fields).includes("hidden"), false);
   assert.equal(detail.item.warnings.some((warning) => warning.code === "REDACTED_FIELDS"), true);
 
   const otherTenant = await getPolicyConditionDetail(app, { tenant_id: TENANT_B }, rows[0].id);
@@ -196,6 +200,22 @@ test("read-only route rejects unauthenticated and unauthorized requests", async 
   assert.equal(forbiddenRes.statusCode, 403);
   assert.equal(forbiddenRes.json().error, "FORBIDDEN");
   await forbidden.close();
+});
+
+test("overview route is not captured by detail route and malformed detail ids are safe", async () => {
+  const app = await buildRouteApp({
+    rows: [condition({ id: "20000000-0000-0000-0000-0000000000aa", tenant_id: TENANT_A, condition_type: "PRICE" })]
+  });
+
+  const overview = await app.inject({ method: "GET", url: "/api/eip/policies-conditions/overview" });
+  assert.equal(overview.statusCode, 200);
+  assert.equal(overview.json().summary.total, 1);
+  assert.equal(overview.json().by_domain.SELLING, 1);
+
+  const malformed = await app.inject({ method: "GET", url: "/api/eip/policies-conditions/not-a-uuid" });
+  assert.equal(malformed.statusCode, 400);
+  assert.equal(malformed.json().error, "INVALID_POLICY_CONDITION_ID");
+  await app.close();
 });
 
 test("read-only route lists and details only current tenant commercial_condition rows", async () => {
@@ -217,6 +237,30 @@ test("read-only route lists and details only current tenant commercial_condition
   const otherTenant = await app.inject({ method: "GET", url: "/api/eip/policies-conditions/20000000-0000-0000-0000-0000000000bb" });
   assert.equal(otherTenant.statusCode, 404);
   assert.equal(otherTenant.json().error, "POLICY_CONDITION_NOT_FOUND");
+  await app.close();
+});
+
+test("overview counts all scanned rows, not only a display page", async () => {
+  const rows = Array.from({ length: 150 }, (_, index) =>
+    condition({
+      id: `20000000-0000-0000-0000-${String(index + 1).padStart(12, "0")}`,
+      tenant_id: TENANT_A,
+      code: `PRICE_${index + 1}`,
+      condition_type: "PRICE",
+      condition_category: "PRICING"
+    })
+  );
+  const app = await buildRouteApp({ rows });
+
+  const list = await app.inject({ method: "GET", url: "/api/eip/policies-conditions?page=1&page_size=25" });
+  assert.equal(list.statusCode, 200);
+  assert.equal(list.json().items.length, 25);
+  assert.equal(list.json().summary.total, 150);
+
+  const overview = await app.inject({ method: "GET", url: "/api/eip/policies-conditions/overview" });
+  assert.equal(overview.statusCode, 200);
+  assert.equal(overview.json().summary.total, 150);
+  assert.equal(overview.json().by_domain.SELLING, 150);
   await app.close();
 });
 

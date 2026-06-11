@@ -518,7 +518,18 @@ SELECT
               "detailTitle": "Condition detail",
               "noSelection": "Select a policy or condition to inspect the read model."
             },
-            "pageSizes": [12, 25, 50]
+            "pageSizes": [12, 25, 50],
+            "domainOptions": [
+              "PROCUREMENT",
+              "SELLING",
+              "INVENTORY",
+              "FINANCE_APPROVAL",
+              "TRADE_PARTY",
+              "MARKETPLACE",
+              "LOGISTICS_DELIVERY",
+              "FISCAL_TAX_TREATMENT",
+              "NEEDS_REVIEW"
+            ]
           }
         }
       ]

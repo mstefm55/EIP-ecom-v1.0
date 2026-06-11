@@ -1,10 +1,12 @@
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 25;
 const MAX_PAGE_SIZE = 100;
+const MAX_SCAN_ROWS = 10000;
 const PHYSICAL_TABLE = "eip_core.commercial_condition";
 
-const REDACTED = "[redacted]";
 const SENSITIVE_KEY_PATTERN = /(secret|token|password|credential|cookie|authorization|signature|api[_-]?key|private[_-]?key|client[_-]?secret|raw[_-]?legal|legal[_-]?text|compliance[_-]?text)/i;
+const SAFE_VALUE_KEY_PATTERN = /(amount|percentage|percent|quantity|qty|unit|currency|threshold|min|max|minimum|maximum|priority|days|rate|count|limit|enabled|allowed|mode|method|rounding|code|level)$/i;
+const SENSITIVE_VALUE_PATTERN = /(bearer\s+|basic\s+|secret|password|token|private[_-]?key|api[_-]?key|-----BEGIN|sk_live|sk_test)/i;
 
 const LEGACY_MAPPINGS = [
   {
@@ -245,6 +247,7 @@ function normalizeFilters(filters = {}) {
     page_size: normalizePageSize(filters.page_size)
   };
 }
+
 function cloneClassification(value) {
   const source = asObject(value);
   return {
@@ -334,30 +337,38 @@ export function deriveScopeSummary(row = {}) {
   };
 }
 
-function redactValue(value) {
-  if (Array.isArray(value)) return value.map((item) => redactValue(item));
-  if (!isPlainObject(value)) return value;
-  return Object.fromEntries(
-    Object.entries(value).map(([key, nested]) => [
-      key,
-      SENSITIVE_KEY_PATTERN.test(key) ? REDACTED : redactValue(nested)
-    ])
-  );
-}
-
 function hasSensitiveKeys(value) {
   if (Array.isArray(value)) return value.some((item) => hasSensitiveKeys(item));
   if (!isPlainObject(value)) return false;
   return Object.entries(value).some(([key, nested]) => SENSITIVE_KEY_PATTERN.test(key) || hasSensitiveKeys(nested));
 }
 
-function collectLeafValues(value, prefix = "", out = {}) {
+function listSafeKeys(value) {
+  if (!isPlainObject(value)) return [];
+  return Object.keys(value)
+    .filter((key) => !SENSITIVE_KEY_PATTERN.test(key))
+    .sort();
+}
+
+function isSafeSummaryLeaf(key, value) {
+  if (!SAFE_VALUE_KEY_PATTERN.test(key)) return false;
+  if (value === null || value === undefined) return false;
+  if (typeof value === "number" || typeof value === "boolean") return true;
+  if (typeof value !== "string") return false;
+  const text = value.trim();
+  if (!text || text.length > 80) return false;
+  if (SENSITIVE_VALUE_PATTERN.test(text)) return false;
+  return true;
+}
+
+function collectSafeLeafValues(value, prefix = "", out = {}) {
   if (Array.isArray(value)) {
-    out[prefix || "items"] = value.length;
+    if (prefix) out[prefix] = value.length;
     return out;
   }
   if (!isPlainObject(value)) {
-    if (prefix && value !== null && value !== undefined && String(value).length <= 120) {
+    const key = prefix.split(".").pop() || "";
+    if (prefix && isSafeSummaryLeaf(key, value)) {
       out[prefix] = value;
     }
     return out;
@@ -365,7 +376,7 @@ function collectLeafValues(value, prefix = "", out = {}) {
   for (const [key, nested] of Object.entries(value)) {
     if (SENSITIVE_KEY_PATTERN.test(key)) continue;
     const next = prefix ? `${prefix}.${key}` : key;
-    collectLeafValues(nested, next, out);
+    collectSafeLeafValues(nested, next, out);
   }
   return out;
 }
@@ -373,8 +384,8 @@ function collectLeafValues(value, prefix = "", out = {}) {
 export function deriveValueSummary(row = {}) {
   const effect = asObject(row.effect);
   const attrs = asObject(row.attrs);
-  const leaves = collectLeafValues(effect);
-  const fallbackLeaves = Object.keys(leaves).length ? leaves : collectLeafValues(attrs);
+  const leaves = collectSafeLeafValues(effect);
+  const fallbackLeaves = Object.keys(leaves).length ? leaves : collectSafeLeafValues(attrs);
   const valueFields = Object.fromEntries(Object.entries(fallbackLeaves).slice(0, 8));
   const effectBlocks = Object.entries(effect)
     .filter(([, value]) => isPlainObject(value))
@@ -430,7 +441,6 @@ export function mapCommercialConditionToPolicyCondition(row = {}, options = {}) 
 
   return {
     id: row.id,
-    tenant_id: row.tenant_id,
     code: row.code,
     label: row.label || row.code,
     status,
@@ -503,6 +513,14 @@ function emptyState() {
   };
 }
 
+function toItems(rows) {
+  return rows.map((row) => mapCommercialConditionToPolicyCondition(row));
+}
+
+function filterItems(items, filters) {
+  return items.filter((item) => matchesFilters(item, filters));
+}
+
 async function loadTenantConditionRows(app, tenantId) {
   const result = await app.db.query(
     `
@@ -511,17 +529,22 @@ async function loadTenantConditionRows(app, tenantId) {
     FROM eip_core.commercial_condition
     WHERE tenant_id=$1
     ORDER BY priority ASC, updated_at DESC NULLS LAST, created_at DESC NULLS LAST, code ASC
+    LIMIT $2
     `,
-    [tenantId]
+    [tenantId, MAX_SCAN_ROWS + 1]
   );
-  return result.rows || [];
+  const rows = result.rows || [];
+  return {
+    rows: rows.slice(0, MAX_SCAN_ROWS),
+    truncated: rows.length > MAX_SCAN_ROWS
+  };
 }
 
 export async function listPolicyConditions(app, authContext, filters = {}) {
   const normalized = normalizeFilters(filters);
-  const rows = await loadTenantConditionRows(app, authContext.tenant_id);
-  const mapped = rows.map((row) => mapCommercialConditionToPolicyCondition(row));
-  const filtered = mapped.filter((item) => matchesFilters(item, normalized));
+  const loaded = await loadTenantConditionRows(app, authContext.tenant_id);
+  const mapped = toItems(loaded.rows);
+  const filtered = filterItems(mapped, normalized);
   const totalPages = filtered.length ? Math.ceil(filtered.length / normalized.page_size) : 0;
   const page = totalPages ? Math.min(normalized.page, totalPages) : 1;
   const start = (page - 1) * normalized.page_size;
@@ -536,7 +559,10 @@ export async function listPolicyConditions(app, authContext, filters = {}) {
     total_pages: totalPages,
     filters: normalized,
     summary: buildSummary(filtered),
-    empty_state: emptyState()
+    empty_state: emptyState(),
+    warnings: loaded.truncated
+      ? [{ code: "SCAN_LIMIT_REACHED", message: "Only the first 10000 policy rows were scanned; narrow filters for complete review." }]
+      : []
   };
 }
 
@@ -555,6 +581,9 @@ export async function getPolicyConditionDetail(app, authContext, id) {
   if (!row) return null;
 
   const item = mapCommercialConditionToPolicyCondition(row);
+  const scope = asObject(row.scope);
+  const effect = asObject(row.effect);
+  const attrs = asObject(row.attrs);
   return {
     ok: true,
     item: {
@@ -570,28 +599,33 @@ export async function getPolicyConditionDetail(app, authContext, id) {
         original_condition_category: row.condition_category || null
       },
       safe_machine_fields: {
-        scope: redactValue(asObject(row.scope)),
-        effect: redactValue(asObject(row.effect)),
-        attrs: redactValue(asObject(row.attrs))
+        scope_keys: listSafeKeys(scope),
+        effect_blocks: Object.entries(effect).filter(([, value]) => isPlainObject(value)).map(([key]) => key).filter((key) => !SENSITIVE_KEY_PATTERN.test(key)).sort(),
+        attrs_keys: listSafeKeys(attrs),
+        value_summary: item.value_summary
       }
     }
   };
 }
 
 export async function getPoliciesConditionsOverview(app, authContext) {
-  const result = await listPolicyConditions(app, authContext, { page_size: MAX_PAGE_SIZE });
+  const loaded = await loadTenantConditionRows(app, authContext.tenant_id);
+  const items = toItems(loaded.rows);
   const byDomain = {};
   const byStatus = {};
-  for (const item of result.items) {
+  for (const item of items) {
     const domain = item.classification.policy_domain || "NEEDS_REVIEW";
     byDomain[domain] = (byDomain[domain] || 0) + 1;
     byStatus[item.status] = (byStatus[item.status] || 0) + 1;
   }
   return {
     ok: true,
-    summary: result.summary,
+    summary: buildSummary(items),
     by_domain: byDomain,
     by_status: byStatus,
-    empty_state: result.empty_state
+    empty_state: emptyState(),
+    warnings: loaded.truncated
+      ? [{ code: "SCAN_LIMIT_REACHED", message: "Only the first 10000 policy rows were scanned; narrow filters for complete review." }]
+      : []
   };
 }
