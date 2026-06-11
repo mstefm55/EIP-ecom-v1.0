@@ -42,6 +42,7 @@ import EcomCommerceLifecyclePanel from "../components/ecom/EcomCommerceLifecycle
 import CrmWorkspace from "../components/crm/CrmWorkspace";
 import InventoryWorkspace from "../components/inventory/InventoryWorkspace";
 import ProcurementWorkspace from "../components/procurement/ProcurementWorkspace";
+import PoliciesConditionsWorkspace from "../components/policies/PoliciesConditionsWorkspace";
 
 function Fallback({ node }) {
   return (
@@ -96,5 +97,6 @@ export const registry = {
   CrmWorkspace,
   InventoryWorkspace,
   ProcurementWorkspace,
+  PoliciesConditionsWorkspace,
   Fallback,
 };
