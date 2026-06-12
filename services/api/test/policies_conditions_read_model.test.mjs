@@ -6,7 +6,9 @@ import { fileURLToPath } from "node:url";
 import Fastify from "fastify";
 import policiesConditionsRoutes from "../src/routes/policies_conditions.js";
 import {
+  DEFAULT_POLICY_DOMAINS,
   getPolicyConditionDetail,
+  getPolicyConditionTaxonomy,
   listPolicyConditions,
   mapCommercialConditionToPolicyCondition
 } from "../src/services/policiesConditions/readModel.js";
@@ -43,12 +45,28 @@ function condition(overrides = {}) {
   };
 }
 
-function buildDb(rows = [], { permissionAllowed = true, queries = [] } = {}) {
+function taxonomyRow(overrides = {}) {
+  return {
+    list_code: overrides.list_code || "POLICY_DOMAIN",
+    list_label: overrides.list_label || "Policy Domain",
+    code: overrides.code || "COMMERCIAL",
+    label: overrides.label || "Commercial",
+    sort_order: overrides.sort_order ?? 10,
+    is_active: overrides.is_active ?? true,
+    attrs: overrides.attrs || {},
+    tenant_id: overrides.tenant_id ?? null
+  };
+}
+
+function buildDb(rows = [], { permissionAllowed = true, queries = [], dropdownRows = [] } = {}) {
   return {
     async query(sql, params = []) {
       queries.push({ sql, params });
       if (sql.includes("FROM eip_authz.identity_role")) {
         return permissionAllowed ? { rowCount: 1, rows: [{ ok: 1 }] } : { rowCount: 0, rows: [] };
+      }
+      if (sql.includes("FROM eip_core.dropdown_list") && sql.includes("JOIN eip_core.dropdown_value")) {
+        return { rowCount: dropdownRows.length, rows: dropdownRows };
       }
       if (sql.includes("FROM eip_core.commercial_condition")) {
         const tenantId = params[0];
@@ -62,9 +80,9 @@ function buildDb(rows = [], { permissionAllowed = true, queries = [] } = {}) {
   };
 }
 
-async function buildRouteApp({ rows = [], permissionAllowed = true, authenticated = true } = {}) {
+async function buildRouteApp({ rows = [], dropdownRows = [], permissionAllowed = true, authenticated = true } = {}) {
   const app = Fastify({ logger: false });
-  app.decorate("db", buildDb(rows, { permissionAllowed }));
+  app.decorate("db", buildDb(rows, { permissionAllowed, dropdownRows }));
   app.decorate("requireSession", async () => {
     if (!authenticated) return { ok: false, status: 401, error: "UNAUTHENTICATED" };
     return {
@@ -83,7 +101,7 @@ async function buildRouteApp({ rows = [], permissionAllowed = true, authenticate
 test("legacy commercial condition rows map to canonical read model classifications", () => {
   const procurement = mapCommercialConditionToPolicyCondition(condition());
   assert.equal(procurement.source.physical_table, "eip_core.commercial_condition");
-  assert.equal(procurement.classification.policy_domain, "PROCUREMENT");
+  assert.equal(procurement.classification.policy_domain, "COMMERCIAL");
   assert.equal(procurement.classification.policy_family, "PURCHASE_REQUISITION");
   assert.equal(procurement.classification.condition_type, "PROCUREMENT_ROUTE");
   assert.equal(procurement.classification.mapping_status, "mapped");
@@ -111,7 +129,7 @@ test("legacy commercial condition rows map to canonical read model classificatio
   assert.equal(ambiguous.warnings.some((warning) => warning.code === "CLASSIFICATION_NEEDS_REVIEW"), true);
 });
 
-test("explicit attrs.classification is preferred over legacy mapping", () => {
+test("explicit attrs.classification is preferred over legacy mapping and canonicalized", () => {
   const mapped = mapCommercialConditionToPolicyCondition(condition({
     condition_type: "TRADE_TERMS",
     attrs: {
@@ -124,9 +142,144 @@ test("explicit attrs.classification is preferred over legacy mapping", () => {
     }
   }));
 
-  assert.equal(mapped.classification.policy_domain, "SELLING");
+  assert.equal(mapped.classification.policy_domain, "COMMERCIAL");
+  assert.equal(mapped.legacy.attrs_classification.policy_domain, "SELLING");
   assert.equal(mapped.classification.mapping_source, "attrs.classification");
   assert.equal(mapped.status, "active");
+});
+
+test("default policy domains are the seven governed business lexicon domains", () => {
+  assert.deepEqual(DEFAULT_POLICY_DOMAINS.map((item) => item.code), [
+    "COMMERCIAL",
+    "FINANCIAL",
+    "APPROVAL_FRAMEWORK",
+    "INVENTORY",
+    "FISCAL_TAX_TREATMENT",
+    "MARKETPLACE",
+    "LOGISTICS"
+  ]);
+  assert.equal(DEFAULT_POLICY_DOMAINS.some((item) => ["PLAN", "SOURCE", "MAKE", "DELIVER", "RETURN", "ENABLE"].includes(item.code)), false);
+});
+
+test("legacy domains canonicalize while tenant custom domains remain visible", () => {
+  const selling = mapCommercialConditionToPolicyCondition(condition({
+    attrs: {
+      classification: {
+        policy_domain: "SELLING",
+        policy_family: "PRICE_POLICY",
+        condition_type: "PRICE",
+        condition_nature: "INTERNAL_MANAGEMENT_POLICY"
+      }
+    }
+  }));
+  assert.equal(selling.classification.policy_domain, "COMMERCIAL");
+  assert.equal(selling.legacy.attrs_classification.policy_domain, "SELLING");
+
+  const tradeParty = mapCommercialConditionToPolicyCondition(condition({
+    attrs: {
+      classification: {
+        policy_domain: "TRADE_PARTY",
+        policy_family: "PAYMENT_TERMS",
+        condition_type: "PAYMENT_TERMS",
+        condition_nature: "EXTERNAL_TRADE_CONDITION"
+      }
+    }
+  }));
+  assert.equal(tradeParty.classification.policy_domain, "COMMERCIAL");
+
+  const logistics = mapCommercialConditionToPolicyCondition(condition({
+    attrs: {
+      classification: {
+        policy_domain: "LOGISTICS_DELIVERY",
+        policy_family: "DELIVERY_EXECUTION",
+        condition_type: "DELIVERY_RULE",
+        condition_nature: "OPERATIONAL_POLICY"
+      }
+    }
+  }));
+  assert.equal(logistics.classification.policy_domain, "LOGISTICS");
+
+  const custom = mapCommercialConditionToPolicyCondition(condition({
+    attrs: {
+      classification: {
+        policy_domain: "CUSTOM_RISK",
+        policy_family: "LOCAL_EXCEPTION",
+        condition_type: "RISK_HOLD",
+        condition_nature: "INTERNAL_MANAGEMENT_POLICY"
+      }
+    }
+  }));
+  assert.equal(custom.classification.policy_domain, "CUSTOM_RISK");
+});
+
+test("incoterms classify under Commercial with governed subtype", () => {
+  const mapped = mapCommercialConditionToPolicyCondition(condition({
+    code: "TRADE_TERM_FOB",
+    label: "FOB sale term",
+    condition_type: "TRADE_TERMS",
+    condition_category: "TRADE",
+    attrs: { incoterm: "FOB" },
+    effect: { trade_terms: { incoterm: "FOB" } }
+  }));
+
+  assert.equal(mapped.classification.policy_domain, "COMMERCIAL");
+  assert.equal(mapped.classification.policy_family, "INCOTERMS");
+  assert.equal(mapped.classification.condition_type, "INCOTERM");
+  assert.equal(mapped.classification.condition_subtype, "FOB");
+});
+
+test("finance approval compatibility maps by meaning and keeps ambiguous rows reviewable", () => {
+  const commercial = mapCommercialConditionToPolicyCondition(condition({
+    attrs: {
+      classification: {
+        policy_domain: "FINANCE_APPROVAL",
+        policy_family: "PAYMENT_TERMS",
+        condition_type: "PAYMENT_TERMS",
+        condition_nature: "EXTERNAL_TRADE_CONDITION"
+      }
+    }
+  }));
+  assert.equal(commercial.classification.policy_domain, "COMMERCIAL");
+
+  const financial = mapCommercialConditionToPolicyCondition(condition({
+    attrs: {
+      classification: {
+        policy_domain: "FINANCE_APPROVAL",
+        policy_family: "LIQUIDITY_POLICY",
+        condition_type: "FINANCIAL_RATIO",
+        condition_nature: "INTERNAL_MANAGEMENT_POLICY"
+      }
+    }
+  }));
+  assert.equal(financial.classification.policy_domain, "FINANCIAL");
+
+  const approval = mapCommercialConditionToPolicyCondition(condition({
+    attrs: {
+      classification: {
+        policy_domain: "FINANCE_APPROVAL",
+        policy_family: "APPROVAL_MATRIX",
+        condition_type: "APPROVAL_MATRIX",
+        condition_nature: "INTERNAL_MANAGEMENT_POLICY"
+      }
+    }
+  }));
+  assert.equal(approval.classification.policy_domain, "APPROVAL_FRAMEWORK");
+
+  const ambiguous = mapCommercialConditionToPolicyCondition(condition({
+    condition_type: "FOREX_RATE",
+    condition_category: "FOREX",
+    attrs: {
+      classification: {
+        policy_domain: "FINANCE_APPROVAL",
+        policy_family: "CURRENCY_CONVERSION",
+        condition_type: "FOREX_RATE",
+        condition_nature: "SYSTEM_CALCULATION_POLICY"
+      }
+    }
+  }));
+  assert.equal(ambiguous.classification.policy_domain, "NEEDS_REVIEW");
+  assert.equal(ambiguous.classification.mapping_status, "legacy_ambiguous");
+  assert.equal(ambiguous.status, "needs_review");
 });
 
 test("list read model returns real tenant rows with pagination, filters, and empty state", async () => {
@@ -210,12 +363,53 @@ test("overview route is not captured by detail route and malformed detail ids ar
   const overview = await app.inject({ method: "GET", url: "/api/eip/policies-conditions/overview" });
   assert.equal(overview.statusCode, 200);
   assert.equal(overview.json().summary.total, 1);
-  assert.equal(overview.json().by_domain.SELLING, 1);
+  assert.equal(overview.json().by_domain.COMMERCIAL, 1);
 
   const malformed = await app.inject({ method: "GET", url: "/api/eip/policies-conditions/not-a-uuid" });
   assert.equal(malformed.statusCode, 400);
   assert.equal(malformed.json().error, "INVALID_POLICY_CONDITION_ID");
   await app.close();
+});
+
+test("taxonomy route is read-only and not captured by detail route", async () => {
+  const app = await buildRouteApp();
+
+  const response = await app.inject({ method: "GET", url: "/api/eip/policies-conditions/taxonomy" });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().read_only, true);
+  assert.equal(response.json().closed_enum, false);
+  assert.deepEqual(response.json().lists.domains.options.map((item) => item.code), DEFAULT_POLICY_DOMAINS.map((item) => item.code));
+
+  const post = await app.inject({ method: "POST", url: "/api/eip/policies-conditions/taxonomy" });
+  assert.equal(post.statusCode, 404);
+  await app.close();
+});
+
+test("taxonomy service returns seeded defaults and tenant custom values as an extensible list", async () => {
+  const dropdownRows = [
+    ...DEFAULT_POLICY_DOMAINS.map((item) => taxonomyRow({
+      code: item.code,
+      label: item.label,
+      sort_order: item.sort_order,
+      attrs: { description: item.description },
+      tenant_id: null
+    })),
+    taxonomyRow({
+      code: "CUSTOM_RISK",
+      label: "Custom Risk",
+      sort_order: 80,
+      attrs: { description: "Tenant-specific review domain" },
+      tenant_id: TENANT_A
+    })
+  ];
+  const app = { db: buildDb([], { dropdownRows }) };
+
+  const taxonomy = await getPolicyConditionTaxonomy(app, { tenant_id: TENANT_A });
+  assert.equal(taxonomy.ok, true);
+  assert.equal(taxonomy.read_only, true);
+  assert.equal(taxonomy.closed_enum, false);
+  assert.equal(taxonomy.lists.domains.options.some((item) => item.code === "CUSTOM_RISK" && item.source === "tenant"), true);
+  assert.deepEqual(taxonomy.defaults.domains.map((item) => item.code), DEFAULT_POLICY_DOMAINS.map((item) => item.code));
 });
 
 test("read-only route lists and details only current tenant commercial_condition rows", async () => {
@@ -260,7 +454,7 @@ test("overview counts all scanned rows, not only a display page", async () => {
   const overview = await app.inject({ method: "GET", url: "/api/eip/policies-conditions/overview" });
   assert.equal(overview.statusCode, 200);
   assert.equal(overview.json().summary.total, 150);
-  assert.equal(overview.json().by_domain.SELLING, 150);
+  assert.equal(overview.json().by_domain.COMMERCIAL, 150);
   await app.close();
 });
 
@@ -272,10 +466,12 @@ test("phase 2 wiring is read-only, descriptor-backed, and has no fake policy row
   const dashboardSurface = read("apps/dashboard/src/engine/surfaces/dashboard.js");
   const seedSurface = read("services/api/db/seed/ui_surface_dashboard.sql");
   const migration = read("services/api/db/migrations/0121_policies_conditions_readonly_center.sql");
+  const lexiconMigration = read("services/api/db/migrations/0122_policies_conditions_business_lexicon.sql");
 
   assert.match(server, /policiesConditionsRoutes/);
   assert.match(server, /prefix: "\/api\/eip\/policies-conditions"/);
   assert.match(route, /app\.get\("\/"/);
+  assert.match(route, /app\.get\("\/taxonomy"/);
   assert.match(route, /app\.get\("\/:id"/);
   assert.doesNotMatch(route, /app\.(post|patch|put|delete)\(/i);
   assert.match(route, /app\.requireSession\(req, \{ realm: "EIP" \}\)/);
@@ -291,4 +487,48 @@ test("phase 2 wiring is read-only, descriptor-backed, and has no fake policy row
   assert.match(migration, /policies_conditions\.read/);
   assert.match(migration, /role_template_permission/);
   assert.doesNotMatch(migration, /CREATE TABLE/i);
+  assert.match(lexiconMigration, /POLICY_DOMAIN/);
+  assert.match(lexiconMigration, /POLICY_FAMILY/);
+  assert.match(lexiconMigration, /POLICY_CONDITION_TYPE/);
+  assert.match(lexiconMigration, /POLICY_CONDITION_SUBTYPE/);
+  assert.match(lexiconMigration, /ON CONFLICT \(list_id, code\)/);
+  assert.doesNotMatch(lexiconMigration, /CREATE TABLE/i);
+  assert.doesNotMatch(lexiconMigration, /'EXW'|'FCA'|'CPT'|'CIP'|'DAP'|'DPU'|'DDP'|'FAS'|'FOB'|'CFR'|'CIF'/);
+});
+
+test("dashboard descriptors expose the read-only taxonomy endpoint and seven default domains", () => {
+  const dashboardSurface = read("apps/dashboard/src/engine/surfaces/dashboard.js");
+  const seedSurface = read("services/api/db/seed/ui_surface_dashboard.sql");
+  const dashboardPoliciesBlock = dashboardSurface.slice(
+    dashboardSurface.indexOf('id: "policies-conditions-workspace"'),
+    dashboardSurface.indexOf('id: "user-tasks-panel"')
+  );
+  const seedPoliciesBlock = seedSurface.slice(
+    seedSurface.indexOf('"id": "policies-conditions-workspace"'),
+    seedSurface.indexOf('"id": "user-tasks-panel"')
+  );
+  const expected = DEFAULT_POLICY_DOMAINS.map((item) => item.code);
+  const retired = ["PROCUREMENT", "SELLING", "FINANCE_APPROVAL", "TRADE_PARTY", "LOGISTICS_DELIVERY"];
+
+  assert.match(dashboardPoliciesBlock, /taxonomy: "\/api\/eip\/policies-conditions\/taxonomy"/);
+  assert.match(seedPoliciesBlock, /"taxonomy": "\/api\/eip\/policies-conditions\/taxonomy"/);
+  for (const code of expected) {
+    assert.match(dashboardPoliciesBlock, new RegExp(`"${code}"`));
+    assert.match(seedPoliciesBlock, new RegExp(`"${code}"`));
+  }
+  for (const code of retired) {
+    assert.doesNotMatch(dashboardPoliciesBlock, new RegExp(`"${code}"`));
+    assert.doesNotMatch(seedPoliciesBlock, new RegExp(`"${code}"`));
+  }
+});
+
+test("SCOR and professional source metadata stay documentation-only", () => {
+  const service = read("services/api/src/services/policiesConditions/readModel.js");
+  const lexiconDoc = read("docs/policies_conditions_business_lexicon_v1.md");
+  const mappingDoc = read("docs/policies_conditions_source_mapping_v1.md");
+
+  assert.match(lexiconDoc, /ASCM\/SCOR Review/);
+  assert.match(mappingDoc, /Source Reference Mapping/);
+  assert.doesNotMatch(service, /SCOR|SCORmark|ASCM|Frontiers|policies_conditions_source_mapping/i);
+  assert.equal(DEFAULT_POLICY_DOMAINS.some((item) => ["PLAN", "SOURCE", "MAKE", "DELIVER", "RETURN", "ENABLE"].includes(item.code)), false);
 });
