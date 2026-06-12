@@ -1,6 +1,7 @@
 import { hasPermission } from "../auth/perm.js";
 import {
   getPoliciesConditionsOverview,
+  getPolicyConditionTaxonomy,
   getPolicyConditionDetail,
   listPolicyConditions
 } from "../services/policiesConditions/readModel.js";
@@ -51,6 +52,18 @@ export default async function policiesConditionsRoutes(app) {
     } catch (error) {
       app.log.error({ event: "policies_conditions_overview_error", tenantId: session.tenant_id, error: error.message });
       return reply.code(500).send({ ok: false, error: "POLICIES_CONDITIONS_OVERVIEW_FAILED" });
+    }
+  });
+
+  app.get("/taxonomy", async (req, reply) => {
+    const session = await requireRead(app, req, reply);
+    if (!session) return;
+
+    try {
+      return getPolicyConditionTaxonomy(app, session);
+    } catch (error) {
+      app.log.error({ event: "policies_conditions_taxonomy_error", tenantId: session.tenant_id, error: error.message });
+      return reply.code(500).send({ ok: false, error: "POLICIES_CONDITIONS_TAXONOMY_FAILED" });
     }
   });
 

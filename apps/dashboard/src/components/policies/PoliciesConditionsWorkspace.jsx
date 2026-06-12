@@ -14,7 +14,8 @@ import { apiFetch } from "../../services/apiClient";
 const DEFAULT_ENDPOINTS = {
   list: "/api/eip/policies-conditions",
   detail: "/api/eip/policies-conditions/:id",
-  overview: "/api/eip/policies-conditions/overview"
+  overview: "/api/eip/policies-conditions/overview",
+  taxonomy: "/api/eip/policies-conditions/taxonomy"
 };
 
 const DEFAULT_LABELS = {
@@ -64,20 +65,66 @@ const MAPPING_TONES = {
 };
 
 const DEFAULT_DOMAIN_OPTIONS = [
-  "PROCUREMENT",
-  "SELLING",
-  "INVENTORY",
-  "FINANCE_APPROVAL",
-  "TRADE_PARTY",
-  "MARKETPLACE",
-  "LOGISTICS_DELIVERY",
-  "FISCAL_TAX_TREATMENT",
-  "NEEDS_REVIEW",
+  { code: "COMMERCIAL", label: "Commercial", sort_order: 10 },
+  { code: "FINANCIAL", label: "Financial", sort_order: 20 },
+  { code: "APPROVAL_FRAMEWORK", label: "Approval Framework", sort_order: 30 },
+  { code: "INVENTORY", label: "Inventory", sort_order: 40 },
+  { code: "FISCAL_TAX_TREATMENT", label: "Fiscal & Tax Treatment", sort_order: 50 },
+  { code: "MARKETPLACE", label: "Marketplace", sort_order: 60 },
+  { code: "LOGISTICS", label: "Logistics", sort_order: 70 },
 ];
+
+const LEGACY_DOMAIN_ALIASES = {
+  PROCUREMENT: "COMMERCIAL",
+  SELLING: "COMMERCIAL",
+  TRADE_PARTY: "COMMERCIAL",
+  LOGISTICS_DELIVERY: "LOGISTICS",
+};
+
+const RETIRED_DEFAULT_DOMAIN_CODES = new Set(["FINANCE_APPROVAL"]);
 
 function formatLabel(value) {
   const text = String(value || "").replace(/_/g, " ").trim();
   return text ? text.replace(/\b\w/g, (char) => char.toUpperCase()) : "-";
+}
+
+function normalizeDomainCode(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9._-]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function normalizeDomainOption(value, { allowReview = false } = {}) {
+  const source = value && typeof value === "object" ? value : { code: value };
+  const rawCode = normalizeDomainCode(source.code || source.value);
+  if (RETIRED_DEFAULT_DOMAIN_CODES.has(rawCode) && !allowReview) return null;
+  const code = LEGACY_DOMAIN_ALIASES[rawCode] || rawCode;
+  if (!code || (code === "NEEDS_REVIEW" && !allowReview)) return null;
+  return {
+    code,
+    label: source.label || formatLabel(code),
+    sort_order: Number.isFinite(Number(source.sort_order)) ? Number(source.sort_order) : 1000,
+  };
+}
+
+function mergeDomainOptions(groups = []) {
+  const byCode = new Map();
+  for (const group of groups) {
+    for (const value of group.options || []) {
+      const option = normalizeDomainOption(value, { allowReview: Boolean(group.allowReview) });
+      if (!option) continue;
+      const existing = byCode.get(option.code);
+      byCode.set(option.code, {
+        ...existing,
+        ...option,
+        sort_order: Math.min(existing?.sort_order ?? option.sort_order, option.sort_order),
+      });
+    }
+  }
+  return [...byCode.values()].sort((a, b) => a.sort_order - b.sort_order || a.label.localeCompare(b.label));
 }
 
 function formatDate(value) {
@@ -162,7 +209,7 @@ export default function PoliciesConditionsWorkspace({ node } = {}) {
     { id: "needs_review", label: labels.needsReview },
   ];
   const pageSizes = props.pageSizes || [12, 25, 50];
-  const domainOptions = props.domainOptions || DEFAULT_DOMAIN_OPTIONS;
+  const descriptorDomainOptions = props.domainOptions || DEFAULT_DOMAIN_OPTIONS;
 
   const [tab, setTab] = useState(tabs[0]?.id || "overview");
   const [query, setQuery] = useState("");
@@ -178,6 +225,7 @@ export default function PoliciesConditionsWorkspace({ node } = {}) {
   const [selectedId, setSelectedId] = useState("");
   const [loading, setLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [taxonomyDomains, setTaxonomyDomains] = useState([]);
   const [error, setError] = useState("");
 
   const items = payload?.items || [];
@@ -187,6 +235,52 @@ export default function PoliciesConditionsWorkspace({ node } = {}) {
     message: labels.emptyMessage,
   };
   const totalPages = payload?.total_pages || 0;
+  const observedDomains = [
+    ...items.map((item) => item.classification?.policy_domain),
+    detail?.classification?.policy_domain,
+  ].filter(Boolean);
+  const domainOptions = mergeDomainOptions([
+    { options: DEFAULT_DOMAIN_OPTIONS },
+    { options: descriptorDomainOptions },
+    { options: taxonomyDomains },
+    { options: observedDomains.map((code) => ({ code, label: formatLabel(code), sort_order: 900 })), allowReview: true },
+  ]);
+  const domainLabelByCode = new Map(domainOptions.map((option) => [option.code, option.label]));
+  const formatDomainLabel = (value) => domainLabelByCode.get(normalizeDomainCode(value)) || formatLabel(value);
+
+  useEffect(() => {
+    if (!endpoints.taxonomy) return undefined;
+    let cancelled = false;
+
+    apiFetch(endpoints.taxonomy)
+      .then((result) => {
+        if (cancelled) return;
+        const options = result?.lists?.domains?.options?.length
+          ? result.lists.domains.options
+          : result?.defaults?.domains || [];
+        setTaxonomyDomains(options);
+      })
+      .catch(() => {
+        if (!cancelled) setTaxonomyDomains([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [endpoints.taxonomy]);
+
+  const refreshTaxonomy = useCallback(async () => {
+    if (!endpoints.taxonomy) return;
+    try {
+      const result = await apiFetch(endpoints.taxonomy);
+      const options = result?.lists?.domains?.options?.length
+        ? result.lists.domains.options
+        : result?.defaults?.domains || [];
+      setTaxonomyDomains(options);
+    } catch {
+      setTaxonomyDomains([]);
+    }
+  }, [endpoints.taxonomy]);
 
   const loadList = useCallback(async () => {
     setLoading(true);
@@ -269,7 +363,10 @@ export default function PoliciesConditionsWorkspace({ node } = {}) {
           ))}
           <button
             type="button"
-            onClick={loadList}
+            onClick={() => {
+              refreshTaxonomy();
+              loadList();
+            }}
             className="inline-flex items-center gap-2 rounded-full border border-ink-100 bg-white px-4 py-2 text-sm font-semibold text-ink-600 hover:bg-ink-50"
           >
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
@@ -314,8 +411,8 @@ export default function PoliciesConditionsWorkspace({ node } = {}) {
                 className="rounded-full border border-ink-100 bg-white px-3 py-2 text-sm font-semibold text-ink-500"
               >
                 <option value="">All domains</option>
-                {domainOptions.map((value) => (
-                  <option key={value} value={value}>{formatLabel(value)}</option>
+                {domainOptions.map((option) => (
+                  <option key={option.code} value={option.code}>{option.label}</option>
                 ))}
               </select>
               <input
@@ -374,7 +471,7 @@ export default function PoliciesConditionsWorkspace({ node } = {}) {
                         <span className="mt-1 block text-xs text-ink-400">{item.code}</span>
                       </span>
                       <span className="space-y-1">
-                        <span className="block text-sm font-semibold text-ink-700">{formatLabel(item.classification?.policy_domain)}</span>
+                        <span className="block text-sm font-semibold text-ink-700">{formatDomainLabel(item.classification?.policy_domain)}</span>
                         <Pill value={item.classification?.mapping_status} tones={MAPPING_TONES} labels={labels} />
                       </span>
                       <span className="text-xs text-ink-500">
@@ -454,7 +551,7 @@ export default function PoliciesConditionsWorkspace({ node } = {}) {
                 <Pill value={selected.classification?.mapping_status} tones={MAPPING_TONES} labels={labels} />
               </div>
               <div className="grid gap-2 sm:grid-cols-2">
-                <DetailRow label={labels.domain} value={formatLabel(selected.classification?.policy_domain)} />
+                <DetailRow label={labels.domain} value={formatDomainLabel(selected.classification?.policy_domain)} />
                 <DetailRow label={labels.family} value={formatLabel(selected.classification?.policy_family)} />
                 <DetailRow label={labels.conditionType} value={selected.classification?.condition_type} />
                 <DetailRow label={labels.nature} value={formatLabel(selected.classification?.condition_nature)} />

@@ -502,7 +502,8 @@ SELECT
             "endpoints": {
               "list": "/api/eip/policies-conditions",
               "detail": "/api/eip/policies-conditions/:id",
-              "overview": "/api/eip/policies-conditions/overview"
+              "overview": "/api/eip/policies-conditions/overview",
+              "taxonomy": "/api/eip/policies-conditions/taxonomy"
             },
             "tabs": [
               { "id": "overview", "label": "Overview" },
@@ -520,15 +521,13 @@ SELECT
             },
             "pageSizes": [12, 25, 50],
             "domainOptions": [
-              "PROCUREMENT",
-              "SELLING",
+              "COMMERCIAL",
+              "FINANCIAL",
+              "APPROVAL_FRAMEWORK",
               "INVENTORY",
-              "FINANCE_APPROVAL",
-              "TRADE_PARTY",
-              "MARKETPLACE",
-              "LOGISTICS_DELIVERY",
               "FISCAL_TAX_TREATMENT",
-              "NEEDS_REVIEW"
+              "MARKETPLACE",
+              "LOGISTICS"
             ]
           }
         }
