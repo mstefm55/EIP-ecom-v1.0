@@ -15,7 +15,7 @@ SELECT
   "type": "UserShell",
   "props": {
     "brand": "EIP Core",
-    "nav": ["Dashboard", "Product Studio", "Content Studio", "Orders & Payments", "Inventory", "Procurement", "Policies & Conditions", "Tasks", "Reports", "Settings"],
+    "nav": ["Dashboard", "Product Studio", "Content Studio", "Orders & Payments", "Inventory", "Procurement", "Entities", "Policies & Conditions", "Tasks", "Reports", "Settings"],
     "menu": [
       { "code": "dashboard", "label": "Dashboard", "icon": "LayoutGrid" },
       { "code": "catalog", "label": "Product Studio", "icon": "Package" },
@@ -23,6 +23,7 @@ SELECT
       { "code": "commerce", "label": "Orders & Payments", "icon": "CreditCard" },
       { "code": "inventory", "label": "Inventory", "icon": "Package", "module": "inventory" },
       { "code": "procurement", "label": "Procurement", "icon": "ShoppingCart", "module": "procurement" },
+      { "code": "entities", "label": "Entities", "icon": "Users", "module": "entity-management" },
       { "code": "policies", "label": "Policies & Conditions", "icon": "FileClock" },
       { "code": "crm", "label": "CRM", "icon": "Users", "module": "crm" },
       { "code": "tasks", "label": "Tasks", "icon": "Activity" },
@@ -529,6 +530,47 @@ SELECT
               "MARKETPLACE",
               "LOGISTICS"
             ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "user-entities-panel",
+      "type": "UserPanel",
+      "props": { "tab": "entities" },
+      "children": [
+        {
+          "id": "entity-management-workspace",
+          "type": "EntityManagementWorkspace",
+          "props": {
+            "module": "entity-management",
+            "title": "Entity Management",
+            "subtitle": "Customers, suppliers, employees, partners, authorities, addresses, contacts, bank accounts, relationships, documents, policies, and activity.",
+            "endpoints": {
+              "list": "/api/eip/entities",
+              "detail": "/api/eip/entities/:id",
+              "options": "/api/eip/entities/governance/options"
+            },
+            "tabs": [
+              { "id": "overview", "label": "Overview" },
+              { "id": "addresses", "label": "Addresses" },
+              { "id": "contacts", "label": "Contacts" },
+              { "id": "bank_accounts", "label": "Bank Accounts" },
+              { "id": "relationships", "label": "Relationships" },
+              { "id": "documents", "label": "Documents" },
+              { "id": "policies", "label": "Policies" },
+              { "id": "activity", "label": "Activity" }
+            ],
+            "actions": {
+              "refresh": "Refresh",
+              "create": "Create entity",
+              "save": "Save",
+              "archive": "Archive",
+              "addAddress": "Add address",
+              "addContact": "Add contact",
+              "addBankAccount": "Add bank account",
+              "addRelationship": "Add relationship"
+            }
           }
         }
       ]

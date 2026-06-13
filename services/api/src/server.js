@@ -38,6 +38,7 @@ import inventoryRoutes from "./routes/inventory.js";
 import procurementRoutes from "./routes/procurement.js";
 import ecomRoutes from "./routes/ecom.js";
 import policiesConditionsRoutes from "./routes/policies_conditions.js";
+import entitiesRoutes from "./routes/entities.js";
 import gatewayRoutes from "./routes/gateway.js";
 import publicCommercePreflightRoutes from "./routes/public_commerce_preflight.js";
 import publicCommerceRoutes from "./routes/public_commerce.js";
@@ -636,6 +637,7 @@ async function buildServer() {
   await app.register(procurementRoutes, { prefix: "/api/eip/procurement" });
   await app.register(ecomRoutes, { prefix: "/api/eip/ecom" });
   await app.register(policiesConditionsRoutes, { prefix: "/api/eip/policies-conditions" });
+  await app.register(entitiesRoutes, { prefix: "/api/eip/entities" });
   await app.register(ediRoutes, { prefix: "/api/edi" });
   await app.register(ediGatewayRoutes, { prefix: "/api/edi" });
   await app.register(privacyRoutes, { prefix: "/api/eip" });
