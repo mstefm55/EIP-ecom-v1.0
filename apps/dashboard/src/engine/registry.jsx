@@ -41,6 +41,7 @@ import EcomCommerceSettingsPanel from "../components/ecom/EcomCommerceSettingsPa
 import EcomCommerceLifecyclePanel from "../components/ecom/EcomCommerceLifecyclePanel";
 import CrmWorkspace from "../components/crm/CrmWorkspace";
 import InventoryWorkspace from "../components/inventory/InventoryWorkspace";
+import InventoryManagementWorkspace from "../components/inventory/InventoryManagementWorkspace";
 import ProcurementWorkspace from "../components/procurement/ProcurementWorkspace";
 import PoliciesConditionsWorkspace from "../components/policies/PoliciesConditionsWorkspace";
 import EntityManagementWorkspace from "../components/entities/EntityManagementWorkspace";
@@ -97,6 +98,7 @@ export const registry = {
   EcomCommerceLifecyclePanel,
   CrmWorkspace,
   InventoryWorkspace,
+  InventoryManagementWorkspace,
   ProcurementWorkspace,
   PoliciesConditionsWorkspace,
   EntityManagementWorkspace,

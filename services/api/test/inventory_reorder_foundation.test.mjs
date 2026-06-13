@@ -459,17 +459,21 @@ test("inventory commercial condition migration is additive, clone-ready, and pre
 
 test("inventory dashboard is descriptor registered and module gated", () => {
   assert.match(registry, /import InventoryWorkspace/);
+  assert.match(registry, /import InventoryManagementWorkspace/);
   assert.match(registry, /InventoryWorkspace,/);
+  assert.match(registry, /InventoryManagementWorkspace,/);
   assert.match(dashboardSurface, /\{ code: "inventory", label: "Inventory", icon: "Package", module: "inventory" \}/);
-  assert.match(dashboardSurface, /type: "InventoryWorkspace"/);
+  assert.match(dashboardSurface, /type: "InventoryManagementWorkspace"/);
   assert.match(dashboardSurface, /\/api\/eip\/inventory\/overview/);
-  assert.match(dashboardSurface, /\/api\/eip\/inventory\/reorder-suggestions/);
-  assert.match(dashboardSurface, /Stock Signals Queue/);
-  assert.match(dashboardSurface, /Inventory Signal Workbench/);
-  assert.match(dashboardSurface, /Action Rail/);
+  assert.match(dashboardSurface, /\/api\/eip\/inventory\/reorder-recommendations/);
+  assert.match(dashboardSurface, /\/api\/eip\/inventory\/policies\/effective/);
+  assert.match(dashboardSurface, /Materials/);
+  assert.match(dashboardSurface, /Lots/);
+  assert.match(dashboardSurface, /Reorder/);
   assert.match(surfaceSeed, /"code": "inventory"/);
-  assert.match(surfaceSeed, /"type": "InventoryWorkspace"/);
-  assert.match(surfaceSeed, /"workbench": "\/api\/eip\/inventory\/reorder-suggestions"/);
+  assert.match(surfaceSeed, /"type": "InventoryManagementWorkspace"/);
+  assert.match(surfaceSeed, /"recommendations": "\/api\/eip\/inventory\/reorder-recommendations"/);
+  assert.match(surfaceSeed, /"policiesEffective": "\/api\/eip\/inventory\/policies\/effective"/);
   assert.match(workspace, /export default function InventoryWorkspace/);
   assert.ok(workspace.includes("apiFetch(`${endpoints.suggestions}/run`"));
   assert.match(workspace, /decision_card/);
