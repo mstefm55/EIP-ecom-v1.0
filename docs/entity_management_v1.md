@@ -1,0 +1,77 @@
+# Entity Management V1
+
+Entity Management V1 is the production tenant entity registry for EIP Core. It uses the existing kernel backbone instead of adding new persistence tables:
+
+- `eip_core.agent` for the universal entity profile.
+- `eip_core.entity_address`, `eip_core.entity_contact`, and `eip_core.entity_bank_account` for structured child records.
+- `eip_core.object_link` for entity-to-entity relationships and linked document records.
+- `eip_core.info_record` for document summaries.
+- `eip_core.commercial_condition` for policy summaries.
+- `eip_core.service_object_party` and `eip_core.task` for activity summaries.
+
+No new tables are introduced by V1.
+
+## Scope
+
+V1 supports entity list/search, create, update, lifecycle status, roles, classifications, addresses, contacts, bank account metadata, relationships, documents, scoped policy summary, activity/task summary, dashboard wiring, permissions, and audit/security events.
+
+Assets are not entities. Operational cases remain service objects. Documents remain info records linked to agents or service objects.
+
+## Entity Model
+
+`agent` is the universal party/entity table. V1 stores profile fields in `agent` plus safe structured `attrs`:
+
+- `agent_type` maps to `entity_kind`.
+- `name` maps to `display_name`.
+- `attrs.roles` stores entity roles.
+- `attrs.status` stores lifecycle status.
+- `attrs.entity_management_v1=true` marks rows created or normalized by this module.
+
+Default roles are seeded as an extensible list: `CUSTOMER`, `SUPPLIER`, `PARTNER`, `INTERNAL_ORG`, `EMPLOYEE`, `CARRIER`, `MARKETPLACE`, `AUTHORITY`, and `OTHER`.
+
+Lifecycle statuses are `ACTIVE`, `INACTIVE`, `UNDER_REVIEW`, `BLOCKED`, and `ARCHIVED`. V1 never hard-deletes entities or child rows; deactivation and archive are status updates.
+
+## API
+
+Routes are mounted under `/api/eip/entities`:
+
+- `GET /` list/search/filter entities.
+- `POST /` create entity.
+- `GET /:id` entity detail with child summaries.
+- `PATCH /:id` update profile and lifecycle.
+- `GET|POST /:id/addresses`, `PATCH /:id/addresses/:addressId`.
+- `GET|POST /:id/contacts`, `PATCH /:id/contacts/:contactId`.
+- `GET|POST /:id/bank-accounts`, `PATCH /:id/bank-accounts/:bankAccountId`.
+- `GET|POST /:id/relationships`, `PATCH /:id/relationships/:relationshipId`.
+- `GET /:id/documents`, `/policies`, `/activity`, and `/summary`.
+- `GET /governance/options` for dropdown and permission metadata.
+
+All routes resolve tenant identity from the EIP session. Mutations require CSRF and module permissions.
+
+## Security
+
+The service rejects browser-supplied `tenant_id`, unknown fields, nested sensitive attrs, and raw secret-like fields. Bank account reads return only masked `account_number_masked` and `iban_masked`; raw account and IBAN values are accepted only on create/update and are never returned by Entity Management V1.
+
+Mutations emit `security_event` records through the existing audit helper with redacted metadata.
+
+## Permissions
+
+Migration `0124_entity_management_v1.sql` seeds:
+
+- `entities.read`
+- `entities.create`
+- `entities.update`
+- `entities.manage_addresses`
+- `entities.manage_contacts`
+- `entities.manage_bank_accounts`
+- `entities.manage_relationships`
+
+Read-only roles receive read permission only. Admin/universal/operational roles receive create/update and child-management permissions.
+
+## Dashboard
+
+The dashboard registers `EntityManagementWorkspace` and adds a module-gated `Entities` menu entry with module code `entity-management`. The workspace includes list/search/filter, create/edit, lifecycle archive, and tabs for Overview, Addresses, Contacts, Bank Accounts, Relationships, Documents, Policies, and Activity.
+
+## Migration
+
+`0124_entity_management_v1.sql` is additive. It seeds permissions, role/template grants, dropdowns, module catalog/settings, indexes, and dashboard descriptor repair. It does not create tables, run data rewrites, merge branches, deploy, or execute Railway migrations.

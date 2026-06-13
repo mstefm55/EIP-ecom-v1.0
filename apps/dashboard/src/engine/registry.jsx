@@ -43,6 +43,7 @@ import CrmWorkspace from "../components/crm/CrmWorkspace";
 import InventoryWorkspace from "../components/inventory/InventoryWorkspace";
 import ProcurementWorkspace from "../components/procurement/ProcurementWorkspace";
 import PoliciesConditionsWorkspace from "../components/policies/PoliciesConditionsWorkspace";
+import EntityManagementWorkspace from "../components/entities/EntityManagementWorkspace";
 
 function Fallback({ node }) {
   return (
@@ -98,5 +99,6 @@ export const registry = {
   InventoryWorkspace,
   ProcurementWorkspace,
   PoliciesConditionsWorkspace,
+  EntityManagementWorkspace,
   Fallback,
 };
