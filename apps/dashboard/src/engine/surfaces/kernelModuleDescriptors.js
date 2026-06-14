@@ -81,6 +81,182 @@ const lotFields = [
   { name: "notes", label: "Notes", type: "textarea", rows: 2 }
 ];
 
+const procurementRequestFields = [
+  { name: "item_type", label: "Item type", type: "select", options: ["MATERIAL", "SERVICE"], defaultValue: "MATERIAL" },
+  { name: "material_id", label: "Material", type: "lookup", endpoint: "/api/eip/procurement/lookup?kind=material", itemsPath: "items", valuePath: "id", labelPath: "label", placeholder: "Search materials" },
+  { name: "service_item_name", label: "Service item" },
+  { name: "title", label: "Title" },
+  { name: "description", label: "Description", type: "textarea", rows: 2 },
+  { name: "requested_qty", label: "Quantity", type: "number" },
+  { name: "unit_of_measure", label: "Unit" },
+  { name: "supplier_agent_id", label: "Supplier", type: "lookup", endpoint: "/api/eip/procurement/lookup?kind=supplier", itemsPath: "items", valuePath: "id", labelPath: "label", placeholder: "Search suppliers" },
+  { name: "required_by_date", label: "Required by", type: "date" },
+  { name: "priority", label: "Priority", type: "select", options: ["LOW", "NORMAL", "HIGH", "URGENT"], defaultValue: "NORMAL" },
+  { name: "estimated_unit_cost", label: "Estimated unit cost", type: "number" },
+  { name: "currency", label: "Currency", defaultValue: "EUR" },
+  { name: "payment_terms_code", label: "Payment terms", type: "select", optionList: "PAYMENT_TERMS", defaultValue: "NET_30" },
+  { name: "incoterm_code", label: "Incoterm", type: "select", optionList: "INCOTERM", allowEmpty: true },
+  { name: "notes", label: "Notes", type: "textarea", rows: 2 }
+];
+
+export const procurementKernelWorkspaceNode = {
+  id: "procurement-management-workspace",
+  type: "KernelModuleWorkspace",
+  props: {
+    module: "procurement",
+    configEndpoint: "/api/eip/procurement/governance/options",
+    layout: {
+      eyebrow: "Procurement Management",
+      title: "Procurement",
+      subtitle: "Purchase needs, supplier selection, commercial terms, approvals, documents, activity, and next procurement actions."
+    },
+    list: {
+      endpoint: "/api/eip/procurement/requests",
+      itemsPath: "items",
+      limit: 50,
+      icon: "shopping-cart",
+      titlePath: "title",
+      subtitlePath: "code",
+      badgePath: "status",
+      searchPlaceholder: "Search purchase needs",
+      filters: [
+        { name: "status", label: "Status", optionList: "PROCUREMENT_REQUEST_STATUS", defaultOptionsPath: "statuses" }
+      ]
+    },
+    detail: {
+      endpoint: "/api/eip/procurement/requests/:id",
+      titlePath: "title",
+      subtitlePath: "code",
+      badgePath: "status",
+      emptyLabel: "Select a purchase need."
+    },
+    actions: {
+      create: {
+        label: "Create need",
+        title: "Create purchase need",
+        endpoint: "/api/eip/procurement/requests",
+        method: "POST",
+        permission: "procurement.request.create",
+        fields: procurementRequestFields
+      }
+    },
+    rowActions: [
+      {
+        id: "submit",
+        label: "Submit",
+        endpoint: "/api/eip/procurement/requests/:id/submit",
+        method: "POST",
+        permission: "procurement.request.submit",
+        primary: true,
+        enabledStatuses: ["DRAFT", "NEEDS_REVIEW"],
+        disabledReason: "Submit is available for draft or review needs."
+      },
+      {
+        id: "approve",
+        label: "Approve",
+        endpoint: "/api/eip/procurement/requests/:id/approve",
+        method: "POST",
+        permission: "procurement.request.approve",
+        primary: true,
+        enabledStatuses: ["PENDING_APPROVAL"],
+        disabledReason: "Approve is available after submission."
+      },
+      {
+        id: "reject",
+        label: "Reject",
+        endpoint: "/api/eip/procurement/requests/:id/reject",
+        method: "POST",
+        permission: "procurement.request.approve",
+        enabledStatuses: ["PENDING_APPROVAL"],
+        disabledReason: "Reject is available after submission."
+      }
+    ],
+    tabs: [
+      {
+        id: "overview",
+        label: "Overview",
+        icon: "shopping-cart",
+        type: "summary",
+        rows: [
+          { label: "Item type", path: "item.item_type", format: "label" },
+          { label: "Material", path: "item.material_name" },
+          { label: "Service", path: "item.service_item_name" },
+          { label: "Quantity", path: "item.requested_qty", unitPath: "item.unit_of_measure", format: "quantity" },
+          { label: "Selected supplier", path: "item.supplier_name" },
+          { label: "Next action", path: "summary.next_action.label" }
+        ]
+      },
+      {
+        id: "purchase_needs",
+        label: "Purchase Needs",
+        icon: "package",
+        type: "form",
+        form: {
+          title: "Purchase need",
+          endpoint: "/api/eip/procurement/requests/:id",
+          method: "PATCH",
+          permission: "procurement.request.update",
+          submitLabel: "Save need",
+          resetOnSave: false,
+          fields: procurementRequestFields
+        }
+      },
+      {
+        id: "recommendations",
+        label: "Recommendations",
+        icon: "reorder",
+        type: "summary",
+        rows: [
+          { label: "Buying route", path: "recommendation.procurement_model", format: "label" },
+          { label: "Reason", path: "recommendation.reason", format: "label" },
+          { label: "Estimated landed cost", path: "recommendation.estimated_landed_cost", format: "number" },
+          { label: "Currency", path: "recommendation.currency" },
+          { label: "Warnings", path: "recommendation.warnings", format: "array" },
+          { label: "Missing data", path: "recommendation.missing_data", format: "array" }
+        ]
+      },
+      { id: "suppliers", label: "Suppliers", icon: "users", type: "records", itemsPath: "supplier_options", titlePath: "supplier_name", subtitlePath: "relationship_source", badgePath: "supplier_role", empty: "No supplier options found." },
+      {
+        id: "commercial_terms",
+        label: "Commercial Terms",
+        icon: "file",
+        type: "summary",
+        rows: [
+          { label: "Payment terms", path: "commercial_terms.payment_terms_code" },
+          { label: "Incoterm", path: "commercial_terms.incoterm_code" },
+          { label: "Trade credit", path: "commercial_terms.trade_credit" },
+          { label: "Commercial conditions", path: "commercial_terms.conditions.length", format: "number" }
+        ]
+      },
+      {
+        id: "approvals",
+        label: "Approvals",
+        icon: "policy",
+        type: "summary",
+        rows: [
+          { label: "Approval required", path: "approval.required" },
+          { label: "Approval status", path: "approval.status", format: "label" },
+          { label: "Pending approval", path: "approval.pending" },
+          { label: "Approval conditions", path: "approval.conditions.length", format: "number" }
+        ]
+      },
+      { id: "documents", label: "Documents", icon: "document", type: "records", itemsPath: "documents", titlePath: "title", subtitlePath: "record_type", badgePath: "relation_type", empty: "No quote, supplier document, contract, note, or attachment metadata linked." },
+      {
+        id: "activity",
+        label: "Activity",
+        icon: "archive",
+        type: "summary",
+        rows: [
+          { label: "Tasks", path: "activity.summary.tasks", format: "number" },
+          { label: "Open tasks", path: "activity.summary.open_tasks", format: "number" },
+          { label: "Status events", path: "activity.summary.events", format: "number" },
+          { label: "Policy commercial resolution", path: "policy_summary.domains.COMMERCIAL.resolution_status", format: "label" }
+        ]
+      }
+    ]
+  }
+};
+
 export const inventoryKernelWorkspaceNode = {
   id: "inventory-management-workspace",
   type: "KernelModuleWorkspace",

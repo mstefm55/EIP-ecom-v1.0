@@ -25,6 +25,21 @@ import {
   serializeMaterial,
   updateSupplierLink
 } from "../services/procurement/procurementOperations.js";
+import {
+  PROCUREMENT_MANAGEMENT_PERMISSIONS,
+  ProcurementInputError,
+  createProcurementRequest,
+  getProcurementEffectivePolicy,
+  getProcurementGovernanceOptions,
+  getProcurementRecommendation,
+  getProcurementRequest,
+  getProcurementRequestSummary,
+  listProcurementRequests,
+  listProcurementSupplierOptions,
+  transitionProcurementRequest,
+  updateProcurementRequest
+} from "../services/procurement/procurementManagement.js";
+import { EffectivePolicyInputError } from "../services/policiesConditions/effectivePolicy.js";
 
 async function requireRead(app, req, reply, permissionCode) {
   const sessionResult = await app.requireSession(req, { realm: "EIP" });
@@ -82,7 +97,134 @@ async function withTransaction(app, session, reply, eventName, failureCode, hand
   }
 }
 
+function sendServiceResult(reply, result) {
+  if (!result) return reply.code(404).send({ ok: false, error: "NOT_FOUND" });
+  if (result.ok === false) return reply.code(result.status || 409).send({ ok: false, error: result.error, details: result.details });
+  return reply.send(result);
+}
+
+function sendRouteError(app, req, reply, error, failureCode) {
+  if (error instanceof ProcurementInputError || error instanceof EffectivePolicyInputError) {
+    return reply.code(error.statusCode || 400).send({ ok: false, error: error.code || error.message, details: error.details || null });
+  }
+  app.log.error({ event: failureCode, error: error.message, route: req.url });
+  return reply.code(500).send({ ok: false, error: failureCode });
+}
+
 export default async function procurementRoutes(app) {
+  app.get("/governance/options", async (req, reply) => {
+    const session = await requireRead(app, req, reply, PROCUREMENT_MANAGEMENT_PERMISSIONS.read);
+    if (!session) return;
+    try {
+      const options = await getProcurementGovernanceOptions(app, session);
+      const permissions = [];
+      for (const permissionCode of Object.values(PROCUREMENT_MANAGEMENT_PERMISSIONS)) {
+        if (await hasPermission(app, session.tenant_id, session.identity_id, permissionCode)) {
+          permissions.push(permissionCode);
+        }
+      }
+      return reply.send({ ...options, permissions });
+    } catch (error) {
+      return sendRouteError(app, req, reply, error, "PROCUREMENT_GOVERNANCE_OPTIONS_FAILED");
+    }
+  });
+
+  app.get("/requests", async (req, reply) => {
+    const session = await requireRead(app, req, reply, PROCUREMENT_MANAGEMENT_PERMISSIONS.read);
+    if (!session) return;
+    try {
+      return reply.send(await listProcurementRequests(app, session, req.query || {}));
+    } catch (error) {
+      return sendRouteError(app, req, reply, error, "PROCUREMENT_REQUEST_LIST_FAILED");
+    }
+  });
+
+  app.post("/requests", async (req, reply) => {
+    const session = await requireWrite(app, req, reply, PROCUREMENT_MANAGEMENT_PERMISSIONS.requestCreate);
+    if (!session) return;
+    try {
+      return sendServiceResult(reply, await createProcurementRequest(app, session, req.body || {}));
+    } catch (error) {
+      return sendRouteError(app, req, reply, error, "PROCUREMENT_REQUEST_CREATE_FAILED");
+    }
+  });
+
+  app.get("/requests/:id", async (req, reply) => {
+    const session = await requireRead(app, req, reply, PROCUREMENT_MANAGEMENT_PERMISSIONS.read);
+    if (!session) return;
+    try {
+      return sendServiceResult(reply, await getProcurementRequest(app, session, req.params.id));
+    } catch (error) {
+      return sendRouteError(app, req, reply, error, "PROCUREMENT_REQUEST_DETAIL_FAILED");
+    }
+  });
+
+  app.patch("/requests/:id", async (req, reply) => {
+    const session = await requireWrite(app, req, reply, PROCUREMENT_MANAGEMENT_PERMISSIONS.requestUpdate);
+    if (!session) return;
+    try {
+      return sendServiceResult(reply, await updateProcurementRequest(app, session, req.params.id, req.body || {}));
+    } catch (error) {
+      return sendRouteError(app, req, reply, error, "PROCUREMENT_REQUEST_UPDATE_FAILED");
+    }
+  });
+
+  app.get("/requests/:id/summary", async (req, reply) => {
+    const session = await requireRead(app, req, reply, PROCUREMENT_MANAGEMENT_PERMISSIONS.read);
+    if (!session) return;
+    try {
+      return sendServiceResult(reply, await getProcurementRequestSummary(app, session, req.params.id));
+    } catch (error) {
+      return sendRouteError(app, req, reply, error, "PROCUREMENT_REQUEST_SUMMARY_FAILED");
+    }
+  });
+
+  app.get("/requests/:id/supplier-options", async (req, reply) => {
+    const session = await requireRead(app, req, reply, PROCUREMENT_MANAGEMENT_PERMISSIONS.read);
+    if (!session) return;
+    try {
+      return sendServiceResult(reply, await listProcurementSupplierOptions(app, session, req.params.id, req.query || {}));
+    } catch (error) {
+      return sendRouteError(app, req, reply, error, "PROCUREMENT_SUPPLIER_OPTIONS_FAILED");
+    }
+  });
+
+  app.get("/recommendations", async (req, reply) => {
+    const session = await requireRead(app, req, reply, PROCUREMENT_MANAGEMENT_PERMISSIONS.recommendationRead);
+    if (!session) return;
+    try {
+      return sendServiceResult(reply, await getProcurementRecommendation(app, session, req.query || {}));
+    } catch (error) {
+      return sendRouteError(app, req, reply, error, "PROCUREMENT_RECOMMENDATION_FAILED");
+    }
+  });
+
+  app.get("/policies/effective", async (req, reply) => {
+    const session = await requireRead(app, req, reply, PROCUREMENT_MANAGEMENT_PERMISSIONS.policyRead);
+    if (!session) return;
+    try {
+      return sendServiceResult(reply, await getProcurementEffectivePolicy(app, session, req.query || {}));
+    } catch (error) {
+      return sendRouteError(app, req, reply, error, "PROCUREMENT_EFFECTIVE_POLICY_FAILED");
+    }
+  });
+
+  for (const [path, action, permission] of [
+    ["/requests/:id/submit", "submit", PROCUREMENT_MANAGEMENT_PERMISSIONS.requestSubmit],
+    ["/requests/:id/approve", "approve", PROCUREMENT_MANAGEMENT_PERMISSIONS.requestApprove],
+    ["/requests/:id/reject", "reject", PROCUREMENT_MANAGEMENT_PERMISSIONS.requestApprove]
+  ]) {
+    app.post(path, async (req, reply) => {
+      const session = await requireWrite(app, req, reply, permission);
+      if (!session) return;
+      try {
+        return sendServiceResult(reply, await transitionProcurementRequest(app, session, req.params.id, action, req.body || {}));
+      } catch (error) {
+        return sendRouteError(app, req, reply, error, "PROCUREMENT_REQUEST_ACTION_FAILED");
+      }
+    });
+  }
+
   app.get("/overview", async (req, reply) => {
     const session = await requireRead(app, req, reply, "PROCUREMENT_READ");
     if (!session) return;

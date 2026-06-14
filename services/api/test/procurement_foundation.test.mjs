@@ -26,7 +26,8 @@ const cloneSql = read("../db/seed/clone_template_to_tenant.sql");
 const adminCloneRoute = read("../src/routes/admin_template_clone.js");
 const registry = read("../../../apps/dashboard/src/engine/registry.jsx");
 const dashboardSurface = read("../../../apps/dashboard/src/engine/surfaces/dashboard.js");
-const workspace = read("../../../apps/dashboard/src/components/procurement/ProcurementWorkspace.jsx");
+const moduleDescriptors = read("../../../apps/dashboard/src/engine/surfaces/kernelModuleDescriptors.js");
+const kernelWorkspace = read("../../../apps/dashboard/src/components/engine/KernelModuleWorkspace.jsx");
 const procurementDocs = read("../../../docs/procurement_foundation_v1.md");
 const inventoryDocs = read("../../../docs/inventory_reorder_foundation_v1.md");
 const smeDocs = read("../../../docs/sme_operating_model_v1.md");
@@ -379,7 +380,7 @@ test("procurement next actions remain transitional, process-aware, and do not ex
 });
 
 test("procurement foundation does not add final PO execution or supplier outbound routes", () => {
-  const touched = `${route}\n${operationsService}\n${workbenchService}\n${workspace}\n${dashboardSurface}\n${surfaceSeed}`;
+  const touched = `${route}\n${operationsService}\n${workbenchService}\n${moduleDescriptors}\n${dashboardSurface}\n${surfaceSeed}`;
   assert.doesNotMatch(touched, /\/purchase-orders/i);
   assert.doesNotMatch(touched, /supplierOutbound|supplier_outbound|transmitSupplier|supplierTransmit|sendToSupplier|\/edi\//i);
   assert.doesNotMatch(touched, /PO completed|PO sent|PO processing ready/i);
@@ -461,32 +462,25 @@ test("procurement workbench UI migration is metadata-only and updates deployed d
 });
 
 test("procurement dashboard is descriptor registered, module gated, and tenant agnostic", () => {
-  assert.match(registry, /import ProcurementWorkspace/);
-  assert.match(registry, /ProcurementWorkspace,/);
+  assert.match(registry, /import KernelModuleWorkspace/);
+  assert.match(registry, /KernelModuleWorkspace,/);
+  assert.doesNotMatch(registry, /ProcurementWorkspace/);
   assert.match(dashboardSurface, /\{ code: "procurement", label: "Procurement", icon: "ShoppingCart", module: "procurement" \}/);
-  assert.match(dashboardSurface, /type: "ProcurementWorkspace"/);
-  assert.match(dashboardSurface, /\/api\/eip\/procurement\/overview/);
-  assert.match(dashboardSurface, /\/api\/eip\/procurement\/purchase-needs/);
-  assert.match(dashboardSurface, /\/api\/eip\/procurement\/lookup/);
-  assert.match(dashboardSurface, /Purchase Need Workbench/);
-  assert.match(dashboardSurface, /Supplier Policy/);
+  assert.match(dashboardSurface, /procurementKernelWorkspaceNode/);
+  assert.match(moduleDescriptors, /procurementKernelWorkspaceNode/);
+  assert.match(moduleDescriptors, /type: "KernelModuleWorkspace"/);
+  assert.match(moduleDescriptors, /\/api\/eip\/procurement\/requests/);
+  assert.match(moduleDescriptors, /\/api\/eip\/procurement\/governance\/options/);
+  assert.match(moduleDescriptors, /Purchase Needs/);
+  assert.match(moduleDescriptors, /Suppliers/);
+  assert.match(moduleDescriptors, /Commercial Terms/);
+  assert.match(moduleDescriptors, /Approvals/);
   assert.match(surfaceSeed, /"code": "procurement"/);
-  assert.match(surfaceSeed, /"type": "ProcurementWorkspace"/);
-  assert.match(surfaceSeed, /"workbench": "\/api\/eip\/procurement\/purchase-needs"/);
-  assert.match(surfaceSeed, /"lookup": "\/api\/eip\/procurement\/lookup"/);
-  assert.match(workspace, /export default function ProcurementWorkspace/);
-  assert.match(workspace, /Purchase Need Workbench/);
-  assert.match(workspace, /Supplier options for this need/);
-  assert.match(workspace, /Request quotes and supplier offers/);
-  assert.match(workspace, /Cash\/shop purchase option/);
-  assert.match(workspace, /Next best action/);
-  assert.match(workspace, /Process timeline/);
-  assert.match(workspace, /SelectField label="Material"/);
-  assert.match(workspace, /SelectField label="Supplier"/);
-  assert.match(workspace, /compareQuotes/);
-  assert.doesNotMatch(workspace, />Material id</i);
-  assert.doesNotMatch(workspace, />Supplier agent id</i);
-  const touched = `${route}\n${migration}\n${workspace}\n${dashboardSurface}\n${surfaceSeed}`;
+  assert.match(surfaceSeed, /"type": "KernelModuleWorkspace"/);
+  assert.match(surfaceSeed, /"configEndpoint": "\/api\/eip\/procurement\/governance\/options"/);
+  assert.match(kernelWorkspace, /field\.type === "lookup"/);
+  assert.match(kernelWorkspace, /rowActions/);
+  const touched = `${route}\n${migration}\n${moduleDescriptors}\n${dashboardSurface}\n${surfaceSeed}`;
   assert.doesNotMatch(touched, /samara|samarapattern|samara-web-storefront/i);
 });
 
