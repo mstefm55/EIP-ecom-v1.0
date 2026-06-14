@@ -12,6 +12,8 @@ import Text from "../components/engine/Text";
 import Grid from "../components/engine/Grid";
 import StatCard from "../components/engine/StatCard";
 import FormCard from "../components/engine/FormCard";
+import KernelModuleWorkspace from "../components/engine/KernelModuleWorkspace";
+import Fallback from "../components/engine/Fallback";
 import AdminShell from "../components/admin/AdminShell";
 import AdminHeader from "../components/admin/AdminHeader";
 import TenantRequestBoard from "../components/admin/TenantRequestBoard";
@@ -40,19 +42,7 @@ import EcomOrderManagementPanel from "../components/ecom/EcomOrderManagementPane
 import EcomCommerceSettingsPanel from "../components/ecom/EcomCommerceSettingsPanel";
 import EcomCommerceLifecyclePanel from "../components/ecom/EcomCommerceLifecyclePanel";
 import CrmWorkspace from "../components/crm/CrmWorkspace";
-import InventoryWorkspace from "../components/inventory/InventoryWorkspace";
-import InventoryManagementWorkspace from "../components/inventory/InventoryManagementWorkspace";
 import ProcurementWorkspace from "../components/procurement/ProcurementWorkspace";
-import PoliciesConditionsWorkspace from "../components/policies/PoliciesConditionsWorkspace";
-import EntityManagementWorkspace from "../components/entities/EntityManagementWorkspace";
-
-function Fallback({ node }) {
-  return (
-    <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
-      Missing component for type: <strong>{node?.type || "unknown"}</strong>
-    </div>
-  );
-}
 
 export const registry = {
   AuthShell,
@@ -69,6 +59,7 @@ export const registry = {
   Grid,
   StatCard,
   FormCard,
+  KernelModuleWorkspace,
   AdminShell,
   AdminHeader,
   TenantRequestBoard,
@@ -97,10 +88,6 @@ export const registry = {
   EcomCommerceSettingsPanel,
   EcomCommerceLifecyclePanel,
   CrmWorkspace,
-  InventoryWorkspace,
-  InventoryManagementWorkspace,
   ProcurementWorkspace,
-  PoliciesConditionsWorkspace,
-  EntityManagementWorkspace,
   Fallback,
 };

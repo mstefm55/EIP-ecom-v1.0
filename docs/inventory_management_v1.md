@@ -110,7 +110,9 @@ Supplier/entity summaries use `eip_core.agent` and `eip_core.object_link`; V1 do
 
 ## UI
 
-`InventoryManagementWorkspace` is registered in the dashboard engine and wired from dashboard descriptors. Sections include Overview, Materials, Lots, Reorder, Policies, Documents, and Activity. Create/update buttons use real API calls or are disabled by permission state.
+The active dashboard surface uses the generic `KernelModuleWorkspace` UI-engine primitive. Inventory-specific list fields, forms, tabs, collection bindings, permissions, and labels are stored as governed workspace metadata under `module_catalog.attrs.ui_workspace` / active `tenant_module_setting.attrs.ui_workspace` and are fetched through `/api/eip/inventory/governance/options`.
+
+Sections include Overview, Material, Lots, Reorder, Policies, Documents, and Activity. Create/update buttons use real API calls or are disabled by permission state.
 
 ## Security
 

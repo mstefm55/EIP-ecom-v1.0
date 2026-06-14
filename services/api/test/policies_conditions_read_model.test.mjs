@@ -464,14 +464,17 @@ test("phase 2 wiring is read-only, descriptor-backed, and has no fake policy row
   const service = read("services/api/src/services/policiesConditions/readModel.js");
   const registry = read("apps/dashboard/src/engine/registry.jsx");
   const dashboardSurface = read("apps/dashboard/src/engine/surfaces/dashboard.js");
+  const moduleDescriptors = read("apps/dashboard/src/engine/surfaces/kernelModuleDescriptors.js");
   const seedSurface = read("services/api/db/seed/ui_surface_dashboard.sql");
   const migration = read("services/api/db/migrations/0121_policies_conditions_readonly_center.sql");
   const lexiconMigration = read("services/api/db/migrations/0122_policies_conditions_business_lexicon.sql");
+  const repairMigration = read("services/api/db/migrations/0126_engine_first_module_workspace_repair.sql");
 
   assert.match(server, /policiesConditionsRoutes/);
   assert.match(server, /prefix: "\/api\/eip\/policies-conditions"/);
   assert.match(route, /app\.get\("\/"/);
   assert.match(route, /app\.get\("\/taxonomy"/);
+  assert.match(route, /app\.get\("\/governance\/options"/);
   assert.match(route, /app\.get\("\/:id"/);
   assert.doesNotMatch(route, /app\.(post|patch|put|delete)\(/i);
   assert.match(route, /app\.requireSession\(req, \{ realm: "EIP" \}\)/);
@@ -480,10 +483,17 @@ test("phase 2 wiring is read-only, descriptor-backed, and has no fake policy row
   assert.match(service, /WHERE tenant_id=\$1/);
   assert.doesNotMatch(service, /INSERT INTO|UPDATE eip_core\.commercial_condition|DELETE FROM eip_core\.commercial_condition/i);
   assert.doesNotMatch(service, /sample|demo|fake/i);
-  assert.match(registry, /PoliciesConditionsWorkspace/);
+  assert.match(registry, /KernelModuleWorkspace/);
   assert.match(dashboardSurface, /Policies & Conditions/);
-  assert.match(dashboardSurface, /type: "PoliciesConditionsWorkspace"/);
-  assert.match(seedSurface, /PoliciesConditionsWorkspace/);
+  assert.match(dashboardSurface, /module: "policies-conditions"/);
+  assert.match(dashboardSurface, /policiesKernelWorkspaceNode/);
+  assert.match(moduleDescriptors, /type: "KernelModuleWorkspace"/);
+  assert.match(seedSurface, /KernelModuleWorkspace/);
+  assert.match(seedSurface, /"module": "policies-conditions"/);
+  assert.match(repairMigration, /policies_menu jsonb/);
+  assert.match(repairMigration, /tenant_module_setting/);
+  assert.match(repairMigration, /'policies-conditions'/);
+  assert.match(repairMigration, /'{ui_workspace}'/);
   assert.match(migration, /policies_conditions\.read/);
   assert.match(migration, /role_template_permission/);
   assert.doesNotMatch(migration, /CREATE TABLE/i);
@@ -497,12 +507,8 @@ test("phase 2 wiring is read-only, descriptor-backed, and has no fake policy row
 });
 
 test("dashboard descriptors expose the read-only taxonomy endpoint and seven default domains", () => {
-  const dashboardSurface = read("apps/dashboard/src/engine/surfaces/dashboard.js");
   const seedSurface = read("services/api/db/seed/ui_surface_dashboard.sql");
-  const dashboardPoliciesBlock = dashboardSurface.slice(
-    dashboardSurface.indexOf('id: "policies-conditions-workspace"'),
-    dashboardSurface.indexOf('id: "user-tasks-panel"')
-  );
+  const moduleDescriptors = read("apps/dashboard/src/engine/surfaces/kernelModuleDescriptors.js");
   const seedPoliciesBlock = seedSurface.slice(
     seedSurface.indexOf('"id": "policies-conditions-workspace"'),
     seedSurface.indexOf('"id": "user-tasks-panel"')
@@ -510,14 +516,14 @@ test("dashboard descriptors expose the read-only taxonomy endpoint and seven def
   const expected = DEFAULT_POLICY_DOMAINS.map((item) => item.code);
   const retired = ["PROCUREMENT", "SELLING", "FINANCE_APPROVAL", "TRADE_PARTY", "LOGISTICS_DELIVERY"];
 
-  assert.match(dashboardPoliciesBlock, /taxonomy: "\/api\/eip\/policies-conditions\/taxonomy"/);
-  assert.match(seedPoliciesBlock, /"taxonomy": "\/api\/eip\/policies-conditions\/taxonomy"/);
+  assert.match(moduleDescriptors, /optionsEndpoint: "\/api\/eip\/policies-conditions\/governance\/options"/);
+  assert.match(moduleDescriptors, /optionList: "POLICY_DOMAIN"/);
+  assert.match(seedPoliciesBlock, /"configEndpoint": "\/api\/eip\/policies-conditions\/governance\/options"/);
   for (const code of expected) {
-    assert.match(dashboardPoliciesBlock, new RegExp(`"${code}"`));
-    assert.match(seedPoliciesBlock, new RegExp(`"${code}"`));
+    assert.match(read("services/api/db/migrations/0122_policies_conditions_business_lexicon.sql"), new RegExp(`'${code}'`));
   }
   for (const code of retired) {
-    assert.doesNotMatch(dashboardPoliciesBlock, new RegExp(`"${code}"`));
+    assert.doesNotMatch(moduleDescriptors, new RegExp(`"${code}"`));
     assert.doesNotMatch(seedPoliciesBlock, new RegExp(`"${code}"`));
   }
 });

@@ -241,39 +241,10 @@ DECLARE
     "children":[
       {
         "id":"inventory-management-workspace",
-        "type":"InventoryManagementWorkspace",
+        "type":"KernelModuleWorkspace",
         "props":{
           "module":"inventory",
-          "title":"Inventory",
-          "subtitle":"Materials, lots, stock visibility, reorder recommendations, policy explanations, suppliers, documents, and activity.",
-          "endpoints":{
-            "overview":"/api/eip/inventory/overview",
-            "materials":"/api/eip/inventory/materials",
-            "materialDetail":"/api/eip/inventory/materials/:id",
-            "materialSummary":"/api/eip/inventory/materials/:id/summary",
-            "materialLots":"/api/eip/inventory/materials/:id/lots",
-            "lotDetail":"/api/eip/inventory/lots/:id",
-            "recommendations":"/api/eip/inventory/reorder-recommendations",
-            "policiesEffective":"/api/eip/inventory/policies/effective",
-            "options":"/api/eip/inventory/governance/options"
-          },
-          "tabs":[
-            {"id":"overview","label":"Overview"},
-            {"id":"materials","label":"Materials"},
-            {"id":"lots","label":"Lots"},
-            {"id":"reorder","label":"Reorder"},
-            {"id":"policies","label":"Policies"},
-            {"id":"documents","label":"Documents"},
-            {"id":"activity","label":"Activity"}
-          ],
-          "actions":{
-            "refresh":"Refresh",
-            "createMaterial":"Create material",
-            "saveMaterial":"Save material",
-            "createLot":"Create lot",
-            "saveLot":"Save lot",
-            "viewSummary":"View summary"
-          }
+          "configEndpoint":"/api/eip/inventory/governance/options"
         }
       }
     ]

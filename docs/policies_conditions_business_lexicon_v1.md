@@ -168,7 +168,7 @@ ASCM practices, people/competency references, balanced scorecard work, gap analy
 - `commercial_condition` remains the source table for released Phase 2.
 - Migration `0121` remains unchanged.
 - Migration `0122` seeds dropdown taxonomy and patches the dashboard descriptor only.
-- The dashboard reads taxonomy from `/api/eip/policies-conditions/taxonomy`.
+- The active dashboard surface uses the generic `KernelModuleWorkspace` UI-engine primitive. Policies-specific list, filter, detail, and tab metadata is stored under `module_catalog.attrs.ui_workspace` and returned by `/api/eip/policies-conditions/governance/options`; taxonomy values still come from `/api/eip/policies-conditions/taxonomy` / dropdown metadata.
 - There are no create, update, delete, migration-run, or deployment actions in this wave.
 - The read model canonicalizes legacy domains only at read time.
 - Tenant custom taxonomy values are preserved.

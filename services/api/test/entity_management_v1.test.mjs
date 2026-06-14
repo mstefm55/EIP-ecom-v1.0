@@ -19,10 +19,12 @@ const route = read("../src/routes/entities.js");
 const service = read("../src/services/entities/entityManagement.js");
 const server = read("../src/server.js");
 const migration = read("../db/migrations/0124_entity_management_v1.sql");
+const repairMigration = read("../db/migrations/0126_engine_first_module_workspace_repair.sql");
 const registry = read("../../../apps/dashboard/src/engine/registry.jsx");
 const dashboardSurface = read("../../../apps/dashboard/src/engine/surfaces/dashboard.js");
+const moduleDescriptors = read("../../../apps/dashboard/src/engine/surfaces/kernelModuleDescriptors.js");
 const seedSurface = read("../db/seed/ui_surface_dashboard.sql");
-const workspace = read("../../../apps/dashboard/src/components/entities/EntityManagementWorkspace.jsx");
+const workspace = read("../../../apps/dashboard/src/components/engine/KernelModuleWorkspace.jsx");
 const docs = read("../../../docs/entity_management_v1.md");
 
 const TENANT_A = "00000000-0000-0000-0000-00000000000a";
@@ -394,27 +396,30 @@ test("migration is additive, seeds permissions, dropdowns, module settings, and 
     "ENTITY_RELATIONSHIP_TYPE",
     "module_catalog",
     "tenant_module_setting",
-    "EntityManagementWorkspace",
     "entity-management"
   ]) {
     assert.match(migration, new RegExp(value.replace(/[.]/g, "\\.")));
   }
+  assert.match(repairMigration, /KernelModuleWorkspace/);
+  assert.match(repairMigration, /ui_workspace/);
   assert.match(migration, /role_template_permission/);
   assert.match(migration, /role_permission/);
 });
 
 test("dashboard registry, source descriptor, and seed descriptor are aligned", () => {
-  assert.match(registry, /import EntityManagementWorkspace/);
-  assert.match(registry, /EntityManagementWorkspace,/);
+  assert.match(registry, /import KernelModuleWorkspace/);
+  assert.match(registry, /KernelModuleWorkspace,/);
   assert.match(dashboardSurface, /\{ code: "entities", label: "Entities", icon: "Users", module: "entity-management" \}/);
-  assert.match(dashboardSurface, /type: "EntityManagementWorkspace"/);
-  assert.match(dashboardSurface, /\/api\/eip\/entities\/governance\/options/);
+  assert.match(dashboardSurface, /entityKernelWorkspaceNode/);
+  assert.match(moduleDescriptors, /type: "KernelModuleWorkspace"/);
+  assert.match(moduleDescriptors, /\/api\/eip\/entities\/governance\/options/);
   assert.match(seedSurface, /"code": "entities"/);
-  assert.match(seedSurface, /"type": "EntityManagementWorkspace"/);
-  assert.match(seedSurface, /"options": "\/api\/eip\/entities\/governance\/options"/);
-  for (const tab of ["Overview", "Addresses", "Contacts", "Bank Accounts", "Relationships", "Documents", "Policies", "Activity"]) {
-    assert.match(workspace, new RegExp(tab));
+  assert.match(seedSurface, /"type": "KernelModuleWorkspace"/);
+  assert.match(seedSurface, /"configEndpoint": "\/api\/eip\/entities\/governance\/options"/);
+  for (const tab of ["Overview", "Profile", "Addresses", "Contacts", "Bank Accounts", "Relationships", "Documents", "Policies", "Activity"]) {
+    assert.match(moduleDescriptors, new RegExp(tab));
   }
+  assert.match(workspace, /configEndpoint/);
 });
 
 test("workspace and docs are tenant agnostic and avoid fake data", () => {

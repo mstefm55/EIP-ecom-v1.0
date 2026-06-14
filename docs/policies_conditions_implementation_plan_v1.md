@@ -141,7 +141,7 @@ Commercial conditions are part of the governed clone path:
 | Resolver reads `effect` and `attrs` | `policyFromCondition()` in `services/api/src/services/inventory/inventoryFoundation.js` merges `effect.reorder_policy`, `effect.inventory_policy`, `effect.supply_policy`, root `effect`, and matching `attrs` blocks |
 | Effective policy output | `resolveInventoryPolicy()` returns `policy_source`, `condition_codes`, `effective_policy`, `policy_inventory`, and `material_override_fields` |
 | Route queries condition rows | `services/api/src/routes/inventory.js` selects `eip_core.commercial_condition` for inventory/material policy view |
-| UI displays condition codes | `apps/dashboard/src/components/inventory/InventoryWorkspace.jsx` displays `policy_condition_codes` and `commercial_condition_governed` |
+| UI displays condition codes | `apps/dashboard/src/components/engine/KernelModuleWorkspace.jsx` renders descriptor-owned policy summary rows, including `policy_condition_codes` and governed commercial-condition indicators exposed by the Inventory API. |
 | Tests | `services/api/test/inventory_reorder_foundation.test.mjs` tests policy resolution, policy_condition_codes, route query, clone coverage |
 
 ### Procurement policy usage
@@ -950,25 +950,10 @@ Required descriptor fields:
 ```json
 {
   "id": "policies-conditions-workspace",
-  "type": "PoliciesConditionsWorkspace",
+  "type": "KernelModuleWorkspace",
   "props": {
-    "title": "Policies & Conditions",
-    "subtitle": "Business rules that explain recommendations and approvals.",
-    "endpoints": {
-      "overview": "/api/eip/policies-conditions/overview",
-      "list": "/api/eip/policies-conditions",
-      "detail": "/api/eip/policies-conditions/:id",
-      "effective": "/api/eip/policies-conditions/effective"
-    },
-    "tabs": [
-      { "id": "overview", "label": "Overview" },
-      { "id": "library", "label": "Policy Library" },
-      { "id": "assignments", "label": "Condition Assignments" },
-      { "id": "alerts", "label": "Expiring / Missing" },
-      { "id": "simulator", "label": "Effective Policy" },
-      { "id": "history", "label": "Audit / History" }
-    ],
-    "emptyStates": {},
+    "module": "policies-conditions",
+    "configEndpoint": "/api/eip/policies-conditions/governance/options",
     "actions": {}
   }
 }
@@ -1441,7 +1426,8 @@ Likely files:
 ```text
 services/api/src/routes/policies_conditions.js
 services/api/src/services/policiesConditions/readModel.js
-apps/dashboard/src/components/policies/PoliciesConditionsWorkspace.jsx
+apps/dashboard/src/components/engine/KernelModuleWorkspace.jsx
+apps/dashboard/src/engine/surfaces/kernelModuleDescriptors.js
 apps/dashboard/src/engine/surfaces/dashboard.js
 services/api/db/seed/ui_surface_dashboard.sql or a descriptor migration
 services/api/test/policies_conditions_read_model.test.mjs
@@ -1531,7 +1517,8 @@ Goal: use central read model while preserving existing resolver outputs.
 Likely files:
 
 ```text
-apps/dashboard/src/components/inventory/InventoryWorkspace.jsx
+apps/dashboard/src/components/engine/KernelModuleWorkspace.jsx
+apps/dashboard/src/engine/surfaces/kernelModuleDescriptors.js
 apps/dashboard/src/components/procurement/ProcurementWorkspace.jsx
 services/api/src/services/inventory/inventoryFoundation.js
 services/api/src/services/procurement/procurementFoundation.js

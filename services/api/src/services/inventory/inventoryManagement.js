@@ -1,4 +1,5 @@
 import { emitSecurityEvent } from "../../lib/securityAudit.js";
+import { allowedCodesFrom, loadDropdownCodeSets, loadModuleWorkspace } from "../moduleWorkspace.js";
 import {
   buildReorderSuggestionPayload,
   normalizeInventoryProfile,
@@ -198,10 +199,18 @@ function normalizeDate(value, field) {
   return text.length <= 10 ? text : parsed.toISOString();
 }
 
-function normalizeStatus(value, allowed, fallback, errorCode) {
+function normalizeStatus(value, allowed, fallback, errorCode, governance = null, listCodes = []) {
   const status = normalizeCode(value, fallback);
-  if (!allowed.includes(status)) throw new InventoryInputError(errorCode);
+  const governedAllowed = listCodes.length ? allowedCodesFrom(governance, listCodes, allowed) : allowed;
+  if (!governedAllowed.includes(status)) throw new InventoryInputError(errorCode);
   return status;
+}
+
+function normalizeMaterialType(value, fallback = "OTHER", governance = null) {
+  const materialType = normalizeFlexibleCode(value, fallback);
+  const allowed = allowedCodesFrom(governance, ["INVENTORY_MATERIAL_TYPE", "MATERIAL_TYPE"], MATERIAL_TYPES);
+  if (!allowed.includes(materialType)) throw new InventoryInputError("INVALID_MATERIAL_TYPE", { material_type: materialType });
+  return materialType;
 }
 
 function safeObject(value) {
@@ -236,18 +245,18 @@ function normalizeAttrs(value) {
   return value;
 }
 
-function materialStatus(row = {}) {
+function materialStatus(row = {}, governance = null) {
   const attrs = safeObject(row.attrs);
   const status = attrs.inventory_management_v1?.status || attrs.status || (row.is_active === false ? "INACTIVE" : "ACTIVE");
-  return normalizeStatus(status, MATERIAL_STATUSES, "ACTIVE", "INVALID_MATERIAL_STATUS");
+  return normalizeStatus(status, MATERIAL_STATUSES, "ACTIVE", "INVALID_MATERIAL_STATUS", governance, ["INVENTORY_MATERIAL_STATUS"]);
 }
 
 function lifecycleIsActive(status) {
   return !["INACTIVE", "ARCHIVED"].includes(status);
 }
 
-function lotDisplayStatus(row = {}) {
-  return normalizeStatus(row.status, LOT_STATUSES, "AVAILABLE", "INVALID_LOT_STATUS");
+function lotDisplayStatus(row = {}, governance = null) {
+  return normalizeStatus(row.status, LOT_STATUSES, "AVAILABLE", "INVALID_LOT_STATUS", governance, ["INVENTORY_LOT_STATUS", "MATERIAL_LOT_STATUS"]);
 }
 
 function displayLabel(...values) {
@@ -284,12 +293,12 @@ function patchMaterialAttrsWithStock(material, stockSummary) {
   };
 }
 
-function mapMaterialRow(row, { conditions = [], stockSummary = null } = {}) {
+function mapMaterialRow(row, { conditions = [], stockSummary = null, governance = null } = {}) {
   if (!row) return null;
   const attrs = safeObject(row.attrs);
   const management = safeObject(attrs.inventory_management_v1);
   const inventory = safeObject(attrs.inventory);
-  const status = materialStatus(row);
+  const status = materialStatus(row, governance);
   const materialForProfile = patchMaterialAttrsWithStock(row, stockSummary);
   const profile = normalizeInventoryProfile(materialForProfile, { conditions });
   const safeAttrs = safeObject(management.safe_attrs);
@@ -320,7 +329,7 @@ function mapMaterialRow(row, { conditions = [], stockSummary = null } = {}) {
   };
 }
 
-function mapLotRow(row) {
+function mapLotRow(row, governance = null) {
   if (!row) return null;
   const attrs = safeObject(row.attrs);
   const management = safeObject(attrs.inventory_management_v1);
@@ -330,7 +339,7 @@ function mapLotRow(row) {
     material_code: row.material_code || null,
     material_name: row.material_name || null,
     lot_code: row.lot_code || null,
-    status: lotDisplayStatus(row),
+    status: lotDisplayStatus(row, governance),
     quantity: row.quantity === null || row.quantity === undefined ? null : Number(row.quantity),
     unit: row.uom || management.unit || null,
     unit_of_measure: row.uom || management.unit || null,
@@ -353,7 +362,7 @@ function mapLotRow(row) {
   };
 }
 
-function stockSummaryFromLots(rows = []) {
+function stockSummaryFromLots(rows = [], governance = null) {
   const summary = {
     has_lots: rows.length > 0,
     lot_count: rows.length,
@@ -371,7 +380,7 @@ function stockSummaryFromLots(rows = []) {
   };
 
   for (const row of rows) {
-    const status = lotDisplayStatus(row);
+    const status = lotDisplayStatus(row, governance);
     const qty = row.quantity === null || row.quantity === undefined ? null : Number(row.quantity);
     const unit = normalizeOptionalText(row.uom, 40);
     if (!summary.unit_of_measure && unit) summary.unit_of_measure = unit;
@@ -397,7 +406,7 @@ function stockSummaryFromLots(rows = []) {
   return summary;
 }
 
-function normalizeMaterialInput(body = {}, current = null) {
+function normalizeMaterialInput(body = {}, current = null, governance = null) {
   rejectUnknownKeys(body, MATERIAL_MUTATION_KEYS, "material");
   const partial = Boolean(current);
   const currentAttrs = safeObject(current?.attrs);
@@ -410,11 +419,11 @@ function normalizeMaterialInput(body = {}, current = null) {
   if (!partial && !name) throw new InventoryInputError("MATERIAL_NAME_REQUIRED");
 
   const materialType = hasOwn(body, "material_type")
-    ? normalizeFlexibleCode(body.material_type, "OTHER")
+    ? normalizeMaterialType(body.material_type, "OTHER", governance)
     : current?.material_type || "OTHER";
   const status = hasOwn(body, "status")
-    ? normalizeStatus(body.status, MATERIAL_STATUSES, "ACTIVE", "INVALID_MATERIAL_STATUS")
-    : current ? materialStatus(current) : "ACTIVE";
+    ? normalizeStatus(body.status, MATERIAL_STATUSES, "ACTIVE", "INVALID_MATERIAL_STATUS", governance, ["INVENTORY_MATERIAL_STATUS"])
+    : current ? materialStatus(current, governance) : "ACTIVE";
   const unit = hasOwn(body, "unit_of_measure") || hasOwn(body, "uom")
     ? normalizeOptionalText(body.unit_of_measure || body.uom, 40)
     : currentManagement.unit_of_measure || currentInventory.unit_of_measure || currentInventory.uom || null;
@@ -473,7 +482,7 @@ function normalizeMaterialInput(body = {}, current = null) {
   };
 }
 
-function normalizeLotInput(body = {}, current = null, material = null) {
+function normalizeLotInput(body = {}, current = null, material = null, governance = null) {
   rejectUnknownKeys(body, LOT_MUTATION_KEYS, "lot");
   const partial = Boolean(current);
   const currentAttrs = safeObject(current?.attrs);
@@ -492,8 +501,8 @@ function normalizeLotInput(body = {}, current = null, material = null) {
     ? normalizeOptionalText(body.unit || body.uom || body.unit_of_measure, 40)
     : current?.uom || material?.attrs?.inventory_management_v1?.unit_of_measure || material?.attrs?.inventory?.unit_of_measure || "pcs";
   const status = hasOwn(body, "status")
-    ? normalizeStatus(body.status, LOT_STATUSES, "AVAILABLE", "INVALID_LOT_STATUS")
-    : current?.status ? lotDisplayStatus(current) : "AVAILABLE";
+    ? normalizeStatus(body.status, LOT_STATUSES, "AVAILABLE", "INVALID_LOT_STATUS", governance, ["INVENTORY_LOT_STATUS", "MATERIAL_LOT_STATUS"])
+    : current?.status ? lotDisplayStatus(current, governance) : "AVAILABLE";
   const supplierId = hasOwn(body, "supplier_agent_id") || hasOwn(body, "supplier_entity_id")
     ? normalizeUuid(body.supplier_agent_id || body.supplier_entity_id, "supplier_agent_id")
     : currentManagement.supplier_agent_id || current?.owner_agent_id || null;
@@ -654,6 +663,11 @@ export async function listInventoryPolicyConditions(app, tenantId) {
 
 export async function listInventoryMaterials(app, session, query = {}) {
   const tenantId = session.tenant_id;
+  const governance = await loadDropdownCodeSets(app, tenantId, [
+    "INVENTORY_MATERIAL_TYPE",
+    "MATERIAL_TYPE",
+    "INVENTORY_MATERIAL_STATUS"
+  ]);
   const limit = clampLimit(query.limit);
   const offset = normalizeOffset(query.offset);
   const includeArchived = query.include_archived === true || query.include_archived === "true";
@@ -667,11 +681,11 @@ export async function listInventoryMaterials(app, session, query = {}) {
     filters.push(`(m.code ILIKE $${params.length} OR m.name ILIKE $${params.length} OR m.material_type ILIKE $${params.length})`);
   }
   if (normalizeOptionalText(query.material_type, 80)) {
-    params.push(normalizeFlexibleCode(query.material_type, "OTHER"));
+    params.push(normalizeMaterialType(query.material_type, "OTHER", governance));
     filters.push(`m.material_type=$${params.length}`);
   }
   if (normalizeOptionalText(query.status, 40)) {
-    params.push(normalizeStatus(query.status, MATERIAL_STATUSES, "ACTIVE", "INVALID_MATERIAL_STATUS"));
+    params.push(normalizeStatus(query.status, MATERIAL_STATUSES, "ACTIVE", "INVALID_MATERIAL_STATUS", governance, ["INVENTORY_MATERIAL_STATUS"]));
     filters.push(`${statusSql}=$${params.length}`);
   }
 
@@ -707,8 +721,8 @@ export async function listInventoryMaterials(app, session, query = {}) {
   const conditions = await listInventoryPolicyConditions(app, tenantId);
   const items = [];
   for (const row of result.rows || []) {
-    const stockSummary = await loadMaterialStockSummary(app.db, tenantId, row.id);
-    items.push(mapMaterialRow(row, { conditions, stockSummary }));
+    const stockSummary = await loadMaterialStockSummary(app.db, tenantId, row.id, governance);
+    items.push(mapMaterialRow(row, { conditions, stockSummary, governance }));
   }
   return {
     ok: true,
@@ -720,7 +734,12 @@ export async function listInventoryMaterials(app, session, query = {}) {
 }
 
 export async function createInventoryMaterial(app, session, body = {}) {
-  const input = normalizeMaterialInput(body);
+  const governance = await loadDropdownCodeSets(app, session.tenant_id, [
+    "INVENTORY_MATERIAL_TYPE",
+    "MATERIAL_TYPE",
+    "INVENTORY_MATERIAL_STATUS"
+  ]);
+  const input = normalizeMaterialInput(body, null, governance);
   if (input.supplierId && !(await ensureAgent(app.db, session.tenant_id, input.supplierId))) {
     throw new InventoryInputError("SUPPLIER_ENTITY_NOT_FOUND");
   }
@@ -737,22 +756,27 @@ export async function createInventoryMaterial(app, session, body = {}) {
   if (input.supplierId) await upsertObjectLink(app.db, session.tenant_id, MATERIAL_KIND, item.id, AGENT_KIND, input.supplierId, "DEFAULT_SUPPLIER");
   await emitMutation(app, session, "inventory.material_created", { material_id: item.id, material_type: item.material_type });
   const conditions = await listInventoryPolicyConditions(app, session.tenant_id);
-  return { ok: true, item: mapMaterialRow(item, { conditions }) };
+  return { ok: true, item: mapMaterialRow(item, { conditions, governance }) };
 }
 
 export async function getInventoryMaterialDetail(app, session, materialId) {
   const row = await ensureMaterial(app.db, session.tenant_id, materialId);
   if (!row) return null;
+  const governance = await loadDropdownCodeSets(app, session.tenant_id, [
+    "INVENTORY_MATERIAL_STATUS",
+    "INVENTORY_LOT_STATUS",
+    "MATERIAL_LOT_STATUS"
+  ]);
   const [conditions, lots, stockSummary, suppliers, documents, policies, movements] = await Promise.all([
     listInventoryPolicyConditions(app, session.tenant_id),
     listInventoryMaterialLots(app, session, row.id, { limit: 50 }),
-    loadMaterialStockSummary(app.db, session.tenant_id, row.id),
+    loadMaterialStockSummary(app.db, session.tenant_id, row.id, governance),
     listMaterialEntityLinks(app, session, row.id),
     listInventoryDocuments(app, session, MATERIAL_KIND, row.id),
     getMaterialPolicySummary(app, session, row),
     listInventoryActivity(app, session, row.id, { limit: 20 })
   ]);
-  const item = mapMaterialRow(row, { conditions, stockSummary });
+  const item = mapMaterialRow(row, { conditions, stockSummary, governance });
   return {
     ok: true,
     item,
@@ -775,7 +799,12 @@ export async function updateInventoryMaterial(app, session, materialId, body = {
       await client.query("ROLLBACK");
       return null;
     }
-    const input = normalizeMaterialInput(body, current);
+    const governance = await loadDropdownCodeSets(app, session.tenant_id, [
+      "INVENTORY_MATERIAL_TYPE",
+      "MATERIAL_TYPE",
+      "INVENTORY_MATERIAL_STATUS"
+    ]);
+    const input = normalizeMaterialInput(body, current, governance);
     if (input.supplierId && !(await ensureAgent(client, session.tenant_id, input.supplierId))) {
       throw new InventoryInputError("SUPPLIER_ENTITY_NOT_FOUND");
     }
@@ -792,7 +821,14 @@ export async function updateInventoryMaterial(app, session, materialId, body = {
     await client.query("COMMIT");
     await emitMutation(app, session, "inventory.material_updated", { material_id: current.id, status: input.status });
     const conditions = await listInventoryPolicyConditions(app, session.tenant_id);
-    return { ok: true, item: mapMaterialRow(result.rows[0], { conditions, stockSummary: await loadMaterialStockSummary(app.db, session.tenant_id, current.id) }) };
+    return {
+      ok: true,
+      item: mapMaterialRow(result.rows[0], {
+        conditions,
+        stockSummary: await loadMaterialStockSummary(app.db, session.tenant_id, current.id, governance),
+        governance
+      })
+    };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
@@ -803,6 +839,7 @@ export async function updateInventoryMaterial(app, session, materialId, body = {
 
 export async function listInventoryMaterialLots(app, session, materialId, query = {}) {
   const tenantId = session.tenant_id;
+  const governance = await loadDropdownCodeSets(app, tenantId, ["INVENTORY_LOT_STATUS", "MATERIAL_LOT_STATUS"]);
   const material = await ensureMaterial(app.db, tenantId, materialId);
   if (!material) return { ok: false, items: [] };
   const limit = clampLimit(query.limit);
@@ -816,7 +853,7 @@ export async function listInventoryMaterialLots(app, session, materialId, query 
     filters.push(`(lot.lot_code ILIKE $${params.length} OR lot.status ILIKE $${params.length})`);
   }
   if (normalizeOptionalText(query.status, 40)) {
-    params.push(normalizeStatus(query.status, LOT_STATUSES, "AVAILABLE", "INVALID_LOT_STATUS"));
+    params.push(normalizeStatus(query.status, LOT_STATUSES, "AVAILABLE", "INVALID_LOT_STATUS", governance, ["INVENTORY_LOT_STATUS", "MATERIAL_LOT_STATUS"]));
     filters.push(`UPPER(lot.status)=$${params.length}`);
   }
   params.push(limit, offset);
@@ -839,7 +876,7 @@ export async function listInventoryMaterialLots(app, session, materialId, query 
     `,
     params
   );
-  return { ok: true, items: (result.rows || []).map(mapLotRow), limit, offset };
+  return { ok: true, items: (result.rows || []).map((row) => mapLotRow(row, governance)), limit, offset };
 }
 
 export async function createInventoryLot(app, session, materialId, body = {}) {
@@ -851,7 +888,8 @@ export async function createInventoryLot(app, session, materialId, body = {}) {
       await client.query("ROLLBACK");
       return null;
     }
-    const input = normalizeLotInput(body, null, material);
+    const governance = await loadDropdownCodeSets(app, session.tenant_id, ["INVENTORY_LOT_STATUS", "MATERIAL_LOT_STATUS"]);
+    const input = normalizeLotInput(body, null, material, governance);
     if (input.supplierId && !(await ensureAgent(client, session.tenant_id, input.supplierId))) {
       throw new InventoryInputError("SUPPLIER_ENTITY_NOT_FOUND");
     }
@@ -870,7 +908,7 @@ export async function createInventoryLot(app, session, materialId, body = {}) {
     if (input.supplierId) await upsertObjectLink(client, session.tenant_id, LOT_KIND, result.rows[0].id, AGENT_KIND, input.supplierId, "SUPPLIER");
     await client.query("COMMIT");
     await emitMutation(app, session, "inventory.lot_created", { material_id: material.id, lot_id: result.rows[0].id, status: input.status });
-    return { ok: true, item: mapLotRow({ ...result.rows[0], material_code: material.code, material_name: material.name }) };
+    return { ok: true, item: mapLotRow({ ...result.rows[0], material_code: material.code, material_name: material.name }, governance) };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
@@ -882,13 +920,14 @@ export async function createInventoryLot(app, session, materialId, body = {}) {
 export async function getInventoryLotDetail(app, session, lotId) {
   const row = await ensureLot(app.db, session.tenant_id, lotId);
   if (!row) return null;
+  const governance = await loadDropdownCodeSets(app, session.tenant_id, ["INVENTORY_LOT_STATUS", "MATERIAL_LOT_STATUS"]);
   const [documents, events] = await Promise.all([
     listInventoryDocuments(app, session, LOT_KIND, row.id),
     listLotStatusEvents(app.db, session.tenant_id, row.id)
   ]);
   return {
     ok: true,
-    item: mapLotRow(row),
+    item: mapLotRow(row, governance),
     material: {
       id: row.material_id,
       code: row.material_code || null,
@@ -914,11 +953,12 @@ export async function updateInventoryLot(app, session, lotId, body = {}) {
       name: current.material_name,
       attrs: current.material_attrs || {}
     };
-    const input = normalizeLotInput(body, current, material);
+    const governance = await loadDropdownCodeSets(app, session.tenant_id, ["INVENTORY_LOT_STATUS", "MATERIAL_LOT_STATUS"]);
+    const input = normalizeLotInput(body, current, material, governance);
     if (input.supplierId && !(await ensureAgent(client, session.tenant_id, input.supplierId))) {
       throw new InventoryInputError("SUPPLIER_ENTITY_NOT_FOUND");
     }
-    const previousStatus = lotDisplayStatus(current);
+    const previousStatus = lotDisplayStatus(current, governance);
     const result = await client.query(
       `
       UPDATE eip_core.material_lot
@@ -956,7 +996,7 @@ export async function updateInventoryLot(app, session, lotId, body = {}) {
     if (input.supplierId) await upsertObjectLink(client, session.tenant_id, LOT_KIND, current.id, AGENT_KIND, input.supplierId, "SUPPLIER");
     await client.query("COMMIT");
     await emitMutation(app, session, "inventory.lot_updated", { material_id: current.material_id, lot_id: current.id, status: input.status });
-    return { ok: true, item: mapLotRow({ ...result.rows[0], material_code: current.material_code, material_name: current.material_name }) };
+    return { ok: true, item: mapLotRow({ ...result.rows[0], material_code: current.material_code, material_name: current.material_name }, governance) };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
@@ -1073,10 +1113,13 @@ export async function getInventoryEffectivePolicies(app, session, query = {}) {
   }
   const normalized = normalizeEffectivePolicyQuery(context);
   const effective = await resolveEffectivePolicy(app, session, normalized);
+  const governance = material
+    ? await loadDropdownCodeSets(app, session.tenant_id, ["INVENTORY_MATERIAL_STATUS"])
+    : null;
   return {
     ok: true,
     context: Object.fromEntries(Object.entries(normalized).filter(([key]) => key !== "_effectiveAtDate")),
-    material: material ? mapMaterialRow(material) : null,
+    material: material ? mapMaterialRow(material, { governance }) : null,
     effective_policy: effective
   };
 }
@@ -1124,7 +1167,8 @@ export async function getInventoryOverview(app, session) {
 }
 
 export async function getInventoryGovernanceOptions(app, session) {
-  const result = await app.db.query(
+  const [result, workspace] = await Promise.all([
+    app.db.query(
     `
     WITH lists AS (
       SELECT DISTINCT ON (code) id, code, name
@@ -1142,7 +1186,9 @@ export async function getInventoryGovernanceOptions(app, session) {
     ORDER BY lists.code, value.sort_order, value.code
     `,
     [session.tenant_id, INVENTORY_DROPDOWN_CODES]
-  );
+    ),
+    loadModuleWorkspace(app, session.tenant_id, "inventory")
+  ]);
   const options = {};
   for (const row of result.rows || []) {
     options[row.list_code] = options[row.list_code] || [];
@@ -1160,11 +1206,12 @@ export async function getInventoryGovernanceOptions(app, session) {
       material_types: MATERIAL_TYPES,
       material_statuses: MATERIAL_STATUSES,
       lot_statuses: LOT_STATUSES
-    }
+    },
+    workspace
   };
 }
 
-async function loadMaterialStockSummary(db, tenantId, materialId) {
+async function loadMaterialStockSummary(db, tenantId, materialId, governance = null) {
   const result = await db.query(
     `
     SELECT id, status, quantity, uom, attrs
@@ -1175,7 +1222,7 @@ async function loadMaterialStockSummary(db, tenantId, materialId) {
     `,
     [tenantId, materialId]
   );
-  return stockSummaryFromLots(result.rows || []);
+  return stockSummaryFromLots(result.rows || [], governance);
 }
 
 async function upsertObjectLink(db, tenantId, srcKind, srcId, dstKind, dstId, relationType) {

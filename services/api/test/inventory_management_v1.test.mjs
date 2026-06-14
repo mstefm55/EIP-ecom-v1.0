@@ -28,8 +28,9 @@ const server = read("../src/server.js");
 const migration = read("../db/migrations/0125_inventory_management_v1.sql");
 const registry = read("../../../apps/dashboard/src/engine/registry.jsx");
 const dashboardSurface = read("../../../apps/dashboard/src/engine/surfaces/dashboard.js");
+const moduleDescriptors = read("../../../apps/dashboard/src/engine/surfaces/kernelModuleDescriptors.js");
 const seedSurface = read("../db/seed/ui_surface_dashboard.sql");
-const workspace = read("../../../apps/dashboard/src/components/inventory/InventoryManagementWorkspace.jsx");
+const workspace = read("../../../apps/dashboard/src/components/engine/KernelModuleWorkspace.jsx");
 const docs = read("../../../docs/inventory_management_v1.md");
 
 function material(overrides = {}) {
@@ -416,7 +417,7 @@ test("migration is additive, reuses kernel tables, seeds governance, and wires d
     "INVENTORY_LOT_STATUS",
     "module_catalog",
     "tenant_module_setting",
-    "InventoryManagementWorkspace",
+    "KernelModuleWorkspace",
     "material_lot_inventory_status_idx",
     "role_template_permission",
     "role_permission",
@@ -427,22 +428,22 @@ test("migration is additive, reuses kernel tables, seeds governance, and wires d
 });
 
 test("dashboard registry, source descriptor, seed descriptor, and workspace are aligned", () => {
-  assert.match(registry, /import InventoryManagementWorkspace/);
-  assert.match(registry, /InventoryManagementWorkspace,/);
-  assert.match(dashboardSurface, /type: "InventoryManagementWorkspace"/);
-  assert.match(dashboardSurface, /\/api\/eip\/inventory\/materials\/:id\/lots/);
-  assert.match(dashboardSurface, /\/api\/eip\/inventory\/reorder-recommendations/);
-  assert.match(dashboardSurface, /\/api\/eip\/inventory\/policies\/effective/);
-  assert.match(seedSurface, /"type": "InventoryManagementWorkspace"/);
-  assert.match(seedSurface, /"materialLots": "\/api\/eip\/inventory\/materials\/:id\/lots"/);
-  assert.match(seedSurface, /"policiesEffective": "\/api\/eip\/inventory\/policies\/effective"/);
-  for (const label of ["Overview", "Materials", "Lots", "Reorder", "Policies", "Documents", "Activity"]) {
-    assert.match(workspace, new RegExp(label));
+  assert.match(registry, /import KernelModuleWorkspace/);
+  assert.match(registry, /KernelModuleWorkspace,/);
+  assert.match(dashboardSurface, /inventoryKernelWorkspaceNode/);
+  assert.match(moduleDescriptors, /type: "KernelModuleWorkspace"/);
+  assert.match(moduleDescriptors, /\/api\/eip\/inventory\/materials\/:id\/lots/);
+  assert.match(moduleDescriptors, /\/api\/eip\/inventory\/policies\/effective|policy_summary/);
+  assert.match(seedSurface, /"type": "KernelModuleWorkspace"/);
+  assert.match(seedSurface, /"configEndpoint": "\/api\/eip\/inventory\/governance\/options"/);
+  for (const label of ["Overview", "Material", "Lots", "Reorder", "Policies", "Documents", "Activity"]) {
+    assert.match(moduleDescriptors, new RegExp(label));
   }
-  assert.match(workspace, /method: "POST"/);
-  assert.match(workspace, /method: "PATCH"/);
-  assert.match(workspace, /inventory\.material\.create/);
-  assert.match(workspace, /inventory\.lot\.update/);
+  assert.match(moduleDescriptors, /method: "POST"/);
+  assert.match(moduleDescriptors, /method: "PATCH"/);
+  assert.match(moduleDescriptors, /inventory\.material\.create/);
+  assert.match(moduleDescriptors, /inventory\.lot\.update/);
+  assert.match(workspace, /configEndpoint/);
 });
 
 test("docs and touched files are production-data-only and avoid fake/demo data", () => {

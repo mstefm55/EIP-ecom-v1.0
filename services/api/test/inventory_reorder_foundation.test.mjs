@@ -25,7 +25,8 @@ const cloneSql = read("../db/seed/clone_template_to_tenant.sql");
 const adminCloneRoute = read("../src/routes/admin_template_clone.js");
 const registry = read("../../../apps/dashboard/src/engine/registry.jsx");
 const dashboardSurface = read("../../../apps/dashboard/src/engine/surfaces/dashboard.js");
-const workspace = read("../../../apps/dashboard/src/components/inventory/InventoryWorkspace.jsx");
+const moduleDescriptors = read("../../../apps/dashboard/src/engine/surfaces/kernelModuleDescriptors.js");
+const workspace = read("../../../apps/dashboard/src/components/engine/KernelModuleWorkspace.jsx");
 const paymentDocs = read("../../../docs/payment_checkout_foundation_v1.md");
 
 test("inventory stock profile normalizes existing ECOM inventory attrs and detects low stock", () => {
@@ -458,37 +459,26 @@ test("inventory commercial condition migration is additive, clone-ready, and pre
 });
 
 test("inventory dashboard is descriptor registered and module gated", () => {
-  assert.match(registry, /import InventoryWorkspace/);
-  assert.match(registry, /import InventoryManagementWorkspace/);
-  assert.match(registry, /InventoryWorkspace,/);
-  assert.match(registry, /InventoryManagementWorkspace,/);
+  assert.match(registry, /import KernelModuleWorkspace/);
+  assert.match(registry, /KernelModuleWorkspace,/);
+  assert.doesNotMatch(registry, new RegExp("Inventory" + "Workspace"));
   assert.match(dashboardSurface, /\{ code: "inventory", label: "Inventory", icon: "Package", module: "inventory" \}/);
-  assert.match(dashboardSurface, /type: "InventoryManagementWorkspace"/);
-  assert.match(dashboardSurface, /\/api\/eip\/inventory\/overview/);
-  assert.match(dashboardSurface, /\/api\/eip\/inventory\/reorder-recommendations/);
-  assert.match(dashboardSurface, /\/api\/eip\/inventory\/policies\/effective/);
-  assert.match(dashboardSurface, /Materials/);
-  assert.match(dashboardSurface, /Lots/);
-  assert.match(dashboardSurface, /Reorder/);
+  assert.match(dashboardSurface, /inventoryKernelWorkspaceNode/);
+  assert.match(moduleDescriptors, /KernelModuleWorkspace/);
+  assert.match(moduleDescriptors, /Material/);
+  assert.match(moduleDescriptors, /Lots/);
+  assert.match(moduleDescriptors, /Reorder/);
   assert.match(surfaceSeed, /"code": "inventory"/);
-  assert.match(surfaceSeed, /"type": "InventoryManagementWorkspace"/);
-  assert.match(surfaceSeed, /"recommendations": "\/api\/eip\/inventory\/reorder-recommendations"/);
-  assert.match(surfaceSeed, /"policiesEffective": "\/api\/eip\/inventory\/policies\/effective"/);
-  assert.match(workspace, /export default function InventoryWorkspace/);
-  assert.ok(workspace.includes("apiFetch(`${endpoints.suggestions}/run`"));
-  assert.match(workspace, /decision_card/);
-  assert.match(workspace, /Stock Signals Queue/);
-  assert.match(workspace, /Inventory Signal Workbench/);
-  assert.match(workspace, /Action Rail/);
-  assert.match(workspace, /Governed policy source/);
-  assert.match(workspace, /Material overrides/);
-  assert.match(workspace, /Current stock state/);
-  assert.match(workspace, /Procurement bridge/);
-  assert.match(workspace, /Open in Procurement/);
-  assert.match(workspace, /Recent stock movements/);
-  assert.match(workspace, /Preferred supplier reference/);
-  assert.doesNotMatch(workspace, /Approve requisition/);
-  assert.doesNotMatch(workspace, /Preferred supplier agent id/);
+  assert.match(surfaceSeed, /"type": "KernelModuleWorkspace"/);
+  assert.match(surfaceSeed, /"configEndpoint": "\/api\/eip\/inventory\/governance\/options"/);
+  assert.match(workspace, /export default function KernelModuleWorkspace/);
+  assert.match(moduleDescriptors, /policy_summary\.condition_codes/);
+  assert.match(moduleDescriptors, /policy_summary\.effective_read_model\.resolution_status/);
+  assert.match(moduleDescriptors, /item\.stock_profile\.policy_source/);
+  assert.match(moduleDescriptors, /item\.stock_profile\.suggested_qty/);
+  assert.match(moduleDescriptors, /default_supplier_entity_id/);
+  assert.doesNotMatch(moduleDescriptors, /Approve requisition/);
+  assert.doesNotMatch(moduleDescriptors, /Preferred supplier agent id/);
 });
 
 test("inventory workspace remains tenant agnostic and separate from payment operations", () => {
