@@ -115,7 +115,7 @@ Commercial conditions are part of the governed clone path:
 | Source | Current values |
 | --- | --- |
 | Inventory policy seed | `INVENTORY_REORDER_POLICY / INVENTORY`, `SUPPLY_REORDER_CONDITION / SUPPLY`, `SUPPLIER_PURCHASE_CONDITION / PURCHASING` in `services/api/db/migrations/0110_inventory_commercial_condition_policy.sql` |
-| Procurement policy seed | `PROCUREMENT_POLICY / PURCHASING`, `MATERIAL_SUPPLIER_CONDITION / PURCHASING`, `PAYMENT_TERM_CONDITION / FINANCE`, `FREIGHT_COST_CONDITION / LOGISTICS`, `CASH_PURCHASE_CONDITION / PURCHASING` in `services/api/db/migrations/0111_procurement_foundation.sql` |
+| Procurement policy seed | `PROCUREMENT_POLICY / PURCHASING`, `MATERIAL_SUPPLIER_CONDITION / PURCHASING`, `PAYMENT_TERM_CONDITION / COMMERCIAL`, `INCOTERM / COMMERCIAL`, `FREIGHT_COST_CONDITION / LOGISTICS`, `CASH_PURCHASE_CONDITION / PURCHASING` in `services/api/db/migrations/0111_procurement_foundation.sql` and `0127_procurement_management_v1.sql` |
 | Structured field catalog | `ECOM_COMMERCIAL_CONDITION_FIELD` in `services/api/db/migrations/0120_commercial_condition_structured_fields.sql` and `services/api/src/routes/ecom.js` |
 | FX sync | `FOREX_RATE / FOREX` in `services/api/src/services/fx/marketFxSync.js` |
 | Legacy/developer docs | `PRICE`, `TAX`, `DISCOUNT`, `TERMS` and categories such as `base_price`, `VAT`, `installment`, `subscription` in `docs/DEVELOPER_MANUAL.md` |
@@ -154,7 +154,7 @@ Commercial conditions are part of the governed clone path:
 | Effective policy output | `resolveProcurementPolicy()` returns `policy_source`, `condition_codes`, and `effective_policy` |
 | Recommendation consumer | `buildProcurementRecommendation()` returns `policy_condition_codes`, `effective_policy`, `procurement_model`, supplier candidates, costs, and next process hints |
 | Supplier relationship context | `services/api/src/services/procurement/procurementOperations.js` and `procurementWorkbench.js` use `object_link` relation `MATERIAL_SUPPLIER` |
-| UI displays policy used | `apps/dashboard/src/components/procurement/ProcurementWorkspace.jsx` displays `Rule used`, payment terms, and raw `effective_policy` JSON |
+| UI displays policy used | `apps/dashboard/src/engine/surfaces/kernelModuleDescriptors.js` exposes Procurement through `KernelModuleWorkspace`; policy summaries show payment terms, Incoterms, approval status, and safe effective-policy explanations |
 | Tests | `services/api/test/procurement_foundation.test.mjs` tests scoped overrides/defaults and asserts route thinness around `commercial_condition` |
 
 ### Public commerce pricing/tax/discount/terms usage
@@ -183,7 +183,7 @@ Commercial conditions are part of the governed clone path:
 | --- | --- |
 | Product Studio trade condition descriptor | `apps/dashboard/src/engine/surfaces/dashboard.js`, `services/api/db/migrations/0115_command_center_product_studio_surface_polish.sql`, `0116_product_studio_focus_surface_correction.sql` |
 | Inventory workspace descriptor | `apps/dashboard/src/engine/surfaces/dashboard.js`, inventory panel endpoints |
-| Procurement workspace descriptor | `apps/dashboard/src/engine/surfaces/dashboard.js`, procurement panel endpoints |
+| Procurement workspace descriptor | `apps/dashboard/src/engine/surfaces/dashboard.js`, `apps/dashboard/src/engine/surfaces/kernelModuleDescriptors.js`, and `module_catalog.attrs.ui_workspace` |
 | Admin template clone summary | `apps/dashboard/src/components/admin/AdminTemplateClonePanel.jsx` |
 | Central `Policies & Conditions` surface | not found in repo inspection |
 | Entity Definition mini-panel | not found in repo inspection |
@@ -220,11 +220,11 @@ This table maps discovered current values to the new taxonomy. It is planning on
 | `SUPPLIER_PURCHASE_CONDITION` | `PURCHASING` | `PROCUREMENT` / `TRADE_PARTY` | `SUPPLIER_TERMS` | `SUPPLIER_PURCHASE` | MOQ/order multiple/payment hint | `EXTERNAL_TRADE_CONDITION` | supplier, material, category | MOQ, order multiple, payment/currency | supplier option scoring | Procurement, Inventory | HIGH | May duplicate supplier link attrs if not normalized |
 | `PROCUREMENT_POLICY` | `PURCHASING` | `PROCUREMENT` | `PURCHASE_REQUISITION` / `RFQ_POLICY` | `PROCUREMENT_ROUTE` | threshold/quote count/strategy | `INTERNAL_MANAGEMENT_POLICY` | tenant, business unit, material/category, process type | thresholds, quote count, strategy, currency | route recommendation and approval rule | Procurement workbench | HIGH | Route helpers must not become process authority |
 | `MATERIAL_SUPPLIER_CONDITION` | `PURCHASING` | `PROCUREMENT` / `TRADE_PARTY` | `SUPPLIER_SELECTION` / `SUPPLIER_TERMS` | `MATERIAL_SUPPLIER` | supplier eligibility/relationship | `EXTERNAL_TRADE_CONDITION` or `HYBRID_POLICY` | material + supplier via `object_link` | accreditation, supplier role, supplier item code, terms | supplier scoring | Procurement, Entity Definition | HIGH | Needs object_link assignment clarity |
-| `PAYMENT_TERM_CONDITION` | `FINANCE` | `TRADE_PARTY` / `FINANCE_APPROVAL` | `PAYMENT_TERMS` / `CREDIT_TERMS` | `PAYMENT_TERMS` | due days/credit limit | `EXTERNAL_TRADE_CONDITION` or `INTERNAL_FINANCIAL_POLICY` | supplier/customer/tenant/channel | due days, credit limit, credit flag | cashflow and approval checks | Product Studio, Procurement, Entity Definition | MEDIUM | Nature depends on source |
+| `PAYMENT_TERM_CONDITION` | `COMMERCIAL` | `TRADE_PARTY` | `PAYMENT_TERMS` / `CREDIT_TERMS` | `PAYMENT_TERMS` | due days/credit limit | `EXTERNAL_TRADE_CONDITION` | supplier/customer/tenant/channel | due days, credit limit, credit flag | supplier terms and approval context | Product Studio, Procurement, Entity Definition | HIGH | Do not classify payment terms as Financial policy |
 | `FREIGHT_COST_CONDITION` | `LOGISTICS` | `LOGISTICS_DELIVERY` | `FREIGHT_COST_POLICY` / `LANDED_COST` | `FREIGHT_COST` | estimate/cost basis | `EXTERNAL_TRADE_CONDITION` or `SYSTEM_CALCULATION_POLICY` | supplier, marketplace, material, route/country | freight amount/rate, currency | landed-cost calculation | Procurement, Inventory | HIGH | Needs source clarity |
 | `CASH_PURCHASE_CONDITION` | `PURCHASING` | `FINANCE_APPROVAL` / `PROCUREMENT` | `CASHFLOW_CONTROL` / `DIRECT_PURCHASE` | `CASH_PURCHASE_LIMIT` | low-value buying | `INTERNAL_MANAGEMENT_POLICY` | tenant, site, category, process type | amount threshold, payment terms | route selection and approval | Procurement | HIGH | Must not enable final PO/payment execution |
 | `TRADE_TERMS` | `TRADE` | `TRADE_PARTY` | `CONTRACT_VALIDITY` / `PAYMENT_TERMS` / `WARRANTY_TERMS` | NEEDS_REVIEW | NEEDS_REVIEW | `EXTERNAL_TRADE_CONDITION` | supplier/customer/marketplace/material | structured terms | none or resolver-specific | Product Studio, Entity Definition | LOW | LEGACY_AMBIGUOUS, DO_NOT_AUTO_MIGRATE blindly |
-| `PAYMENT_TERMS` | `FINANCE` or `TRADE` | `TRADE_PARTY` / `FINANCE_APPROVAL` | `PAYMENT_TERMS` / `CREDIT_TERMS` | `PAYMENT_TERMS` | due days/credit terms | `EXTERNAL_TRADE_CONDITION` or `INTERNAL_FINANCIAL_POLICY` | supplier/customer/tenant | due days, credit amount/days | cashflow/approval | Product Studio, Procurement | MEDIUM | Nature source-dependent |
+| `PAYMENT_TERMS` | `COMMERCIAL` | `TRADE_PARTY` | `PAYMENT_TERMS` / `CREDIT_TERMS` | `PAYMENT_TERMS` | due days/credit terms | `EXTERNAL_TRADE_CONDITION` | supplier/customer/tenant | due days, credit amount/days | supplier terms and approval context | Product Studio, Procurement | HIGH | Financial policy is reserved for internal cash/liquidity/debt/ratio/capital policy |
 | `PRICE` | `PRICING` or legacy category | `SELLING` / `MARKETPLACE` | `PRICE_POLICY` | `PRICE` | base/channel/customer | `EXTERNAL_TRADE_CONDITION` or `INTERNAL_MANAGEMENT_POLICY` | product, customer, marketplace, channel, jurisdiction | unit price, currency, tier | price selection | Public commerce, Product Studio | MEDIUM | Material attrs fallback still exists |
 | `DISCOUNT` | `PRICING` | `SELLING` / `MARKETPLACE` | `DISCOUNT_POLICY` | `DISCOUNT` | percent/amount/promo | `INTERNAL_MANAGEMENT_POLICY` or `EXTERNAL_TRADE_CONDITION` | product/customer/channel/qty/date | percent or amount | stacking/exclusivity | Public commerce, Product Studio | MEDIUM | Stacking rules not formalized |
 | `TAX` | legacy/PRICING | `FISCAL_TAX_TREATMENT` | `TAX_CATEGORY` / `VAT_TREATMENT` | `TAX` | rate/classification | `REGULATION_DERIVED_OPERATIONAL_POLICY` | jurisdiction/product/customer/channel | rate/category | tax calculation | Public commerce | MEDIUM | Must not store raw legal text |
@@ -1519,9 +1519,9 @@ Likely files:
 ```text
 apps/dashboard/src/components/engine/KernelModuleWorkspace.jsx
 apps/dashboard/src/engine/surfaces/kernelModuleDescriptors.js
-apps/dashboard/src/components/procurement/ProcurementWorkspace.jsx
 services/api/src/services/inventory/inventoryFoundation.js
 services/api/src/services/procurement/procurementFoundation.js
+services/api/src/services/procurement/procurementManagement.js
 ```
 
 Boundaries:

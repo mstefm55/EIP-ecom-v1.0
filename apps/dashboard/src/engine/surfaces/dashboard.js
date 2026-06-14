@@ -1,7 +1,8 @@
 import {
   entityKernelWorkspaceNode,
   inventoryKernelWorkspaceNode,
-  policiesKernelWorkspaceNode
+  policiesKernelWorkspaceNode,
+  procurementKernelWorkspaceNode
 } from "./kernelModuleDescriptors";
 
 export const dashboardSurface = {
@@ -451,41 +452,7 @@ export const dashboardSurface = {
       type: "UserPanel",
       props: { tab: "procurement" },
       children: [
-        {
-          id: "procurement-workspace",
-          type: "ProcurementWorkspace",
-          props: {
-            module: "procurement",
-            title: "Purchase Need Workbench",
-            subtitle: "Review what needs buying, supplier options, buying route, offers, and the next owner action.",
-            endpoints: {
-              overview: "/api/eip/procurement/overview",
-              workbench: "/api/eip/procurement/purchase-needs",
-              lookup: "/api/eip/procurement/lookup",
-              supplierLinks: "/api/eip/procurement/supplier-links",
-              requisitions: "/api/eip/procurement/requisitions",
-              rfqs: "/api/eip/procurement/rfqs",
-              cashPurchases: "/api/eip/procurement/cash-purchases",
-            },
-            tabs: [
-              { id: "workbench", label: "Purchase Need Workbench" },
-              { id: "supplier-policy", label: "Supplier Policy" },
-              { id: "history", label: "History" },
-            ],
-            actions: {
-              refresh: "Refresh",
-              createRequisition: "Create requisition",
-              approve: "Approve",
-              ignore: "Ignore",
-              createRfq: "Request quotes",
-              addQuote: "Add supplier offer",
-              compareQuotes: "Compare offers",
-              approveQuote: "Approve recommended offer",
-              saveSupplierLink: "Save supplier link",
-              recordCashPurchase: "Record cash purchase",
-            },
-          },
-        },
+        procurementKernelWorkspaceNode,
       ],
     },
     {

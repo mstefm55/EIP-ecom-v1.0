@@ -13,6 +13,7 @@ import {
   Save,
   Search,
   ShieldCheck,
+  ShoppingCart,
   TrendingDown,
   Users
 } from "lucide-react";
@@ -29,6 +30,8 @@ const ICONS = {
   package: Package,
   policy: ShieldCheck,
   reorder: TrendingDown,
+  shopping: ShoppingCart,
+  "shopping-cart": ShoppingCart,
   users: Users
 };
 
@@ -208,10 +211,76 @@ function updateInputValue(setValues, field, value) {
   });
 }
 
+function LookupField({ field, values, setValues, disabled }) {
+  const value = inputValue(values, field);
+  const label = field.label || titleize(field.name || field.key);
+  const [query, setQuery] = useState("");
+  const [options, setOptions] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!field.endpoint) return;
+    let active = true;
+    Promise.resolve().then(async () => {
+      if (!active) return;
+      setLoading(true);
+      const params = new URLSearchParams();
+      params.set(field.queryParam || "q", query);
+      params.set(field.limitParam || "limit", String(field.limit || 25));
+      try {
+        const payload = await apiFetch(`${field.endpoint}${String(field.endpoint).includes("?") ? "&" : "?"}${params.toString()}`);
+        if (!active) return;
+        setOptions(normalizeList(getPath(payload, field.itemsPath || "items")));
+      } catch {
+        if (active) setOptions([]);
+      } finally {
+        if (active) setLoading(false);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [field.endpoint, field.itemsPath, field.limit, field.limitParam, field.queryParam, query]);
+
+  return (
+    <label className="block">
+      <span className="mb-1 block text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-ink-400">{label}</span>
+      <input
+        disabled={disabled}
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        placeholder={field.placeholder || "Search"}
+        className="mb-2 w-full rounded-xl border border-ink-100 bg-white/90 px-3 py-2 text-sm text-ink-700 outline-none transition focus:border-brand-300 focus:ring-2 focus:ring-brand-100 disabled:opacity-60"
+      />
+      <select
+        disabled={disabled || loading}
+        value={value}
+        onChange={(event) => updateInputValue(setValues, field, event.target.value)}
+        className="w-full rounded-xl border border-ink-100 bg-white/90 px-3 py-2 text-sm text-ink-700 outline-none transition focus:border-brand-300 focus:ring-2 focus:ring-brand-100 disabled:opacity-60"
+      >
+        <option value="">{loading ? "Loading..." : field.emptyLabel || "Select"}</option>
+        {options.map((option) => {
+          const optionValue = getPath(option, field.valuePath || "id", option.id || option.value);
+          const optionLabel = getPath(option, field.labelPath || "label", option.label || option.name || option.code || optionValue);
+          return (
+            <option key={optionValue} value={optionValue}>
+              {optionLabel}
+            </option>
+          );
+        })}
+      </select>
+    </label>
+  );
+}
+
 function FieldInput({ field, values, setValues, disabled, optionsPayload }) {
   const value = inputValue(values, field);
   const label = field.label || titleize(field.name || field.key);
   const baseClass = "w-full rounded-xl border border-ink-100 bg-white/90 px-3 py-2 text-sm text-ink-700 outline-none transition focus:border-brand-300 focus:ring-2 focus:ring-brand-100 disabled:opacity-60";
+
+  if (field.type === "lookup") {
+    return <LookupField field={field} values={values} setValues={setValues} disabled={disabled} />;
+  }
 
   if (field.type === "select") {
     return (
@@ -549,6 +618,7 @@ export default function KernelModuleWorkspace({ node }) {
   const listConfig = useMemo(() => effectiveProps.list || {}, [effectiveProps.list]);
   const detailConfig = useMemo(() => effectiveProps.detail || {}, [effectiveProps.detail]);
   const actions = useMemo(() => effectiveProps.actions || {}, [effectiveProps.actions]);
+  const rowActions = useMemo(() => normalizeList(effectiveProps.rowActions), [effectiveProps.rowActions]);
   const tabs = useMemo(() => effectiveProps.tabs || [], [effectiveProps.tabs]);
   const [items, setItems] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
@@ -558,6 +628,7 @@ export default function KernelModuleWorkspace({ node }) {
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState({});
   const [createOpen, setCreateOpen] = useState(false);
+  const [actionLoading, setActionLoading] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -618,6 +689,24 @@ export default function KernelModuleWorkspace({ node }) {
       setError(parseApiError(err));
     }
   }, [detailConfig.endpoint]);
+
+  const runRowAction = useCallback(async (action) => {
+    if (!selected || !action?.endpoint) return;
+    setActionLoading(action.id || action.label || action.endpoint);
+    setError("");
+    try {
+      await apiFetch(endpointFor(action.endpoint, selected), {
+        method: action.method || "POST",
+        body: action.body || {}
+      });
+      await refreshAll();
+      await refreshDetail(selected.id);
+    } catch (err) {
+      setError(parseApiError(err));
+    } finally {
+      setActionLoading("");
+    }
+  }, [refreshAll, refreshDetail, selected]);
 
   useEffect(() => {
     let active = true;
@@ -750,6 +839,37 @@ export default function KernelModuleWorkspace({ node }) {
                     </div>
                     <p className="mt-1 truncate text-sm text-ink-500">{formatValue(getPath(selected, detailConfig.subtitlePath || listConfig.subtitlePath || "code"))}</p>
                   </div>
+                  {rowActions.length ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      {rowActions.map((action) => {
+                        const permissionMissing = action.permission && !permissions.includes(action.permission);
+                        const enabledStatuses = normalizeList(action.enabledStatuses).map((status) => String(status).toUpperCase());
+                        const statusBlocked = enabledStatuses.length
+                          ? !enabledStatuses.includes(String(selectedBadgeValue || "").toUpperCase())
+                          : false;
+                        const disabled = permissionMissing || statusBlocked || Boolean(actionLoading);
+                        const title = permissionMissing
+                          ? `Missing ${action.permission}`
+                          : statusBlocked
+                            ? action.disabledReason || "Action is unavailable for this status."
+                            : undefined;
+                        const loadingThis = actionLoading === (action.id || action.label || action.endpoint);
+                        return (
+                          <button
+                            key={action.id || action.label || action.endpoint}
+                            type="button"
+                            disabled={disabled}
+                            title={title}
+                            onClick={() => runRowAction(action)}
+                            className={buttonClass(action.primary === true)}
+                          >
+                            {loadingThis ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                            {action.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
                 </div>
                 <div className="mt-4 flex flex-wrap gap-2">
                   {tabs.map((tab) => {
