@@ -137,10 +137,13 @@ test("mailbox migration reuses the kernel and seeds governance without a mailbox
 });
 
 test("mailbox tabs and actions remain descriptor-backed reusable CRM workspace behavior", () => {
-  for (const source of [migration, seed, surface, workspace]) {
+  for (const source of [migration, workspace]) {
     assert.match(source, /mailbox/);
     assert.match(source, /CRM_MAILBOX_READ/);
   }
+  assert.match(surface, /crmKernelWorkspaceNode/);
+  assert.match(seed, /"type": "KernelModuleWorkspace"/);
+  assert.match(seed, /"configEndpoint": "\/api\/eip\/crm\/governance\/options"/);
   assert.match(workspace, /No linked contact yet/);
   assert.match(workspace, /Search by name or reference/);
   assert.doesNotMatch(workspace, /Linked agent id/);

@@ -5,6 +5,27 @@ import registerCrmCompletionRoutes from "./crm_completion.js";
 import registerCrmIntelligenceRoutes from "./crm_intelligence.js";
 import registerCrmIntakeRoutes from "./crm_intake.js";
 import registerCrmMailboxRoutes from "./crm_mailbox.js";
+import {
+  CRM_MANAGEMENT_PERMISSIONS,
+  CrmInputError,
+  convertCrmOpportunity,
+  createCrmAccount,
+  createCrmActivity,
+  createCrmContact,
+  createCrmOpportunity,
+  getCrmAccount,
+  getCrmAccountSummary,
+  getCrmOpportunity,
+  getCrmPipeline,
+  listCrmAccountContacts,
+  listCrmAccounts,
+  listCrmActivities,
+  listCrmOpportunities,
+  updateCrmAccount,
+  updateCrmActivity,
+  updateCrmContact,
+  updateCrmOpportunity
+} from "../services/crm/crmManagement.js";
 
 const MAX_LIMIT = 200;
 
@@ -63,6 +84,30 @@ async function requirePerm(app, req, reply, permCode) {
   }
 
   return s.session;
+}
+
+function sendCrmResult(reply, result) {
+  if (!result) return reply.code(404).send({ ok: false, error: "NOT_FOUND" });
+  if (result.ok === false) {
+    return reply.code(result.status || 409).send({
+      ok: false,
+      error: result.error,
+      details: result.details || null
+    });
+  }
+  return reply.send(result);
+}
+
+function sendCrmRouteError(app, req, reply, error, failureCode) {
+  if (error instanceof CrmInputError) {
+    return reply.code(error.statusCode || 400).send({
+      ok: false,
+      error: error.code || error.message,
+      details: error.details || null
+    });
+  }
+  app.log.error({ event: failureCode, error: error.message, route: req.url });
+  return reply.code(500).send({ ok: false, error: failureCode });
 }
 
 async function getPrimaryAgentId(client, tenantId, identityId) {
@@ -199,6 +244,139 @@ async function ensureProcessInstance(client, app, opts) {
 }
 
 export default async function crmRoutes(app) {
+  // ==========================================================
+  // CRM Management V1 accounts, contacts, activities, pipeline
+  // ==========================================================
+  app.get("/accounts", async (req, reply) => {
+    const session = await requirePerm(app, req, reply, CRM_MANAGEMENT_PERMISSIONS.read);
+    if (!session) return;
+    try {
+      return reply.send(await listCrmAccounts(app, session, req.query || {}));
+    } catch (error) {
+      return sendCrmRouteError(app, req, reply, error, "CRM_ACCOUNT_LIST_FAILED");
+    }
+  });
+
+  app.post("/accounts", async (req, reply) => {
+    const session = await requirePerm(app, req, reply, CRM_MANAGEMENT_PERMISSIONS.accountCreate);
+    if (!session) return;
+    try {
+      return sendCrmResult(reply, await createCrmAccount(app, session, req.body || {}));
+    } catch (error) {
+      return sendCrmRouteError(app, req, reply, error, "CRM_ACCOUNT_CREATE_FAILED");
+    }
+  });
+
+  app.get("/accounts/:id", async (req, reply) => {
+    const session = await requirePerm(app, req, reply, CRM_MANAGEMENT_PERMISSIONS.read);
+    if (!session) return;
+    try {
+      return sendCrmResult(reply, await getCrmAccount(app, session, req.params.id));
+    } catch (error) {
+      return sendCrmRouteError(app, req, reply, error, "CRM_ACCOUNT_GET_FAILED");
+    }
+  });
+
+  app.patch("/accounts/:id", async (req, reply) => {
+    const session = await requirePerm(app, req, reply, CRM_MANAGEMENT_PERMISSIONS.accountUpdate);
+    if (!session) return;
+    try {
+      return sendCrmResult(reply, await updateCrmAccount(app, session, req.params.id, req.body || {}));
+    } catch (error) {
+      return sendCrmRouteError(app, req, reply, error, "CRM_ACCOUNT_UPDATE_FAILED");
+    }
+  });
+
+  app.get("/accounts/:id/contacts", async (req, reply) => {
+    const session = await requirePerm(app, req, reply, CRM_MANAGEMENT_PERMISSIONS.read);
+    if (!session) return;
+    try {
+      return sendCrmResult(reply, await listCrmAccountContacts(app, session, req.params.id));
+    } catch (error) {
+      return sendCrmRouteError(app, req, reply, error, "CRM_CONTACT_LIST_FAILED");
+    }
+  });
+
+  app.post("/accounts/:id/contacts", async (req, reply) => {
+    const session = await requirePerm(app, req, reply, CRM_MANAGEMENT_PERMISSIONS.contactManage);
+    if (!session) return;
+    try {
+      return sendCrmResult(reply, await createCrmContact(app, session, req.params.id, req.body || {}));
+    } catch (error) {
+      return sendCrmRouteError(app, req, reply, error, "CRM_CONTACT_CREATE_FAILED");
+    }
+  });
+
+  app.patch("/accounts/:id/contacts/:contactId", async (req, reply) => {
+    const session = await requirePerm(app, req, reply, CRM_MANAGEMENT_PERMISSIONS.contactManage);
+    if (!session) return;
+    try {
+      return sendCrmResult(reply, await updateCrmContact(app, session, req.params.id, req.params.contactId, req.body || {}));
+    } catch (error) {
+      return sendCrmRouteError(app, req, reply, error, "CRM_CONTACT_UPDATE_FAILED");
+    }
+  });
+
+  app.get("/activities", async (req, reply) => {
+    const session = await requirePerm(app, req, reply, CRM_MANAGEMENT_PERMISSIONS.read);
+    if (!session) return;
+    try {
+      return reply.send(await listCrmActivities(app, session, req.query || {}));
+    } catch (error) {
+      return sendCrmRouteError(app, req, reply, error, "CRM_ACTIVITY_LIST_FAILED");
+    }
+  });
+
+  app.post("/activities", async (req, reply) => {
+    const session = await requirePerm(app, req, reply, CRM_MANAGEMENT_PERMISSIONS.activityCreate);
+    if (!session) return;
+    try {
+      return sendCrmResult(reply, await createCrmActivity(app, session, req.body || {}));
+    } catch (error) {
+      return sendCrmRouteError(app, req, reply, error, "CRM_ACTIVITY_CREATE_FAILED");
+    }
+  });
+
+  app.patch("/activities/:id", async (req, reply) => {
+    const session = await requirePerm(app, req, reply, CRM_MANAGEMENT_PERMISSIONS.activityUpdate);
+    if (!session) return;
+    try {
+      return sendCrmResult(reply, await updateCrmActivity(app, session, req.params.id, req.body || {}));
+    } catch (error) {
+      return sendCrmRouteError(app, req, reply, error, "CRM_ACTIVITY_UPDATE_FAILED");
+    }
+  });
+
+  app.get("/accounts/:id/summary", async (req, reply) => {
+    const session = await requirePerm(app, req, reply, CRM_MANAGEMENT_PERMISSIONS.policyRead);
+    if (!session) return;
+    try {
+      return sendCrmResult(reply, await getCrmAccountSummary(app, session, req.params.id));
+    } catch (error) {
+      return sendCrmRouteError(app, req, reply, error, "CRM_ACCOUNT_SUMMARY_FAILED");
+    }
+  });
+
+  app.get("/pipeline", async (req, reply) => {
+    const session = await requirePerm(app, req, reply, CRM_MANAGEMENT_PERMISSIONS.read);
+    if (!session) return;
+    try {
+      return reply.send(await getCrmPipeline(app, session, req.query || {}));
+    } catch (error) {
+      return sendCrmRouteError(app, req, reply, error, "CRM_PIPELINE_FAILED");
+    }
+  });
+
+  app.post("/opportunities/:id/convert", async (req, reply) => {
+    const session = await requirePerm(app, req, reply, CRM_MANAGEMENT_PERMISSIONS.convert);
+    if (!session) return;
+    try {
+      return sendCrmResult(reply, await convertCrmOpportunity(app, session, req.params.id, req.body || {}));
+    } catch (error) {
+      return sendCrmRouteError(app, req, reply, error, "CRM_OPPORTUNITY_CONVERT_FAILED");
+    }
+  });
+
   // ==========================================================
   // Agents
   // ==========================================================
@@ -1412,189 +1590,35 @@ export default async function crmRoutes(app) {
   // ==========================================================
   // Opportunities
   // ==========================================================
-  app.post(
-    "/opportunities",
-    {
-      schema: {
-        body: {
-          type: "object",
-          additionalProperties: false,
-          required: ["customer_agent_id"],
-          properties: {
-            customer_agent_id: { type: "string", minLength: 36, maxLength: 36 },
-            title: { type: "string", maxLength: 200 },
-            value: {
-              type: "object",
-              properties: {
-                amount: { type: "number" },
-                currency: { type: "string", maxLength: 3 }
-              }
-            },
-            probability: { type: "number", minimum: 0, maximum: 1 },
-            expected_close_at: { type: "string", maxLength: 40 },
-            source: { type: "string", maxLength: 50 }
-          }
-        }
-      }
-    },
-    async (req, reply) => {
-      const session = await requirePerm(app, req, reply, "CRM_OPPORTUNITY_WRITE");
-      if (!session) return;
-
-      const tenantId = session.tenant_id;
-      const body = req.body || {};
-      const customerAgentId = normalizeText(body.customer_agent_id);
-
-      const client = await app.db.connect();
-      try {
-        await client.query("BEGIN");
-
-        const customer = await ensureAgent(client, tenantId, customerAgentId);
-        if (!customer) {
-          await client.query("ROLLBACK");
-          return reply.code(404).send({ ok: false, error: "CUSTOMER_NOT_FOUND" });
-        }
-
-        const ownerAgentId = await getPrimaryAgentId(client, tenantId, session.identity_id);
-
-        const attrs = {
-          value: body.value || {},
-          probability: body.probability ?? null,
-          expected_close_at: normalizeOptionalText(body.expected_close_at),
-          source: normalizeOptionalText(body.source)
-        };
-
-        const serviceObject = {
-          object_type: "CRM_OPPORTUNITY",
-          status: "new",
-          title: normalizeOptionalText(body.title) || "Opportunity",
-          attrs,
-          owner_agent_id: ownerAgentId,
-          parties: [
-            { role: "CUSTOMER", agent_id: customerAgentId },
-            ...(ownerAgentId ? [{ role: "OWNER", agent_id: ownerAgentId }] : [])
-          ]
-        };
-
-        const processStart = await startProcessFor(client, app, {
-          tenantId,
-          identityId: session.identity_id,
-          objectType: "CRM_OPPORTUNITY",
-          serviceObject,
-          requireBinding: true
-        });
-        if (!processStart.ok) {
-          await client.query("ROLLBACK");
-          return reply.code(409).send({ ok: false, error: processStart.error });
-        }
-
-        await client.query("COMMIT");
-        return reply.send({ ok: true, item: processStart.service_object });
-      } catch (e) {
-        await client.query("ROLLBACK");
-        app.log.error({ event: "crm_opportunity_create_error", tenantId, error: e.message });
-        return reply.code(500).send({ ok: false });
-      } finally {
-        client.release();
-      }
+  app.post("/opportunities", async (req, reply) => {
+    const session = await requirePerm(app, req, reply, CRM_MANAGEMENT_PERMISSIONS.opportunityCreate);
+    if (!session) return;
+    try {
+      return sendCrmResult(reply, await createCrmOpportunity(app, session, req.body || {}));
+    } catch (error) {
+      return sendCrmRouteError(app, req, reply, error, "CRM_OPPORTUNITY_CREATE_FAILED");
     }
-  );
+  });
 
-  app.get(
-    "/opportunities",
-    {
-      schema: {
-        querystring: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            status: { type: "string", maxLength: 50 },
-            agent_id: { type: "string", minLength: 36, maxLength: 36 },
-            limit: { type: "integer", minimum: 1, maximum: MAX_LIMIT, default: 50 },
-            offset: { type: "integer", minimum: 0, default: 0 }
-          }
-        }
-      }
-    },
-    async (req, reply) => {
-      const session = await requirePerm(app, req, reply, "CRM_OPPORTUNITY_READ");
-      if (!session) return;
-
-      const tenantId = session.tenant_id;
-      const status = normalizeOptionalText(req.query?.status);
-      const agentId = normalizeOptionalText(req.query?.agent_id);
-      const limit = clampLimit(req.query?.limit);
-      const offset = Number(req.query?.offset || 0);
-
-      const params = [tenantId];
-      const filters = [
-        "so.tenant_id = $1",
-        "so.object_type = 'CRM_OPPORTUNITY'"
-      ];
-
-      if (status) {
-        params.push(normalizeStatus(status));
-        filters.push(`so.status = $${params.length}`);
-      }
-      if (agentId) {
-        params.push(agentId);
-        filters.push(
-          `EXISTS (
-            SELECT 1
-            FROM eip_core.service_object_party sop
-            WHERE sop.tenant_id = so.tenant_id
-              AND sop.service_object_id = so.id
-              AND sop.role = 'CUSTOMER'
-              AND sop.agent_id = $${params.length}
-          )`
-        );
-      }
-
-      params.push(limit);
-      params.push(offset);
-
-      const r = await app.db.query(
-        `
-        SELECT so.id, so.status, so.title, so.attrs, so.owner_agent_id, so.created_at, so.updated_at
-        FROM eip_core.service_object so
-        WHERE ${filters.join(" AND ")}
-        ORDER BY so.created_at DESC
-        LIMIT $${params.length - 1} OFFSET $${params.length}
-        `,
-        params
-      );
-
-      return reply.send({ ok: true, items: r.rows, limit, offset });
+  app.get("/opportunities", async (req, reply) => {
+    const session = await requirePerm(app, req, reply, CRM_MANAGEMENT_PERMISSIONS.read);
+    if (!session) return;
+    try {
+      return reply.send(await listCrmOpportunities(app, session, req.query || {}));
+    } catch (error) {
+      return sendCrmRouteError(app, req, reply, error, "CRM_OPPORTUNITY_LIST_FAILED");
     }
-  );
+  });
 
-  app.get(
-    "/opportunities/:id",
-    {
-      schema: {
-        params: {
-          type: "object",
-          required: ["id"],
-          properties: { id: { type: "string", minLength: 36, maxLength: 36 } }
-        }
-      }
-    },
-    async (req, reply) => {
-      const session = await requirePerm(app, req, reply, "CRM_OPPORTUNITY_READ");
-      if (!session) return;
-
-      const r = await app.db.query(
-        `
-        SELECT id, status, title, attrs, owner_agent_id, created_at, updated_at
-        FROM eip_core.service_object
-        WHERE tenant_id=$1 AND id=$2 AND object_type='CRM_OPPORTUNITY'
-        `,
-        [session.tenant_id, req.params.id]
-      );
-      if (r.rowCount === 0) return reply.code(404).send({ ok: false, error: "NOT_FOUND" });
-      return reply.send({ ok: true, item: r.rows[0] });
+  app.get("/opportunities/:id", async (req, reply) => {
+    const session = await requirePerm(app, req, reply, CRM_MANAGEMENT_PERMISSIONS.read);
+    if (!session) return;
+    try {
+      return sendCrmResult(reply, await getCrmOpportunity(app, session, req.params.id));
+    } catch (error) {
+      return sendCrmRouteError(app, req, reply, error, "CRM_OPPORTUNITY_GET_FAILED");
     }
-  );
+  });
 
   app.post(
     "/opportunities/:id/status",

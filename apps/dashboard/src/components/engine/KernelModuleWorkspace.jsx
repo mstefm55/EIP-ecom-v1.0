@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  Activity,
   Archive,
   Boxes,
+  Briefcase,
   Building2,
   FileText,
   GitBranch,
   Layers,
   Loader2,
+  Mail,
   Package,
   Plus,
   RefreshCw,
@@ -15,35 +18,50 @@ import {
   ShieldCheck,
   ShoppingCart,
   TrendingDown,
+  TrendingUp,
   Users
 } from "lucide-react";
 import { apiFetch } from "../../services/apiClient";
 
 const ICONS = {
+  activity: Activity,
   archive: Archive,
   boxes: Boxes,
+  briefcase: Briefcase,
   building: Building2,
   document: FileText,
   file: FileText,
   link: GitBranch,
   layers: Layers,
+  mail: Mail,
   package: Package,
+  pipeline: TrendingUp,
   policy: ShieldCheck,
   reorder: TrendingDown,
   shopping: ShoppingCart,
   "shopping-cart": ShoppingCart,
+  trend: TrendingUp,
   users: Users
 };
 
 const TONES = {
   ACTIVE: "green",
   AVAILABLE: "green",
+  DONE: "green",
   RESOLVED: "green",
   MAPPED: "green",
+  WON: "green",
   BLOCKED: "red",
+  CANCELLED: "red",
   EXPIRED: "red",
   ARCHIVED: "red",
   INACTIVE: "red",
+  LOST: "red",
+  NEGOTIATION: "blue",
+  NEW: "blue",
+  PROPOSAL: "blue",
+  PROSPECT: "blue",
+  QUALIFYING: "amber",
   NEEDS_REVIEW: "amber",
   UNDER_REVIEW: "amber",
   RESERVED: "amber",
@@ -160,6 +178,7 @@ function buttonClass(primary = false) {
 
 function fieldOptions(field, optionsPayload) {
   const options = optionsPayload?.options || {};
+  const normalizeValue = (value) => (field.uppercaseOptions ? String(value ?? "").toUpperCase() : value);
   const lists = Array.isArray(field.optionLists)
     ? field.optionLists
     : field.optionList
@@ -168,7 +187,7 @@ function fieldOptions(field, optionsPayload) {
   for (const listCode of lists) {
     if (Array.isArray(options[listCode]) && options[listCode].length) {
       return options[listCode].map((entry) => ({
-        value: entry.code ?? entry.value,
+        value: normalizeValue(entry.code ?? entry.value),
         label: entry.label ?? titleize(entry.code ?? entry.value)
       }));
     }
@@ -176,12 +195,12 @@ function fieldOptions(field, optionsPayload) {
   const fallback = getPath(optionsPayload?.defaults || {}, field.defaultOptionsPath);
   if (Array.isArray(fallback)) {
     return fallback.map((entry) => ({
-      value: entry.code ?? entry.value ?? entry,
+      value: normalizeValue(entry.code ?? entry.value ?? entry),
       label: entry.label ?? titleize(entry.code ?? entry.value ?? entry)
     }));
   }
   return normalizeList(field.options).map((entry) => ({
-    value: entry.code ?? entry.value ?? entry,
+    value: normalizeValue(entry.code ?? entry.value ?? entry),
     label: entry.label ?? titleize(entry.code ?? entry.value ?? entry)
   }));
 }
@@ -277,6 +296,10 @@ function FieldInput({ field, values, setValues, disabled, optionsPayload }) {
   const value = inputValue(values, field);
   const label = field.label || titleize(field.name || field.key);
   const baseClass = "w-full rounded-xl border border-ink-100 bg-white/90 px-3 py-2 text-sm text-ink-700 outline-none transition focus:border-brand-300 focus:ring-2 focus:ring-brand-100 disabled:opacity-60";
+
+  if (field.type === "hidden") {
+    return null;
+  }
 
   if (field.type === "lookup") {
     return <LookupField field={field} values={values} setValues={setValues} disabled={disabled} />;
@@ -414,7 +437,7 @@ function ManagedFormState({ config, fields, initialValues, selected, row, option
         body
       });
       await onSaved?.();
-      if (config.resetOnSave !== false) setValues(defaultValues(fields, {}));
+      if (config.resetOnSave !== false) setValues(initialValues);
     } catch (err) {
       setError(parseApiError(err));
     } finally {
@@ -522,6 +545,27 @@ function JsonBlock({ value }) {
 function TabContent({ tab, detail, selected, optionsPayload, permissions, refreshDetail, refreshAll }) {
   const data = { detail, selected, item: selected, ...detail };
   const [selectedRowByTab, setSelectedRowByTab] = useState({});
+  const [collectionActionLoading, setCollectionActionLoading] = useState("");
+  const [collectionActionError, setCollectionActionError] = useState("");
+
+  async function runCollectionAction(action, row) {
+    if (!selected || !row || !action?.endpoint) return;
+    const actionKey = action.id || action.label || action.endpoint;
+    setCollectionActionLoading(actionKey);
+    setCollectionActionError("");
+    try {
+      await apiFetch(endpointFor(action.endpoint, selected, row), {
+        method: action.method || "POST",
+        body: action.body || {}
+      });
+      await refreshDetail(selected?.id);
+      await refreshAll?.();
+    } catch (err) {
+      setCollectionActionError(parseApiError(err));
+    } finally {
+      setCollectionActionLoading("");
+    }
+  }
 
   if (tab.type === "form") {
     return (
@@ -564,11 +608,47 @@ function TabContent({ tab, detail, selected, optionsPayload, permissions, refres
           {tab.createForm ? (
             <ManagedForm
               config={tab.createForm}
+              source={data}
               selected={selected}
               optionsPayload={optionsPayload}
               permissions={permissions}
               onSaved={() => refreshDetail(selected?.id)}
             />
+          ) : null}
+          {tab.rowActions?.length && selectedRow ? (
+            <div className="rounded-2xl border border-white/70 bg-white/75 p-5 shadow-soft">
+              {collectionActionError ? <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{collectionActionError}</div> : null}
+              <div className="flex flex-wrap gap-2">
+                {tab.rowActions.map((action) => {
+                  const permissionMissing = action.permission && !permissions.includes(action.permission);
+                  const enabledStatuses = normalizeList(action.enabledStatuses).map((status) => String(status).toUpperCase());
+                  const rowBadgeValue = getPath(selectedRow, action.statusPath || tab.badgePath || "status");
+                  const statusBlocked = enabledStatuses.length
+                    ? !enabledStatuses.includes(String(rowBadgeValue || "").toUpperCase())
+                    : false;
+                  const actionKey = action.id || action.label || action.endpoint;
+                  const disabled = permissionMissing || statusBlocked || Boolean(collectionActionLoading);
+                  const title = permissionMissing
+                    ? `Missing ${action.permission}`
+                    : statusBlocked
+                      ? action.disabledReason || "Action is unavailable for this status."
+                      : undefined;
+                  return (
+                    <button
+                      key={actionKey}
+                      type="button"
+                      disabled={disabled}
+                      title={title}
+                      onClick={() => runCollectionAction(action, selectedRow)}
+                      className={buttonClass(action.primary === true)}
+                    >
+                      {collectionActionLoading === actionKey ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                      {action.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           ) : null}
           {tab.updateForm && selectedRow ? (
             <ManagedForm
@@ -633,6 +713,10 @@ export default function KernelModuleWorkspace({ node }) {
   const [error, setError] = useState("");
 
   const permissions = useMemo(() => optionsPayload.permissions || [], [optionsPayload.permissions]);
+  const visibleTabs = useMemo(
+    () => tabs.filter((tab) => !tab.permission || permissions.includes(tab.permission)),
+    [permissions, tabs]
+  );
   const selected = detail?.item || items.find((item) => item.id === selectedId) || null;
 
   const listEndpoint = useMemo(() => {
@@ -730,6 +814,9 @@ export default function KernelModuleWorkspace({ node }) {
 
   const listBadgePath = listConfig.badgePath || "status";
   const selectedBadgeValue = getPath(selected, detailConfig.badgePath || listBadgePath);
+  const effectiveActiveTab = visibleTabs.some((tab) => tab.id === activeTab)
+    ? activeTab
+    : visibleTabs[0]?.id || "overview";
 
   return (
     <div className="space-y-5">
@@ -815,7 +902,7 @@ export default function KernelModuleWorkspace({ node }) {
               }}
               onSelect={(item) => {
                 setSelectedId(item.id);
-                setActiveTab(tabs[0]?.id || "overview");
+                setActiveTab(visibleTabs[0]?.id || "overview");
               }}
             />
           ) : null}
@@ -872,14 +959,14 @@ export default function KernelModuleWorkspace({ node }) {
                   ) : null}
                 </div>
                 <div className="mt-4 flex flex-wrap gap-2">
-                  {tabs.map((tab) => {
+                  {visibleTabs.map((tab) => {
                     const Icon = ICONS[tab.icon] || Package;
                     return (
                       <button
                         key={tab.id}
                         type="button"
                         onClick={() => setActiveTab(tab.id)}
-                        className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold ${activeTab === tab.id ? "bg-ink-900 text-white" : "border border-ink-100 bg-white text-ink-600"}`}
+                        className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold ${effectiveActiveTab === tab.id ? "bg-ink-900 text-white" : "border border-ink-100 bg-white text-ink-600"}`}
                       >
                         <Icon className="h-4 w-4" />
                         {tab.label}
@@ -889,7 +976,7 @@ export default function KernelModuleWorkspace({ node }) {
                 </div>
               </div>
               <TabContent
-                tab={tabs.find((tab) => tab.id === activeTab) || tabs[0] || {}}
+                tab={visibleTabs.find((tab) => tab.id === effectiveActiveTab) || visibleTabs[0] || {}}
                 detail={detail || {}}
                 selected={selected}
                 optionsPayload={optionsPayload}

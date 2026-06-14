@@ -1,6 +1,12 @@
 import { hasPermission } from "../auth/perm.js";
 import { sha256Hex } from "../auth/crypto.js";
 import { loadCapabilities } from "./crm_intelligence.js";
+import {
+  CRM_MANAGEMENT_PERMISSIONS,
+  CrmInputError,
+  getCrmGovernanceOptions,
+  updateCrmOpportunity
+} from "../services/crm/crmManagement.js";
 
 const MAX_LIMIT = 200;
 const CRM_OBJECT_TYPES = new Set(["CRM_LEAD", "CRM_INTERACTION", "CRM_CASE", "CRM_OPPORTUNITY"]);
@@ -43,7 +49,8 @@ const CRM_PERMISSIONS = [
   "CRM_MAILBOX_READ",
   "CRM_MAILBOX_WRITE",
   "CRM_MAILBOX_REPLY_DRAFT",
-  "CRM_MAILBOX_REPLY_SEND"
+  "CRM_MAILBOX_REPLY_SEND",
+  ...Object.values(CRM_MANAGEMENT_PERMISSIONS)
 ];
 
 function normalizeText(value) {
@@ -230,11 +237,27 @@ function toTimelineItem(kind, row, occurredAt) {
   return { kind, ...row, occurred_at: occurredAt };
 }
 
+function sendManagementResult(reply, result) {
+  if (!result) return reply.code(404).send({ ok: false, error: "NOT_FOUND" });
+  if (result.ok === false) {
+    return reply.code(result.status || 409).send({ ok: false, error: result.error, details: result.details || null });
+  }
+  return reply.send(result);
+}
+
+function sendManagementError(app, req, reply, error, failureCode) {
+  if (error instanceof CrmInputError) {
+    return reply.code(error.statusCode || 400).send({ ok: false, error: error.code || error.message, details: error.details || null });
+  }
+  app.log.error({ event: failureCode, error: error.message, route: req.url });
+  return reply.code(500).send({ ok: false, error: failureCode });
+}
+
 export default async function registerCrmCompletionRoutes(app) {
   app.get(
     "/governance/options",
     async (req, reply) => {
-      const session = await requirePerm(app, req, reply, "CRM_DASHBOARD_READ");
+      const session = await requirePerm(app, req, reply, CRM_MANAGEMENT_PERMISSIONS.read);
       if (!session) return;
       const result = await app.db.query(
         `
@@ -291,13 +314,16 @@ export default async function registerCrmCompletionRoutes(app) {
         options[item.list_code] = options[item.list_code] || [];
         options[item.list_code].push(item);
       }
+      const managementOptions = await getCrmGovernanceOptions(app, session);
       const permissions = [];
       for (const code of CRM_PERMISSIONS) {
         if (await hasPermission(app, session.tenant_id, session.identity_id, code)) permissions.push(code);
       }
       return reply.send({
         ok: true,
-        options,
+        options: { ...managementOptions.options, ...options },
+        defaults: managementOptions.defaults,
+        workspace: managementOptions.workspace,
         permissions,
         capabilities: await loadCapabilities(app.db, session.tenant_id)
       });
@@ -642,9 +668,18 @@ export default async function registerCrmCompletionRoutes(app) {
     }
   });
 
+  app.patch("/opportunities/:id", async (req, reply) => {
+    const session = await requirePerm(app, req, reply, CRM_MANAGEMENT_PERMISSIONS.opportunityUpdate);
+    if (!session) return;
+    try {
+      return sendManagementResult(reply, await updateCrmOpportunity(app, session, req.params.id, req.body || {}));
+    } catch (error) {
+      return sendManagementError(app, req, reply, error, "CRM_OPPORTUNITY_UPDATE_FAILED");
+    }
+  });
+
   for (const [routeName, objectType, permission] of [
-    ["cases", "CRM_CASE", "CRM_CASE_WRITE"],
-    ["opportunities", "CRM_OPPORTUNITY", "CRM_OPPORTUNITY_WRITE"]
+    ["cases", "CRM_CASE", "CRM_CASE_WRITE"]
   ]) {
     app.patch(`/${routeName}/:id`, async (req, reply) => {
       const session = await requirePerm(app, req, reply, permission);
