@@ -70,7 +70,9 @@ Read-only roles receive read permission only. Admin/universal/operational roles 
 
 ## Dashboard
 
-The dashboard registers `EntityManagementWorkspace` and adds a module-gated `Entities` menu entry with module code `entity-management`. The workspace includes list/search/filter, create/edit, lifecycle archive, and tabs for Overview, Addresses, Contacts, Bank Accounts, Relationships, Documents, Policies, and Activity.
+The dashboard uses the generic `KernelModuleWorkspace` UI-engine primitive for the module-gated `Entities` menu entry with module code `entity-management`. Entity-specific list fields, forms, child collections, tabs, labels, and permission gates are stored as governed workspace metadata under `module_catalog.attrs.ui_workspace` / active `tenant_module_setting.attrs.ui_workspace` and are fetched through `/api/eip/entities/governance/options`.
+
+The workspace includes list/search/filter, create/edit, child record management, and tabs for Overview, Profile, Addresses, Contacts, Bank Accounts, Relationships, Documents, Policies, and Activity.
 
 ## Migration
 

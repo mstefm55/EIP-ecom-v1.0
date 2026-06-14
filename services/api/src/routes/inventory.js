@@ -11,6 +11,22 @@ import {
   normalizeReorderStatus
 } from "../services/inventory/inventoryFoundation.js";
 import { composeInventorySignalWorkbench } from "../services/inventory/inventoryWorkbench.js";
+import {
+  INVENTORY_MANAGEMENT_PERMISSIONS,
+  InventoryInputError,
+  createInventoryLot,
+  createInventoryMaterial,
+  getInventoryEffectivePolicies,
+  getInventoryGovernanceOptions,
+  getInventoryLotDetail,
+  getInventoryMaterialDetail,
+  getInventoryMaterialSummary,
+  listInventoryMaterialLots,
+  listInventoryMaterials,
+  listInventoryReorderRecommendations,
+  updateInventoryLot,
+  updateInventoryMaterial
+} from "../services/inventory/inventoryManagement.js";
 import { findRequisitionForNeed, findRfqForRequisition } from "../services/procurement/procurementOperations.js";
 
 const MAX_LIMIT = 200;
@@ -134,6 +150,44 @@ async function requireWrite(app, req, reply, permissionCode) {
     return null;
   }
   return sessionResult.session;
+}
+
+async function requireInventoryManagementPermission(app, req, reply, permissionCode) {
+  const sessionResult = await app.requireSession(req, { realm: "EIP" });
+  if (!sessionResult.ok) {
+    reply.code(sessionResult.status).send({ ok: false, error: sessionResult.error });
+    return null;
+  }
+
+  if (!["GET", "HEAD"].includes(String(req.method || "").toUpperCase())) {
+    const csrfResult = await app.requireCsrf(req);
+    if (!csrfResult.ok) {
+      reply.code(csrfResult.status).send({ ok: false, error: csrfResult.error });
+      return null;
+    }
+  }
+
+  const allowed = await hasPermission(
+    app,
+    sessionResult.session.tenant_id,
+    sessionResult.session.identity_id,
+    permissionCode
+  );
+  if (!allowed) {
+    reply.code(403).send({ ok: false, error: "FORBIDDEN" });
+    return null;
+  }
+  return sessionResult.session;
+}
+
+function handleInventoryManagementError(reply, error) {
+  if (error instanceof InventoryInputError) {
+    return reply.code(400).send({ ok: false, error: error.code, details: error.details || undefined });
+  }
+  if (error?.name === "EffectivePolicyInputError") {
+    return reply.code(400).send({ ok: false, error: "INVALID_EFFECTIVE_POLICY_CONTEXT", details: error.details || undefined });
+  }
+  throw error;
 }
 
 async function getPrimaryAgentId(client, tenantId, identityId) {
@@ -470,35 +524,150 @@ export default async function inventoryRoutes(app) {
   });
 
   app.get("/materials", async (req, reply) => {
-    const session = await requireRead(app, req, reply, "INVENTORY_READ");
+    const session = await requireInventoryManagementPermission(app, req, reply, INVENTORY_MANAGEMENT_PERMISSIONS.read);
     if (!session) return;
 
-    const status = normalizeOptionalText(req.query?.status);
-    const limit = clampLimit(req.query?.limit);
-    const offset = Math.max(0, Number(req.query?.offset || 0));
-    const allItems = await listMaterials(app.db, session.tenant_id, { q: req.query?.q });
-    const filtered = status
-      ? allItems.filter((item) => item.stock_profile.stock_status === status)
-      : allItems;
-    return reply.send({
-      ok: true,
-      items: filtered.slice(offset, offset + limit),
-      total: filtered.length,
-      limit,
-      offset
-    });
+    try {
+      return reply.send(await listInventoryMaterials(app, session, req.query || {}));
+    } catch (error) {
+      return handleInventoryManagementError(reply, error);
+    }
+  });
+
+  app.post("/materials", async (req, reply) => {
+    const session = await requireInventoryManagementPermission(app, req, reply, INVENTORY_MANAGEMENT_PERMISSIONS.materialCreate);
+    if (!session) return;
+
+    try {
+      return reply.send(await createInventoryMaterial(app, session, req.body || {}));
+    } catch (error) {
+      app.log.error({ event: "inventory_material_create_error", tenantId: session.tenant_id, error: error.message });
+      return handleInventoryManagementError(reply, error);
+    }
   });
 
   app.get("/materials/:id", async (req, reply) => {
-    const session = await requireRead(app, req, reply, "INVENTORY_READ");
+    const session = await requireInventoryManagementPermission(app, req, reply, INVENTORY_MANAGEMENT_PERMISSIONS.read);
     if (!session) return;
-    const [material, conditions] = await Promise.all([
-      fetchMaterial(app.db, session.tenant_id, req.params.id),
-      listInventoryPolicyConditions(app.db, session.tenant_id)
-    ]);
-    if (!material) return reply.code(404).send({ ok: false, error: "NOT_FOUND" });
-    const movements = await listMovements(app.db, session.tenant_id, material.id, 20);
-    return reply.send({ ok: true, item: serializeMaterial(material, conditions), movements });
+    try {
+      const detail = await getInventoryMaterialDetail(app, session, req.params.id);
+      if (!detail) return reply.code(404).send({ ok: false, error: "NOT_FOUND" });
+      return reply.send(detail);
+    } catch (error) {
+      return handleInventoryManagementError(reply, error);
+    }
+  });
+
+  app.patch("/materials/:id", async (req, reply) => {
+    const session = await requireInventoryManagementPermission(app, req, reply, INVENTORY_MANAGEMENT_PERMISSIONS.materialUpdate);
+    if (!session) return;
+    try {
+      const result = await updateInventoryMaterial(app, session, req.params.id, req.body || {});
+      if (!result) return reply.code(404).send({ ok: false, error: "NOT_FOUND" });
+      return reply.send(result);
+    } catch (error) {
+      app.log.error({ event: "inventory_material_update_error", tenantId: session.tenant_id, error: error.message });
+      return handleInventoryManagementError(reply, error);
+    }
+  });
+
+  app.get("/materials/:id/lots", async (req, reply) => {
+    const session = await requireInventoryManagementPermission(app, req, reply, INVENTORY_MANAGEMENT_PERMISSIONS.read);
+    if (!session) return;
+    try {
+      const result = await listInventoryMaterialLots(app, session, req.params.id, req.query || {});
+      if (!result.ok) return reply.code(404).send({ ok: false, error: "NOT_FOUND" });
+      return reply.send(result);
+    } catch (error) {
+      return handleInventoryManagementError(reply, error);
+    }
+  });
+
+  app.post("/materials/:id/lots", async (req, reply) => {
+    const session = await requireInventoryManagementPermission(app, req, reply, INVENTORY_MANAGEMENT_PERMISSIONS.lotCreate);
+    if (!session) return;
+    try {
+      const result = await createInventoryLot(app, session, req.params.id, req.body || {});
+      if (!result) return reply.code(404).send({ ok: false, error: "NOT_FOUND" });
+      return reply.send(result);
+    } catch (error) {
+      app.log.error({ event: "inventory_lot_create_error", tenantId: session.tenant_id, error: error.message });
+      return handleInventoryManagementError(reply, error);
+    }
+  });
+
+  app.get("/materials/:id/summary", async (req, reply) => {
+    const session = await requireInventoryManagementPermission(app, req, reply, INVENTORY_MANAGEMENT_PERMISSIONS.read);
+    if (!session) return;
+    try {
+      const result = await getInventoryMaterialSummary(app, session, req.params.id);
+      if (!result) return reply.code(404).send({ ok: false, error: "NOT_FOUND" });
+      return reply.send(result);
+    } catch (error) {
+      return handleInventoryManagementError(reply, error);
+    }
+  });
+
+  app.get("/lots/:id", async (req, reply) => {
+    const session = await requireInventoryManagementPermission(app, req, reply, INVENTORY_MANAGEMENT_PERMISSIONS.read);
+    if (!session) return;
+    try {
+      const result = await getInventoryLotDetail(app, session, req.params.id);
+      if (!result) return reply.code(404).send({ ok: false, error: "NOT_FOUND" });
+      return reply.send(result);
+    } catch (error) {
+      return handleInventoryManagementError(reply, error);
+    }
+  });
+
+  app.patch("/lots/:id", async (req, reply) => {
+    const session = await requireInventoryManagementPermission(app, req, reply, INVENTORY_MANAGEMENT_PERMISSIONS.lotUpdate);
+    if (!session) return;
+    try {
+      const result = await updateInventoryLot(app, session, req.params.id, req.body || {});
+      if (!result) return reply.code(404).send({ ok: false, error: "NOT_FOUND" });
+      return reply.send(result);
+    } catch (error) {
+      app.log.error({ event: "inventory_lot_update_error", tenantId: session.tenant_id, error: error.message });
+      return handleInventoryManagementError(reply, error);
+    }
+  });
+
+  app.get("/reorder-recommendations", async (req, reply) => {
+    const session = await requireInventoryManagementPermission(app, req, reply, INVENTORY_MANAGEMENT_PERMISSIONS.recommendationRead);
+    if (!session) return;
+    try {
+      return reply.send(await listInventoryReorderRecommendations(app, session, req.query || {}));
+    } catch (error) {
+      return handleInventoryManagementError(reply, error);
+    }
+  });
+
+  app.get("/policies/effective", async (req, reply) => {
+    const session = await requireInventoryManagementPermission(app, req, reply, INVENTORY_MANAGEMENT_PERMISSIONS.policyRead);
+    if (!session) return;
+    try {
+      const result = await getInventoryEffectivePolicies(app, session, req.query || {});
+      if (!result) return reply.code(404).send({ ok: false, error: "NOT_FOUND" });
+      return reply.send(result);
+    } catch (error) {
+      return handleInventoryManagementError(reply, error);
+    }
+  });
+
+  app.get("/governance/options", async (req, reply) => {
+    const session = await requireInventoryManagementPermission(app, req, reply, INVENTORY_MANAGEMENT_PERMISSIONS.read);
+    if (!session) return;
+    try {
+      const options = await getInventoryGovernanceOptions(app, session);
+      const permissions = [];
+      for (const permissionCode of Object.values(INVENTORY_MANAGEMENT_PERMISSIONS)) {
+        if (await hasPermission(app, session.tenant_id, session.identity_id, permissionCode)) permissions.push(permissionCode);
+      }
+      return reply.send({ ...options, permissions });
+    } catch (error) {
+      return handleInventoryManagementError(reply, error);
+    }
   });
 
   app.patch("/materials/:id/policy", async (req, reply) => {

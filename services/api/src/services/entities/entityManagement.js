@@ -1,4 +1,5 @@
 import { emitSecurityEvent } from "../../lib/securityAudit.js";
+import { allowedCodesFrom, loadDropdownCodeSets, loadModuleWorkspace } from "../moduleWorkspace.js";
 
 export const ENTITY_PERMISSIONS = Object.freeze({
   read: "entities.read",
@@ -184,16 +185,28 @@ function normalizeCurrency(value) {
   return currency;
 }
 
-function normalizeStatus(value, fallback = "ACTIVE") {
+function normalizeStatus(value, fallback = "ACTIVE", governance = null) {
   const status = normalizeCode(value, fallback);
-  if (!ENTITY_STATUSES.includes(status)) throw new EntityInputError("INVALID_ENTITY_STATUS");
+  const allowed = allowedCodesFrom(governance, "ENTITY_STATUS", ENTITY_STATUSES);
+  if (!allowed.includes(status)) throw new EntityInputError("INVALID_ENTITY_STATUS");
   return status;
 }
 
-function normalizeRoles(value, fallback = ["OTHER"]) {
+function normalizeRoles(value, fallback = ["OTHER"], governance = null) {
   const roles = Array.isArray(value) ? value : value ? [value] : fallback;
   const normalized = [...new Set(roles.map((item) => normalizeCode(item, null)).filter(Boolean))];
+  const allowed = allowedCodesFrom(governance, "ENTITY_ROLE", DEFAULT_ENTITY_ROLES);
+  for (const role of normalized) {
+    if (!allowed.includes(role)) throw new EntityInputError("INVALID_ENTITY_ROLE", { role });
+  }
   return normalized.length ? normalized : fallback;
+}
+
+function normalizeEntityKind(value, fallback = "ORG", governance = null) {
+  const entityKind = normalizeCode(value, fallback);
+  const allowed = allowedCodesFrom(governance, "ENTITY_KIND", ["ORG", "PERSON"]);
+  if (allowed.length && !allowed.includes(entityKind)) throw new EntityInputError("INVALID_ENTITY_KIND", { entity_kind: entityKind });
+  return entityKind;
 }
 
 function clampLimit(value) {
@@ -362,7 +375,7 @@ function mapRelationshipRow(row, entityId) {
   };
 }
 
-function buildEntityAttrs(body, existingAttrs = {}, partial = false) {
+function buildEntityAttrs(body, existingAttrs = {}, partial = false, governance = null) {
   const attrs = safeJson(existingAttrs);
   const entityAttrs = {
     ...(attrs.entity_attrs && typeof attrs.entity_attrs === "object" ? attrs.entity_attrs : {})
@@ -373,16 +386,16 @@ function buildEntityAttrs(body, existingAttrs = {}, partial = false) {
     ...attrs,
     entity_management_v1: true,
     roles: hasOwn(body, "roles")
-      ? normalizeRoles(body.roles)
+      ? normalizeRoles(body.roles, ["OTHER"], governance)
       : Array.isArray(attrs.roles)
         ? attrs.roles
         : partial
           ? ["OTHER"]
           : ["OTHER"],
     status: hasOwn(body, "status")
-      ? normalizeStatus(body.status)
+      ? normalizeStatus(body.status, "ACTIVE", governance)
       : attrs.status
-        ? normalizeStatus(attrs.status)
+        ? normalizeStatus(attrs.status, "ACTIVE", governance)
         : "ACTIVE",
     entity_attrs: entityAttrs
   };
@@ -431,6 +444,7 @@ async function emitMutation(app, session, eventType, metadata = {}) {
 
 export async function listEntities(app, session, query = {}) {
   const tenantId = session.tenant_id;
+  const governance = await loadDropdownCodeSets(app, tenantId, ["ENTITY_STATUS", "ENTITY_ROLE", "ENTITY_KIND"]);
   const limit = clampLimit(query.limit);
   const offset = Math.max(0, Number(query.offset || 0));
   const params = [tenantId];
@@ -447,17 +461,17 @@ export async function listEntities(app, session, query = {}) {
     )`);
   }
   if (normalizeOptionalText(query.role, 80)) {
-    params.push(normalizeCode(query.role));
+    params.push(normalizeRoles(query.role, ["OTHER"], governance)[0]);
     filters.push(`COALESCE(agent.attrs->'roles','[]'::jsonb) ? $${params.length}`);
   }
   if (normalizeOptionalText(query.status, 40)) {
-    params.push(normalizeStatus(query.status));
+    params.push(normalizeStatus(query.status, "ACTIVE", governance));
     filters.push(`COALESCE(agent.attrs->>'status', CASE WHEN agent.is_active THEN 'ACTIVE' ELSE 'INACTIVE' END) = $${params.length}`);
   } else if (query.include_archived !== "true" && query.include_archived !== true) {
     filters.push(`COALESCE(agent.attrs->>'status', CASE WHEN agent.is_active THEN 'ACTIVE' ELSE 'INACTIVE' END) <> 'ARCHIVED'`);
   }
   if (normalizeOptionalText(query.entity_kind, 50)) {
-    params.push(normalizeCode(query.entity_kind, null));
+    params.push(normalizeEntityKind(query.entity_kind, "ORG", governance));
     filters.push(`agent.agent_type=$${params.length}`);
   }
   if (normalizeOptionalText(query.country_code, 2)) {
@@ -510,15 +524,16 @@ export async function listEntities(app, session, query = {}) {
 export async function createEntity(app, session, body = {}) {
   rejectUnknownKeys(body, ENTITY_MUTATION_KEYS, "entity");
   const tenantId = session.tenant_id;
+  const governance = await loadDropdownCodeSets(app, tenantId, ["ENTITY_STATUS", "ENTITY_ROLE", "ENTITY_KIND"]);
   const displayName = normalizeOptionalText(body.display_name, 300);
   if (!displayName) throw new EntityInputError("DISPLAY_NAME_REQUIRED");
-  const entityKind = normalizeCode(body.entity_kind, "ORG");
+  const entityKind = normalizeEntityKind(body.entity_kind, "ORG", governance);
   const code = body.code === undefined ? null : normalizeCode(body.code, null);
   const parentEntityId = normalizeUuid(body.parent_entity_id, "parent_entity_id");
   if (parentEntityId && !(await ensureEntity(app.db, tenantId, parentEntityId))) {
     throw new EntityInputError("PARENT_ENTITY_NOT_FOUND");
   }
-  const attrs = buildEntityAttrs(body, {}, false);
+  const attrs = buildEntityAttrs(body, {}, false, governance);
   const result = await app.db.query(
     `
     INSERT INTO eip_core.agent
@@ -572,7 +587,8 @@ export async function updateEntity(app, session, entityId, body = {}) {
   rejectUnknownKeys(body, ENTITY_MUTATION_KEYS, "entity");
   const current = await ensureEntity(app.db, session.tenant_id, entityId);
   if (!current) return null;
-  const nextAttrs = buildEntityAttrs(body, current.attrs, true);
+  const governance = await loadDropdownCodeSets(app, session.tenant_id, ["ENTITY_STATUS", "ENTITY_ROLE", "ENTITY_KIND"]);
+  const nextAttrs = buildEntityAttrs(body, current.attrs, true, governance);
   const parentEntityId = hasOwn(body, "parent_entity_id")
     ? normalizeUuid(body.parent_entity_id, "parent_entity_id")
     : current.parent_agent_id;
@@ -595,7 +611,7 @@ export async function updateEntity(app, session, entityId, body = {}) {
     [
       session.tenant_id,
       current.id,
-      hasOwn(body, "entity_kind") ? normalizeCode(body.entity_kind, "ORG") : current.agent_type,
+      hasOwn(body, "entity_kind") ? normalizeEntityKind(body.entity_kind, "ORG", governance) : current.agent_type,
       hasOwn(body, "code") ? normalizeCode(body.code, null) : current.code,
       hasOwn(body, "display_name") ? normalizeOptionalText(body.display_name, 300) : current.name,
       JSON.stringify(nextAttrs),
@@ -1183,7 +1199,8 @@ export async function getEntityActivitySummary(app, session, entityId) {
 }
 
 export async function getEntityGovernanceOptions(app, session) {
-  const result = await app.db.query(
+  const [result, workspace] = await Promise.all([
+    app.db.query(
     `
     WITH lists AS (
       SELECT DISTINCT ON (code) id, code, name
@@ -1201,7 +1218,9 @@ export async function getEntityGovernanceOptions(app, session) {
     ORDER BY lists.code, value.sort_order, value.code
     `,
     [session.tenant_id, ENTITY_DROPDOWN_CODES]
-  );
+    ),
+    loadModuleWorkspace(app, session.tenant_id, "entity-management")
+  ]);
   const options = {};
   for (const row of result.rows) {
     options[row.list_code] = options[row.list_code] || [];
@@ -1218,6 +1237,7 @@ export async function getEntityGovernanceOptions(app, session) {
     defaults: {
       roles: DEFAULT_ENTITY_ROLES,
       statuses: ENTITY_STATUSES
-    }
+    },
+    workspace
   };
 }

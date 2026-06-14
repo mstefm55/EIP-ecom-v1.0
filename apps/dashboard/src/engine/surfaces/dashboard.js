@@ -1,3 +1,9 @@
+import {
+  entityKernelWorkspaceNode,
+  inventoryKernelWorkspaceNode,
+  policiesKernelWorkspaceNode
+} from "./kernelModuleDescriptors";
+
 export const dashboardSurface = {
   id: "dashboard",
   title: "User Dashboard",
@@ -15,7 +21,7 @@ export const dashboardSurface = {
         { code: "inventory", label: "Inventory", icon: "Package", module: "inventory" },
         { code: "procurement", label: "Procurement", icon: "ShoppingCart", module: "procurement" },
         { code: "entities", label: "Entities", icon: "Users", module: "entity-management" },
-        { code: "policies", label: "Policies & Conditions", icon: "FileClock" },
+        { code: "policies", label: "Policies & Conditions", icon: "FileClock", module: "policies-conditions" },
         { code: "crm", label: "CRM", icon: "Users", module: "crm" },
         { code: "tasks", label: "Tasks", icon: "Activity" },
         { code: "reports", label: "Reports", icon: "BarChart3" },
@@ -404,39 +410,7 @@ export const dashboardSurface = {
       type: "UserPanel",
       props: { tab: "inventory" },
       children: [
-        {
-          id: "inventory-workspace",
-          type: "InventoryWorkspace",
-          props: {
-            module: "inventory",
-            title: "Inventory",
-            subtitle: "Stock signal queue, policy-backed recommendation, procurement handoff, and timeline.",
-            endpoints: {
-              overview: "/api/eip/inventory/overview",
-              materials: "/api/eip/inventory/materials",
-              suggestions: "/api/eip/inventory/reorder-suggestions",
-              workbench: "/api/eip/inventory/reorder-suggestions",
-            },
-            tabs: [
-              { id: "queue", label: "Stock Signals Queue" },
-              { id: "workbench", label: "Inventory Signal Workbench" },
-              { id: "actions", label: "Action Rail" },
-              { id: "tools", label: "Material Policy Tools" },
-            ],
-            actions: {
-              refresh: "Refresh",
-              runReorder: "Run low-stock scan",
-              adjust: "Adjust stock",
-              policy: "Set reorder policy",
-              movements: "View movements",
-              createSuggestion: "Create reorder suggestion",
-              approve: "Approve",
-              ignore: "Ignore",
-              createTask: "Create task",
-              openProcurement: "Open in Procurement",
-            },
-          },
-        },
+        inventoryKernelWorkspaceNode,
       ],
     },
     {
@@ -519,44 +493,7 @@ export const dashboardSurface = {
       type: "UserPanel",
       props: { tab: "policies" },
       children: [
-        {
-          id: "policies-conditions-workspace",
-          type: "PoliciesConditionsWorkspace",
-          props: {
-            title: "Policies & Conditions",
-            subtitle: "Read-only business rules that explain recommendations and approvals.",
-            endpoints: {
-              list: "/api/eip/policies-conditions",
-              detail: "/api/eip/policies-conditions/:id",
-              overview: "/api/eip/policies-conditions/overview",
-              taxonomy: "/api/eip/policies-conditions/taxonomy",
-            },
-            tabs: [
-              { id: "overview", label: "Overview" },
-              { id: "library", label: "Policy Library" },
-              { id: "needs_review", label: "Needs Review" },
-            ],
-            labels: {
-              search: "Search policies...",
-              refresh: "Refresh",
-              readOnly: "Create/edit will be added in a later governed wave.",
-              emptyTitle: "No policies or conditions yet",
-              emptyMessage: "Create governed business rules before EIP can explain recommendations for this area.",
-              detailTitle: "Condition detail",
-              noSelection: "Select a policy or condition to inspect the read model.",
-            },
-            pageSizes: [12, 25, 50],
-            domainOptions: [
-              "COMMERCIAL",
-              "FINANCIAL",
-              "APPROVAL_FRAMEWORK",
-              "INVENTORY",
-              "FISCAL_TAX_TREATMENT",
-              "MARKETPLACE",
-              "LOGISTICS",
-            ],
-          },
-        },
+        policiesKernelWorkspaceNode,
       ],
     },
     {
@@ -564,40 +501,7 @@ export const dashboardSurface = {
       type: "UserPanel",
       props: { tab: "entities" },
       children: [
-        {
-          id: "entity-management-workspace",
-          type: "EntityManagementWorkspace",
-          props: {
-            module: "entity-management",
-            title: "Entity Management",
-            subtitle: "Customers, suppliers, employees, partners, authorities, addresses, contacts, bank accounts, relationships, documents, policies, and activity.",
-            endpoints: {
-              list: "/api/eip/entities",
-              detail: "/api/eip/entities/:id",
-              options: "/api/eip/entities/governance/options",
-            },
-            tabs: [
-              { id: "overview", label: "Overview" },
-              { id: "addresses", label: "Addresses" },
-              { id: "contacts", label: "Contacts" },
-              { id: "bank_accounts", label: "Bank Accounts" },
-              { id: "relationships", label: "Relationships" },
-              { id: "documents", label: "Documents" },
-              { id: "policies", label: "Policies" },
-              { id: "activity", label: "Activity" },
-            ],
-            actions: {
-              refresh: "Refresh",
-              create: "Create entity",
-              save: "Save",
-              archive: "Archive",
-              addAddress: "Add address",
-              addContact: "Add contact",
-              addBankAccount: "Add bank account",
-              addRelationship: "Add relationship",
-            },
-          },
-        },
+        entityKernelWorkspaceNode,
       ],
     },
     {

@@ -1,4 +1,5 @@
 import { hasPermission } from "../auth/perm.js";
+import { loadModuleWorkspace } from "../services/moduleWorkspace.js";
 import {
   getPoliciesConditionsOverview,
   getPolicyConditionTaxonomy,
@@ -78,6 +79,33 @@ export default async function policiesConditionsRoutes(app) {
     } catch (error) {
       app.log.error({ event: "policies_conditions_taxonomy_error", tenantId: session.tenant_id, error: error.message });
       return reply.code(500).send({ ok: false, error: "POLICIES_CONDITIONS_TAXONOMY_FAILED" });
+    }
+  });
+
+  app.get("/governance/options", async (req, reply) => {
+    const session = await requireRead(app, req, reply);
+    if (!session) return;
+
+    try {
+      const [taxonomy, workspace] = await Promise.all([
+        getPolicyConditionTaxonomy(app, session),
+        loadModuleWorkspace(app, session.tenant_id, "policies-conditions")
+      ]);
+      return {
+        ok: true,
+        options: {
+          POLICY_DOMAIN: taxonomy.lists?.domains?.options || [],
+          POLICY_FAMILY: taxonomy.lists?.families?.options || [],
+          POLICY_CONDITION_TYPE: taxonomy.lists?.condition_types?.options || [],
+          POLICY_CONDITION_SUBTYPE: taxonomy.lists?.condition_subtypes?.options || []
+        },
+        defaults: taxonomy.defaults || {},
+        permissions: [POLICIES_CONDITIONS_READ_PERMISSION],
+        workspace
+      };
+    } catch (error) {
+      app.log.error({ event: "policies_conditions_governance_options_error", tenantId: session.tenant_id, error: error.message });
+      return reply.code(500).send({ ok: false, error: "POLICIES_CONDITIONS_GOVERNANCE_OPTIONS_FAILED" });
     }
   });
 
