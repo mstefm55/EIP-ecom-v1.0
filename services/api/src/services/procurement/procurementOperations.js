@@ -633,6 +633,8 @@ export async function addSupplierQuote(client, input) {
   if (!rfq) return { ok: false, status: 404, error: "RFQ_NOT_FOUND" };
   const quote = normalizeSupplierQuote({ ...(input.body || {}), material_id: input.body?.material_id || rfq.attrs?.material_id });
   if (!quote.supplier_agent_id) return { ok: false, status: 400, error: "SUPPLIER_REQUIRED" };
+  const supplier = await fetchAgent(client, input.tenantId, quote.supplier_agent_id);
+  if (!supplier) return { ok: false, status: 404, error: "SUPPLIER_NOT_FOUND" };
   const actorAgentId = await getPrimaryAgentId(client, input.tenantId, input.identityId);
   const result = await client.query(
     `

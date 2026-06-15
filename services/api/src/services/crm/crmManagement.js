@@ -292,6 +292,14 @@ async function fetchAccount(client, tenantId, accountId) {
   return result.rows[0] || null;
 }
 
+async function resolveOptionalTenantAgentId(client, tenantId, agentId, field, errorCode) {
+  const normalized = normalizeOptionalText(agentId, 64);
+  if (!normalized) return null;
+  const agent = await fetchAccount(client, tenantId, normalized);
+  if (!agent) throw new CrmInputError(errorCode, { field });
+  return normalized;
+}
+
 async function fetchOpportunity(client, tenantId, opportunityId) {
   const result = await client.query(
     `
@@ -620,6 +628,13 @@ export async function createCrmAccount(app, session, body = {}) {
     const status = toApiStatus(toStoredStatus(body.status, "PROSPECT", governance, "CRM_ACCOUNT_STATUS", CRM_ACCOUNT_STATUSES), "PROSPECT");
     const name = normalizeOptionalText(body.display_name || body.name, 300);
     if (!name) throw new CrmInputError("ACCOUNT_NAME_REQUIRED");
+    const parentAgentId = await resolveOptionalTenantAgentId(
+      client,
+      session.tenant_id,
+      body.parent_agent_id,
+      "parent_agent_id",
+      "PARENT_AGENT_NOT_FOUND"
+    );
     const attrs = {
       ...normalizeAttrs(body.attrs),
       roles,
@@ -650,7 +665,7 @@ export async function createCrmAccount(app, session, body = {}) {
         normalizeOptionalText(body.code, 64) || buildCode("CRM-ACC"),
         name,
         JSON.stringify(attrs),
-        normalizeOptionalText(body.parent_agent_id, 64),
+        parentAgentId,
         status !== "ARCHIVED"
       ]
     );
@@ -715,6 +730,9 @@ export async function updateCrmAccount(app, session, accountId, body = {}) {
     const status = body.status !== undefined
       ? toApiStatus(toStoredStatus(body.status, currentSafe.status, governance, "CRM_ACCOUNT_STATUS", CRM_ACCOUNT_STATUSES), currentSafe.status)
       : currentSafe.status;
+    const parentAgentId = body.parent_agent_id !== undefined
+      ? await resolveOptionalTenantAgentId(client, session.tenant_id, body.parent_agent_id, "parent_agent_id", "PARENT_AGENT_NOT_FOUND")
+      : current.parent_agent_id;
     const attrs = {
       ...asObject(current.attrs),
       ...normalizeAttrs(body.attrs),
@@ -754,7 +772,7 @@ export async function updateCrmAccount(app, session, accountId, body = {}) {
         body.code !== undefined ? normalizeOptionalText(body.code, 64) : current.code,
         body.display_name !== undefined || body.name !== undefined ? normalizeOptionalText(body.display_name || body.name, 300) : current.name,
         JSON.stringify(attrs),
-        body.parent_agent_id !== undefined ? normalizeOptionalText(body.parent_agent_id, 64) : current.parent_agent_id,
+        parentAgentId,
         status !== "ARCHIVED"
       ]
     );
@@ -919,7 +937,9 @@ export async function createCrmOpportunity(app, session, body = {}) {
     if (!account) return { ok: false, status: 404, error: "ACCOUNT_NOT_FOUND" };
     const governance = await loadDropdownCodeSets(client, session.tenant_id, ["CRM_OPPORTUNITY_STATUS"]);
     const status = toStoredStatus(body.status || body.stage, "NEW", governance, "CRM_OPPORTUNITY_STATUS", CRM_OPPORTUNITY_STATUSES);
-    const ownerAgentId = normalizeOptionalText(body.owner_agent_id, 64) || await getPrimaryAgentId(client, session.tenant_id, session.identity_id);
+    const ownerAgentId = body.owner_agent_id !== undefined
+      ? await resolveOptionalTenantAgentId(client, session.tenant_id, body.owner_agent_id, "owner_agent_id", "OWNER_AGENT_NOT_FOUND")
+      : await getPrimaryAgentId(client, session.tenant_id, session.identity_id);
     const amount = finiteNumber(body.value_amount ?? body.amount ?? body.value?.amount, null);
     const currency = normalizeCode(body.currency || body.value_currency || body.value?.currency, "EUR");
     const attrs = {
@@ -1008,6 +1028,9 @@ export async function updateCrmOpportunity(app, session, opportunityId, body = {
         [session.tenant_id, opportunityId, nextAccountId, JSON.stringify({ module: "crm", source: "crm_management_v1" })]
       );
     }
+    const ownerAgentId = body.owner_agent_id !== undefined
+      ? await resolveOptionalTenantAgentId(client, session.tenant_id, body.owner_agent_id, "owner_agent_id", "OWNER_AGENT_NOT_FOUND")
+      : current.owner_agent_id;
     const amount = finiteNumber(body.value_amount ?? body.amount ?? body.value?.amount, currentSafe.value_amount);
     const currency = normalizeCode(body.currency || body.value_currency || body.value?.currency, currentSafe.currency || "EUR");
     const attrs = {
@@ -1046,7 +1069,7 @@ export async function updateCrmOpportunity(app, session, opportunityId, body = {
         body.code !== undefined ? normalizeOptionalText(body.code, 64) : current.code,
         body.title !== undefined ? normalizeOptionalText(body.title, 300) : current.title,
         JSON.stringify(attrs),
-        body.owner_agent_id !== undefined ? normalizeOptionalText(body.owner_agent_id, 64) : current.owner_agent_id
+        ownerAgentId
       ]
     );
     await emitMutation(app, session, "crm.opportunity_updated", { opportunity_id: opportunityId, status: toApiStatus(nextStatus) });
@@ -1147,6 +1170,13 @@ export async function createCrmActivity(app, session, body = {}) {
     if (!target.ok) return target;
     const governance = await loadDropdownCodeSets(client, session.tenant_id, ["TASK_STATUS"]);
     const status = toStoredStatus(body.status, "OPEN", governance, "TASK_STATUS", CRM_ACTIVITY_STATUSES);
+    const assignedAgentId = await resolveOptionalTenantAgentId(
+      client,
+      session.tenant_id,
+      body.assigned_agent_id,
+      "assigned_agent_id",
+      "ASSIGNED_AGENT_NOT_FOUND"
+    );
     const accountId = normalizeOptionalText(body.account_id, 64) || target.account_id || null;
     const attrs = {
       ...normalizeAttrs(body.attrs),
@@ -1172,7 +1202,7 @@ export async function createCrmActivity(app, session, body = {}) {
         status,
         normalizeOptionalText(body.title, 300) || "Follow up",
         normalizeOptionalText(body.description, 1000),
-        normalizeOptionalText(body.assigned_agent_id, 64),
+        assignedAgentId,
         normalizeOptionalText(body.due_at, 80),
         JSON.stringify(asObject(body.payload)),
         JSON.stringify(attrs)
@@ -1197,6 +1227,9 @@ export async function updateCrmActivity(app, session, activityId, body = {}) {
     if (!current.rowCount) return { ok: false, status: 404, error: "NOT_FOUND" };
     const governance = await loadDropdownCodeSets(client, session.tenant_id, ["TASK_STATUS"]);
     const currentAttrs = asObject(current.rows[0].attrs);
+    const assignedAgentId = body.assigned_agent_id !== undefined
+      ? await resolveOptionalTenantAgentId(client, session.tenant_id, body.assigned_agent_id, "assigned_agent_id", "ASSIGNED_AGENT_NOT_FOUND")
+      : current.rows[0].assigned_agent_id;
     const result = await client.query(
       `
       UPDATE eip_core.task
@@ -1221,7 +1254,7 @@ export async function updateCrmActivity(app, session, activityId, body = {}) {
         body.status !== undefined ? toStoredStatus(body.status, current.rows[0].status, governance, "TASK_STATUS", CRM_ACTIVITY_STATUSES) : current.rows[0].status,
         body.title !== undefined ? normalizeOptionalText(body.title, 300) : current.rows[0].title,
         body.description !== undefined ? normalizeOptionalText(body.description, 1000) : current.rows[0].description,
-        body.assigned_agent_id !== undefined ? normalizeOptionalText(body.assigned_agent_id, 64) : current.rows[0].assigned_agent_id,
+        assignedAgentId,
         body.due_at !== undefined ? normalizeOptionalText(body.due_at, 80) : current.rows[0].due_at,
         body.payload !== undefined ? JSON.stringify(asObject(body.payload)) : null,
         JSON.stringify({

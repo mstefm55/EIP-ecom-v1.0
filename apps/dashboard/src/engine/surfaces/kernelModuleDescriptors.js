@@ -49,7 +49,7 @@ const bankFields = [
 
 const relationshipFields = [
   { name: "related_entity_id", label: "Related entity id" },
-  { name: "relation_type", label: "Relationship", type: "select", optionList: "ENTITY_RELATIONSHIP_TYPE", options: ["RELATED_TO", "PARENT_OF", "SUPPLIER_OF", "CUSTOMER_OF"] },
+  { name: "relation_type", label: "Relationship", type: "select", optionList: "ENTITY_RELATIONSHIP_TYPE", options: ["RELATED_TO", "PARENT_OF", "SUBSIDIARY_OF", "CONTACT_FOR", "WORKS_FOR", "BILLS_TO", "SUPPLIES_TO", "SUPPLIER_OF", "CUSTOMER_OF"] },
   { name: "direction", label: "Direction", type: "select", options: ["OUTGOING", "INCOMING"] },
   { name: "is_active", label: "Active", type: "checkbox", defaultValue: true }
 ];
@@ -109,7 +109,7 @@ export const crmKernelWorkspaceNode = {
 };
 
 export const procurementKernelWorkspaceNode = {
-  id: "procurement-management-workspace",
+  id: "procurement-workspace",
   type: "KernelModuleWorkspace",
   props: {
     module: "procurement",

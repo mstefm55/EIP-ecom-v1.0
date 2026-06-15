@@ -91,6 +91,10 @@ export default async function policiesConditionsRoutes(app) {
         getPolicyConditionTaxonomy(app, session),
         loadModuleWorkspace(app, session.tenant_id, "policies-conditions")
       ]);
+      const permissions = [POLICIES_CONDITIONS_READ_PERMISSION];
+      if (await hasPermission(app, session.tenant_id, session.identity_id, POLICIES_CONDITIONS_READ_EFFECTIVE_PERMISSION)) {
+        permissions.push(POLICIES_CONDITIONS_READ_EFFECTIVE_PERMISSION);
+      }
       return {
         ok: true,
         options: {
@@ -100,7 +104,7 @@ export default async function policiesConditionsRoutes(app) {
           POLICY_CONDITION_SUBTYPE: taxonomy.lists?.condition_subtypes?.options || []
         },
         defaults: taxonomy.defaults || {},
-        permissions: [POLICIES_CONDITIONS_READ_PERMISSION],
+        permissions,
         workspace
       };
     } catch (error) {

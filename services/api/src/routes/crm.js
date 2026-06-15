@@ -54,6 +54,19 @@ function normalizeStatus(value) {
   return normalizeText(value).toLowerCase();
 }
 
+function maskIdentifier(value) {
+  const text = normalizeText(value).replace(/\s+/g, "");
+  if (!text) return null;
+  return `****${text.slice(-4)}`;
+}
+
+function withoutRawBankIdentifiers(row = {}) {
+  const item = { ...row };
+  delete item.account_number;
+  delete item.iban;
+  return item;
+}
+
 function buildIdempotencyKey(prefix, payload) {
   return sha256Hex(`${prefix}:${JSON.stringify(payload || {})}`);
 }
@@ -71,10 +84,12 @@ async function requirePerm(app, req, reply, permCode) {
     return null;
   }
 
-  const c = await app.requireCsrf(req);
-  if (!c.ok) {
-    reply.code(c.status).send({ ok: false, error: c.error });
-    return null;
+  if (!["GET", "HEAD"].includes(String(req.method || "").toUpperCase())) {
+    const c = await app.requireCsrf(req);
+    if (!c.ok) {
+      reply.code(c.status).send({ ok: false, error: c.error });
+      return null;
+    }
   }
 
   const allowed = await hasPermission(app, s.session.tenant_id, s.session.identity_id, permCode);
@@ -758,8 +773,10 @@ export default async function crmRoutes(app) {
            account_number, iban, swift_bic, currency_code, is_primary, is_active, attrs)
         VALUES
           ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb)
-        RETURNING id, account_type, label, bank_name, account_name, account_number,
-                  iban, swift_bic, currency_code, is_primary, is_active, attrs, created_at, updated_at
+        RETURNING id, account_type, label, bank_name, account_name,
+                  CASE WHEN account_number IS NULL THEN NULL ELSE '****' || right(regexp_replace(account_number, '\\s+', '', 'g'), 4) END AS account_number_masked,
+                  CASE WHEN iban IS NULL THEN NULL ELSE '****' || right(regexp_replace(iban, '\\s+', '', 'g'), 4) END AS iban_masked,
+                  swift_bic, currency_code, is_primary, is_active, attrs, created_at, updated_at
         `,
         [
           tenantId,
@@ -777,7 +794,15 @@ export default async function crmRoutes(app) {
           JSON.stringify(body.attrs || {})
         ]
       );
-      return reply.send({ ok: true, item: r.rows[0] });
+      const item = withoutRawBankIdentifiers(r.rows[0] || {});
+      return reply.send({
+        ok: true,
+        item: {
+          ...item,
+          account_number_masked: item.account_number_masked || maskIdentifier(body.account_number),
+          iban_masked: item.iban_masked || maskIdentifier(body.iban)
+        }
+      });
     }
   );
 
