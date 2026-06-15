@@ -478,7 +478,7 @@ function ManagedFormState({ config, fields, initialValues, selected, row, option
   }
 
   return (
-    <form onSubmit={submit} className="rounded-2xl border border-white/70 bg-white/75 p-5 shadow-soft">
+    <form onSubmit={submit} className="rounded-xl border border-ink-100/70 bg-white/80 p-4">
       {config.title ? <h3 className="text-base font-semibold text-ink-900">{config.title}</h3> : null}
       {config.subtitle ? <p className="mt-1 text-sm text-ink-400">{config.subtitle}</p> : null}
       {error ? <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
@@ -642,58 +642,67 @@ function OverviewCards({ cards, data }) {
   const visible = normalizeList(cards);
   if (!visible.length) return null;
   return (
-    <div className="rounded-2xl border border-white/70 bg-white/70 p-3 shadow-soft">
-      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-        {visible.map((card) => {
-          const Icon = ICONS[card.icon] || Sparkles;
-          const value = valueFromSpec(card, data);
-          const unit = card.unitPath ? getPath(data, card.unitPath) : card.unit;
-          const toneValue = String(getPath(data, card.tonePath, value) || "").toUpperCase();
-          const tone = TONES[toneValue] || card.tone || "slate";
-          return (
-            <div key={`${card.label}-${card.path || card.value}`} className="rounded-xl border border-ink-100/70 bg-white/85 px-3 py-2">
-              <div className="flex items-center justify-between gap-3">
-                <p className="truncate text-[0.58rem] font-semibold uppercase tracking-[0.18em] text-ink-400">{card.label}</p>
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-ink-50 text-ink-500">
-                  <Icon className="h-3.5 w-3.5" />
-                </span>
-              </div>
-              <div className="mt-1 flex items-center justify-between gap-3">
-                <p className="min-w-0 break-words text-sm font-semibold text-ink-900">{formatValue(value, card.format, unit)}</p>
-                {card.badge ? <Pill tone={tone}>{card.badge}</Pill> : null}
-              </div>
-              {card.hint ? <p className="mt-1 text-xs leading-relaxed text-ink-500">{card.hint}</p> : null}
+    <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+      {visible.map((card) => {
+        const Icon = ICONS[card.icon] || Sparkles;
+        const value = valueFromSpec(card, data);
+        const unit = card.unitPath ? getPath(data, card.unitPath) : card.unit;
+        const toneValue = String(getPath(data, card.tonePath, value) || "").toUpperCase();
+        const tone = TONES[toneValue] || card.tone || "slate";
+        return (
+          <div key={`${card.label}-${card.path || card.value}`} className="rounded-xl border border-ink-100/70 bg-white/85 px-3 py-2">
+            <div className="flex items-center justify-between gap-3">
+              <p className="truncate text-[0.58rem] font-semibold uppercase tracking-[0.18em] text-ink-400">{card.label}</p>
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-ink-50 text-ink-500">
+                <Icon className="h-3.5 w-3.5" />
+              </span>
             </div>
-          );
-        })}
-      </div>
+            <div className="mt-1 flex items-center justify-between gap-3">
+              <p className="min-w-0 break-words text-sm font-semibold text-ink-900">{formatValue(value, card.format, unit)}</p>
+              {card.badge ? <Pill tone={tone}>{card.badge}</Pill> : null}
+            </div>
+            {card.hint ? <p className="mt-1 text-xs leading-relaxed text-ink-500">{card.hint}</p> : null}
+          </div>
+        );
+      })}
     </div>
   );
 }
 
-function KernelModuleTabs({ tabs, activeTab, onChange }) {
-  if (!tabs.length) return null;
+function KernelTabbedFormPanel({ tabs, activeTab, onChange, children }) {
+  if (!tabs.length) {
+    return (
+      <section className="rounded-2xl border border-ink-100/70 bg-white/75 p-4 shadow-soft">
+        {children}
+      </section>
+    );
+  }
   return (
-    <div className="glass-panel flex flex-wrap items-center gap-2 border border-ink-100/60 bg-white/70 p-3">
-      {tabs.map((tab) => {
-        const Icon = ICONS[tab.icon] || Package;
-        return (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => onChange(tab.id)}
-            className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-[0.68rem] font-semibold uppercase tracking-[0.2em] transition ${
-              activeTab === tab.id
-                ? "bg-ink-900 text-white shadow-soft"
-                : "border border-ink-100/70 bg-white/80 text-ink-600 hover:bg-white"
-            }`}
-          >
-            <Icon className="h-3.5 w-3.5" />
-            {tab.label}
-          </button>
-        );
-      })}
-    </div>
+    <section className="glass-panel overflow-hidden border border-ink-100/60 bg-white/75 shadow-soft">
+      <div className="flex flex-wrap items-center gap-2 border-b border-ink-100/70 bg-white/70 px-4 py-3">
+        {tabs.map((tab) => {
+          const Icon = ICONS[tab.icon] || Package;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => onChange(tab.id)}
+              className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-[0.68rem] font-semibold uppercase tracking-[0.2em] transition ${
+                activeTab === tab.id
+                  ? "bg-ink-900 text-white shadow-soft"
+                  : "border border-ink-100/70 bg-white/80 text-ink-600 hover:bg-white"
+              }`}
+            >
+              <Icon className="h-3.5 w-3.5" />
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+      <div className="bg-white/55 p-4">
+        {children}
+      </div>
+    </section>
   );
 }
 
@@ -1050,6 +1059,7 @@ export default function KernelModuleWorkspace({ node }) {
   const effectiveActiveTab = visibleTabs.some((tab) => tab.id === activeTab)
     ? activeTab
     : visibleTabs[0]?.id || "overview";
+  const activeTabConfig = visibleTabs.find((tab) => tab.id === effectiveActiveTab) || visibleTabs[0] || {};
   const workspaceData = { items, selected, item: selected, detail, optionsPayload, ...(detail || {}) };
   const processConfig = detailConfig.process || layout.process;
   const overviewCards = detailConfig.overviewCards || layout.overviewCards;
@@ -1204,18 +1214,21 @@ export default function KernelModuleWorkspace({ node }) {
                   ) : null}
                 </div>
               </div>
-              <KernelModuleTabs tabs={visibleTabs} activeTab={effectiveActiveTab} onChange={setActiveTab} />
               <ProcessIntentStrip config={processConfig} data={workspaceData} />
-              <OverviewCards cards={overviewCards} data={workspaceData} />
-              <TabContent
-                tab={visibleTabs.find((tab) => tab.id === effectiveActiveTab) || visibleTabs[0] || {}}
-                detail={detail || {}}
-                selected={selected}
-                optionsPayload={optionsPayload}
-                permissions={permissions}
-                refreshAll={refreshAll}
-                refreshDetail={refreshDetail}
-              />
+              <KernelTabbedFormPanel tabs={visibleTabs} activeTab={effectiveActiveTab} onChange={setActiveTab}>
+                <div className="space-y-4">
+                  {activeTabConfig.id === "overview" ? <OverviewCards cards={overviewCards} data={workspaceData} /> : null}
+                  <TabContent
+                    tab={activeTabConfig}
+                    detail={detail || {}}
+                    selected={selected}
+                    optionsPayload={optionsPayload}
+                    permissions={permissions}
+                    refreshAll={refreshAll}
+                    refreshDetail={refreshDetail}
+                  />
+                </div>
+              </KernelTabbedFormPanel>
             </div>
           )}
         </section>

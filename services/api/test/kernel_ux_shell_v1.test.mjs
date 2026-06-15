@@ -19,7 +19,7 @@ function count(text, pattern) {
 test("KernelModuleWorkspace supports metadata-driven premium shell primitives", () => {
   for (const token of [
     "HeroMetrics",
-    "KernelModuleTabs",
+    "KernelTabbedFormPanel",
     "ProcessIntentStrip",
     "OverviewCards",
     "ActionButton",
@@ -45,7 +45,8 @@ test("disabled action reasons and metadata tabs are visible, not dead controls",
   assert.match(workspace, /permissionDeniedReason/);
   assert.match(workspace, /Action is unavailable for this status/);
   assert.match(workspace, /<p className="mt-1 max-w-\[12rem\]/);
-  assert.match(workspace, /<KernelModuleTabs tabs=\{visibleTabs\}/);
+  assert.match(workspace, /<KernelTabbedFormPanel tabs=\{visibleTabs\}/);
+  assert.match(workspace, /activeTabConfig\.id === "overview"/);
   assert.match(workspace, /tabs\.map/);
   assert.match(workspace, /tab\.type === "communications"/);
 });
