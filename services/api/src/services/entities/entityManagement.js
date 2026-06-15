@@ -31,6 +31,16 @@ export const ENTITY_STATUSES = Object.freeze([
   "ARCHIVED"
 ]);
 
+export const ENTITY_KINDS = Object.freeze([
+  "ORG",
+  "PERSON",
+  "DIVISION",
+  "DEPARTMENT",
+  "TEAM",
+  "SYSTEM",
+  "OTHER"
+]);
+
 export const ENTITY_DROPDOWN_CODES = Object.freeze([
   "ENTITY_ROLE",
   "ENTITY_STATUS",
@@ -38,7 +48,9 @@ export const ENTITY_DROPDOWN_CODES = Object.freeze([
   "ENTITY_ADDRESS_TYPE",
   "ENTITY_CONTACT_TYPE",
   "ENTITY_BANK_ACCOUNT_TYPE",
-  "ENTITY_RELATIONSHIP_TYPE"
+  "ENTITY_RELATIONSHIP_TYPE",
+  "ENTITY_RELATIONSHIP_SCOPE",
+  "ENTITY_STRUCTURE_CATEGORY"
 ]);
 
 const MAX_LIMIT = 200;
@@ -52,7 +64,8 @@ const MUTATION_EVENTS = Object.freeze({
   bankCreate: "entities.bank_account_created",
   bankUpdate: "entities.bank_account_updated",
   relationshipCreate: "entities.relationship_created",
-  relationshipUpdate: "entities.relationship_updated"
+  relationshipUpdate: "entities.relationship_updated",
+  relationshipMove: "entities.relationship_moved"
 });
 
 const SENSITIVE_KEY_RE = /(password|secret|token|credential|authorization|cookie|signature|csrf|sid|api[_-]?key|private[_-]?key|account_number|iban|raw_legal|compliance_raw)/i;
@@ -125,9 +138,41 @@ const RELATIONSHIP_KEYS = new Set([
   "related_entity_id",
   "relation_type",
   "direction",
+  "relationship_scope",
+  "structure_category",
+  "valid_from",
+  "valid_to",
+  "mobile_affiliation",
+  "movement_reason",
+  "chart_x",
+  "chart_y",
   "sort_order",
   "is_active",
   "attrs"
+]);
+
+const ORG_CHILD_TO_PARENT_RELATION_TYPES = Object.freeze([
+  "MEMBER_OF",
+  "DIVISION_OF",
+  "DEPARTMENT_OF",
+  "TEAM_OF",
+  "SUBSIDIARY_OF",
+  "AFFILIATED_TO",
+  "REPORTS_TO",
+  "PART_OF",
+  "WORKS_FOR"
+]);
+
+const ORG_PARENT_TO_CHILD_RELATION_TYPES = Object.freeze([
+  "PARENT_OF",
+  "HAS_MEMBER",
+  "OWNS",
+  "MANAGES"
+]);
+
+const ORG_CHART_RELATION_TYPES = Object.freeze([
+  ...ORG_CHILD_TO_PARENT_RELATION_TYPES,
+  ...ORG_PARENT_TO_CHILD_RELATION_TYPES
 ]);
 
 export class EntityInputError extends Error {
@@ -185,6 +230,21 @@ function normalizeCurrency(value) {
   return currency;
 }
 
+function normalizeDateTime(value, field) {
+  const text = normalizeOptionalText(value, 80);
+  if (!text) return null;
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) throw new EntityInputError("INVALID_DATE", { field });
+  return date.toISOString();
+}
+
+function normalizeFiniteNumber(value, field, fallback = null) {
+  if (value === undefined || value === null || value === "") return fallback;
+  const number = Number(value);
+  if (!Number.isFinite(number)) throw new EntityInputError("INVALID_NUMBER", { field });
+  return number;
+}
+
 function normalizeStatus(value, fallback = "ACTIVE", governance = null) {
   const status = normalizeCode(value, fallback);
   const allowed = allowedCodesFrom(governance, "ENTITY_STATUS", ENTITY_STATUSES);
@@ -204,7 +264,7 @@ function normalizeRoles(value, fallback = ["OTHER"], governance = null) {
 
 function normalizeEntityKind(value, fallback = "ORG", governance = null) {
   const entityKind = normalizeCode(value, fallback);
-  const allowed = allowedCodesFrom(governance, "ENTITY_KIND", ["ORG", "PERSON"]);
+  const allowed = allowedCodesFrom(governance, "ENTITY_KIND", ENTITY_KINDS);
   if (allowed.length && !allowed.includes(entityKind)) throw new EntityInputError("INVALID_ENTITY_KIND", { entity_kind: entityKind });
   return entityKind;
 }
@@ -355,6 +415,8 @@ function mapBankRow(row) {
 function mapRelationshipRow(row, entityId) {
   if (!row) return null;
   const outgoing = String(row.src_id) === String(entityId);
+  const attrs = safeJson(row.attrs);
+  const chart = attrs.chart && typeof attrs.chart === "object" ? attrs.chart : {};
   return {
     id: row.id,
     entity_id: entityId,
@@ -367,9 +429,17 @@ function mapRelationshipRow(row, entityId) {
     },
     relation_type: row.relation_type,
     direction: outgoing ? "OUTGOING" : "INCOMING",
+    relationship_scope: attrs.relationship_scope || "GENERAL",
+    structure_category: attrs.structure_category || null,
+    valid_from: attrs.valid_from || null,
+    valid_to: attrs.valid_to || null,
+    mobile_affiliation: attrs.mobile_affiliation === true,
+    movement_reason: attrs.movement_reason || null,
+    chart_x: chart.x ?? null,
+    chart_y: chart.y ?? null,
     sort_order: row.sort_order,
     is_active: row.is_active === true,
-    attrs: safeJson(row.attrs),
+    attrs,
     created_at: row.created_at,
     updated_at: row.updated_at
   };
@@ -551,11 +621,12 @@ export async function createEntity(app, session, body = {}) {
 export async function getEntityDetail(app, session, entityId) {
   const entity = await ensureEntity(app.db, session.tenant_id, entityId);
   if (!entity) return null;
-  const [addresses, contacts, bankAccounts, relationships, documents, policies, activity] = await Promise.all([
+  const [addresses, contacts, bankAccounts, relationships, orgChart, documents, policies, activity] = await Promise.all([
     listEntityAddresses(app, session, entity.id),
     listEntityContacts(app, session, entity.id),
     listEntityBankAccounts(app, session, entity.id),
     listEntityRelationships(app, session, entity.id),
+    getEntityOrgChart(app, session, entity.id),
     listEntityDocuments(app, session, entity.id),
     getEntityPolicySummary(app, session, entity.id),
     getEntityActivitySummary(app, session, entity.id)
@@ -567,6 +638,7 @@ export async function getEntityDetail(app, session, entityId) {
     contacts: contacts.items,
     bank_accounts: bankAccounts.items,
     relationships: relationships.items,
+    org_chart: orgChart,
     documents: documents.items,
     policy_summary: policies.summary,
     activity_summary: activity.summary,
@@ -958,6 +1030,7 @@ export async function listEntityRelationships(app, session, entityId) {
 
 function normalizeRelationship(body, current = {}, partial = false) {
   rejectUnknownKeys(body, RELATIONSHIP_KEYS, "relationship");
+  const currentAttrs = safeJson(current.attrs);
   const relatedEntityId = hasOwn(body, "related_entity_id")
     ? normalizeUuid(body.related_entity_id, "related_entity_id")
     : current.related_entity_id || current.dst_id || null;
@@ -967,14 +1040,132 @@ function normalizeRelationship(body, current = {}, partial = false) {
   if (!partial && !relatedEntityId) throw new EntityInputError("RELATED_ENTITY_REQUIRED");
   const direction = normalizeCode(body.direction || current.direction || "OUTGOING", "OUTGOING");
   if (!["OUTGOING", "INCOMING"].includes(direction)) throw new EntityInputError("INVALID_RELATIONSHIP_DIRECTION");
+  const relationshipScope = hasOwn(body, "relationship_scope")
+    ? normalizeCode(body.relationship_scope, "GENERAL")
+    : currentAttrs.relationship_scope || current.relationship_scope || "GENERAL";
+  const structureCategory = hasOwn(body, "structure_category")
+    ? normalizeCode(body.structure_category, relationshipScope === "SELF" ? "SELF" : "GENERAL")
+    : currentAttrs.structure_category || current.structure_category || (relationshipScope === "SELF" ? "SELF" : "GENERAL");
+  const validFrom = hasOwn(body, "valid_from")
+    ? normalizeDateTime(body.valid_from, "valid_from")
+    : currentAttrs.valid_from || (!partial ? new Date().toISOString() : null);
+  const validTo = hasOwn(body, "valid_to")
+    ? normalizeDateTime(body.valid_to, "valid_to")
+    : currentAttrs.valid_to || null;
+  if (validFrom && validTo && new Date(validFrom).getTime() > new Date(validTo).getTime()) {
+    throw new EntityInputError("INVALID_RELATIONSHIP_DATES");
+  }
+  const chartX = hasOwn(body, "chart_x")
+    ? normalizeFiniteNumber(body.chart_x, "chart_x")
+    : currentAttrs.chart?.x ?? null;
+  const chartY = hasOwn(body, "chart_y")
+    ? normalizeFiniteNumber(body.chart_y, "chart_y")
+    : currentAttrs.chart?.y ?? null;
+  const attrs = {
+    ...currentAttrs,
+    ...(hasOwn(body, "attrs") ? normalizeAttrs(body.attrs) : {})
+  };
+  attrs.relationship_scope = relationshipScope;
+  attrs.structure_category = structureCategory;
+  if (validFrom) attrs.valid_from = validFrom;
+  if (validTo) attrs.valid_to = validTo;
+  if (hasOwn(body, "mobile_affiliation")) attrs.mobile_affiliation = body.mobile_affiliation === true;
+  else if (!hasOwn(attrs, "mobile_affiliation")) attrs.mobile_affiliation = false;
+  if (hasOwn(body, "movement_reason")) attrs.movement_reason = normalizeOptionalText(body.movement_reason, 500);
+  if (chartX !== null || chartY !== null) attrs.chart = { ...(attrs.chart && typeof attrs.chart === "object" ? attrs.chart : {}) };
+  if (chartX !== null) attrs.chart.x = chartX;
+  if (chartY !== null) attrs.chart.y = chartY;
   return {
     related_entity_id: relatedEntityId,
     relation_type: relationType,
     direction,
-    sort_order: hasOwn(body, "sort_order") ? Number(body.sort_order || 100) : Number(current.sort_order || 100),
+    relationship_scope: relationshipScope,
+    structure_category: structureCategory,
+    valid_from: validFrom,
+    valid_to: validTo,
+    mobile_affiliation: attrs.mobile_affiliation === true,
+    movement_reason: attrs.movement_reason || null,
+    sort_order: hasOwn(body, "sort_order")
+      ? normalizeFiniteNumber(body.sort_order, "sort_order", 100)
+      : normalizeFiniteNumber(current.sort_order, "sort_order", 100),
     is_active: hasOwn(body, "is_active") ? body.is_active !== false : current.is_active !== false,
-    attrs: hasOwn(body, "attrs") ? normalizeAttrs(body.attrs) : safeJson(current.attrs)
+    attrs
   };
+}
+
+function isChildToParentOrgRelation(relationType) {
+  return ORG_CHILD_TO_PARENT_RELATION_TYPES.includes(String(relationType || "").toUpperCase());
+}
+
+function isParentToChildOrgRelation(relationType) {
+  return ORG_PARENT_TO_CHILD_RELATION_TYPES.includes(String(relationType || "").toUpperCase());
+}
+
+async function closePriorMobileAffiliations(db, tenantId, childEntityId, input, excludeRelationshipId = null) {
+  if (!input.mobile_affiliation || !isChildToParentOrgRelation(input.relation_type)) return;
+  const closedAt = input.valid_from || new Date().toISOString();
+  await db.query(
+    `
+    UPDATE eip_core.object_link
+    SET is_active=false,
+        attrs=COALESCE(attrs,'{}'::jsonb)
+          || jsonb_build_object(
+            'valid_to', $6::text,
+            'superseded_by_entity_id', $7::text,
+            'movement_reason', $8::text,
+            'mobile_affiliation', true
+          ),
+        updated_at=now()
+    WHERE tenant_id=$1
+      AND src_kind='agent'
+      AND dst_kind='agent'
+      AND src_id=$2
+      AND is_active=true
+      AND relation_type = ANY($3::text[])
+      AND COALESCE(attrs->>'relationship_scope','GENERAL')=$4
+      AND COALESCE(attrs->>'structure_category','SELF')=$5
+      AND ($9::uuid IS NULL OR id<>$9::uuid)
+    `,
+    [
+      tenantId,
+      childEntityId,
+      ORG_CHILD_TO_PARENT_RELATION_TYPES,
+      input.relationship_scope,
+      input.structure_category,
+      closedAt,
+      input.related_entity_id,
+      input.movement_reason || "Affiliation changed",
+      excludeRelationshipId
+    ]
+  );
+}
+
+async function closeRelationshipById(db, tenantId, relationshipId, input) {
+  await db.query(
+    `
+    UPDATE eip_core.object_link
+    SET is_active=false,
+        attrs=COALESCE(attrs,'{}'::jsonb)
+          || jsonb_build_object(
+            'valid_to', $3::text,
+            'superseded_by_entity_id', $4::text,
+            'movement_reason', $5::text,
+            'mobile_affiliation', true
+          ),
+        updated_at=now()
+    WHERE tenant_id=$1
+      AND id=$2
+      AND src_kind='agent'
+      AND dst_kind='agent'
+    `,
+    [
+      tenantId,
+      relationshipId,
+      input.valid_from || new Date().toISOString(),
+      input.related_entity_id,
+      input.movement_reason || "Affiliation changed"
+    ]
+  );
 }
 
 export async function createEntityRelationship(app, session, entityId, body = {}) {
@@ -986,6 +1177,7 @@ export async function createEntityRelationship(app, session, entityId, body = {}
   if (related.id === entity.id) throw new EntityInputError("SELF_RELATIONSHIP_NOT_ALLOWED");
   const srcId = input.direction === "INCOMING" ? related.id : entity.id;
   const dstId = input.direction === "INCOMING" ? entity.id : related.id;
+  await closePriorMobileAffiliations(app.db, session.tenant_id, srcId, input);
   const result = await app.db.query(
     `
     INSERT INTO eip_core.object_link
@@ -1026,6 +1218,31 @@ export async function updateEntityRelationship(app, session, entityId, relations
   if (related.id === entity.id) throw new EntityInputError("SELF_RELATIONSHIP_NOT_ALLOWED");
   const srcId = input.direction === "INCOMING" ? related.id : entity.id;
   const dstId = input.direction === "INCOMING" ? entity.id : related.id;
+  const mobileReparent = input.mobile_affiliation &&
+    isChildToParentOrgRelation(input.relation_type) &&
+    (String(current.rows[0].src_id) !== String(srcId) ||
+      String(current.rows[0].dst_id) !== String(dstId) ||
+      String(current.rows[0].relation_type) !== String(input.relation_type));
+  if (mobileReparent) {
+    await closePriorMobileAffiliations(app.db, session.tenant_id, srcId, input, current.rows[0].id);
+    await closeRelationshipById(app.db, session.tenant_id, current.rows[0].id, input);
+    const inserted = await app.db.query(
+      `
+      INSERT INTO eip_core.object_link
+        (tenant_id, src_kind, src_id, dst_kind, dst_id, relation_type, sort_order, attrs, is_active)
+      VALUES ($1,'agent',$2,'agent',$3,$4,$5,$6::jsonb,$7)
+      ON CONFLICT (tenant_id, src_kind, src_id, dst_kind, dst_id, relation_type)
+      DO UPDATE SET sort_order=EXCLUDED.sort_order, attrs=EXCLUDED.attrs, is_active=EXCLUDED.is_active, updated_at=now()
+      RETURNING id, src_id, dst_id, relation_type, sort_order, attrs, is_active, created_at, updated_at
+      `,
+      [session.tenant_id, srcId, dstId, input.relation_type, input.sort_order, JSON.stringify(input.attrs), input.is_active]
+    );
+    const rows = await listEntityRelationships(app, session, entity.id);
+    const item = rows.items.find((relationship) => relationship.id === inserted.rows[0].id) || mapRelationshipRow(inserted.rows[0], entity.id);
+    await emitMutation(app, session, MUTATION_EVENTS.relationshipMove, { entity_id: entity.id, relationship_id: item.id, is_active: item.is_active });
+    return { ok: true, item };
+  }
+  await closePriorMobileAffiliations(app.db, session.tenant_id, srcId, input, current.rows[0].id);
   const result = await app.db.query(
     `
     UPDATE eip_core.object_link
@@ -1039,6 +1256,211 @@ export async function updateEntityRelationship(app, session, entityId, relations
   const item = rows.items.find((relationship) => relationship.id === result.rows[0].id) || mapRelationshipRow(result.rows[0], entity.id);
   await emitMutation(app, session, MUTATION_EVENTS.relationshipUpdate, { entity_id: entity.id, relationship_id: item.id, is_active: item.is_active });
   return { ok: true, item };
+}
+
+function chartNodeFromAgent(row, prefix) {
+  return {
+    id: row[`${prefix}_id`],
+    code: row[`${prefix}_code`],
+    display_name: row[`${prefix}_name`],
+    entity_kind: row[`${prefix}_type`],
+    status: row[`${prefix}_status`] || null
+  };
+}
+
+function orgEdgeFromRow(row) {
+  const attrs = safeJson(row.attrs);
+  const parentToChild = isParentToChildOrgRelation(row.relation_type);
+  const parent = parentToChild ? chartNodeFromAgent(row, "src") : chartNodeFromAgent(row, "dst");
+  const child = parentToChild ? chartNodeFromAgent(row, "dst") : chartNodeFromAgent(row, "src");
+  const chart = attrs.chart && typeof attrs.chart === "object" ? attrs.chart : {};
+  return {
+    id: row.id,
+    relationship_id: row.id,
+    parent_entity_id: parent.id,
+    child_entity_id: child.id,
+    parent,
+    child,
+    relation_type: row.relation_type,
+    relationship_scope: attrs.relationship_scope || "GENERAL",
+    structure_category: attrs.structure_category || null,
+    valid_from: attrs.valid_from || null,
+    valid_to: attrs.valid_to || null,
+    mobile_affiliation: attrs.mobile_affiliation === true,
+    sort_order: row.sort_order,
+    chart_x: chart.x ?? null,
+    chart_y: chart.y ?? null
+  };
+}
+
+async function loadOrgChartRows(db, tenantId, relationshipScope = "SELF", structureCategory = "SELF") {
+  const result = await db.query(
+    `
+    SELECT link.id, link.src_id, link.dst_id, link.relation_type, link.sort_order, link.attrs,
+           link.is_active, link.created_at, link.updated_at,
+           src.id AS src_id, src.code AS src_code, src.name AS src_name, src.agent_type AS src_type,
+           COALESCE(src.attrs->>'status', CASE WHEN src.is_active THEN 'ACTIVE' ELSE 'INACTIVE' END) AS src_status,
+           dst.id AS dst_id, dst.code AS dst_code, dst.name AS dst_name, dst.agent_type AS dst_type,
+           COALESCE(dst.attrs->>'status', CASE WHEN dst.is_active THEN 'ACTIVE' ELSE 'INACTIVE' END) AS dst_status
+    FROM eip_core.object_link link
+    JOIN eip_core.agent src ON src.tenant_id=link.tenant_id AND src.id=link.src_id AND link.src_kind='agent'
+    JOIN eip_core.agent dst ON dst.tenant_id=link.tenant_id AND dst.id=link.dst_id AND link.dst_kind='agent'
+    WHERE link.tenant_id=$1
+      AND link.src_kind='agent'
+      AND link.dst_kind='agent'
+      AND link.is_active=true
+      AND link.relation_type = ANY($2::text[])
+      AND COALESCE(link.attrs->>'relationship_scope','GENERAL')=$3
+      AND COALESCE(link.attrs->>'structure_category','SELF')=$4
+      AND (
+        link.attrs->>'valid_to' IS NULL
+        OR (link.attrs->>'valid_to')::timestamptz >= now()
+      )
+    ORDER BY link.sort_order ASC, link.updated_at DESC
+    `,
+    [tenantId, ORG_CHART_RELATION_TYPES, relationshipScope, structureCategory]
+  );
+  return result.rows;
+}
+
+function buildOrgChart(rootEntity, rows) {
+  const nodes = new Map();
+  const edges = rows.map(orgEdgeFromRow);
+  const neighbors = new Map();
+  const incoming = new Map();
+
+  function addNode(node, position = {}) {
+    if (!node?.id) return;
+    const current = nodes.get(node.id) || node;
+    nodes.set(node.id, {
+      ...current,
+      ...node,
+      chart_x: current.chart_x ?? position.x ?? null,
+      chart_y: current.chart_y ?? position.y ?? null
+    });
+  }
+
+  addNode({
+    id: rootEntity.id,
+    code: rootEntity.code,
+    display_name: rootEntity.name,
+    entity_kind: rootEntity.agent_type,
+    status: safeJson(rootEntity.attrs).status || (rootEntity.is_active ? "ACTIVE" : "INACTIVE")
+  }, { x: 0, y: 0 });
+
+  for (const edge of edges) {
+    addNode(edge.parent);
+    addNode(edge.child, { x: edge.chart_x, y: edge.chart_y });
+    neighbors.set(edge.parent_entity_id, [...(neighbors.get(edge.parent_entity_id) || []), edge.child_entity_id]);
+    neighbors.set(edge.child_entity_id, [...(neighbors.get(edge.child_entity_id) || []), edge.parent_entity_id]);
+    incoming.set(edge.child_entity_id, [...(incoming.get(edge.child_entity_id) || []), edge.parent_entity_id]);
+  }
+
+  const included = new Set();
+  const queue = [rootEntity.id];
+  while (queue.length) {
+    const nodeId = queue.shift();
+    if (!nodeId || included.has(nodeId)) continue;
+    included.add(nodeId);
+    for (const nextId of neighbors.get(nodeId) || []) {
+      if (!included.has(nextId)) queue.push(nextId);
+    }
+  }
+
+  const visibleEdges = edges.filter((edge) => included.has(edge.parent_entity_id) && included.has(edge.child_entity_id));
+  const rootIds = [...included].filter((nodeId) => !(incoming.get(nodeId) || []).some((parentId) => included.has(parentId)));
+  return {
+    ok: true,
+    root_id: rootEntity.id,
+    roots: rootIds.length ? rootIds : [rootEntity.id],
+    nodes: [...nodes.values()].filter((node) => included.has(node.id)),
+    edges: visibleEdges
+  };
+}
+
+function wouldCreateOrgCycle(rows, childEntityId, newParentEntityId) {
+  const childrenByParent = new Map();
+  for (const row of rows) {
+    const edge = orgEdgeFromRow(row);
+    childrenByParent.set(edge.parent_entity_id, [...(childrenByParent.get(edge.parent_entity_id) || []), edge.child_entity_id]);
+  }
+  const stack = [childEntityId];
+  const visited = new Set();
+  while (stack.length) {
+    const nodeId = stack.pop();
+    if (!nodeId || visited.has(nodeId)) continue;
+    visited.add(nodeId);
+    if (nodeId === newParentEntityId) return true;
+    for (const childId of childrenByParent.get(nodeId) || []) stack.push(childId);
+  }
+  return false;
+}
+
+export async function getEntityOrgChart(app, session, entityId, query = {}) {
+  const entity = await ensureEntity(app.db, session.tenant_id, entityId);
+  if (!entity) return null;
+  const relationshipScope = normalizeCode(query.relationship_scope || query.scope || "SELF", "SELF");
+  const structureCategory = normalizeCode(query.structure_category || query.category || "SELF", "SELF");
+  const rows = await loadOrgChartRows(app.db, session.tenant_id, relationshipScope, structureCategory);
+  return buildOrgChart(entity, rows);
+}
+
+export async function moveEntityOrgChartNode(app, session, entityId, body = {}) {
+  const root = await ensureEntity(app.db, session.tenant_id, entityId);
+  if (!root) return null;
+  const child = await ensureEntity(app.db, session.tenant_id, body.node_id);
+  if (!child) throw new EntityInputError("ORG_CHART_NODE_NOT_FOUND");
+  const parent = await ensureEntity(app.db, session.tenant_id, body.new_parent_entity_id);
+  if (!parent) throw new EntityInputError("ORG_CHART_PARENT_NOT_FOUND");
+  if (child.id === parent.id) throw new EntityInputError("ORG_CHART_SELF_PARENT_NOT_ALLOWED");
+
+  const relationshipScope = normalizeCode(body.relationship_scope || body.scope || "SELF", "SELF");
+  const structureCategory = normalizeCode(body.structure_category || body.category || "SELF", "SELF");
+  const relationType = normalizeCode(body.relation_type || "MEMBER_OF", "MEMBER_OF");
+  if (!isChildToParentOrgRelation(relationType)) throw new EntityInputError("INVALID_ORG_CHART_RELATIONSHIP");
+
+  const rows = await loadOrgChartRows(app.db, session.tenant_id, relationshipScope, structureCategory);
+  if (wouldCreateOrgCycle(rows, child.id, parent.id)) throw new EntityInputError("ORG_CHART_CYCLE_NOT_ALLOWED");
+
+  const input = normalizeRelationship({
+    related_entity_id: parent.id,
+    relation_type: relationType,
+    direction: "OUTGOING",
+    relationship_scope: relationshipScope,
+    structure_category: structureCategory,
+    valid_from: body.valid_from || new Date().toISOString(),
+    mobile_affiliation: true,
+    movement_reason: body.movement_reason,
+    chart_x: body.chart_x,
+    chart_y: body.chart_y,
+    sort_order: body.sort_order,
+    is_active: true,
+    attrs: body.attrs
+  });
+
+  await closePriorMobileAffiliations(app.db, session.tenant_id, child.id, input);
+  const result = await app.db.query(
+    `
+    INSERT INTO eip_core.object_link
+      (tenant_id, src_kind, src_id, dst_kind, dst_id, relation_type, sort_order, attrs, is_active)
+    VALUES ($1,'agent',$2,'agent',$3,$4,$5,$6::jsonb,true)
+    ON CONFLICT (tenant_id, src_kind, src_id, dst_kind, dst_id, relation_type)
+    DO UPDATE SET sort_order=EXCLUDED.sort_order, attrs=EXCLUDED.attrs, is_active=true, updated_at=now()
+    RETURNING id, src_id, dst_id, relation_type, sort_order, attrs, is_active, created_at, updated_at
+    `,
+    [session.tenant_id, child.id, parent.id, input.relation_type, input.sort_order, JSON.stringify(input.attrs)]
+  );
+  const relationshipRows = await listEntityRelationships(app, session, child.id);
+  const item = relationshipRows.items.find((relationship) => relationship.id === result.rows[0].id) || mapRelationshipRow(result.rows[0], child.id);
+  const orgChart = await getEntityOrgChart(app, session, root.id, { relationship_scope: relationshipScope, structure_category: structureCategory });
+  await emitMutation(app, session, MUTATION_EVENTS.relationshipMove, {
+    entity_id: child.id,
+    parent_entity_id: parent.id,
+    root_entity_id: root.id,
+    relationship_id: item.id,
+    relation_type: item.relation_type
+  });
+  return { ok: true, item, org_chart: orgChart };
 }
 
 export async function listEntityDocuments(app, session, entityId) {

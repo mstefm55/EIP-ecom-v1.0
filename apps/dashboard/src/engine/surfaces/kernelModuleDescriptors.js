@@ -1,5 +1,5 @@
 const entityFields = [
-  { name: "entity_kind", label: "Kind", type: "select", optionList: "ENTITY_KIND", options: ["ORG", "PERSON"] },
+  { name: "entity_kind", label: "Kind", type: "select", optionList: "ENTITY_KIND", options: ["ORG", "PERSON", "DIVISION", "DEPARTMENT", "TEAM", "SYSTEM", "OTHER"] },
   { name: "code", label: "Code" },
   { name: "display_name", label: "Display name" },
   { name: "legal_name", label: "Legal name" },
@@ -48,9 +48,15 @@ const bankFields = [
 ];
 
 const relationshipFields = [
-  { name: "related_entity_id", label: "Related entity id" },
-  { name: "relation_type", label: "Relationship", type: "select", optionList: "ENTITY_RELATIONSHIP_TYPE", options: ["RELATED_TO", "PARENT_OF", "SUBSIDIARY_OF", "CONTACT_FOR", "WORKS_FOR", "BILLS_TO", "SUPPLIES_TO", "SUPPLIER_OF", "CUSTOMER_OF"] },
+  { name: "related_entity_id", label: "Related entity", type: "lookup", endpoint: "/api/eip/entities", itemsPath: "items", valuePath: "id", labelPath: "display_name", placeholder: "Search entities" },
+  { name: "relation_type", label: "Relationship", type: "select", optionList: "ENTITY_RELATIONSHIP_TYPE", options: ["RELATED_TO", "PARENT_OF", "SUBSIDIARY_OF", "MEMBER_OF", "DIVISION_OF", "DEPARTMENT_OF", "TEAM_OF", "REPORTS_TO", "AFFILIATED_TO", "CONTACT_FOR", "WORKS_FOR", "BILLS_TO", "SUPPLIES_TO", "SUPPLIER_OF", "CUSTOMER_OF"] },
   { name: "direction", label: "Direction", type: "select", options: ["OUTGOING", "INCOMING"] },
+  { name: "relationship_scope", label: "Scope", type: "select", optionList: "ENTITY_RELATIONSHIP_SCOPE", options: ["GENERAL", "SELF", "LEGAL", "COMMERCIAL", "OPERATIONAL"], defaultValue: "GENERAL" },
+  { name: "structure_category", label: "Structure category", type: "select", optionList: "ENTITY_STRUCTURE_CATEGORY", options: ["SELF", "GROUP", "TEAM", "LEGAL", "COMMERCIAL", "OPERATIONAL"], defaultValue: "SELF" },
+  { name: "mobile_affiliation", label: "Mobile affiliation", type: "checkbox" },
+  { name: "valid_from", label: "Valid from", type: "date" },
+  { name: "valid_to", label: "Valid to", type: "date" },
+  { name: "movement_reason", label: "Movement reason" },
   { name: "is_active", label: "Active", type: "checkbox", defaultValue: true }
 ];
 
@@ -649,7 +655,7 @@ export const entityKernelWorkspaceNode = {
       filters: [
         { name: "role", label: "Role", optionList: "ENTITY_ROLE", defaultOptionsPath: "roles" },
         { name: "status", label: "Status", optionList: "ENTITY_STATUS", defaultOptionsPath: "statuses" },
-        { name: "entity_kind", label: "Kind", optionList: "ENTITY_KIND", options: ["ORG", "PERSON"] }
+        { name: "entity_kind", label: "Kind", optionList: "ENTITY_KIND", options: ["ORG", "PERSON", "DIVISION", "DEPARTMENT", "TEAM", "SYSTEM", "OTHER"] }
       ]
     },
     detail: {
@@ -770,6 +776,21 @@ export const entityKernelWorkspaceNode = {
         empty: "No relationships recorded.",
         createForm: { title: "Add relationship", endpoint: "/api/eip/entities/:id/relationships", method: "POST", permission: "entities.manage_relationships", submitLabel: "Add relationship", fields: relationshipFields },
         updateForm: { title: "Update relationship", endpoint: "/api/eip/entities/:id/relationships/:rowId", method: "PATCH", permission: "entities.manage_relationships", submitLabel: "Save relationship", resetOnSave: false, fields: relationshipFields }
+      },
+      {
+        id: "org_chart",
+        label: "Org Chart",
+        icon: "layers",
+        type: "org_chart",
+        itemsPath: "org_chart",
+        endpoint: "/api/eip/entities/:id/org-chart?relationship_scope=SELF&structure_category=SELF",
+        moveEndpoint: "/api/eip/entities/:id/org-chart/move",
+        moveMethod: "POST",
+        moveRelationType: "MEMBER_OF",
+        relationshipScope: "SELF",
+        structureCategory: "SELF",
+        permission: "entities.manage_relationships",
+        empty: "No self-structure relationships recorded."
       },
       { id: "documents", label: "Documents", icon: "document", type: "records", itemsPath: "documents", titlePath: "title", subtitlePath: "record_type", badgePath: "status", empty: "No documents linked." },
       {

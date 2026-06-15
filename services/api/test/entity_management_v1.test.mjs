@@ -9,8 +9,11 @@ import {
   createEntityBankAccount,
   createEntityContact,
   createEntityRelationship,
+  getEntityOrgChart,
   listEntities,
-  updateEntity
+  moveEntityOrgChartNode,
+  updateEntity,
+  updateEntityRelationship
 } from "../src/services/entities/entityManagement.js";
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
@@ -19,6 +22,7 @@ const route = read("../src/routes/entities.js");
 const service = read("../src/services/entities/entityManagement.js");
 const server = read("../src/server.js");
 const migration = read("../db/migrations/0124_entity_management_v1.sql");
+const mobilityMigration = read("../db/migrations/0131_entity_relationship_mobility_org_chart.sql");
 const repairMigration = read("../db/migrations/0126_engine_first_module_workspace_repair.sql");
 const registry = read("../../../apps/dashboard/src/engine/registry.jsx");
 const dashboardSurface = read("../../../apps/dashboard/src/engine/surfaces/dashboard.js");
@@ -181,24 +185,113 @@ function buildDb(initial = {}) {
         state.banks.push(row);
         return { rowCount: 1, rows: [row] };
       }
+      if (sql.includes("UPDATE eip_core.object_link") && sql.includes("superseded_by_entity_id") && sql.includes("relation_type = ANY($3::text[])")) {
+        const relationTypes = Array.isArray(params[2]) ? params[2] : [];
+        for (const link of state.links) {
+          const attrs = link.attrs || {};
+          if (
+            link.tenant_id === params[0] &&
+            link.src_id === params[1] &&
+            link.src_kind === "agent" &&
+            link.dst_kind === "agent" &&
+            link.is_active &&
+            relationTypes.includes(link.relation_type) &&
+            (attrs.relationship_scope || "GENERAL") === params[3] &&
+            (attrs.structure_category || "SELF") === params[4] &&
+            (!params[8] || link.id !== params[8])
+          ) {
+            link.is_active = false;
+            link.attrs = {
+              ...attrs,
+              valid_to: params[5],
+              superseded_by_entity_id: params[6],
+              movement_reason: params[7],
+              mobile_affiliation: true
+            };
+          }
+        }
+        return { rowCount: 1, rows: [] };
+      }
+      if (sql.includes("UPDATE eip_core.object_link") && sql.includes("superseded_by_entity_id") && sql.includes("AND id=$2")) {
+        const link = state.links.find((item) => item.tenant_id === params[0] && item.id === params[1]);
+        if (link) {
+          link.is_active = false;
+          link.attrs = {
+            ...(link.attrs || {}),
+            valid_to: params[2],
+            superseded_by_entity_id: params[3],
+            movement_reason: params[4],
+            mobile_affiliation: true
+          };
+        }
+        return { rowCount: link ? 1 : 0, rows: [] };
+      }
       if (sql.includes("INSERT INTO eip_core.object_link")) {
+        const existing = state.links.find((link) =>
+          link.tenant_id === params[0] &&
+          link.src_kind === "agent" &&
+          link.src_id === params[1] &&
+          link.dst_kind === "agent" &&
+          link.dst_id === params[2] &&
+          link.relation_type === params[3]
+        );
+        const attrs = JSON.parse(params[5]);
+        if (existing) {
+          existing.sort_order = params[4];
+          existing.attrs = attrs;
+          existing.is_active = params.length > 6 ? params[6] : true;
+          return { rowCount: 1, rows: [existing] };
+        }
         const row = {
-          id: `rel-${state.links.length + 1}`,
+          id: `30000000-0000-4000-8000-${String(state.links.length + 1).padStart(12, "0")}`,
+          tenant_id: params[0],
+          src_kind: "agent",
           src_id: params[1],
+          dst_kind: "agent",
           dst_id: params[2],
           relation_type: params[3],
           sort_order: params[4],
-          attrs: JSON.parse(params[5]),
-          is_active: params[6],
+          attrs,
+          is_active: params.length > 6 ? params[6] : true,
           created_at: "2026-06-01T00:00:00.000Z",
           updated_at: "2026-06-01T00:00:00.000Z"
         };
         state.links.push(row);
         return { rowCount: 1, rows: [row] };
       }
+      if (sql.includes("FROM eip_core.object_link link") && sql.includes("link.relation_type = ANY($2::text[])")) {
+        const relationTypes = Array.isArray(params[1]) ? params[1] : [];
+        const rows = state.links
+          .filter((link) =>
+            link.tenant_id === params[0] &&
+            link.src_kind === "agent" &&
+            link.dst_kind === "agent" &&
+            link.is_active &&
+            relationTypes.includes(link.relation_type) &&
+            (link.attrs?.relationship_scope || "GENERAL") === params[2] &&
+            (link.attrs?.structure_category || "SELF") === params[3] &&
+            !link.attrs?.valid_to
+          )
+          .map((link) => {
+            const src = state.agents.find((agent) => agent.id === link.src_id);
+            const dst = state.agents.find((agent) => agent.id === link.dst_id);
+            return {
+              ...link,
+              src_code: src?.code,
+              src_name: src?.name,
+              src_type: src?.agent_type,
+              src_status: src?.attrs?.status,
+              dst_code: dst?.code,
+              dst_name: dst?.name,
+              dst_type: dst?.agent_type,
+              dst_status: dst?.attrs?.status
+            };
+          });
+        return { rowCount: rows.length, rows };
+      }
       if (sql.includes("FROM eip_core.object_link link") && sql.includes("JOIN eip_core.agent src")) {
         const rows = state.links
-          .filter((link) => link.src_id === params[1] || link.dst_id === params[1])
+          .filter((link) => link.tenant_id === params[0] && (link.src_id === params[1] || link.dst_id === params[1]))
           .map((link) => {
             const src = state.agents.find((agent) => agent.id === link.src_id);
             const dst = state.agents.find((agent) => agent.id === link.dst_id);
@@ -213,6 +306,29 @@ function buildDb(initial = {}) {
             };
           });
         return { rowCount: rows.length, rows };
+      }
+      if (sql.includes("SELECT id, src_id, dst_id, relation_type, sort_order, attrs, is_active") && sql.includes("FROM eip_core.object_link")) {
+        const row = state.links.find((link) =>
+          link.tenant_id === params[0] &&
+          link.id === params[1] &&
+          (link.src_id === params[2] || link.dst_id === params[2])
+        );
+        return { rowCount: row ? 1 : 0, rows: row ? [row] : [] };
+      }
+      if (sql.includes("UPDATE eip_core.object_link") && sql.includes("SET src_id=$4")) {
+        const row = state.links.find((link) =>
+          link.tenant_id === params[0] &&
+          link.id === params[1] &&
+          (link.src_id === params[2] || link.dst_id === params[2])
+        );
+        if (!row) return { rowCount: 0, rows: [] };
+        row.src_id = params[3];
+        row.dst_id = params[4];
+        row.relation_type = params[5];
+        row.sort_order = params[6];
+        row.attrs = JSON.parse(params[7]);
+        row.is_active = params[8];
+        return { rowCount: 1, rows: [row] };
       }
       if (sql.includes("UPDATE eip_core.entity_address SET is_primary=false")) return { rowCount: 0, rows: [] };
       if (sql.includes("UPDATE eip_core.entity_contact SET is_primary=false")) return { rowCount: 0, rows: [] };
@@ -297,6 +413,62 @@ test("address, contact, bank account, and relationship writes use existing subta
   assert.equal(relationship.item.related_entity_id, other.id);
 });
 
+test("mobile self-structure relationships close prior affiliation and feed org chart", async () => {
+  const division = makeAgent({ id: "20000000-0000-4000-8000-000000000010", agent_type: "DIVISION", code: "DIV", name: "Division" });
+  const parentA = makeAgent({ id: "20000000-0000-4000-8000-000000000011", code: "PARENT-A", name: "Parent A" });
+  const parentB = makeAgent({ id: "20000000-0000-4000-8000-000000000012", code: "PARENT-B", name: "Parent B" });
+  const parentC = makeAgent({ id: "20000000-0000-4000-8000-000000000013", code: "PARENT-C", name: "Parent C" });
+  const db = buildDb({ agents: [division, parentA, parentB, parentC] });
+  const app = appWithDb(db);
+  const session = { tenant_id: TENANT_A, identity_id: IDENTITY_A };
+
+  const first = await createEntityRelationship(app, session, division.id, {
+    related_entity_id: parentA.id,
+    relation_type: "MEMBER_OF",
+    relationship_scope: "SELF",
+    structure_category: "SELF",
+    mobile_affiliation: true,
+    movement_reason: "Initial structure"
+  });
+  assert.equal(first.item.related_entity_id, parentA.id);
+  assert.equal(first.item.mobile_affiliation, true);
+
+  const updated = await updateEntityRelationship(app, session, division.id, first.item.id, {
+    related_entity_id: parentB.id,
+    relation_type: "MEMBER_OF",
+    relationship_scope: "SELF",
+    structure_category: "SELF",
+    mobile_affiliation: true,
+    movement_reason: "Sold to Parent B"
+  });
+  assert.equal(updated.item.related_entity_id, parentB.id);
+  assert.equal(db.state.links.filter((link) => link.is_active).length, 1);
+  assert.equal(db.state.links.find((link) => link.is_active).dst_id, parentB.id);
+  assert.equal(db.state.links.filter((link) => !link.is_active).length, 1);
+
+  const moved = await moveEntityOrgChartNode(app, session, parentC.id, {
+    node_id: division.id,
+    new_parent_entity_id: parentC.id,
+    relation_type: "MEMBER_OF",
+    movement_reason: "Moved to Parent C"
+  });
+
+  const activeLinks = db.state.links.filter((link) => link.is_active);
+  const inactiveLinks = db.state.links.filter((link) => !link.is_active);
+  assert.equal(activeLinks.length, 1);
+  assert.equal(activeLinks[0].dst_id, parentC.id);
+  assert.equal(inactiveLinks.length, 2);
+  assert.equal(inactiveLinks.some((link) => link.dst_id === parentA.id), true);
+  assert.equal(inactiveLinks.some((link) => link.dst_id === parentB.id), true);
+  assert.equal(inactiveLinks.every((link) => link.attrs.valid_to.length > 0), true);
+  assert.equal(moved.org_chart.nodes.some((node) => node.id === division.id), true);
+  assert.equal(moved.org_chart.edges.some((edge) => edge.parent_entity_id === parentC.id && edge.child_entity_id === division.id), true);
+
+  const chart = await getEntityOrgChart(app, session, parentC.id);
+  assert.equal(chart.edges.length, 1);
+  assert.equal(chart.edges[0].mobile_affiliation, true);
+});
+
 test("route rejects permission denied and tenant_id override", async () => {
   const forbidden = Fastify({ logger: false });
   forbidden.decorate("db", {
@@ -340,6 +512,8 @@ test("entity route family registers required endpoints, session, CSRF, RBAC, and
     '"/:id/bank-accounts/:bankAccountId"',
     '"/:id/relationships"',
     '"/:id/relationships/:relationshipId"',
+    '"/:id/org-chart"',
+    '"/:id/org-chart/move"',
     '"/:id/documents"',
     '"/:id/policies"',
     '"/:id/activity"',
@@ -416,10 +590,36 @@ test("dashboard registry, source descriptor, and seed descriptor are aligned", (
   assert.match(seedSurface, /"code": "entities"/);
   assert.match(seedSurface, /"type": "KernelModuleWorkspace"/);
   assert.match(seedSurface, /"configEndpoint": "\/api\/eip\/entities\/governance\/options"/);
-  for (const tab of ["Overview", "Profile", "Addresses", "Contacts", "Bank Accounts", "Relationships", "Documents", "Policies", "Activity"]) {
+  for (const tab of ["Overview", "Profile", "Addresses", "Contacts", "Bank Accounts", "Relationships", "Org Chart", "Documents", "Policies", "Activity"]) {
     assert.match(moduleDescriptors, new RegExp(tab));
   }
   assert.match(workspace, /configEndpoint/);
+  assert.match(workspace, /tab\.type === "org_chart"/);
+  assert.match(workspace, /draggable=\{canMove && !saving\}/);
+  assert.match(moduleDescriptors, /relationshipScope: "SELF"/);
+  assert.match(moduleDescriptors, /moveEndpoint: "\/api\/eip\/entities\/:id\/org-chart\/move"/);
+});
+
+test("relationship mobility migration is additive and DB-metadata driven", () => {
+  for (const token of [
+    "0131_entity_relationship_mobility_org_chart",
+    "ENTITY_RELATIONSHIP_SCOPE",
+    "ENTITY_STRUCTURE_CATEGORY",
+    "MEMBER_OF",
+    "DIVISION_OF",
+    "DEPARTMENT_OF",
+    "TEAM_OF",
+    "mobile_affiliation",
+    "\"type\":\"org_chart\"",
+    "/api/eip/entities/:id/org-chart/move",
+    "module_catalog",
+    "tenant_module_setting"
+  ]) {
+    assert.match(mobilityMigration, new RegExp(token.replace(/[(){}[\].?*+^$|\\]/g, "\\$&")));
+  }
+  assert.doesNotMatch(mobilityMigration, /CREATE\s+TABLE/i);
+  assert.doesNotMatch(mobilityMigration, /DROP\s+/i);
+  assert.doesNotMatch(mobilityMigration, /DELETE\s+FROM/i);
 });
 
 test("workspace and docs are tenant agnostic and avoid fake data", () => {
@@ -427,5 +627,7 @@ test("workspace and docs are tenant agnostic and avoid fake data", () => {
   assert.doesNotMatch(touched, /samara|samarapattern|samara-web-storefront/i);
   assert.doesNotMatch(touched, /sample customer|fake customer|lorem ipsum|manual_test/i);
   assert.match(docs, /No new tables/);
+  assert.match(docs, /mobile self-structure affiliation/i);
+  assert.match(docs, /Org Chart/);
   assert.match(docs, /never hard-deletes/i);
 });

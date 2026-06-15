@@ -10,6 +10,7 @@ import {
   getEntityActivitySummary,
   getEntityDetail,
   getEntityGovernanceOptions,
+  getEntityOrgChart,
   getEntityPolicySummary,
   listEntities,
   listEntityAddresses,
@@ -21,7 +22,8 @@ import {
   updateEntityAddress,
   updateEntityBankAccount,
   updateEntityContact,
-  updateEntityRelationship
+  updateEntityRelationship,
+  moveEntityOrgChartNode
 } from "../services/entities/entityManagement.js";
 
 async function requireEntityPermission(app, req, reply, permissionCode) {
@@ -274,6 +276,30 @@ export default async function entitiesRoutes(app) {
     try {
       const result = await updateEntityRelationship(app, session, req.params.id, req.params.relationshipId, req.body || {});
       if (!result) return reply.code(404).send({ ok: false, error: "RELATIONSHIP_NOT_FOUND" });
+      return reply.send(result);
+    } catch (error) {
+      return handleEntityError(reply, error);
+    }
+  });
+
+  app.get("/:id/org-chart", async (req, reply) => {
+    const session = await requireEntityPermission(app, req, reply, ENTITY_PERMISSIONS.read);
+    if (!session) return;
+    try {
+      const result = await getEntityOrgChart(app, session, req.params.id, req.query || {});
+      if (!result) return reply.code(404).send({ ok: false, error: "ENTITY_NOT_FOUND" });
+      return reply.send(result);
+    } catch (error) {
+      return handleEntityError(reply, error);
+    }
+  });
+
+  app.post("/:id/org-chart/move", async (req, reply) => {
+    const session = await requireEntityPermission(app, req, reply, ENTITY_PERMISSIONS.manageRelationships);
+    if (!session) return;
+    try {
+      const result = await moveEntityOrgChartNode(app, session, req.params.id, req.body || {});
+      if (!result) return reply.code(404).send({ ok: false, error: "ENTITY_NOT_FOUND" });
       return reply.send(result);
     } catch (error) {
       return handleEntityError(reply, error);

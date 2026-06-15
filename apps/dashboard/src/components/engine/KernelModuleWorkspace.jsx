@@ -773,6 +773,136 @@ function JsonBlock({ value }) {
   );
 }
 
+function OrgChartTab({ tab, data, selected, permissions, refreshDetail, refreshAll }) {
+  const sourceChart = getPath(data, tab.itemsPath || "org_chart");
+  const [remoteChart, setRemoteChart] = useState(null);
+  const [draggedNodeId, setDraggedNodeId] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const canMove = !tab.permission || permissions.includes(tab.permission);
+  const chart = remoteChart || sourceChart;
+
+  useEffect(() => {
+    if (!tab.endpoint || !selected?.id) return;
+    let active = true;
+    Promise.resolve().then(async () => {
+      try {
+        const payload = await apiFetch(endpointFor(tab.endpoint, selected));
+        if (active) setRemoteChart(payload);
+      } catch (err) {
+        if (active) setError(parseApiError(err));
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [selected, tab.endpoint]);
+
+  const nodes = normalizeList(chart?.nodes);
+  const edges = normalizeList(chart?.edges);
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const childrenByParent = new Map();
+  for (const edge of edges) {
+    childrenByParent.set(edge.parent_entity_id, [...(childrenByParent.get(edge.parent_entity_id) || []), edge]);
+  }
+  const roots = normalizeList(chart?.roots).length
+    ? chart.roots
+    : nodes.filter((node) => !edges.some((edge) => edge.child_entity_id === node.id)).map((node) => node.id);
+
+  async function moveNode(parentEntityId) {
+    if (!draggedNodeId || draggedNodeId === parentEntityId || !tab.moveEndpoint || !selected?.id) return;
+    setSaving(true);
+    setError("");
+    try {
+      const payload = await apiFetch(endpointFor(tab.moveEndpoint, selected), {
+        method: tab.moveMethod || "POST",
+        body: {
+          node_id: draggedNodeId,
+          new_parent_entity_id: parentEntityId,
+          relation_type: tab.moveRelationType || "MEMBER_OF",
+          relationship_scope: tab.relationshipScope || "SELF",
+          structure_category: tab.structureCategory || "SELF",
+          movement_reason: tab.moveReason || "Org chart move"
+        }
+      });
+      if (payload?.org_chart) setRemoteChart(payload.org_chart);
+      await refreshDetail?.(selected.id);
+      await refreshAll?.();
+    } catch (err) {
+      setError(parseApiError(err));
+    } finally {
+      setSaving(false);
+      setDraggedNodeId("");
+    }
+  }
+
+  function renderNode(nodeId, depth = 0, seen = new Set()) {
+    if (!nodeId || seen.has(nodeId)) return null;
+    const node = nodeById.get(nodeId);
+    if (!node) return null;
+    const nextSeen = new Set(seen);
+    nextSeen.add(nodeId);
+    const children = normalizeList(childrenByParent.get(nodeId)).sort((a, b) => Number(a.sort_order || 100) - Number(b.sort_order || 100));
+    const Icon = ICONS[tab.nodeIcon || node.entity_kind?.toLowerCase()] || Building2;
+    return (
+      <div key={nodeId} className="min-w-0">
+        <div className="flex items-start gap-3">
+          {depth ? <div className="mt-6 h-px w-6 shrink-0 bg-ink-100" /> : null}
+          <div className="min-w-0 flex-1">
+            <div
+              draggable={canMove && !saving}
+              onDragStart={() => setDraggedNodeId(nodeId)}
+              onDragOver={(event) => {
+                if (canMove && draggedNodeId && draggedNodeId !== nodeId) event.preventDefault();
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                void moveNode(nodeId);
+              }}
+              className={`rounded-xl border px-3 py-2 transition ${
+                draggedNodeId && draggedNodeId !== nodeId
+                  ? "border-brand-200 bg-brand-50/70"
+                  : "border-ink-100/70 bg-white/85"
+              } ${canMove ? "cursor-grab active:cursor-grabbing" : ""}`}
+            >
+              <div className="flex items-center gap-2">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-ink-900 text-white">
+                  <Icon className="h-3.5 w-3.5" />
+                </span>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-ink-900">{node.display_name || node.code || node.id}</p>
+                  <p className="truncate text-[0.58rem] font-semibold uppercase tracking-[0.18em] text-ink-400">
+                    {formatValue(node.entity_kind || "entity", "label")}
+                  </p>
+                </div>
+                {node.status ? <Pill tone={TONES[String(node.status).toUpperCase()] || "slate"}>{formatValue(node.status, "label")}</Pill> : null}
+              </div>
+            </div>
+            {children.length ? (
+              <div className="ml-5 mt-3 space-y-3 border-l border-ink-100 pl-3">
+                {children.map((edge) => renderNode(edge.child_entity_id, depth + 1, nextSeen))}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!nodes.length) return <EmptyState>{tab.empty || "No structure relationships recorded."}</EmptyState>;
+
+  return (
+    <div className="space-y-3">
+      {error ? <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
+      <div className="overflow-x-auto rounded-xl border border-ink-100/70 bg-white/70 p-4">
+        <div className="min-w-[36rem] space-y-4">
+          {(roots.length ? roots : [selected?.id]).map((rootId) => renderNode(rootId))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TabContent({ tab, detail, selected, optionsPayload, permissions, refreshDetail, refreshAll }) {
   const data = { detail, selected, item: selected, ...detail };
   const [selectedRowByTab, setSelectedRowByTab] = useState({});
@@ -810,6 +940,20 @@ function TabContent({ tab, detail, selected, optionsPayload, permissions, refres
           await refreshAll();
           await refreshDetail(selected?.id);
         }}
+      />
+    );
+  }
+
+  if (tab.type === "org_chart") {
+    return (
+      <OrgChartTab
+        key={`${tab.id}-${selected?.id || ""}`}
+        tab={tab}
+        data={data}
+        selected={selected}
+        permissions={permissions}
+        refreshAll={refreshAll}
+        refreshDetail={refreshDetail}
       />
     );
   }
