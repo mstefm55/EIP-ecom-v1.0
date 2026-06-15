@@ -671,6 +671,32 @@ function OverviewCards({ cards, data }) {
   );
 }
 
+function KernelModuleTabs({ tabs, activeTab, onChange }) {
+  if (!tabs.length) return null;
+  return (
+    <div className="glass-panel flex flex-wrap items-center gap-2 border border-ink-100/60 bg-white/70 p-3">
+      {tabs.map((tab) => {
+        const Icon = ICONS[tab.icon] || Package;
+        return (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => onChange(tab.id)}
+            className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-[0.68rem] font-semibold uppercase tracking-[0.2em] transition ${
+              activeTab === tab.id
+                ? "bg-ink-900 text-white shadow-soft"
+                : "border border-ink-100/70 bg-white/80 text-ink-600 hover:bg-white"
+            }`}
+          >
+            <Icon className="h-3.5 w-3.5" />
+            {tab.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function SummaryRows({ rows, data }) {
   return (
     <div className="grid gap-2 md:grid-cols-2">
@@ -1177,23 +1203,8 @@ export default function KernelModuleWorkspace({ node }) {
                     </div>
                   ) : null}
                 </div>
-                <div className="mt-5 flex flex-wrap gap-2 rounded-2xl border border-ink-100/70 bg-ink-50/70 p-2">
-                  {visibleTabs.map((tab) => {
-                    const Icon = ICONS[tab.icon] || Package;
-                    return (
-                      <button
-                        key={tab.id}
-                        type="button"
-                        onClick={() => setActiveTab(tab.id)}
-                        className={`inline-flex items-center gap-2 rounded-full px-3.5 py-2 text-[0.65rem] font-semibold uppercase tracking-[0.16em] transition ${effectiveActiveTab === tab.id ? "bg-ink-900 text-white shadow-soft" : "border border-ink-100 bg-white/90 text-ink-600 hover:bg-white"}`}
-                      >
-                        <Icon className="h-4 w-4" />
-                        {tab.label}
-                      </button>
-                    );
-                  })}
-                </div>
               </div>
+              <KernelModuleTabs tabs={visibleTabs} activeTab={effectiveActiveTab} onChange={setActiveTab} />
               <ProcessIntentStrip config={processConfig} data={workspaceData} />
               <OverviewCards cards={overviewCards} data={workspaceData} />
               <TabContent
