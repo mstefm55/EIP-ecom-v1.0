@@ -642,41 +642,45 @@ function OverviewCards({ cards, data }) {
   const visible = normalizeList(cards);
   if (!visible.length) return null;
   return (
-    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-      {visible.map((card) => {
-        const Icon = ICONS[card.icon] || Sparkles;
-        const value = valueFromSpec(card, data);
-        const unit = card.unitPath ? getPath(data, card.unitPath) : card.unit;
-        const toneValue = String(getPath(data, card.tonePath, value) || "").toUpperCase();
-        const tone = TONES[toneValue] || card.tone || "slate";
-        return (
-          <div key={`${card.label}-${card.path || card.value}`} className="rounded-2xl border border-white/70 bg-white/80 p-4 shadow-soft">
-            <div className="flex items-start justify-between gap-3">
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-ink-900 text-white">
-                <Icon className="h-4 w-4" />
-              </span>
-              {card.badge ? <Pill tone={tone}>{card.badge}</Pill> : null}
+    <div className="rounded-2xl border border-white/70 bg-white/70 p-3 shadow-soft">
+      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+        {visible.map((card) => {
+          const Icon = ICONS[card.icon] || Sparkles;
+          const value = valueFromSpec(card, data);
+          const unit = card.unitPath ? getPath(data, card.unitPath) : card.unit;
+          const toneValue = String(getPath(data, card.tonePath, value) || "").toUpperCase();
+          const tone = TONES[toneValue] || card.tone || "slate";
+          return (
+            <div key={`${card.label}-${card.path || card.value}`} className="rounded-xl border border-ink-100/70 bg-white/85 px-3 py-2">
+              <div className="flex items-center justify-between gap-3">
+                <p className="truncate text-[0.58rem] font-semibold uppercase tracking-[0.18em] text-ink-400">{card.label}</p>
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-ink-50 text-ink-500">
+                  <Icon className="h-3.5 w-3.5" />
+                </span>
+              </div>
+              <div className="mt-1 flex items-center justify-between gap-3">
+                <p className="min-w-0 break-words text-sm font-semibold text-ink-900">{formatValue(value, card.format, unit)}</p>
+                {card.badge ? <Pill tone={tone}>{card.badge}</Pill> : null}
+              </div>
+              {card.hint ? <p className="mt-1 text-xs leading-relaxed text-ink-500">{card.hint}</p> : null}
             </div>
-            <p className="mt-4 text-[0.58rem] font-semibold uppercase tracking-[0.18em] text-ink-400">{card.label}</p>
-            <p className="mt-1 break-words text-lg font-semibold text-ink-900">{formatValue(value, card.format, unit)}</p>
-            {card.hint ? <p className="mt-1 text-xs leading-relaxed text-ink-500">{card.hint}</p> : null}
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   );
 }
 
 function SummaryRows({ rows, data }) {
   return (
-    <div className="grid gap-3 md:grid-cols-2">
+    <div className="grid gap-2 md:grid-cols-2">
       {normalizeList(rows).map((row) => {
         const value = getPath(data, row.path, row.value);
         const unit = row.unitPath ? getPath(data, row.unitPath) : row.unit;
         return (
-          <div key={`${row.label}-${row.path || row.value}`} className="rounded-2xl border border-white/70 bg-white/75 p-4 shadow-soft">
-            <p className="text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-ink-400">{row.label}</p>
-            <p className="mt-2 break-words text-sm font-semibold text-ink-800">{formatValue(value, row.format, unit)}</p>
+          <div key={`${row.label}-${row.path || row.value}`} className="rounded-xl border border-ink-100/70 bg-white/80 px-3 py-2 shadow-soft">
+            <p className="text-[0.58rem] font-semibold uppercase tracking-[0.18em] text-ink-400">{row.label}</p>
+            <p className="mt-1 break-words text-sm font-semibold text-ink-800">{formatValue(value, row.format, unit)}</p>
           </div>
         );
       })}
