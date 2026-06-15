@@ -65,9 +65,8 @@ test("mailbox capability, mailbox dropdowns, and descriptor tabs are included in
   ]) {
     assert.match(canonicalCrmSeed, new RegExp(code));
   }
-  assert.match(dashboardSeed, /"id": "mailbox"/);
-  assert.match(dashboardSeed, /"id": "mailbox_replies"/);
-  assert.match(dashboardSeed, /"capability": "mailbox"/);
+  assert.match(dashboardSeed, /"type": "KernelModuleWorkspace"/);
+  assert.match(dashboardSeed, /"configEndpoint": "\/api\/eip\/crm\/governance\/options"/);
 });
 
 test("published dashboard descriptors and global CRM dropdowns remain inheritable without stale tenant copies", () => {

@@ -41,7 +41,6 @@ import EcomProductWorkspace from "../components/ecom/EcomProductWorkspace";
 import EcomOrderManagementPanel from "../components/ecom/EcomOrderManagementPanel";
 import EcomCommerceSettingsPanel from "../components/ecom/EcomCommerceSettingsPanel";
 import EcomCommerceLifecyclePanel from "../components/ecom/EcomCommerceLifecyclePanel";
-import CrmWorkspace from "../components/crm/CrmWorkspace";
 
 export const registry = {
   AuthShell,
@@ -86,6 +85,5 @@ export const registry = {
   EcomOrderManagementPanel,
   EcomCommerceSettingsPanel,
   EcomCommerceLifecyclePanel,
-  CrmWorkspace,
   Fallback,
 };

@@ -99,6 +99,15 @@ const procurementRequestFields = [
   { name: "notes", label: "Notes", type: "textarea", rows: 2 }
 ];
 
+export const crmKernelWorkspaceNode = {
+  id: "crm-management-workspace",
+  type: "KernelModuleWorkspace",
+  props: {
+    module: "crm",
+    configEndpoint: "/api/eip/crm/governance/options"
+  }
+};
+
 export const procurementKernelWorkspaceNode = {
   id: "procurement-management-workspace",
   type: "KernelModuleWorkspace",

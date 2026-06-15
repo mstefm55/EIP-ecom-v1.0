@@ -12,6 +12,7 @@ const descriptorRepair = read("../db/migrations/0100_crm_dashboard_descriptor_re
 const uiSurfaceRoutes = read("../src/routes/ui_surface.js");
 const registry = read("../../../apps/dashboard/src/engine/registry.jsx");
 const surface = read("../../../apps/dashboard/src/engine/surfaces/dashboard.js");
+const moduleDescriptors = read("../../../apps/dashboard/src/engine/surfaces/kernelModuleDescriptors.js");
 const userShell = read("../../../apps/dashboard/src/components/user/UserShell.jsx");
 const workspace = read("../../../apps/dashboard/src/components/crm/CrmWorkspace.jsx");
 
@@ -36,7 +37,8 @@ test("CRM completion registers leads, conversion, notes, timeline, overview, and
     assert.match(completion, new RegExp(route.replace(/[/:]/g, "\\$&")));
   }
   assert.match(completion, /\["cases", "CRM_CASE", "CRM_CASE_WRITE"\]/);
-  assert.match(completion, /\["opportunities", "CRM_OPPORTUNITY", "CRM_OPPORTUNITY_WRITE"\]/);
+  assert.match(completion, /app\.patch\("\/opportunities\/:id"/);
+  assert.match(completion, /updateCrmOpportunity/);
 });
 
 test("CRM write routes preserve session, CSRF, permission, and tenant scope checks", () => {
@@ -94,10 +96,12 @@ test("lead conversion remains process-governed", () => {
 });
 
 test("CRM dashboard is descriptor registered, module gated, and backed by a reusable widget", () => {
-  assert.match(registry, /import CrmWorkspace/);
-  assert.match(registry, /CrmWorkspace,/);
+  assert.match(registry, /import KernelModuleWorkspace/);
+  assert.match(registry, /KernelModuleWorkspace,/);
   assert.match(surface, /\{ code: "crm", label: "CRM", icon: "Users", module: "crm" \}/);
-  assert.match(surface, /type: "CrmWorkspace"/);
+  assert.match(surface, /crmKernelWorkspaceNode/);
+  assert.match(moduleDescriptors, /export const crmKernelWorkspaceNode/);
+  assert.match(moduleDescriptors, /type: "KernelModuleWorkspace"/);
   assert.match(userShell, /activeModules\?\.includes\(String\(item\.module\)\.trim\(\)\.toLowerCase\(\)\)/);
   assert.match(workspace, /export default function CrmWorkspace/);
   assert.match(workspace, /CRM_LEAD_STATUS/);

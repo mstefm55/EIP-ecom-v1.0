@@ -1,4 +1,5 @@
 import {
+  crmKernelWorkspaceNode,
   entityKernelWorkspaceNode,
   inventoryKernelWorkspaceNode,
   policiesKernelWorkspaceNode,
@@ -419,32 +420,7 @@ export const dashboardSurface = {
       type: "UserPanel",
       props: { tab: "crm" },
       children: [
-        {
-          id: "crm-workspace",
-          type: "CrmWorkspace",
-          props: {
-            module: "crm",
-            title: "CRM",
-            subtitle: "Customers, leads, opportunities, cases, interactions, and follow-ups.",
-            tabs: [
-              { id: "overview", label: "Overview", kind: "overview" },
-              { id: "intake", label: "Intake Inbox", kind: "intake", endpoint: "/api/eip/crm/intake", permission: "CRM_INTAKE_READ", capability: "intake" },
-              { id: "mailbox", label: "Mailbox", kind: "mailbox", endpoint: "/api/eip/crm/mailbox/messages", permission: "CRM_MAILBOX_READ", capability: "mailbox" },
-              { id: "mailbox_replies", label: "Reply Drafts", kind: "mailbox_reply", endpoint: "/api/eip/crm/mailbox/replies", permission: "CRM_MAILBOX_READ", capability: "mailbox" },
-              { id: "leads", label: "Leads", kind: "service_object", endpoint: "/api/eip/crm/leads", permission: "CRM_LEAD_READ" },
-              { id: "agents", label: "Customers", kind: "agent", endpoint: "/api/eip/crm/agents", permission: "CRM_AGENT_READ" },
-              { id: "opportunities", label: "Opportunities", kind: "service_object", endpoint: "/api/eip/crm/opportunities", permission: "CRM_OPPORTUNITY_READ" },
-              { id: "cases", label: "Cases", kind: "service_object", endpoint: "/api/eip/crm/cases", permission: "CRM_CASE_READ" },
-              { id: "interactions", label: "Interactions", kind: "service_object", endpoint: "/api/eip/crm/interactions", permission: "CRM_INTERACTION_READ" },
-              { id: "tasks", label: "Follow-ups", kind: "task", endpoint: "/api/eip/crm/tasks", permission: "CRM_TASK_READ" },
-              { id: "intelligence", label: "Intelligence", kind: "intelligence", endpoint: "/api/eip/crm/intelligence/overview", permission: "CRM_INTELLIGENCE_READ", capability: "intelligence" },
-              { id: "segments", label: "Segments", kind: "agent", endpoint: "/api/eip/crm/segments", permission: "CRM_SEGMENT_READ", capability: "segments" },
-              { id: "campaigns", label: "Campaigns", kind: "service_object", endpoint: "/api/eip/crm/campaigns", permission: "CRM_CAMPAIGN_READ", capability: "campaigns" },
-              { id: "signals", label: "Signals", kind: "info_record", endpoint: "/api/eip/crm/signals", permission: "CRM_SIGNAL_READ", capability: "signals" },
-              { id: "connectors", label: "Connectors", kind: "connector", endpoint: "/api/eip/crm/intelligence/connectors", permission: "CRM_CONNECTOR_READ", capability: "connectors" },
-            ],
-          },
-        },
+        crmKernelWorkspaceNode,
       ],
     },
     {

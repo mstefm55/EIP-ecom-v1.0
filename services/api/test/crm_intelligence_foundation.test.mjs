@@ -116,9 +116,11 @@ test("migration seeds governed dropdowns, permissions, role bundles, capabilitie
 
 test("dashboard descriptors and reusable workspace register capability-gated intelligence tabs", () => {
   for (const value of ["intelligence", "segments", "campaigns", "signals", "connectors"]) {
-    assert.match(surface, new RegExp(`id: "${value}"`));
-    assert.match(seed, new RegExp(`"id": "${value}"`));
+    assert.match(workspace, new RegExp(`id: "${value}"`));
   }
+  assert.match(surface, /crmKernelWorkspaceNode/);
+  assert.match(seed, /"type": "KernelModuleWorkspace"/);
+  assert.match(seed, /"configEndpoint": "\/api\/eip\/crm\/governance\/options"/);
   assert.match(workspace, /capabilities\[item\.capability\] === true/);
   assert.match(workspace, /CRM_CAMPAIGN_CHANNEL/);
   assert.match(workspace, /CRM_SIGNAL_SOURCE_CHANNEL/);

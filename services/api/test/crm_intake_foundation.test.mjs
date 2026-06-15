@@ -142,9 +142,10 @@ test("intake permissions remain available when tenant roles are provisioned afte
   assert.doesNotMatch(roleTemplateBackfill, /\('ACCESS_READ_ONLY','CRM_INTAKE_WRITE'\)/);
 });
 
-test("intake Inbox is descriptor and capability gated in the reusable CRM workspace", () => {
-  assert.match(surface, /id: "intake", label: "Intake Inbox"/);
-  assert.match(seed, /"id": "intake", "label": "Intake Inbox"/);
+test("intake Inbox remains capability gated while CRM dashboard mount is engine-first", () => {
+  assert.match(surface, /crmKernelWorkspaceNode/);
+  assert.match(seed, /"type": "KernelModuleWorkspace"/);
+  assert.match(seed, /"configEndpoint": "\/api\/eip\/crm\/governance\/options"/);
   assert.match(workspace, /Review incoming messages and signals before EIP creates leads, cases, opportunities, or tasks\./);
   assert.match(workspace, /<th className="px-2 py-2">Confidence<\/th>/);
   assert.match(workspace, /item\.payload\?\.suggested_tasks/);
