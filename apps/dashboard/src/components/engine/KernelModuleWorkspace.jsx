@@ -1,21 +1,27 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity,
+  AlertTriangle,
   Archive,
   Boxes,
   Briefcase,
   Building2,
+  CheckCircle2,
+  CircleDot,
+  Clock3,
   FileText,
   GitBranch,
   Layers,
   Loader2,
   Mail,
   Package,
+  PanelLeft,
   Plus,
   RefreshCw,
   Save,
   Search,
   ShieldCheck,
+  Sparkles,
   ShoppingCart,
   TrendingDown,
   TrendingUp,
@@ -25,19 +31,27 @@ import { apiFetch } from "../../services/apiClient";
 
 const ICONS = {
   activity: Activity,
+  alert: AlertTriangle,
   archive: Archive,
   boxes: Boxes,
   briefcase: Briefcase,
   building: Building2,
+  check: CheckCircle2,
+  clock: Clock3,
+  dot: CircleDot,
   document: FileText,
   file: FileText,
+  health: CheckCircle2,
+  intent: Sparkles,
   link: GitBranch,
   layers: Layers,
   mail: Mail,
   package: Package,
+  panel: PanelLeft,
   pipeline: TrendingUp,
   policy: ShieldCheck,
   reorder: TrendingDown,
+  sparkles: Sparkles,
   shopping: ShoppingCart,
   "shopping-cart": ShoppingCart,
   trend: TrendingUp,
@@ -65,7 +79,14 @@ const TONES = {
   NEEDS_REVIEW: "amber",
   UNDER_REVIEW: "amber",
   RESERVED: "amber",
-  QUARANTINE: "amber"
+  QUARANTINE: "amber",
+  DRAFT: "slate",
+  OPEN: "blue",
+  PENDING_APPROVAL: "amber",
+  LOW_STOCK: "amber",
+  REORDER_NOW: "amber",
+  STOCKOUT_PREDICTED: "red",
+  ALREADY_OUT_OF_STOCK: "red"
 };
 
 function getPath(obj, path, fallback = undefined) {
@@ -117,6 +138,17 @@ function formatValue(value, format, unit) {
     if (!Number.isFinite(number)) return "-";
     const text = String(Number(number.toFixed(3)));
     return format === "quantity" && unit ? `${text} ${unit}` : text;
+  }
+  if (format === "currency") {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return "-";
+    return new Intl.NumberFormat(undefined, { style: "currency", currency: unit || "EUR" }).format(number);
+  }
+  if (format === "boolean") return value ? "Yes" : "No";
+  if (format === "percent") {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return "-";
+    return `${String(Number(number.toFixed(2)))}%`;
   }
   if (format === "array") return normalizeList(value).join(", ") || "-";
   if (format === "label") return titleize(value);
@@ -474,8 +506,163 @@ function ManagedFormState({ config, fields, initialValues, selected, row, option
 
 function EmptyState({ children }) {
   return (
-    <div className="rounded-2xl border border-dashed border-ink-100 bg-white/60 p-5 text-sm text-ink-400">
+    <div className="rounded-2xl border border-dashed border-ink-100 bg-white/70 p-5 text-sm text-ink-500">
       {children}
+    </div>
+  );
+}
+
+function valueFromSpec(spec, data) {
+  const value = spec.path ? getPath(data, spec.path, spec.value) : spec.value;
+  return value === undefined || value === null || value === "" ? spec.fallback : value;
+}
+
+function FieldList({ fields, data, compact = false }) {
+  const visible = normalizeList(fields).filter(Boolean);
+  if (!visible.length) return null;
+  return (
+    <div className={`grid gap-2 ${compact ? "" : "sm:grid-cols-2 xl:grid-cols-4"}`}>
+      {visible.map((field) => {
+        const value = valueFromSpec(field, data);
+        const unit = field.unitPath ? getPath(data, field.unitPath) : field.unit;
+        return (
+          <div key={`${field.label}-${field.path || field.value}`} className={compact ? "min-w-0" : "rounded-2xl border border-ink-100/70 bg-white/70 px-3 py-2"}>
+            <p className="truncate text-[0.58rem] font-semibold uppercase tracking-[0.18em] text-ink-400">{field.label}</p>
+            <p className="mt-1 truncate text-xs font-semibold text-ink-700">{formatValue(value, field.format, unit)}</p>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function HeroMetrics({ metrics, items, data }) {
+  const configured = normalizeList(metrics);
+  const statusCounts = items.reduce((acc, item) => {
+    const status = getPath(item, "status") || getPath(item, "mapping_status") || "records";
+    const key = String(status || "records").toUpperCase();
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+  const cards = configured.length
+    ? configured.map((metric) => ({ ...metric, value: valueFromSpec(metric, data) }))
+    : [
+        { label: "Records", value: items.length, icon: "panel" },
+        ...Object.entries(statusCounts).slice(0, 2).map(([status, count]) => ({ label: titleize(status), value: count, icon: "dot" }))
+      ];
+  return (
+    <div className="grid gap-2 sm:grid-cols-3 xl:min-w-[24rem]">
+      {cards.map((metric) => {
+        const Icon = ICONS[metric.icon] || CircleDot;
+        const unit = metric.unitPath ? getPath(data, metric.unitPath) : metric.unit;
+        return (
+          <div key={`${metric.label}-${metric.path || metric.value}`} className="rounded-2xl border border-ink-100/70 bg-white/75 px-3 py-2 shadow-soft">
+            <div className="flex items-center gap-2">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-ink-50 text-ink-500">
+                <Icon className="h-3.5 w-3.5" />
+              </span>
+              <div className="min-w-0">
+                <p className="truncate text-[0.56rem] font-semibold uppercase tracking-[0.18em] text-ink-400">{metric.label}</p>
+                <p className="truncate text-sm font-semibold text-ink-900">{formatValue(metric.value, metric.format, unit)}</p>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function disabledReasonForAction(action, permissions, statusValue, loading) {
+  if (loading) return "";
+  if (action.permission && !permissions.includes(action.permission)) return action.permissionDeniedReason || `Missing ${action.permission}`;
+  const enabledStatuses = normalizeList(action.enabledStatuses).map((status) => String(status).toUpperCase());
+  if (enabledStatuses.length && !enabledStatuses.includes(String(statusValue || "").toUpperCase())) {
+    return action.disabledReason || "Action is unavailable for this status.";
+  }
+  return "";
+}
+
+function ActionButton({ action, permissions, statusValue, loading, onClick, icon }) {
+  const reason = disabledReasonForAction(action, permissions, statusValue, loading);
+  const disabled = Boolean(reason) || loading;
+  const ButtonIcon = icon || ICONS[action.icon] || Save;
+  return (
+    <div className="min-w-[8rem]">
+      <button
+        type="button"
+        disabled={disabled}
+        title={reason || undefined}
+        onClick={onClick}
+        className={buttonClass(action.primary === true)}
+      >
+        {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ButtonIcon className="h-4 w-4" />}
+        {action.label}
+      </button>
+      {reason ? <p className="mt-1 max-w-[12rem] text-[0.58rem] font-medium leading-snug text-ink-400">{reason}</p> : null}
+    </div>
+  );
+}
+
+function ProcessIntentStrip({ config, data }) {
+  if (!config) return null;
+  const stage = valueFromSpec(config.stage || {}, data);
+  const nextAction = valueFromSpec(config.nextAction || {}, data);
+  const blocked = valueFromSpec(config.blocked || {}, data);
+  const approval = valueFromSpec(config.approval || {}, data);
+  const taskCount = valueFromSpec(config.taskCount || {}, data);
+  const hasContent = [stage, nextAction, blocked, approval, taskCount].some((value) => value !== undefined && value !== null && value !== "" && value !== "-");
+  if (!hasContent) return null;
+  const blockedActive = Array.isArray(blocked) ? blocked.length > 0 : Boolean(blocked && blocked !== "-");
+  return (
+    <div className="rounded-2xl border border-ink-100/70 bg-ink-950 p-4 text-white shadow-soft">
+      <div className="grid gap-3 md:grid-cols-5">
+        <div className="md:col-span-2">
+          <p className="text-[0.58rem] font-semibold uppercase tracking-[0.2em] text-white/45">{config.label || "Process intent"}</p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Pill tone={blockedActive ? "amber" : "blue"}>{formatValue(stage || config.stage?.fallback || "In progress", config.stage?.format || "label")}</Pill>
+            {approval ? <Pill tone={String(approval).toUpperCase().includes("PENDING") ? "amber" : "slate"}>{formatValue(approval, config.approval?.format || "label")}</Pill> : null}
+          </div>
+        </div>
+        <div className="md:col-span-2">
+          <p className="text-[0.58rem] font-semibold uppercase tracking-[0.2em] text-white/45">Next best action</p>
+          <p className="mt-2 text-sm font-semibold text-white">{formatValue(nextAction || config.nextAction?.fallback || "Review current state")}</p>
+          {blockedActive ? <p className="mt-1 text-xs text-amber-100">{formatValue(blocked, config.blocked?.format || "array")}</p> : null}
+        </div>
+        <div>
+          <p className="text-[0.58rem] font-semibold uppercase tracking-[0.2em] text-white/45">Linked tasks</p>
+          <p className="mt-2 text-2xl font-semibold text-white">{formatValue(taskCount ?? 0, "number")}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OverviewCards({ cards, data }) {
+  const visible = normalizeList(cards);
+  if (!visible.length) return null;
+  return (
+    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      {visible.map((card) => {
+        const Icon = ICONS[card.icon] || Sparkles;
+        const value = valueFromSpec(card, data);
+        const unit = card.unitPath ? getPath(data, card.unitPath) : card.unit;
+        const toneValue = String(getPath(data, card.tonePath, value) || "").toUpperCase();
+        const tone = TONES[toneValue] || card.tone || "slate";
+        return (
+          <div key={`${card.label}-${card.path || card.value}`} className="rounded-2xl border border-white/70 bg-white/80 p-4 shadow-soft">
+            <div className="flex items-start justify-between gap-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-ink-900 text-white">
+                <Icon className="h-4 w-4" />
+              </span>
+              {card.badge ? <Pill tone={tone}>{card.badge}</Pill> : null}
+            </div>
+            <p className="mt-4 text-[0.58rem] font-semibold uppercase tracking-[0.18em] text-ink-400">{card.label}</p>
+            <p className="mt-1 break-words text-lg font-semibold text-ink-900">{formatValue(value, card.format, unit)}</p>
+            {card.hint ? <p className="mt-1 text-xs leading-relaxed text-ink-500">{card.hint}</p> : null}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -512,20 +699,25 @@ function RecordList({ items, config, onSelect, selectedId }) {
             key={id}
             type="button"
             onClick={() => onSelect?.(item)}
-            className={`w-full rounded-2xl border p-3 text-left transition ${selectedId === id ? "border-brand-200 bg-brand-50/80 shadow-soft" : "border-white/70 bg-white/70 hover:bg-white"}`}
+            className={`w-full rounded-2xl border p-3 text-left transition ${selectedId === id ? "border-ink-900 bg-ink-900 text-white shadow-soft" : "border-white/70 bg-white/75 hover:border-brand-200 hover:bg-white"}`}
           >
             <div className="flex items-start justify-between gap-3">
               <div className="flex min-w-0 items-start gap-3">
-                <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-ink-900 text-white">
+                <span className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${selectedId === id ? "bg-white text-ink-900" : "bg-ink-900 text-white"}`}>
                   <Icon className="h-4 w-4" />
                 </span>
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-ink-800">{title}</p>
-                  <p className="truncate text-xs text-ink-400">{subtitle}</p>
+                  <p className={`truncate text-sm font-semibold ${selectedId === id ? "text-white" : "text-ink-800"}`}>{title}</p>
+                  <p className={`truncate text-xs ${selectedId === id ? "text-white/60" : "text-ink-400"}`}>{subtitle}</p>
                 </div>
               </div>
               {badgeValue ? <Pill tone={TONES[String(badgeValue).toUpperCase()] || "slate"}>{formatValue(badgeValue, "label")}</Pill> : null}
             </div>
+            {config.meta?.length ? (
+              <div className={`mt-3 rounded-xl border px-3 py-2 ${selectedId === id ? "border-white/10 bg-white/10" : "border-ink-100/70 bg-ink-50/60"}`}>
+                <FieldList fields={config.meta} data={item} compact />
+              </div>
+            ) : null}
           </button>
         );
       })}
@@ -620,31 +812,17 @@ function TabContent({ tab, detail, selected, optionsPayload, permissions, refres
               {collectionActionError ? <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{collectionActionError}</div> : null}
               <div className="flex flex-wrap gap-2">
                 {tab.rowActions.map((action) => {
-                  const permissionMissing = action.permission && !permissions.includes(action.permission);
-                  const enabledStatuses = normalizeList(action.enabledStatuses).map((status) => String(status).toUpperCase());
                   const rowBadgeValue = getPath(selectedRow, action.statusPath || tab.badgePath || "status");
-                  const statusBlocked = enabledStatuses.length
-                    ? !enabledStatuses.includes(String(rowBadgeValue || "").toUpperCase())
-                    : false;
                   const actionKey = action.id || action.label || action.endpoint;
-                  const disabled = permissionMissing || statusBlocked || Boolean(collectionActionLoading);
-                  const title = permissionMissing
-                    ? `Missing ${action.permission}`
-                    : statusBlocked
-                      ? action.disabledReason || "Action is unavailable for this status."
-                      : undefined;
                   return (
-                    <button
+                    <ActionButton
                       key={actionKey}
-                      type="button"
-                      disabled={disabled}
-                      title={title}
+                      action={action}
+                      permissions={permissions}
+                      statusValue={rowBadgeValue}
+                      loading={collectionActionLoading === actionKey}
                       onClick={() => runCollectionAction(action, selectedRow)}
-                      className={buttonClass(action.primary === true)}
-                    >
-                      {collectionActionLoading === actionKey ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                      {action.label}
-                    </button>
+                    />
                   );
                 })}
               </div>
@@ -675,6 +853,31 @@ function TabContent({ tab, detail, selected, optionsPayload, permissions, refres
     return (
       <div className="rounded-2xl border border-white/70 bg-white/75 p-5 shadow-soft">
         <RecordList items={items} config={tab} />
+      </div>
+    );
+  }
+
+  if (tab.type === "communications") {
+    const configured = tab.providerConfiguredPath ? getPath(data, tab.providerConfiguredPath) === true : false;
+    const items = normalizeList(getPath(data, tab.itemsPath));
+    if (!configured && !items.length) {
+      return (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800 shadow-soft">
+          <div className="flex items-start gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white text-amber-700">
+              <Mail className="h-4 w-4" />
+            </span>
+            <div>
+              <p className="font-semibold">{tab.disabledTitle || "Communications unavailable"}</p>
+              <p className="mt-1 text-amber-700">{tab.disabledMessage || "Communication provider not configured"}</p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div className="rounded-2xl border border-white/70 bg-white/75 p-5 shadow-soft">
+        <RecordList items={items} config={{ ...tab, empty: tab.empty || "No communication summaries linked." }} />
       </div>
     );
   }
@@ -817,33 +1020,48 @@ export default function KernelModuleWorkspace({ node }) {
   const effectiveActiveTab = visibleTabs.some((tab) => tab.id === activeTab)
     ? activeTab
     : visibleTabs[0]?.id || "overview";
+  const workspaceData = { items, selected, item: selected, detail, optionsPayload, ...(detail || {}) };
+  const processConfig = detailConfig.process || layout.process;
+  const overviewCards = detailConfig.overviewCards || layout.overviewCards;
+  const ModuleIcon = ICONS[layout.icon || listConfig.icon] || Package;
 
   return (
-    <div className="space-y-5">
-      <div className="glass-panel p-5">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-          <div>
-            {layout.eyebrow ? <p className="text-[0.65rem] font-semibold uppercase tracking-[0.24em] text-brand-500">{layout.eyebrow}</p> : null}
-            <h1 className="mt-1 font-display text-2xl font-semibold text-ink-900">{layout.title || props.title || "Workspace"}</h1>
-            {layout.subtitle || props.subtitle ? <p className="mt-1 max-w-3xl text-sm text-ink-500">{layout.subtitle || props.subtitle}</p> : null}
+    <div className="space-y-4">
+      <div className="glass-panel border border-ink-100/60 bg-white/75 p-5 shadow-soft">
+        <div className="flex flex-col gap-5 2xl:flex-row 2xl:items-center 2xl:justify-between">
+          <div className="flex min-w-0 items-start gap-4">
+            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-ink-900 text-white shadow-soft">
+              <ModuleIcon className="h-5 w-5" />
+            </span>
+            <div className="min-w-0">
+              {layout.eyebrow ? <p className="text-[0.62rem] font-semibold uppercase tracking-[0.28em] text-brand-500">{layout.eyebrow}</p> : null}
+              <h1 className="mt-1 font-display text-2xl font-semibold text-ink-900">{layout.title || props.title || "Workspace"}</h1>
+              {layout.subtitle || props.subtitle ? <p className="mt-1 max-w-3xl text-sm leading-6 text-ink-500">{layout.subtitle || props.subtitle}</p> : null}
+              {layout.processHealth ? (
+                <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-ink-100/70 bg-white/80 px-3 py-1 text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-ink-500">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                  {layout.processHealth.label || "Process health"}: {formatValue(valueFromSpec(layout.processHealth, workspaceData), layout.processHealth.format || "label")}
+                </div>
+              ) : null}
+            </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-col gap-3 xl:items-end">
+            <HeroMetrics metrics={layout.metrics} items={items} data={workspaceData} />
+            <div className="flex flex-wrap items-center gap-2 xl:justify-end">
             <button type="button" onClick={refreshAll} disabled={loading} className={buttonClass(false)}>
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
               {layout.refreshLabel || "Refresh"}
             </button>
             {actions.create ? (
-              <button
-                type="button"
+              <ActionButton
+                action={{ ...actions.create, label: actions.create.label || "Create" }}
+                permissions={permissions}
+                loading={false}
+                icon={Plus}
                 onClick={() => setCreateOpen((value) => !value)}
-                disabled={actions.create.permission && !permissions.includes(actions.create.permission)}
-                title={actions.create.permission && !permissions.includes(actions.create.permission) ? `Missing ${actions.create.permission}` : undefined}
-                className={buttonClass(true)}
-              >
-                <Plus className="h-4 w-4" />
-                {actions.create.label || "Create"}
-              </button>
+              />
             ) : null}
+            </div>
           </div>
         </div>
       </div>
@@ -862,9 +1080,16 @@ export default function KernelModuleWorkspace({ node }) {
         />
       ) : null}
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(280px,380px)_1fr]">
+      <div className="grid gap-5 xl:grid-cols-[minmax(320px,400px)_1fr]">
         <section className="space-y-3">
-          <div className="rounded-2xl border border-white/70 bg-white/75 p-4 shadow-soft">
+          <div className="glass-panel border border-ink-100/60 bg-white/75 p-4 shadow-soft">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[0.58rem] font-semibold uppercase tracking-[0.22em] text-ink-400">{listConfig.label || "Records"}</p>
+                <p className="text-sm font-semibold text-ink-900">{items.length} visible</p>
+              </div>
+              <PanelLeft className="h-4 w-4 text-ink-300" />
+            </div>
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-300" />
               <input
@@ -898,7 +1123,8 @@ export default function KernelModuleWorkspace({ node }) {
                 titlePath: listConfig.titlePath || "name",
                 subtitlePath: listConfig.subtitlePath || "code",
                 badgePath: listBadgePath,
-                empty: listConfig.emptyLabel
+                empty: listConfig.emptyLabel,
+                meta: listConfig.meta
               }}
               onSelect={(item) => {
                 setSelectedId(item.id);
@@ -915,7 +1141,7 @@ export default function KernelModuleWorkspace({ node }) {
             </div>
           ) : (
             <div className="space-y-5">
-              <div className="glass-panel p-5">
+              <div className="glass-panel border border-ink-100/60 bg-white/75 p-5 shadow-soft">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
@@ -925,40 +1151,29 @@ export default function KernelModuleWorkspace({ node }) {
                       {selectedBadgeValue ? <Pill tone={TONES[String(selectedBadgeValue).toUpperCase()] || "slate"}>{formatValue(selectedBadgeValue, "label")}</Pill> : null}
                     </div>
                     <p className="mt-1 truncate text-sm text-ink-500">{formatValue(getPath(selected, detailConfig.subtitlePath || listConfig.subtitlePath || "code"))}</p>
+                    <div className="mt-3">
+                      <FieldList fields={detailConfig.meta} data={workspaceData} />
+                    </div>
                   </div>
                   {rowActions.length ? (
                     <div className="flex flex-wrap items-center gap-2">
                       {rowActions.map((action) => {
-                        const permissionMissing = action.permission && !permissions.includes(action.permission);
-                        const enabledStatuses = normalizeList(action.enabledStatuses).map((status) => String(status).toUpperCase());
-                        const statusBlocked = enabledStatuses.length
-                          ? !enabledStatuses.includes(String(selectedBadgeValue || "").toUpperCase())
-                          : false;
-                        const disabled = permissionMissing || statusBlocked || Boolean(actionLoading);
-                        const title = permissionMissing
-                          ? `Missing ${action.permission}`
-                          : statusBlocked
-                            ? action.disabledReason || "Action is unavailable for this status."
-                            : undefined;
                         const loadingThis = actionLoading === (action.id || action.label || action.endpoint);
                         return (
-                          <button
+                          <ActionButton
                             key={action.id || action.label || action.endpoint}
-                            type="button"
-                            disabled={disabled}
-                            title={title}
+                            action={action}
+                            permissions={permissions}
+                            statusValue={selectedBadgeValue}
+                            loading={loadingThis}
                             onClick={() => runRowAction(action)}
-                            className={buttonClass(action.primary === true)}
-                          >
-                            {loadingThis ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                            {action.label}
-                          </button>
+                          />
                         );
                       })}
                     </div>
                   ) : null}
                 </div>
-                <div className="mt-4 flex flex-wrap gap-2">
+                <div className="mt-5 flex flex-wrap gap-2 rounded-2xl border border-ink-100/70 bg-ink-50/70 p-2">
                   {visibleTabs.map((tab) => {
                     const Icon = ICONS[tab.icon] || Package;
                     return (
@@ -966,7 +1181,7 @@ export default function KernelModuleWorkspace({ node }) {
                         key={tab.id}
                         type="button"
                         onClick={() => setActiveTab(tab.id)}
-                        className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold ${effectiveActiveTab === tab.id ? "bg-ink-900 text-white" : "border border-ink-100 bg-white text-ink-600"}`}
+                        className={`inline-flex items-center gap-2 rounded-full px-3.5 py-2 text-[0.65rem] font-semibold uppercase tracking-[0.16em] transition ${effectiveActiveTab === tab.id ? "bg-ink-900 text-white shadow-soft" : "border border-ink-100 bg-white/90 text-ink-600 hover:bg-white"}`}
                       >
                         <Icon className="h-4 w-4" />
                         {tab.label}
@@ -975,6 +1190,8 @@ export default function KernelModuleWorkspace({ node }) {
                   })}
                 </div>
               </div>
+              <ProcessIntentStrip config={processConfig} data={workspaceData} />
+              <OverviewCards cards={overviewCards} data={workspaceData} />
               <TabContent
                 tab={visibleTabs.find((tab) => tab.id === effectiveActiveTab) || visibleTabs[0] || {}}
                 detail={detail || {}}
