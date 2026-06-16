@@ -32,7 +32,10 @@ export async function callEndpoint(endpoint, options = {}) {
     config.body = isFormData ? options.body : JSON.stringify(options.body);
   }
 
-  const response = await fetch(`${baseUrl}${endpoint}`, config);
+  const target = /^https?:\/\//i.test(String(endpoint || ""))
+    ? endpoint
+    : `${baseUrl}${endpoint}`;
+  const response = await fetch(target, config);
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -59,6 +62,25 @@ function buildPublicCommercePath(path, params) {
   return `${path}${query}`;
 }
 
+function buildPublicCheckoutPath(path, params = {}) {
+  const nextParams = { ...(params || {}) };
+  try {
+    const parsed = new URL(EIP_CONFIG.endpoint, typeof window !== "undefined" ? window.location.origin : "http://localhost");
+    const marker = "/api/public/commerce/";
+    const index = parsed.pathname.indexOf(marker);
+    if (index >= 0) {
+      const suffix = decodeURIComponent(parsed.pathname.slice(index + marker.length).split("/")[0] || "");
+      if (suffix && !nextParams.suffix) nextParams.suffix = suffix;
+      const rootPath = `${parsed.pathname.slice(0, index)}/api/public`;
+      const query = Object.keys(nextParams).length ? `?${new URLSearchParams(nextParams).toString()}` : "";
+      return `${parsed.origin}${rootPath}${path}${query}`;
+    }
+  } catch {
+    // Fall back to the configured commerce endpoint.
+  }
+  return buildPublicCommercePath(path, nextParams);
+}
+
 export async function fetchCatalog({ materialType, q, limit, offset } = {}) {
   const params = {};
   if (materialType) params.material_type = materialType;
@@ -82,6 +104,10 @@ export async function fetchTradeConditions({ channel = "WEB", jurisdiction = "",
 
 export async function fetchCheckoutConfig() {
   return callEndpoint(buildPublicCommercePath("/meta/checkout-config"));
+}
+
+export async function fetchPaymentMethods() {
+  return callEndpoint(buildPublicCheckoutPath("/checkout/payment-methods"));
 }
 
 export async function fetchStorefrontLocales() {
@@ -200,7 +226,7 @@ export async function createPayment({ payload } = {}) {
 
 export async function createCheckoutSession({ payload } = {}) {
   const eventIdHeader = EIP_CONFIG.eventIdHeader || "X-Event-Id";
-  return callEndpoint(buildPublicCommercePath("/checkout/session"), {
+  return callEndpoint(buildPublicCheckoutPath("/checkout/payment-session"), {
     method: "POST",
     headers: { [eventIdHeader]: buildEventId("payment") },
     body: payload || {},

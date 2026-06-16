@@ -29,6 +29,52 @@ const PUBLIC_STOREFRONT_SCOPES = [
   "storefront.content.read",
   "storefront.catalog.read"
 ];
+const PAYMENT_CONNECTION_TYPES = {
+  PAYPAL: {
+    code: "PAYPAL",
+    connection_kind: "paypal",
+    display_name: "PayPal",
+    provider_code: "paypal",
+    channel: "payments",
+    sandbox_live_supported: true,
+    supported_payment_methods: ["PAYPAL"],
+    required_secret_fields: ["outbound.auth.client_secret"],
+    safe_public_metadata: ["provider_code", "environment", "supported_payment_methods"],
+    webhook: {
+      supported: true,
+      verification_mode: "hmac_signature",
+      event_id_location: "body",
+      event_id_key: "id"
+    },
+    healthcheck: { supported: true }
+  },
+  CHECKOUT_COM: {
+    code: "CHECKOUT_COM",
+    connection_kind: "checkout_com",
+    display_name: "Checkout.com",
+    provider_code: "checkout_com",
+    channel: "payments",
+    sandbox_live_supported: true,
+    supported_payment_methods: ["CARD", "GOOGLE_PAY", "APPLE_PAY"],
+    required_secret_fields: ["outbound.auth.secret"],
+    safe_public_metadata: ["provider_code", "environment", "supported_payment_methods"],
+    webhook: {
+      supported: true,
+      verification_mode: "hmac_signature",
+      event_id_location: "body",
+      event_id_key: "id"
+    },
+    healthcheck: { supported: true }
+  }
+};
+const CONNECTION_KIND_ALIASES = new Map([
+  ["pay_pal", "paypal"],
+  ["paypal", "paypal"],
+  ["checkout", "checkout_com"],
+  ["checkoutcom", "checkout_com"],
+  ["checkout_com", "checkout_com"],
+  ["checkout.com", "checkout_com"]
+]);
 const SECRET_FIELD_SPECS = [
   { kind: "verification.api_key.secret", path: ["verification", "api_key"], key: "secret" },
   { kind: "verification.hmac_signature.secret", path: ["verification", "hmac_signature"], key: "secret" },
@@ -124,6 +170,11 @@ function slugifyCode(value) {
   return base.slice(0, 65);
 }
 
+function normalizeConnectionKind(value) {
+  const normalized = normalizeText(value || "custom").toLowerCase().replace(/[-.\s]+/g, "_");
+  return CONNECTION_KIND_ALIASES.get(normalized) || normalized || "custom";
+}
+
 function normalizeProfile(raw = {}, fallbackId) {
   const identity = raw.identity || {};
   const inbound = raw.inbound || {};
@@ -137,7 +188,7 @@ function normalizeProfile(raw = {}, fallbackId) {
   const connectionName = normalizeText(identity.connection_name || raw.connection_name);
   const connectionCodeRaw = normalizeText(identity.connection_code || raw.connection_code);
   const connectionCode = connectionCodeRaw || slugifyCode(connectionName);
-  const connectionKind = normalizeText(identity.connection_kind || raw.connection_kind || "custom");
+  const connectionKind = normalizeConnectionKind(identity.connection_kind || raw.connection_kind || "custom");
   const storefrontDefault =
     ["website", "ecommerce"].includes(connectionKind) ||
     normalizeText(routing.channel || raw.channel) === "website_intake" ||
@@ -235,6 +286,8 @@ function normalizeProfile(raw = {}, fallbackId) {
     routing: {
       channel: normalizeText(routing.channel || raw.channel || "custom"),
       protocol: normalizeText(routing.protocol || raw.protocol),
+      provider_code: normalizeText(routing.provider_code || raw.provider_code),
+      health_status: normalizeText(routing.health_status || raw.health_status || "healthy").toLowerCase(),
       supported_message_types: normalizeArray(routing.supported_message_types || raw.supported_message_types),
       schema_version: normalizeText(routing.schema_version || raw.schema_version || "v1"),
       envelope_profile: normalizeText(routing.envelope_profile || raw.envelope_profile || "canonical_v1"),
@@ -470,6 +523,16 @@ function validateProfile(profile) {
 
   const routing = profile?.routing || {};
   if (!CHANNELS.includes(routing.channel)) errors.push(`${id}: routing channel invalid`);
+  const paymentType = Object.values(PAYMENT_CONNECTION_TYPES).find(
+    (item) => item.connection_kind === identity.connection_kind
+  );
+  if (paymentType) {
+    if (routing.channel !== "payments") errors.push(`${id}: payment provider connections must use payments channel`);
+    const providerCode = normalizeText(routing.provider_code || routing.protocol).toLowerCase().replace(/[-.\s]+/g, "_");
+    if (providerCode && providerCode !== paymentType.provider_code) {
+      errors.push(`${id}: payment provider code must be ${paymentType.provider_code}`);
+    }
+  }
   if (!normalizeText(routing.schema_version)) errors.push(`${id}: schema_version required`);
   if (!normalizeText(routing.envelope_profile)) errors.push(`${id}: envelope_profile required`);
   if (!MAPPING_MODES.includes(routing.mapping_mode)) errors.push(`${id}: mapping_mode invalid`);
@@ -537,6 +600,8 @@ export {
   hasSecretConfigured,
   normalizeArray,
   normalizeJson,
+  normalizeConnectionKind,
+  PAYMENT_CONNECTION_TYPES,
   PUBLIC_STOREFRONT_SCOPES,
   STOREFRONT_SCAN_MODES,
   connectionAllowsStorefrontCapability,

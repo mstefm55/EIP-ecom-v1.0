@@ -6,6 +6,9 @@ import ActionMiniModal from "../shared/ActionMiniModal";
 const KIND_OPTIONS = [
   { value: "website", label: "Website" },
   { value: "ecommerce", label: "E-commerce" },
+  { value: "payments", label: "Payments" },
+  { value: "paypal", label: "PayPal" },
+  { value: "checkout_com", label: "Checkout.com" },
   { value: "banking", label: "Banking" },
   { value: "edi", label: "EDI" },
   { value: "social", label: "Social" },
@@ -170,6 +173,8 @@ function buildProfile(id, overrides = {}) {
     routing: {
       channel: "custom",
       protocol: "",
+      provider_code: "",
+      health_status: "healthy",
       supported_message_types_text: "",
       schema_version: "v1",
       envelope_profile: "canonical_v1",
@@ -284,6 +289,8 @@ function fromApiProfile(profile) {
     routing: {
       channel: profile.routing?.channel || "custom",
       protocol: profile.routing?.protocol || "",
+      provider_code: profile.routing?.provider_code || "",
+      health_status: profile.routing?.health_status || "healthy",
       supported_message_types_text: Array.isArray(profile.routing?.supported_message_types) ? profile.routing.supported_message_types.join("\n") : "",
       schema_version: profile.routing?.schema_version || "v1",
       envelope_profile: profile.routing?.envelope_profile || "canonical_v1",
@@ -368,6 +375,8 @@ function toApiProfile(profile) {
     routing: {
       channel: profile.routing.channel,
       protocol: profile.routing.protocol,
+      provider_code: profile.routing.provider_code,
+      health_status: profile.routing.health_status || "healthy",
       supported_message_types: normalizeList(profile.routing.supported_message_types_text),
       schema_version: profile.routing.schema_version,
       envelope_profile: profile.routing.envelope_profile,
@@ -411,6 +420,13 @@ function validateProfile(profile) {
   if (!profile.idempotency.event_id_location) errors.push("Idempotency location is required");
   if (!profile.idempotency.event_id_key) errors.push("Idempotency key is required");
   if (!profile.routing.channel) errors.push("Routing channel is required");
+  if (["paypal", "checkout_com"].includes(profile.identity.connection_kind)) {
+    const expected = profile.identity.connection_kind;
+    if (profile.routing.channel !== "payments") errors.push("Payment provider connections must use the payments channel");
+    if ((profile.routing.provider_code || profile.routing.protocol) && (profile.routing.provider_code || profile.routing.protocol) !== expected) {
+      errors.push(`Provider code must be ${expected}`);
+    }
+  }
   if (!profile.routing.schema_version) errors.push("Schema version is required");
   if (!profile.routing.envelope_profile) errors.push("Envelope profile is required");
   if (!profile.public_storefront.allowed_scan_modes.length) errors.push("At least one storefront scan mode is required");
@@ -558,6 +574,29 @@ export default function AdminConnectionsPanelSafe() {
     if (!selectedConnection) return;
     setConnections((prev) => prev.map((item) => item.id === selectedConnection.id ? { ...item, [section]: { ...item[section], [key]: { ...item[section][key], ...patch } } } : item));
   };
+
+  useEffect(() => {
+    if (!selectedConnection) return;
+    const kind = selectedConnection.identity?.connection_kind;
+    const map = {
+      website: "website_intake",
+      ecommerce: "website_intake",
+      edi: "edi",
+      banking: "banking",
+      payments: "payments",
+      paypal: "payments",
+      checkout_com: "payments",
+      social: "social",
+      email: "email"
+    };
+    const providerCode = kind === "paypal" ? "paypal" : kind === "checkout_com" ? "checkout_com" : "";
+    const targetChannel = map[kind];
+    const patch = {};
+    if (targetChannel && selectedConnection.routing?.channel !== targetChannel) patch.channel = targetChannel;
+    if (providerCode && selectedConnection.routing?.provider_code !== providerCode) patch.provider_code = providerCode;
+    if (providerCode && selectedConnection.routing?.protocol !== providerCode) patch.protocol = providerCode;
+    if (Object.keys(patch).length) updateSection("routing", patch);
+  }, [selectedConnection?.identity?.connection_kind]);
 
   const buildUniqueCode = (name, currentId, avoidCode = null) => {
     const base = slugifyCode(name);
@@ -711,6 +750,10 @@ export default function AdminConnectionsPanelSafe() {
 
   return (
     <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
+      <datalist id="payment-provider-codes">
+        <option value="paypal" />
+        <option value="checkout_com" />
+      </datalist>
       <div className="glass-panel rounded-2xl p-4">
         <h3 className="text-sm font-semibold text-ink-900">Tenants</h3>
         <div className="mt-3 space-y-2">
@@ -872,6 +915,8 @@ export default function AdminConnectionsPanelSafe() {
               <Grid>
                 <Field label="Channel"><select value={selectedConnection.routing.channel} onChange={(e) => updateSection("routing", { channel: e.target.value })} className={inputClass}>{CHANNEL_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>
                 <Field label="Protocol"><input value={selectedConnection.routing.protocol} onChange={(e) => updateSection("routing", { protocol: e.target.value })} className={inputClass} /></Field>
+                <Field label="Provider code"><input list="payment-provider-codes" value={selectedConnection.routing.provider_code || ""} onChange={(e) => updateSection("routing", { provider_code: e.target.value })} className={inputClass} /></Field>
+                <Field label="Health status"><select value={selectedConnection.routing.health_status || "healthy"} onChange={(e) => updateSection("routing", { health_status: e.target.value })} className={inputClass}><option value="healthy">Healthy</option><option value="pending">Pending</option><option value="unhealthy">Unhealthy</option></select></Field>
                 <Field label="Schema version"><input value={selectedConnection.routing.schema_version} onChange={(e) => updateSection("routing", { schema_version: e.target.value })} className={inputClass} /></Field>
                 <Field label="Envelope profile"><input value={selectedConnection.routing.envelope_profile} onChange={(e) => updateSection("routing", { envelope_profile: e.target.value })} className={inputClass} /></Field>
                 <Field label="Mapping mode"><select value={selectedConnection.routing.mapping_mode} onChange={(e) => updateSection("routing", { mapping_mode: e.target.value })} className={inputClass}>{MAPPING_MODES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>

@@ -17,18 +17,20 @@ const DEFAULT_PAYMENT_SETTINGS = {
     { code: "card", label: "Credit card", enabled: true },
     { code: "paypal", label: "PayPal", enabled: false },
     { code: "google_pay", label: "Google Pay", enabled: false },
+    { code: "apple_pay", label: "Apple Pay", enabled: false },
     { code: "manual_test", label: "Sandbox manual test", enabled: false }
   ],
   default_currency: "USD",
   capture_mode: "automatic",
   allowed_countries: [],
-  display_order: ["card", "paypal", "google_pay", "manual_test"],
+  display_order: ["card", "paypal", "google_pay", "apple_pay", "manual_test"],
   refund_approval_threshold: null,
   manual_review_rules: { enabled: true, high_value_threshold: null },
   providers: {
     card: { provider_code: "checkout_com", environment: "production", connection_code: null },
     paypal: { provider_code: "paypal", environment: "production", connection_code: null },
     google_pay: { provider_code: "checkout_com", environment: "production", connection_code: null },
+    apple_pay: { provider_code: "checkout_com", environment: "production", connection_code: null },
     manual_test: { provider_code: "manual_test", environment: "sandbox", connection_code: null }
   }
 };
@@ -269,7 +271,8 @@ function normalizePaymentMethodCode(value) {
   if (!normalized) return "";
   if (["card", "credit_card", "creditcard", "bank_card"].includes(normalized)) return "card";
   if (["paypal", "pay_pal"].includes(normalized)) return "paypal";
-  if (["app", "app_pay", "apple_pay", "googlepay", "google_pay", "wallet"].includes(normalized)) return "google_pay";
+  if (["applepay", "apple_pay", "apple", "apple_wallet"].includes(normalized)) return "apple_pay";
+  if (["app", "app_pay", "googlepay", "google_pay", "wallet"].includes(normalized)) return "google_pay";
   if (["manual", "manual_test", "test"].includes(normalized)) return "manual_test";
   return normalized;
 }
@@ -297,7 +300,7 @@ function normalizePaymentProviderCode(value, method = "") {
   const normalizedMethod = normalizePaymentMethodCode(method);
   if (normalizedMethod === "paypal") return "paypal";
   if (normalizedMethod === "manual_test") return "manual_test";
-  if (normalizedMethod === "card" || normalizedMethod === "google_pay") return "checkout_com";
+  if (["card", "google_pay", "apple_pay"].includes(normalizedMethod)) return "checkout_com";
   return normalized || "checkout_com";
 }
 

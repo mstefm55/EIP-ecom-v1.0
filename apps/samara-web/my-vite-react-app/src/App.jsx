@@ -13,6 +13,7 @@ import {
   createSubscriber,
   fetchBlogPosts,
   fetchCheckoutConfig,
+  fetchPaymentMethods,
   fetchMemberHistory,
   fetchMemberMe,
   fetchCatalog,
@@ -270,6 +271,7 @@ const DEFAULT_CHECKOUT_METHODS = [
   { code: "card", label: "Credit card", enabled: true },
   { code: "paypal", label: "PayPal", enabled: false },
   { code: "google_pay", label: "Google Pay", enabled: false },
+  { code: "apple_pay", label: "Apple Pay", enabled: false },
   { code: "manual_test", label: "Sandbox manual test", enabled: false },
 ];
 const DEFAULT_CHECKOUT_CONFIG = {
@@ -285,7 +287,8 @@ function normalizePaymentMethodCode(value) {
   if (!normalized) return "";
   if (["card", "credit_card", "creditcard", "bank_card"].includes(normalized)) return "card";
   if (["paypal", "pay_pal"].includes(normalized)) return "paypal";
-  if (["app", "app_pay", "apple_pay", "googlepay", "google_pay", "wallet"].includes(normalized)) return "google_pay";
+  if (["applepay", "apple_pay", "apple", "apple_wallet"].includes(normalized)) return "apple_pay";
+  if (["app", "app_pay", "googlepay", "google_pay", "wallet"].includes(normalized)) return "google_pay";
   if (["manual", "manual_test", "test"].includes(normalized)) return "manual_test";
   return normalized;
 }
@@ -300,7 +303,7 @@ function normalizeCheckoutConfig(input) {
 
   for (const item of sourceMethods) {
     if (!item || typeof item !== "object") continue;
-    const code = normalizePaymentMethodCode(item.code || item.method || item.id);
+    const code = normalizePaymentMethodCode(item.code || item.methodCode || item.method || item.id);
     if (!code || seen.has(code)) continue;
     seen.add(code);
     const fallback = defaultsByCode.get(code) || {};
@@ -308,12 +311,15 @@ function normalizeCheckoutConfig(input) {
       code,
       label: String(item.label || fallback.label || code.toUpperCase()).trim(),
       enabled: item.enabled !== false,
+      available: item.available !== false,
+      reason: item.reason || null,
+      provider_code: item.provider_code || item.providerCode || fallback.provider_code || null,
     });
   }
 
   for (const fallback of DEFAULT_CHECKOUT_METHODS) {
     if (!seen.has(fallback.code)) {
-      methods.push({ ...fallback });
+      methods.push({ ...fallback, available: fallback.available !== false, reason: fallback.reason || null });
       seen.add(fallback.code);
     }
   }
@@ -323,7 +329,9 @@ function normalizeCheckoutConfig(input) {
     : methods.filter((item) => item.enabled).map((item) => item.code);
   const readyMethods = Array.isArray(payment.ready_methods)
     ? payment.ready_methods.map(normalizePaymentMethodCode).filter(Boolean)
-    : [];
+    : methods
+        .filter((item) => item.enabled !== false && item.available !== false)
+        .map((item) => item.code);
 
   return {
     payment: {
@@ -581,6 +589,7 @@ const COPY = {
       paymentMethodCard: "Credit card",
       paymentMethodPaypal: "PayPal",
       paymentMethodGooglePay: "Google Pay",
+      paymentMethodApplePay: "Apple Pay",
       paymentMethodManualTest: "Sandbox manual test",
       paymentProviderNotice: "This method opens a governed checkout session. No raw card details are collected by EIP.",
       cardName: "Name on card",
@@ -5516,16 +5525,28 @@ function CartModal({
   const paymentMethodOptions = (Array.isArray(paymentMethods) && paymentMethods.length
     ? paymentMethods
     : DEFAULT_CHECKOUT_METHODS
-  ).filter((item) => item?.enabled !== false);
+  );
   const selectedPaymentMethod = normalizePaymentMethodCode(
     form.payment_method || paymentMethodOptions[0]?.code || "card"
+  );
+  const selectedPaymentOption = paymentMethodOptions.find(
+    (item) => normalizePaymentMethodCode(item.code) === selectedPaymentMethod
   );
   const paymentMethodLabel = (code) => {
     const normalized = normalizePaymentMethodCode(code);
     if (normalized === "paypal") return resolveCopy(t, "cart.paymentMethodPaypal", "PayPal");
     if (normalized === "google_pay") return resolveCopy(t, "cart.paymentMethodGooglePay", "Google Pay");
+    if (normalized === "apple_pay") return resolveCopy(t, "cart.paymentMethodApplePay", "Apple Pay");
     if (normalized === "manual_test") return resolveCopy(t, "cart.paymentMethodManualTest", "Sandbox manual test");
     return resolveCopy(t, "cart.paymentMethodCard", "Credit card");
+  };
+  const paymentReasonLabel = (reason) => {
+    const normalized = String(reason || "").trim().toLowerCase();
+    if (normalized === "payment_method_disabled") return "disabled";
+    if (normalized === "provider_not_configured") return "provider not configured";
+    if (normalized === "provider_unhealthy") return "provider unavailable";
+    if (normalized === "checkout_source_missing") return "checkout source missing";
+    return normalized.replace(/_/g, " ");
   };
   const subtotalLabel =
     currencies.length === 1
@@ -5739,12 +5760,22 @@ function CartModal({
                     onChange={(event) => onFormChange("payment_method", event.target.value)}
                   >
                     {paymentMethodOptions.map((item) => (
-                      <option key={item.code} value={normalizePaymentMethodCode(item.code)}>
+                      <option
+                        key={item.code}
+                        value={normalizePaymentMethodCode(item.code)}
+                        disabled={item.enabled === false || item.available === false}
+                      >
                         {item.label || paymentMethodLabel(item.code)}
+                        {item.reason ? ` (${paymentReasonLabel(item.reason)})` : ""}
                       </option>
                     ))}
                   </select>
                 </label>
+                {selectedPaymentOption?.reason ? (
+                  <p className="modal-alert error">
+                    {paymentMethodLabel(selectedPaymentOption.code)}: {paymentReasonLabel(selectedPaymentOption.reason)}
+                  </p>
+                ) : null}
                 <p className="modal-alert">
                   {resolveCopy(
                     t,
@@ -6432,10 +6463,13 @@ export default function App() {
       return;
     }
     let cancelled = false;
-    fetchCheckoutConfig({})
+    fetchPaymentMethods({})
+      .catch(() => fetchCheckoutConfig({}))
       .then((res) => {
         if (cancelled) return;
-        const normalized = normalizeCheckoutConfig({ payment: res?.payment || {} });
+        const normalized = normalizeCheckoutConfig({
+          payment: res?.payment || { methods: Array.isArray(res?.methods) ? res.methods : [] }
+        });
         setCheckoutConfig(normalized);
         const readyMethods = normalized.payment.ready_methods?.length
           ? normalized.payment.ready_methods
@@ -7143,13 +7177,7 @@ export default function App() {
   );
   const checkoutPaymentMethods = useMemo(() => {
     const methods = checkoutConfig?.payment?.methods || [];
-    const ready = Array.isArray(checkoutConfig?.payment?.ready_methods)
-      ? checkoutConfig.payment.ready_methods.map(normalizePaymentMethodCode).filter(Boolean)
-      : [];
-    const enabled = methods.filter((item) => item?.enabled !== false);
-    return ready.length
-      ? enabled.filter((item) => ready.includes(normalizePaymentMethodCode(item.code)))
-      : enabled.filter((item) => item?.available !== false);
+    return methods.filter((item) => normalizePaymentMethodCode(item?.code));
   }, [checkoutConfig]);
 
   const addToCart = (item, quantity = 1) => {
@@ -7307,7 +7335,14 @@ export default function App() {
       return;
     }
     const selectedMethod = normalizePaymentMethodCode(checkoutForm.payment_method);
-    if (!selectedMethod || !checkoutPaymentMethods.some((item) => normalizePaymentMethodCode(item.code) === selectedMethod)) {
+    if (
+      !selectedMethod ||
+      !checkoutPaymentMethods.some((item) =>
+        normalizePaymentMethodCode(item.code) === selectedMethod &&
+        item.enabled !== false &&
+        item.available !== false
+      )
+    ) {
       setCheckoutStatus({
         loading: false,
         error: t("errors.paymentMethodUnavailable"),
@@ -7466,16 +7501,6 @@ export default function App() {
       if (!orderCode && !orderId) {
         throw new Error("Order reference not returned by API.");
       }
-      const quoteTotal = Number(result?.quote?.totals?.total);
-      const fallbackTotal = checkoutItems.reduce((sum, item) => {
-        const unit = Number(item?.unitAmount);
-        const qty = Number(item?.quantity) || 0;
-        return Number.isFinite(unit) ? sum + unit * qty : sum;
-      }, 0);
-      const paymentAmount = Number.isFinite(quoteTotal) ? quoteTotal : fallbackTotal;
-      if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) {
-        throw new Error("Unable to determine payment amount.");
-      }
       const paymentMetadata = {
         source: clientSource,
         locale: language,
@@ -7489,8 +7514,6 @@ export default function App() {
         payload: {
           order_code: orderCode || undefined,
           order_id: orderId || undefined,
-          amount: paymentAmount,
-          currency,
           method: selectedMethod,
           metadata: paymentMetadata,
         },

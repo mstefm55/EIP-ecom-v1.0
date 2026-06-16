@@ -26,6 +26,7 @@ import { auditSecurityEvent } from "../lib/securityAudit.js";
 import { normalizeProductSource, resolveProductDrivenRows } from "../lib/storefrontContentResolution.js";
 import {
   buildPublicCheckoutConfig,
+  buildPublicPaymentMethods,
   getPaymentAdapter,
   normalizePaymentEnvironment,
   normalizePaymentMethodCode,
@@ -2018,6 +2019,18 @@ export default async function publicCommerceRoutes(app) {
     return reply.code(204).send();
   });
 
+  app.options("/checkout/*", async (req, reply) => {
+    const origin = req.headers.origin;
+    applyCors(reply, origin, req.headers["access-control-request-headers"]);
+    return reply.code(204).send();
+  });
+
+  app.options("/payments/*", async (req, reply) => {
+    const origin = req.headers.origin;
+    applyCors(reply, origin, req.headers["access-control-request-headers"]);
+    return reply.code(204).send();
+  });
+
   async function resolveConnection(appInstance, req, reply, allowedChannels) {
     if (hasQueryApiKey(req)) {
       auditSecurityEvent(appInstance, "commerce.query_api_key_rejected", {
@@ -2033,7 +2046,15 @@ export default async function publicCommerceRoutes(app) {
       return null;
     }
 
-    const suffix = normalizeText(req.params?.suffix);
+    const suffix = normalizeText(
+      req.params?.suffix ||
+        req.query?.suffix ||
+        req.query?.connection ||
+        req.query?.connection_suffix ||
+        req.headers["x-eip-connection-suffix"] ||
+        req.headers["x-storefront-suffix"] ||
+        req.headers["x-storefront-connection"]
+    );
     if (!suffix) {
       auditSecurityEvent(appInstance, "commerce.connection_suffix_missing", {
         category: "public_commerce",
@@ -4865,6 +4886,85 @@ export default async function publicCommerceRoutes(app) {
     }
   );
 
+  async function loadOrderPaymentSource(client, tenantId, body = {}) {
+    const requestedOrderCode = normalizeText(body.order_code || body.orderCode);
+    const requestedOrderId = normalizeText(body.order_id || body.orderId);
+    if (!requestedOrderCode && !requestedOrderId) {
+      return { ok: false, error: "checkout_source_missing", status: 409 };
+    }
+
+    const filters = ["tenant_id = $1", "object_type = 'sales_order'"];
+    const params = [tenantId];
+    if (requestedOrderCode) {
+      params.push(requestedOrderCode);
+      filters.push(`code = $${params.length}`);
+    } else {
+      params.push(requestedOrderId);
+      filters.push(`id::text = $${params.length}`);
+    }
+
+    const r = await client.query(
+      `
+      SELECT id, code, attrs
+      FROM eip_core.service_object
+      WHERE ${filters.join(" AND ")}
+      LIMIT 1
+      `,
+      params
+    );
+    if (r.rowCount === 0) return { ok: false, error: "order_not_found", status: 404 };
+
+    const order = r.rows[0];
+    const attrs = order.attrs && typeof order.attrs === "object" ? order.attrs : {};
+    const pricing = attrs.pricing_snapshot && typeof attrs.pricing_snapshot === "object"
+      ? attrs.pricing_snapshot
+      : {};
+    const amount = normalizeAmount(pricing?.totals?.total, null);
+    if (amount === null || amount <= 0) {
+      return { ok: false, error: "checkout_source_missing", status: 409 };
+    }
+
+    return {
+      ok: true,
+      order,
+      amount,
+      currency: normalizeText(pricing.currency || attrs.currency || body.currency || "USD").toUpperCase()
+    };
+  }
+
+  const getPublicPaymentMethods = async (req, reply) => {
+    const access = await resolveConnection(app, req, reply, ["website_intake", "custom", "payments"]);
+    if (!access) return;
+
+    const payment = await loadCommercePaymentSettings(app, access.tenant.id);
+    const methods = buildPublicPaymentMethods({
+      settings: payment,
+      profiles: extractProfiles(access.tenant.attrs || {})
+    });
+
+    return reply.send({
+      ok: true,
+      methods,
+      payment: {
+        methods,
+        default_currency: payment.default_currency || "USD",
+        capture_mode: payment.capture_mode || "automatic"
+      }
+    });
+  };
+
+  app.get(
+    "/checkout/payment-methods",
+    { config: { rateLimit: RATE_LIMIT, cors: false } },
+    getPublicPaymentMethods
+  );
+
+  app.get(
+    "/commerce/:suffix/checkout/payment-methods",
+    { config: { rateLimit: RATE_LIMIT, cors: false } },
+    getPublicPaymentMethods
+  );
+
   const createCheckoutSession = async (req, reply) => {
     const access = await resolveConnection(app, req, reply, ["payments", "custom", "website_intake"]);
     if (!access) return;
@@ -4967,6 +5067,7 @@ export default async function publicCommerceRoutes(app) {
       currency,
       captureMode: paymentSettings.capture_mode,
       environment: methodContext.environment,
+      connectionProfile: methodContext.profile || null,
       metadata: sanitizePaymentMetadata(body.metadata || {})
     });
     if (!providerResult.ok) {
@@ -5065,6 +5166,66 @@ export default async function publicCommerceRoutes(app) {
     "/commerce/:suffix/checkout/session",
     { config: { rateLimit: RATE_LIMIT, cors: false }, bodyLimit: MAX_BODY },
     createCheckoutSession
+  );
+
+  app.post(
+    "/checkout/payment-session",
+    { config: { rateLimit: RATE_LIMIT, cors: false }, bodyLimit: MAX_BODY },
+    async (req, reply) => {
+      const access = await resolveConnection(app, req, reply, ["website_intake", "custom", "payments"]);
+      if (!access) return;
+
+      let body;
+      try {
+        body = parseJsonBody(req);
+      } catch {
+        return reply.code(400).send({ ok: false, error: "invalid_json" });
+      }
+
+      if (
+        Object.prototype.hasOwnProperty.call(body, "amount") ||
+        Object.prototype.hasOwnProperty.call(body, "total") ||
+        Object.prototype.hasOwnProperty.call(body, "payment_amount")
+      ) {
+        return reply.code(400).send({
+          ok: false,
+          error: "browser_amount_not_accepted",
+          reason: "server_amount_from_order_required"
+        });
+      }
+
+      const paymentSettings = await loadCommercePaymentSettings(app, access.tenant.id);
+      const profiles = extractProfiles(access.tenant.attrs || {});
+      const requestedMethod = normalizePaymentMethodCode(body.method || body.payment_method || "");
+      const methodContext = resolvePaymentMethodContext({
+        settings: paymentSettings,
+        profiles,
+        method: requestedMethod || paymentSettings.methods?.find((item) => item.enabled !== false)?.code
+      });
+      if (!methodContext.ok) {
+        const disabled = methodContext.error === "PAYMENT_METHOD_DISABLED";
+        return reply.code(disabled ? 403 : 409).send({
+          ok: false,
+          error: disabled ? "payment_method_disabled" : "provider_not_configured",
+          method: requestedMethod || null,
+          providerCode: methodContext.provider_code || null
+        });
+      }
+
+      const source = await loadOrderPaymentSource(app.db, access.tenant.id, body);
+      if (!source.ok) return reply.code(source.status || 409).send({ ok: false, error: source.error });
+
+      req.body = {
+        ...body,
+        order_id: source.order.id,
+        order_code: source.order.code,
+        amount: source.amount,
+        currency: source.currency,
+        method: methodContext.code
+      };
+
+      return createCheckoutSession(req, reply);
+    }
   );
 
   app.get(
@@ -5197,45 +5358,126 @@ export default async function publicCommerceRoutes(app) {
     }
   );
 
+  function paymentWebhookEventId(provider, body = {}, req = {}) {
+    return normalizeText(
+      req.headers?.["paypal-transmission-id"] ||
+        req.headers?.["cko-request-id"] ||
+        req.headers?.["checkout-event-id"] ||
+        body.id ||
+        body.event_id ||
+        body.eventId ||
+        body.resource?.id ||
+        body.data?.id ||
+        `${provider}:${sha256Hex(JSON.stringify(sanitizePaymentMetadata(body || {}))).slice(0, 24)}`
+    );
+  }
+
+  const handlePaymentWebhook = async (req, reply, allowedChannels = ["payments", "custom"]) => {
+    const access = await resolveConnection(app, req, reply, allowedChannels);
+    if (!access) return;
+    const provider = normalizeText(req.params.provider).toLowerCase().replace(/-/g, "_");
+    if (!["checkout_com", "paypal"].includes(provider)) {
+      return reply.code(404).send({ ok: false, error: "PAYMENT_PROVIDER_NOT_SUPPORTED" });
+    }
+    let body;
+    try {
+      body = parseJsonBody(req);
+    } catch {
+      return reply.code(400).send({ ok: false, error: "INVALID_JSON" });
+    }
+    const adapter = getPaymentAdapter(provider);
+    const verification = await adapter.verifyWebhookSignature({ headers: req.headers, body });
+    if (!verification.ok) {
+      await app.db.query(
+        `
+        INSERT INTO eip_core.info_record (tenant_id, record_type, title, payload)
+        VALUES ($1, 'ECOM_PAYMENT_WEBHOOK', $2, $3::jsonb)
+        `,
+        [
+          access.tenant.id,
+          `payment.webhook.${provider}.rejected`,
+          JSON.stringify(sanitizePaymentMetadata({
+            provider,
+            event_type: "webhook_failed_verification",
+            connection_code: access.profile.identity?.connection_code,
+            error: verification.error
+          }))
+        ]
+      );
+      const status = String(verification.error || "").includes("NOT_CONFIGURED") ? 501 : 401;
+      return reply.code(status).send({ ok: false, error: verification.error });
+    }
+
+    const eventId = paymentWebhookEventId(provider, body, req);
+    const rawBody = Buffer.isBuffer(req.rawBody) ? req.rawBody : Buffer.from(req.rawBody || "");
+    const scope = `commerce.payment.webhook.${provider}.${access.profile.identity?.connection_code}`;
+    const idem = await ensureIdempotency(app.db, {
+      tenantId: access.tenant.id,
+      scope,
+      key: eventId,
+      requestHash: buildRequestHash(rawBody)
+    });
+    if (!idem.ok) return reply.code(409).send({ ok: false, error: idem.error });
+    if (idem.replay) return reply.send(idem.response || { ok: true, replay: true });
+
+    const normalized = await adapter.normalizeWebhookEvent({ headers: req.headers, body });
+    if (!normalized.ok) {
+      const out = { ok: false, error: normalized.error };
+      await app.db.query(
+        `
+        INSERT INTO eip_core.info_record (tenant_id, record_type, title, payload)
+        VALUES ($1, 'ECOM_PAYMENT_WEBHOOK', $2, $3::jsonb)
+        `,
+        [
+          access.tenant.id,
+          `payment.webhook.${provider}.${eventId}.unmapped`,
+          JSON.stringify(sanitizePaymentMetadata({
+            provider,
+            event_id: eventId,
+            event_type: "webhook_not_normalized",
+            connection_code: access.profile.identity?.connection_code,
+            error: normalized.error
+          }))
+        ]
+      );
+      await finalizeIdempotency(app.db, { tenantId: access.tenant.id, scope, key: eventId, response: out, status: "error" });
+      return reply.code(501).send(out);
+    }
+
+    const event = normalized.event || {};
+    const out = { ok: true, accepted: true, event_id: event.provider_event_id || eventId };
+    await app.db.query(
+      `
+      INSERT INTO eip_core.info_record (tenant_id, record_type, title, payload)
+      VALUES ($1, 'ECOM_PAYMENT_WEBHOOK', $2, $3::jsonb)
+      `,
+      [
+        access.tenant.id,
+        `payment.webhook.${provider}.${event.provider_event_id || eventId}`,
+        JSON.stringify(sanitizePaymentMetadata({
+          provider,
+          event_id: event.provider_event_id || eventId,
+          event_type: event.event_type || "payment_webhook",
+          status: event.status || null,
+          connection_code: access.profile.identity?.connection_code,
+          payload: event
+        }))
+      ]
+    );
+    await finalizeIdempotency(app.db, { tenantId: access.tenant.id, scope, key: eventId, response: out, status: "ok" });
+    return reply.send(out);
+  };
+
   app.post(
     "/commerce/:suffix/payments/:provider/webhook",
     { config: { rateLimit: RATE_LIMIT, cors: false }, bodyLimit: MAX_BODY },
-    async (req, reply) => {
-      const access = await resolveConnection(app, req, reply, ["payments", "custom"]);
-      if (!access) return;
-      const provider = normalizeText(req.params.provider).toLowerCase().replace(/-/g, "_");
-      if (!["checkout_com", "paypal"].includes(provider)) {
-        return reply.code(404).send({ ok: false, error: "PAYMENT_PROVIDER_NOT_SUPPORTED" });
-      }
-      let body;
-      try {
-        body = parseJsonBody(req);
-      } catch {
-        return reply.code(400).send({ ok: false, error: "INVALID_JSON" });
-      }
-      const adapter = getPaymentAdapter(provider);
-      const verification = await adapter.verifyWebhookSignature({ headers: req.headers, body });
-      if (!verification.ok) {
-        await app.db.query(
-          `
-          INSERT INTO eip_core.info_record (tenant_id, record_type, title, payload)
-          VALUES ($1, 'ECOM_PAYMENT_WEBHOOK', $2, $3::jsonb)
-          `,
-          [
-            access.tenant.id,
-            `payment.webhook.${provider}.rejected`,
-            JSON.stringify(sanitizePaymentMetadata({
-              provider,
-              event_type: "webhook_failed_verification",
-              connection_code: access.profile.identity?.connection_code,
-              error: verification.error
-            }))
-          ]
-        );
-        return reply.code(501).send({ ok: false, error: verification.error });
-      }
-      return reply.code(501).send({ ok: false, error: "PAYMENT_WEBHOOK_NORMALIZATION_NOT_CONFIGURED" });
-    }
+    async (req, reply) => handlePaymentWebhook(req, reply, ["payments", "custom"])
+  );
+
+  app.post(
+    "/payments/webhooks/:provider",
+    { config: { rateLimit: RATE_LIMIT, cors: false }, bodyLimit: MAX_BODY },
+    async (req, reply) => handlePaymentWebhook(req, reply, ["website_intake", "custom", "payments"])
   );
 
   app.post(

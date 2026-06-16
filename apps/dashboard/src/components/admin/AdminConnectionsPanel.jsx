@@ -17,6 +17,9 @@ const STEPS = [
 const KIND_OPTIONS = [
   { value: "website", label: "Website" },
   { value: "ecommerce", label: "E-commerce" },
+  { value: "payments", label: "Payments" },
+  { value: "paypal", label: "PayPal" },
+  { value: "checkout_com", label: "Checkout.com" },
   { value: "banking", label: "Banking" },
   { value: "edi", label: "EDI" },
   { value: "social", label: "Social" },
@@ -296,6 +299,8 @@ function fromApiProfile(profile) {
     routing: {
       channel: profile.routing?.channel || "custom",
       protocol: profile.routing?.protocol || "",
+      provider_code: profile.routing?.provider_code || "",
+      health_status: profile.routing?.health_status || "healthy",
       supported_message_types_text: Array.isArray(profile.routing?.supported_message_types)
         ? profile.routing.supported_message_types.join("\n")
         : "",
@@ -406,6 +411,8 @@ function toApiProfile(profile) {
     routing: {
       channel: profile.routing.channel,
       protocol: profile.routing.protocol,
+      provider_code: profile.routing.provider_code,
+      health_status: profile.routing.health_status || "healthy",
       supported_message_types: normalizeList(profile.routing.supported_message_types_text),
       schema_version: profile.routing.schema_version,
       envelope_profile: profile.routing.envelope_profile,
@@ -428,6 +435,13 @@ function validateProfile(profile) {
   if (!profile.identity.connection_code) errors.push("Connection code is required");
 
   const kind = profile.identity.connection_kind;
+  if (["paypal", "checkout_com"].includes(kind)) {
+    const expected = kind;
+    if (profile.routing.channel !== "payments") errors.push("Payment provider connections must use the payments channel");
+    if ((profile.routing.provider_code || profile.routing.protocol) && (profile.routing.provider_code || profile.routing.protocol) !== expected) {
+      errors.push(`Provider code must be ${expected}`);
+    }
+  }
   if ((kind === "website" || kind === "ecommerce") && profile.identity.direction !== "outbound") {
     if (!profile.identity.frontend_url) {
       errors.push("Frontend URL is required for website/e-commerce connections");
@@ -620,12 +634,19 @@ export default function AdminConnectionsPanel() {
       edi: "edi",
       banking: "banking",
       payments: "payments",
+      paypal: "payments",
+      checkout_com: "payments",
       social: "social",
       email: "email"
     };
+    const providerCode = kind === "paypal" ? "paypal" : kind === "checkout_com" ? "checkout_com" : "";
     const targetChannel = map[kind];
-    if (targetChannel && selectedConnection.routing?.channel !== targetChannel) {
-      updateSection("routing", { channel: targetChannel });
+    const patch = {};
+    if (targetChannel && selectedConnection.routing?.channel !== targetChannel) patch.channel = targetChannel;
+    if (providerCode && selectedConnection.routing?.provider_code !== providerCode) patch.provider_code = providerCode;
+    if (providerCode && selectedConnection.routing?.protocol !== providerCode) patch.protocol = providerCode;
+    if (Object.keys(patch).length) {
+      updateSection("routing", patch);
     }
   }, [selectedConnection?.identity?.connection_kind]);
 
@@ -934,6 +955,12 @@ export default function AdminConnectionsPanel() {
         <option value="MQ" />
         <option value="SMTP" />
         <option value="WebSocket" />
+        <option value="paypal" />
+        <option value="checkout_com" />
+      </datalist>
+      <datalist id="payment-provider-codes">
+        <option value="paypal" />
+        <option value="checkout_com" />
       </datalist>
       <div className="glass-panel rounded-2xl p-4">
         <h3 className="text-sm font-semibold text-ink-900">Tenants</h3>
@@ -1813,6 +1840,28 @@ export default function AdminConnectionsPanel() {
                     placeholder="HTTPS, AS2, SFTP..."
                     className="w-full rounded-lg border border-ink-200/70 bg-white px-3 py-2 text-xs"
                   />
+                </label>
+                <label className="text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink-400">
+                  <span className="mb-1 block">Provider code</span>
+                  <input
+                    list="payment-provider-codes"
+                    value={selectedConnection.routing.provider_code || ""}
+                    onChange={(event) => updateSection("routing", { provider_code: event.target.value })}
+                    placeholder="paypal, checkout_com"
+                    className="w-full rounded-lg border border-ink-200/70 bg-white px-3 py-2 text-xs"
+                  />
+                </label>
+                <label className="text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink-400">
+                  <span className="mb-1 block">Health status</span>
+                  <select
+                    value={selectedConnection.routing.health_status || "healthy"}
+                    onChange={(event) => updateSection("routing", { health_status: event.target.value })}
+                    className="w-full rounded-lg border border-ink-200/70 bg-white px-3 py-2 text-xs"
+                  >
+                    <option value="healthy">Healthy</option>
+                    <option value="pending">Pending</option>
+                    <option value="unhealthy">Unhealthy</option>
+                  </select>
                 </label>
                 <label className="text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink-400">
                   <span className="mb-1 block">Schema version</span>

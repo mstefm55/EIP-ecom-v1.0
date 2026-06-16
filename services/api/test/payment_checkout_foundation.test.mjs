@@ -4,11 +4,13 @@ import test from "node:test";
 import {
   buildPaymentReadiness,
   buildPublicCheckoutConfig,
+  buildPublicPaymentMethods,
   getPaymentAdapter,
   normalizePaymentMethodCode,
   normalizePaymentSettings,
   sanitizePaymentMetadata
 } from "../src/services/payments/paymentFoundation.js";
+import { PAYMENT_CONNECTION_TYPES } from "../src/services/gateway/connectionProfile.js";
 
 const publicCommerceRoute = fs.readFileSync(
   new URL("../src/routes/public_commerce.js", import.meta.url),
@@ -24,6 +26,10 @@ const migration = fs.readFileSync(
 );
 const settingsOwnershipMigration = fs.readFileSync(
   new URL("../db/migrations/0107_payment_settings_surface_ownership.sql", import.meta.url),
+  "utf8"
+);
+const paymentConnectionsMigration = fs.readFileSync(
+  new URL("../db/migrations/0131_payment_connections_v1.sql", import.meta.url),
   "utf8"
 );
 const samaraApi = fs.readFileSync(
@@ -55,7 +61,8 @@ test("payment settings normalize legacy app wallet to google_pay without preserv
   const settings = normalizePaymentSettings({
     methods: [
       { code: "card", label: "Card", enabled: true },
-      { code: "app", label: "Wallet", enabled: true }
+      { code: "app", label: "Wallet", enabled: true },
+      { code: "apple_pay", label: "Apple Pay", enabled: true }
     ],
     providers: {
       card: { mode: "sandbox", public_key: "pk_test_secret-ish" },
@@ -63,8 +70,11 @@ test("payment settings normalize legacy app wallet to google_pay without preserv
     }
   });
   assert.equal(normalizePaymentMethodCode("app_pay"), "google_pay");
+  assert.equal(normalizePaymentMethodCode("apple_pay"), "apple_pay");
   assert.equal(settings.methods.some((item) => item.code === "google_pay"), true);
+  assert.equal(settings.methods.some((item) => item.code === "apple_pay"), true);
   assert.equal(settings.providers.card.provider_code, "checkout_com");
+  assert.equal(settings.providers.apple_pay.provider_code, "checkout_com");
   assert.equal(settings.providers.card.environment, "sandbox");
   assert.equal("public_key" in settings.providers.card, false);
   assert.equal("app_id" in settings.providers.google_pay, false);
@@ -75,11 +85,15 @@ test("payment readiness and public checkout config expose only secret-free provi
     methods: [
       { code: "card", label: "Card", enabled: true },
       { code: "paypal", label: "PayPal", enabled: true },
+      { code: "google_pay", label: "Google Pay", enabled: true },
+      { code: "apple_pay", label: "Apple Pay", enabled: true },
       { code: "manual_test", label: "Sandbox", enabled: true }
     ],
     providers: {
       card: { provider_code: "checkout_com", environment: "sandbox" },
       paypal: { provider_code: "paypal", environment: "sandbox" },
+      google_pay: { provider_code: "checkout_com", environment: "sandbox" },
+      apple_pay: { provider_code: "checkout_com", environment: "sandbox" },
       manual_test: { provider_code: "manual_test", environment: "sandbox" }
     }
   });
@@ -96,13 +110,30 @@ test("payment readiness and public checkout config expose only secret-free provi
   const readiness = buildPaymentReadiness({ settings, profiles });
   assert.equal(readiness.methods.find((item) => item.code === "card").available, true);
   assert.equal(readiness.methods.find((item) => item.code === "paypal").available, false);
+  assert.equal(readiness.methods.find((item) => item.code === "google_pay").available, true);
+  assert.equal(readiness.methods.find((item) => item.code === "apple_pay").available, true);
   assert.equal(readiness.methods.find((item) => item.code === "manual_test").available, true);
 
   const publicConfig = buildPublicCheckoutConfig({ settings, profiles });
   const serialized = JSON.stringify(publicConfig);
   assert.match(serialized, /checkout_com/);
   assert.doesNotMatch(serialized, /do-not-leak|secret|public_key|client_id|app_id/i);
-  assert.deepEqual(publicConfig.ready_methods.sort(), ["card", "manual_test"]);
+  assert.deepEqual(publicConfig.ready_methods.sort(), ["apple_pay", "card", "google_pay", "manual_test"]);
+
+  const publicMethods = buildPublicPaymentMethods({ settings, profiles });
+  assert.deepEqual(publicMethods.map((item) => item.methodCode).sort(), ["APPLE_PAY", "CARD", "GOOGLE_PAY", "PAYPAL"]);
+  assert.equal(publicMethods.find((item) => item.methodCode === "PAYPAL").reason, "provider_not_configured");
+  assert.doesNotMatch(JSON.stringify(publicMethods), /manual_test|do-not-leak|secret|client_secret/i);
+});
+
+test("payment connection provider types are registered as existing Admin Console Connections kinds", () => {
+  assert.equal(PAYMENT_CONNECTION_TYPES.PAYPAL.provider_code, "paypal");
+  assert.equal(PAYMENT_CONNECTION_TYPES.PAYPAL.connection_kind, "paypal");
+  assert.deepEqual(PAYMENT_CONNECTION_TYPES.PAYPAL.supported_payment_methods, ["PAYPAL"]);
+  assert.equal(PAYMENT_CONNECTION_TYPES.CHECKOUT_COM.provider_code, "checkout_com");
+  assert.equal(PAYMENT_CONNECTION_TYPES.CHECKOUT_COM.connection_kind, "checkout_com");
+  assert.deepEqual(PAYMENT_CONNECTION_TYPES.CHECKOUT_COM.supported_payment_methods, ["CARD", "GOOGLE_PAY", "APPLE_PAY"]);
+  assert.match(JSON.stringify(PAYMENT_CONNECTION_TYPES), /required_secret_fields|outbound\.auth/);
 });
 
 test("payment adapters fail closed for live placeholders and allow manual_test sandbox only", async () => {
@@ -154,6 +185,12 @@ test("payment metadata sanitizer strips raw payment credentials and keeps safe c
 
 test("payment routes and storefront integration expose governed checkout sessions without raw card collection", () => {
   assert.match(publicCommerceRoute, /"\/commerce\/:suffix\/checkout\/session"/);
+  assert.match(publicCommerceRoute, /"\/checkout\/payment-methods"/);
+  assert.match(publicCommerceRoute, /"\/checkout\/payment-session"/);
+  assert.match(publicCommerceRoute, /"\/payments\/webhooks\/:provider"/);
+  assert.match(publicCommerceRoute, /browser_amount_not_accepted/);
+  assert.match(publicCommerceRoute, /pricing_snapshot/);
+  assert.match(publicCommerceRoute, /buildPublicPaymentMethods/);
   assert.match(publicCommerceRoute, /"\/commerce\/:suffix\/checkout\/confirm"/);
   assert.match(publicCommerceRoute, /"\/commerce\/:suffix\/payments\/:provider\/webhook"/);
   assert.doesNotMatch(publicCommerceRoute, /normalizeProviderMode/);
@@ -162,8 +199,13 @@ test("payment routes and storefront integration expose governed checkout session
   assert.match(commerceOrdersRoute, /CRM_PAYMENT_SIGNAL/);
 
   assert.match(samaraApi, /\/checkout\/session/);
+  assert.match(samaraApi, /fetchPaymentMethods/);
+  assert.match(samaraApi, /\/checkout\/payment-methods/);
+  assert.match(samaraApi, /\/checkout\/payment-session/);
   assert.match(samaraApi, /\/checkout\/confirm/);
+  assert.doesNotMatch(samaraApp, /amount: paymentAmount/);
   assert.doesNotMatch(samaraApp, /selectedPaymentMethod === "card"/);
+  assert.match(samaraApp, /paymentMethodApplePay/);
   assert.match(samaraApp, /No raw card details are collected by EIP/);
 });
 
@@ -202,6 +244,12 @@ test("payment settings are descriptor-owned by Settings, not the operational pay
   assert.match(settingsOwnershipMigration, /patch_payment_settings_surface_node/);
   assert.match(settingsOwnershipMigration, /"id": "commerce-payment-settings"/);
   assert.doesNotMatch(settingsOwnershipMigration, /CREATE\s+TABLE/i);
+  assert.doesNotMatch(paymentConnectionsMigration, /CREATE\s+TABLE/i);
+  assert.match(paymentConnectionsMigration, /0131_payment_connections_v1/);
+  assert.match(paymentConnectionsMigration, /apple_pay/);
+  assert.match(paymentConnectionsMigration, /EIP_CONNECTION_KIND/);
+  assert.match(paymentConnectionsMigration, /checkout_com/);
+  assert.match(paymentConnectionsMigration, /paypal/);
 
   assert.match(dashboardOrdersPanel, /title: "Orders & payments"/);
   assert.match(dashboardOrdersPanel, /\{ id: "payments", label: "Payments"/);

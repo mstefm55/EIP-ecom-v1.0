@@ -4,6 +4,7 @@ const PAYMENT_METHODS = [
   { code: "card", label: "Credit card", provider_code: "checkout_com", enabled: true },
   { code: "paypal", label: "PayPal", provider_code: "paypal", enabled: false },
   { code: "google_pay", label: "Google Pay", provider_code: "checkout_com", enabled: false },
+  { code: "apple_pay", label: "Apple Pay", provider_code: "checkout_com", enabled: false },
   { code: "manual_test", label: "Sandbox manual test", provider_code: "manual_test", enabled: false }
 ];
 
@@ -26,6 +27,7 @@ export const DEFAULT_PAYMENT_SETTINGS = {
     card: { provider_code: "checkout_com" },
     paypal: { provider_code: "paypal" },
     google_pay: { provider_code: "checkout_com" },
+    apple_pay: { provider_code: "checkout_com" },
     manual_test: { provider_code: "manual_test", environment: "sandbox" }
   }
 };
@@ -70,6 +72,7 @@ export function normalizePaymentMethodCode(value) {
   if (!normalized) return "";
   if (["card", "credit_card", "creditcard", "bank_card"].includes(normalized)) return "card";
   if (["paypal", "pay_pal"].includes(normalized)) return "paypal";
+  if (["applepay", "apple_pay", "apple", "apple_wallet"].includes(normalized)) return "apple_pay";
   if (["app", "app_pay", "googlepay", "google_pay", "wallet"].includes(normalized)) return "google_pay";
   if (["manual", "manual_test", "test"].includes(normalized)) return "manual_test";
   return normalized;
@@ -83,8 +86,14 @@ export function normalizePaymentProviderCode(value, method = "") {
   const normalizedMethod = normalizePaymentMethodCode(method);
   if (normalizedMethod === "paypal") return "paypal";
   if (normalizedMethod === "manual_test") return "manual_test";
-  if (normalizedMethod === "card" || normalizedMethod === "google_pay") return "checkout_com";
+  if (["card", "google_pay", "apple_pay"].includes(normalizedMethod)) return "checkout_com";
   return PROVIDER_CODES.has(normalized) ? normalized : normalized;
+}
+
+export function toPublicPaymentCode(value) {
+  const normalized = normalizeText(value).toUpperCase().replace(/[-.\s]+/g, "_");
+  if (normalized === "CHECKOUTCOM") return "CHECKOUT_COM";
+  return normalized;
 }
 
 export function normalizePaymentEnvironment(value, fallback = "sandbox") {
@@ -177,6 +186,20 @@ function profileIsEnabled(profile) {
   return Boolean(profile?.identity?.is_enabled !== false);
 }
 
+function profileHealthStatus(profile) {
+  return normalizeText(
+    profile?.routing?.health_status ||
+      profile?.outbound?.health_status ||
+      profile?.identity?.health_status ||
+      profile?.audit?.health_status ||
+      "healthy"
+  ).toLowerCase();
+}
+
+function profileIsHealthy(profile) {
+  return !["down", "failed", "unhealthy", "disabled", "error", "pending"].includes(profileHealthStatus(profile));
+}
+
 function selectProviderProfile(profiles, providerCode, configuredCode) {
   const source = Array.isArray(profiles) ? profiles : [];
   if (configuredCode) {
@@ -198,12 +221,14 @@ export function buildPaymentReadiness({ settings, profiles = [] } = {}) {
       : selectProviderProfile(profiles, providerCode, provider.connection_code);
     const available = providerCode === "manual_test"
       ? provider.environment === "sandbox"
-      : Boolean(profile && profileIsEnabled(profile));
+      : Boolean(profile && profileIsEnabled(profile) && profileIsHealthy(profile));
     const status = available
       ? providerCode === "manual_test"
         ? "sandbox_ready"
         : "configured"
-      : "provider_not_configured";
+      : profile && !profileIsHealthy(profile)
+        ? "provider_unhealthy"
+        : "provider_not_configured";
 
     return {
       code: method.code,
@@ -216,7 +241,7 @@ export function buildPaymentReadiness({ settings, profiles = [] } = {}) {
       connection_code: profile?.identity?.connection_code || provider.connection_code || null,
       available,
       status,
-      wallet: method.code === "google_pay"
+      wallet: method.code === "google_pay" || method.code === "apple_pay"
     };
   });
 
@@ -242,7 +267,11 @@ export function resolvePaymentMethodContext({ settings, profiles = [], method } 
       provider_code: item.provider_code
     };
   }
-  return { ok: true, ...item, readiness };
+  const provider = normalizePaymentSettings(settings).providers[normalizedMethod] || {};
+  const profile = item.provider_code === "manual_test"
+    ? null
+    : selectProviderProfile(profiles, item.provider_code, provider.connection_code);
+  return { ok: true, ...item, profile, readiness };
 }
 
 export function sanitizePaymentMetadata(value, depth = 0) {
@@ -384,6 +413,11 @@ export function buildPublicCheckoutConfig({ settings, profiles = [] } = {}) {
       enabled: method.enabled,
       provider_code: method.provider_code,
       available: method.available,
+      reason: method.enabled === false
+        ? "payment_method_disabled"
+        : method.available
+          ? null
+          : method.status || "provider_not_configured",
       status: method.status,
       wallet: method.wallet
     })),
@@ -393,4 +427,22 @@ export function buildPublicCheckoutConfig({ settings, profiles = [] } = {}) {
     capture_mode: readiness.capture_mode,
     allowed_countries: readiness.allowed_countries
   };
+}
+
+export function buildPublicPaymentMethods({ settings, profiles = [] } = {}) {
+  const config = buildPublicCheckoutConfig({ settings, profiles });
+  return config.methods
+    .filter((method) => method.code !== "manual_test")
+    .map((method) => ({
+      methodCode: toPublicPaymentCode(method.code),
+      providerCode: toPublicPaymentCode(method.provider_code),
+      label: method.label,
+      enabled: method.enabled !== false,
+      available: method.enabled !== false && method.available === true,
+      reason: method.enabled === false
+        ? "payment_method_disabled"
+        : method.available
+          ? null
+          : method.reason || "provider_not_configured"
+    }));
 }
