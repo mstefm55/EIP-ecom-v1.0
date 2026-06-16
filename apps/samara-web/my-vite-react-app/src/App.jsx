@@ -314,6 +314,8 @@ function normalizeCheckoutConfig(input) {
       available: item.available !== false,
       reason: item.reason || null,
       provider_code: item.provider_code || item.providerCode || fallback.provider_code || null,
+      mode: item.mode || item.environment || null,
+      status: item.status || item.reason || null,
     });
   }
 
@@ -340,6 +342,35 @@ function normalizeCheckoutConfig(input) {
       ready_methods: readyMethods,
     },
   };
+}
+
+function humanizePaymentReason(reason) {
+  const normalized = String(reason || "").trim().toLowerCase();
+  if (normalized === "payment_method_disabled") return "disabled";
+  if (normalized === "provider_not_configured") return "provider not configured";
+  if (normalized === "sandbox_credentials_missing") return "sandbox credentials missing";
+  if (normalized === "domain_validation_missing") return "domain validation missing";
+  if (normalized === "provider_health_unknown") return "provider health unknown";
+  if (normalized === "provider_health_failed") return "provider health failed";
+  if (normalized === "provider_disabled") return "provider disabled";
+  if (normalized === "provider_unhealthy") return "provider unavailable";
+  if (normalized === "checkout_source_missing") return "checkout source missing";
+  if (normalized === "browser_amount_not_accepted") return "server amount required";
+  return normalized ? normalized.replace(/_/g, " ") : "not available";
+}
+
+function friendlyCheckoutError(error, fallback) {
+  const message = String(error?.message || "");
+  const match = message.match(/API Error \(\d+\):\s*(.*)$/);
+  if (match) {
+    try {
+      const payload = JSON.parse(match[1]);
+      return humanizePaymentReason(payload?.error || payload?.reason || fallback);
+    } catch {
+      return match[1] || fallback;
+    }
+  }
+  return message || fallback;
 }
 
 function buildCheckoutFormDefaults(countryIso = DEFAULT_COUNTRY_ISO) {
@@ -5541,12 +5572,13 @@ function CartModal({
     return resolveCopy(t, "cart.paymentMethodCard", "Credit card");
   };
   const paymentReasonLabel = (reason) => {
-    const normalized = String(reason || "").trim().toLowerCase();
-    if (normalized === "payment_method_disabled") return "disabled";
-    if (normalized === "provider_not_configured") return "provider not configured";
-    if (normalized === "provider_unhealthy") return "provider unavailable";
-    if (normalized === "checkout_source_missing") return "checkout source missing";
-    return normalized.replace(/_/g, " ");
+    return humanizePaymentReason(reason);
+  };
+  const paymentModeLabel = (value) => {
+    const normalized = String(value || "").trim().toLowerCase();
+    if (normalized === "production") return "live";
+    if (normalized === "sandbox") return "sandbox";
+    return normalized || "not configured";
   };
   const subtotalLabel =
     currencies.length === 1
@@ -5766,11 +5798,22 @@ function CartModal({
                         disabled={item.enabled === false || item.available === false}
                       >
                         {item.label || paymentMethodLabel(item.code)}
+                        {item.mode ? ` - ${paymentModeLabel(item.mode)}` : ""}
                         {item.reason ? ` (${paymentReasonLabel(item.reason)})` : ""}
                       </option>
                     ))}
                   </select>
                 </label>
+                {selectedPaymentOption ? (
+                  <p className="modal-alert">
+                    {paymentMethodLabel(selectedPaymentOption.code)} via{" "}
+                    {String(selectedPaymentOption.provider_code || "").replace(/_/g, " ") || "payment provider"} -{" "}
+                    {paymentModeLabel(selectedPaymentOption.mode)}
+                    {selectedPaymentOption.available === false || selectedPaymentOption.reason
+                      ? ` - ${paymentReasonLabel(selectedPaymentOption.reason || selectedPaymentOption.status)}`
+                      : " - available"}
+                  </p>
+                ) : null}
                 {selectedPaymentOption?.reason ? (
                   <p className="modal-alert error">
                     {paymentMethodLabel(selectedPaymentOption.code)}: {paymentReasonLabel(selectedPaymentOption.reason)}
@@ -7559,7 +7602,7 @@ export default function App() {
     } catch (err) {
       setCheckoutStatus({
         loading: false,
-        error: err?.message || t("errors.paymentFailed"),
+        error: friendlyCheckoutError(err, t("errors.paymentFailed")),
         success: false,
         orderCode: "",
         paymentCode: "",

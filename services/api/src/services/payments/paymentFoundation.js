@@ -196,8 +196,68 @@ function profileHealthStatus(profile) {
   ).toLowerCase();
 }
 
+function profileHealthReason(profile) {
+  const status = profileHealthStatus(profile);
+  if (["healthy", "configured", "ok", "ready"].includes(status)) return null;
+  if (["disabled"].includes(status)) return "provider_disabled";
+  if (["down", "failed", "unhealthy", "error"].includes(status)) return "provider_health_failed";
+  return "provider_health_unknown";
+}
+
 function profileIsHealthy(profile) {
-  return !["down", "failed", "unhealthy", "disabled", "error", "pending"].includes(profileHealthStatus(profile));
+  return !profileHealthReason(profile);
+}
+
+function hasConfiguredValue(container, key) {
+  if (!container || typeof container !== "object") return false;
+  return Boolean(
+    normalizeText(container[key]) ||
+      normalizeText(container[`${key}_ref`]) ||
+      container[`${key}_set`] === true
+  );
+}
+
+function providerCredentialReason(profile, providerCode) {
+  if (!profile) return "provider_not_configured";
+  const auth = profile?.outbound?.auth || {};
+  const environment = normalizePaymentEnvironment(profile?.identity?.environment, "production");
+  const missingReason = environment === "sandbox" ? "sandbox_credentials_missing" : "provider_not_configured";
+  if (providerCode === "paypal") {
+    if (!hasConfiguredValue(auth, "client_id") || !hasConfiguredValue(auth, "client_secret")) return missingReason;
+    return null;
+  }
+  if (providerCode === "checkout_com") {
+    if (!hasConfiguredValue(auth, "secret")) return missingReason;
+    return null;
+  }
+  return null;
+}
+
+function applePayDomainStatus(profile) {
+  return normalizeText(
+    profile?.routing?.apple_pay_domain_status ||
+      profile?.routing?.domain_validation_status ||
+      profile?.public_storefront?.apple_pay_domain_status ||
+      profile?.identity?.apple_pay_domain_status
+  ).toLowerCase();
+}
+
+function applePayDomainReady(profile) {
+  const status = applePayDomainStatus(profile);
+  return ["validated", "verified", "active", "configured", "ready"].includes(status);
+}
+
+function providerAvailability({ profile, providerCode, methodCode }) {
+  if (!profile) return { available: false, status: "provider_not_configured" };
+  if (!profileIsEnabled(profile)) return { available: false, status: "provider_disabled" };
+  const credentialReason = providerCredentialReason(profile, providerCode);
+  if (credentialReason) return { available: false, status: credentialReason };
+  const healthReason = profileHealthReason(profile);
+  if (healthReason) return { available: false, status: healthReason };
+  if (methodCode === "apple_pay" && providerCode === "checkout_com" && !applePayDomainReady(profile)) {
+    return { available: false, status: "domain_validation_missing" };
+  }
+  return { available: true, status: "configured" };
 }
 
 function selectProviderProfile(profiles, providerCode, configuredCode) {
@@ -219,16 +279,18 @@ export function buildPaymentReadiness({ settings, profiles = [] } = {}) {
     const profile = providerCode === "manual_test"
       ? null
       : selectProviderProfile(profiles, providerCode, provider.connection_code);
-    const available = providerCode === "manual_test"
-      ? provider.environment === "sandbox"
-      : Boolean(profile && profileIsEnabled(profile) && profileIsHealthy(profile));
+    const providerState = providerCode === "manual_test"
+      ? {
+          available: provider.environment === "sandbox",
+          status: provider.environment === "sandbox" ? "sandbox_ready" : "provider_not_configured"
+        }
+      : providerAvailability({ profile, providerCode, methodCode: method.code });
+    const available = providerState.available;
     const status = available
       ? providerCode === "manual_test"
         ? "sandbox_ready"
         : "configured"
-      : profile && !profileIsHealthy(profile)
-        ? "provider_unhealthy"
-        : "provider_not_configured";
+      : providerState.status || "provider_not_configured";
 
     return {
       code: method.code,
@@ -241,6 +303,7 @@ export function buildPaymentReadiness({ settings, profiles = [] } = {}) {
       connection_code: profile?.identity?.connection_code || provider.connection_code || null,
       available,
       status,
+      reason: status,
       wallet: method.code === "google_pay" || method.code === "apple_pay"
     };
   });
@@ -264,7 +327,9 @@ export function resolvePaymentMethodContext({ settings, profiles = [], method } 
       ok: false,
       error: "PAYMENT_PROVIDER_NOT_CONFIGURED",
       method: item.code,
-      provider_code: item.provider_code
+      provider_code: item.provider_code,
+      reason: item.reason || item.status || "provider_not_configured",
+      environment: item.environment
     };
   }
   const provider = normalizePaymentSettings(settings).providers[normalizedMethod] || {};
@@ -312,6 +377,20 @@ function buildManualTestSession({ paymentCode, amount, currency, captureMode }) 
   };
 }
 
+function providerAdapterUnavailable(input = {}, providerCode) {
+  const profile = input.connectionProfile || null;
+  const methodCode = normalizePaymentMethodCode(input.method || "");
+  const state = providerAvailability({ profile, providerCode, methodCode });
+  if (!state.available) return state.status || "provider_not_configured";
+  return "provider_health_unknown";
+}
+
+function webhookVerificationUnavailable(input = {}) {
+  const hmac = input.connectionProfile?.verification?.hmac_signature || {};
+  if (!hasConfiguredValue(hmac, "secret")) return "webhook_signing_secret_missing";
+  return "webhook_signature_verification_unavailable";
+}
+
 const ADAPTERS = {
   manual_test: {
     code: "manual_test",
@@ -351,8 +430,8 @@ const ADAPTERS = {
   },
   checkout_com: {
     code: "checkout_com",
-    async createCheckoutSession() {
-      return { ok: false, error: "CHECKOUT_COM_ADAPTER_NOT_CONFIGURED" };
+    async createCheckoutSession(input = {}) {
+      return { ok: false, error: providerAdapterUnavailable(input, "checkout_com") };
     },
     async confirmCheckoutSession() {
       return { ok: false, error: "CHECKOUT_COM_CONFIRMATION_NOT_CONFIGURED" };
@@ -363,8 +442,8 @@ const ADAPTERS = {
     async cancelPayment() {
       return { ok: false, error: "CHECKOUT_COM_CANCEL_NOT_CONFIGURED" };
     },
-    async verifyWebhookSignature() {
-      return { ok: false, error: "CHECKOUT_COM_WEBHOOK_NOT_CONFIGURED" };
+    async verifyWebhookSignature(input = {}) {
+      return { ok: false, error: webhookVerificationUnavailable(input) };
     },
     async normalizeWebhookEvent() {
       return { ok: false, error: "CHECKOUT_COM_WEBHOOK_NOT_CONFIGURED" };
@@ -375,8 +454,8 @@ const ADAPTERS = {
   },
   paypal: {
     code: "paypal",
-    async createCheckoutSession() {
-      return { ok: false, error: "PAYPAL_ADAPTER_NOT_CONFIGURED" };
+    async createCheckoutSession(input = {}) {
+      return { ok: false, error: providerAdapterUnavailable(input, "paypal") };
     },
     async confirmCheckoutSession() {
       return { ok: false, error: "PAYPAL_CONFIRMATION_NOT_CONFIGURED" };
@@ -387,8 +466,8 @@ const ADAPTERS = {
     async cancelPayment() {
       return { ok: false, error: "PAYPAL_CANCEL_NOT_CONFIGURED" };
     },
-    async verifyWebhookSignature() {
-      return { ok: false, error: "PAYPAL_WEBHOOK_NOT_CONFIGURED" };
+    async verifyWebhookSignature(input = {}) {
+      return { ok: false, error: webhookVerificationUnavailable(input) };
     },
     async normalizeWebhookEvent() {
       return { ok: false, error: "PAYPAL_WEBHOOK_NOT_CONFIGURED" };
@@ -412,6 +491,8 @@ export function buildPublicCheckoutConfig({ settings, profiles = [] } = {}) {
       label: method.label,
       enabled: method.enabled,
       provider_code: method.provider_code,
+      mode: method.environment,
+      environment: method.environment,
       available: method.available,
       reason: method.enabled === false
         ? "payment_method_disabled"
@@ -439,6 +520,8 @@ export function buildPublicPaymentMethods({ settings, profiles = [] } = {}) {
       label: method.label,
       enabled: method.enabled !== false,
       available: method.enabled !== false && method.available === true,
+      mode: method.mode || method.environment || "production",
+      status: method.status || method.reason || null,
       reason: method.enabled === false
         ? "payment_method_disabled"
         : method.available
