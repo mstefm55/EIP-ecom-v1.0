@@ -82,3 +82,9 @@ Before enabling live provider payments:
 - switch environment only after sandbox webhook and payment-session tests pass
 
 Live mode is not enabled by this V1 branch.
+
+## Migration Release Discipline
+
+This module adds `services/api/db/migrations/0131_payment_connections_v1.sql`.
+
+When this migration is intended to be run from Railway, it must be present on GitHub `main`, not only on `agent/payment-connections-v1`. Before telling the user to run migrations, confirm the file exists on GitHub `main` and report the resulting `main` SHA.

@@ -162,6 +162,21 @@ The scheduler may use specialized timeline/drag primitives, but:
 
 Admin, commerce, CRM, gateway, and tenant screens must not become isolated hardcoded React modules. They should be rendered as UI-engine surfaces with specialized widgets only where justified.
 
+## Migration and GitHub main rule
+
+When a wave adds a database migration that the user must run from Railway, the migration is not deliverable until it is present on GitHub `main`.
+
+Codex must not stop at a local commit or a pushed feature branch when the user has asked to run the migration from Railway. Railway follows the GitHub repo, so the release path must make the migration visible from `main` before telling the user it is ready to run.
+
+Required final checks for any migration-bearing wave:
+
+1. Confirm the migration file exists locally.
+2. Commit and push the feature branch.
+3. Merge or fast-forward the accepted branch into `main` when the user needs Railway to run it.
+4. Push `main` to GitHub.
+5. Confirm the migration file exists on GitHub `main`.
+6. Report clearly whether the migration is only on a branch or already on `main`.
+
 ## Mandatory Codex deliverable for every wave
 
 Every Codex implementation wave must end with an **Engine-first drift check**:
