@@ -8,6 +8,7 @@ import {
   getPaymentAdapter,
   normalizePaymentMethodCode,
   normalizePaymentSettings,
+  resolvePaymentMethodContext,
   sanitizePaymentMetadata
 } from "../src/services/payments/paymentFoundation.js";
 import { PAYMENT_CONNECTION_TYPES } from "../src/services/gateway/connectionProfile.js";
@@ -104,7 +105,8 @@ test("payment readiness and public checkout config expose only secret-free provi
       environment: "sandbox",
       is_enabled: true
     },
-    routing: { provider_code: "checkout_com" },
+    outbound: { auth: { secret_set: true } },
+    routing: { provider_code: "checkout_com", health_status: "healthy", apple_pay_domain_status: "validated" },
     verification: { api_key: { secret: "do-not-leak" } }
   }];
   const readiness = buildPaymentReadiness({ settings, profiles });
@@ -134,6 +136,7 @@ test("payment connection provider types are registered as existing Admin Console
   assert.equal(PAYMENT_CONNECTION_TYPES.CHECKOUT_COM.connection_kind, "checkout_com");
   assert.deepEqual(PAYMENT_CONNECTION_TYPES.CHECKOUT_COM.supported_payment_methods, ["CARD", "GOOGLE_PAY", "APPLE_PAY"]);
   assert.match(JSON.stringify(PAYMENT_CONNECTION_TYPES), /required_secret_fields|outbound\.auth/);
+  assert.match(JSON.stringify(PAYMENT_CONNECTION_TYPES), /required_sandbox_fields|apple_pay_domain_status/);
 });
 
 test("payment adapters fail closed for live placeholders and allow manual_test sandbox only", async () => {
@@ -157,11 +160,105 @@ test("payment adapters fail closed for live placeholders and allow manual_test s
 
   assert.deepEqual(await checkout.createCheckoutSession({}), {
     ok: false,
-    error: "CHECKOUT_COM_ADAPTER_NOT_CONFIGURED"
+    error: "provider_not_configured"
   });
   assert.deepEqual(await paypal.createCheckoutSession({}), {
     ok: false,
-    error: "PAYPAL_ADAPTER_NOT_CONFIGURED"
+    error: "provider_not_configured"
+  });
+});
+
+test("payment sandbox readiness distinguishes provider, credential, health, domain, and disabled states", () => {
+  const settings = normalizePaymentSettings({
+    methods: [
+      { code: "card", label: "Card", enabled: true },
+      { code: "paypal", label: "PayPal", enabled: true },
+      { code: "google_pay", label: "Google Pay", enabled: true },
+      { code: "apple_pay", label: "Apple Pay", enabled: true }
+    ],
+    providers: {
+      card: { provider_code: "checkout_com", environment: "sandbox" },
+      paypal: { provider_code: "paypal", environment: "sandbox" },
+      google_pay: { provider_code: "checkout_com", environment: "sandbox" },
+      apple_pay: { provider_code: "checkout_com", environment: "sandbox" }
+    }
+  });
+
+  const missingProvider = buildPublicPaymentMethods({ settings, profiles: [] });
+  assert.equal(missingProvider.find((item) => item.methodCode === "PAYPAL").reason, "provider_not_configured");
+  assert.equal(missingProvider.find((item) => item.methodCode === "GOOGLE_PAY").reason, "provider_not_configured");
+
+  const checkoutMissingSecret = buildPublicPaymentMethods({
+    settings,
+    profiles: [{
+      identity: { connection_code: "checkout-sandbox", connection_kind: "checkout_com", environment: "sandbox", is_enabled: true },
+      outbound: { auth: {} },
+      routing: { provider_code: "checkout_com", health_status: "healthy", apple_pay_domain_status: "validated" }
+    }]
+  });
+  assert.equal(checkoutMissingSecret.find((item) => item.methodCode === "CARD").reason, "sandbox_credentials_missing");
+
+  const checkoutNoDomain = buildPublicPaymentMethods({
+    settings,
+    profiles: [{
+      identity: { connection_code: "checkout-sandbox", connection_kind: "checkout_com", environment: "sandbox", is_enabled: true },
+      outbound: { auth: { secret_set: true } },
+      routing: { provider_code: "checkout_com", health_status: "healthy" }
+    }]
+  });
+  assert.equal(checkoutNoDomain.find((item) => item.methodCode === "CARD").available, true);
+  assert.equal(checkoutNoDomain.find((item) => item.methodCode === "GOOGLE_PAY").available, true);
+  assert.equal(checkoutNoDomain.find((item) => item.methodCode === "APPLE_PAY").reason, "domain_validation_missing");
+
+  const healthUnknown = buildPublicPaymentMethods({
+    settings,
+    profiles: [{
+      identity: { connection_code: "checkout-sandbox", connection_kind: "checkout_com", environment: "sandbox", is_enabled: true },
+      outbound: { auth: { secret_set: true } },
+      routing: { provider_code: "checkout_com", health_status: "pending", apple_pay_domain_status: "validated" }
+    }]
+  });
+  assert.equal(healthUnknown.find((item) => item.methodCode === "CARD").reason, "provider_health_unknown");
+
+  const disabled = buildPublicPaymentMethods({
+    settings: normalizePaymentSettings({
+      ...settings,
+      methods: [{ code: "paypal", label: "PayPal", enabled: false }]
+    }),
+    profiles: [{
+      identity: { connection_code: "paypal-sandbox", connection_kind: "paypal", environment: "sandbox", is_enabled: true },
+      outbound: { auth: { client_id: "paypal-client-ref", client_secret_set: true } },
+      routing: { provider_code: "paypal", health_status: "healthy" }
+    }]
+  });
+  assert.equal(disabled.find((item) => item.methodCode === "PAYPAL").reason, "payment_method_disabled");
+});
+
+test("payment sandbox session and webhook foundations fail closed without trusted setup", async () => {
+  const settings = normalizePaymentSettings({
+    methods: [{ code: "paypal", label: "PayPal", enabled: true }],
+    providers: { paypal: { provider_code: "paypal", environment: "sandbox" } }
+  });
+  const profiles = [{
+    identity: { connection_code: "paypal-sandbox", connection_kind: "paypal", environment: "sandbox", is_enabled: true },
+    outbound: { auth: { client_id: "paypal-client-ref" } },
+    routing: { provider_code: "paypal", health_status: "healthy" }
+  }];
+  const context = resolvePaymentMethodContext({ settings, profiles, method: "paypal" });
+  assert.equal(context.ok, false);
+  assert.equal(context.reason, "sandbox_credentials_missing");
+  assert.match(publicCommerceRoute, /checkout_source_missing/);
+  assert.match(publicCommerceRoute, /browser_amount_not_accepted/);
+  assert.match(publicCommerceRoute, /methodContext\.reason/);
+
+  const paypal = getPaymentAdapter("paypal");
+  assert.deepEqual(await paypal.createCheckoutSession({ connectionProfile: profiles[0], method: "paypal" }), {
+    ok: false,
+    error: "sandbox_credentials_missing"
+  });
+  assert.deepEqual(await paypal.verifyWebhookSignature({ connectionProfile: profiles[0] }), {
+    ok: false,
+    error: "webhook_signing_secret_missing"
   });
 });
 
@@ -206,7 +303,24 @@ test("payment routes and storefront integration expose governed checkout session
   assert.doesNotMatch(samaraApp, /amount: paymentAmount/);
   assert.doesNotMatch(samaraApp, /selectedPaymentMethod === "card"/);
   assert.match(samaraApp, /paymentMethodApplePay/);
+  assert.match(samaraApp, /sandbox_credentials_missing/);
+  assert.match(samaraApp, /domain_validation_missing/);
+  assert.match(samaraApp, /friendlyCheckoutError/);
   assert.match(samaraApp, /No raw card details are collected by EIP/);
+});
+
+test("admin connection UI exposes payment sandbox setup without raw secret display after save", () => {
+  const adminConnections = fs.readFileSync(
+    new URL("../../../apps/dashboard/src/components/admin/AdminConnectionsPanelSafe.jsx", import.meta.url),
+    "utf8"
+  );
+  assert.match(adminConnections, /PayPal sandbox setup/);
+  assert.match(adminConnections, /Checkout\.com sandbox setup/);
+  assert.match(adminConnections, /Client secret reference/);
+  assert.match(adminConnections, /Secret key reference/);
+  assert.match(adminConnections, /Webhook signing secret/);
+  assert.match(adminConnections, /Apple Pay domain status/);
+  assert.match(adminConnections, /Raw secret values are never displayed after save/);
 });
 
 test("payment governance migration is additive and keeps future clones on role/template metadata", () => {

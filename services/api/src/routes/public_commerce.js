@@ -5067,6 +5067,7 @@ export default async function publicCommerceRoutes(app) {
       currency,
       captureMode: paymentSettings.capture_mode,
       environment: methodContext.environment,
+      method: methodContext.code,
       connectionProfile: methodContext.profile || null,
       metadata: sanitizePaymentMetadata(body.metadata || {})
     });
@@ -5204,11 +5205,15 @@ export default async function publicCommerceRoutes(app) {
       });
       if (!methodContext.ok) {
         const disabled = methodContext.error === "PAYMENT_METHOD_DISABLED";
+        const reason = disabled
+          ? "payment_method_disabled"
+          : methodContext.reason || "provider_not_configured";
         return reply.code(disabled ? 403 : 409).send({
           ok: false,
-          error: disabled ? "payment_method_disabled" : "provider_not_configured",
+          error: reason,
           method: requestedMethod || null,
-          providerCode: methodContext.provider_code || null
+          providerCode: methodContext.provider_code || null,
+          mode: methodContext.environment || null
         });
       }
 
@@ -5386,7 +5391,12 @@ export default async function publicCommerceRoutes(app) {
       return reply.code(400).send({ ok: false, error: "INVALID_JSON" });
     }
     const adapter = getPaymentAdapter(provider);
-    const verification = await adapter.verifyWebhookSignature({ headers: req.headers, body });
+    const verification = await adapter.verifyWebhookSignature({
+      headers: req.headers,
+      body,
+      rawBody: req.rawBody,
+      connectionProfile: access.profile
+    });
     if (!verification.ok) {
       await app.db.query(
         `

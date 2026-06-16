@@ -52,6 +52,31 @@ const MAPPING_MODES = [
 const LOG_LEVELS = ["error", "warn", "info", "debug"];
 const HTTP_METHODS = ["POST", "PUT", "PATCH"];
 
+const PAYMENT_PROVIDER_SETUP = {
+  paypal: {
+    title: "PayPal sandbox setup",
+    providerCode: "paypal",
+    authMode: "oauth2_client_credentials",
+    baseUrl: "https://api-m.sandbox.paypal.com",
+    healthcheckPath: "/v1/oauth2/token",
+    supportedMethods: ["PAYPAL"],
+    signatureHeader: "paypal-transmission-sig",
+    timestampHeader: "paypal-transmission-time",
+    eventIdKey: "paypal-transmission-id"
+  },
+  checkout_com: {
+    title: "Checkout.com sandbox setup",
+    providerCode: "checkout_com",
+    authMode: "api_key_header",
+    baseUrl: "https://api.sandbox.checkout.com",
+    healthcheckPath: "/",
+    supportedMethods: ["CARD", "GOOGLE_PAY", "APPLE_PAY"],
+    signatureHeader: "cko-signature",
+    timestampHeader: "cko-request-id",
+    eventIdKey: "cko-request-id"
+  }
+};
+
 function normalizeList(text) {
   return String(text || "")
     .split(/[\n,]+/)
@@ -122,6 +147,7 @@ function buildProfile(id, overrides = {}) {
         encoding: "hex",
         secret: "",
         secret_set: false,
+        webhook_id_ref: "",
         payload_mode: "raw",
         timestamp_header: "x-timestamp",
         max_skew_sec: 300
@@ -153,6 +179,7 @@ function buildProfile(id, overrides = {}) {
         query_param_name: "",
         secret: "",
         secret_set: false,
+        public_key_ref: "",
         token: "",
         token_set: false,
         username: "",
@@ -175,6 +202,8 @@ function buildProfile(id, overrides = {}) {
       protocol: "",
       provider_code: "",
       health_status: "healthy",
+      apple_pay_domain_status: "",
+      domain_validation_status: "",
       supported_message_types_text: "",
       schema_version: "v1",
       envelope_profile: "canonical_v1",
@@ -238,6 +267,7 @@ function fromApiProfile(profile) {
         encoding: profile.verification?.hmac_signature?.encoding || "hex",
         secret: "",
         secret_set: Boolean(profile.verification?.hmac_signature?.secret_set),
+        webhook_id_ref: profile.verification?.hmac_signature?.webhook_id_ref || "",
         payload_mode: profile.verification?.hmac_signature?.payload_mode || "raw",
         timestamp_header: profile.verification?.hmac_signature?.timestamp_header || "x-timestamp",
         max_skew_sec: profile.verification?.hmac_signature?.max_skew_sec ?? 300
@@ -269,6 +299,7 @@ function fromApiProfile(profile) {
         query_param_name: profile.outbound?.auth?.query_param_name || "",
         secret: "",
         secret_set: Boolean(profile.outbound?.auth?.secret_set),
+        public_key_ref: profile.outbound?.auth?.public_key_ref || "",
         token: "",
         token_set: Boolean(profile.outbound?.auth?.token_set),
         username: profile.outbound?.auth?.username || "",
@@ -291,6 +322,8 @@ function fromApiProfile(profile) {
       protocol: profile.routing?.protocol || "",
       provider_code: profile.routing?.provider_code || "",
       health_status: profile.routing?.health_status || "healthy",
+      apple_pay_domain_status: profile.routing?.apple_pay_domain_status || "",
+      domain_validation_status: profile.routing?.domain_validation_status || "",
       supported_message_types_text: Array.isArray(profile.routing?.supported_message_types) ? profile.routing.supported_message_types.join("\n") : "",
       schema_version: profile.routing?.schema_version || "v1",
       envelope_profile: profile.routing?.envelope_profile || "canonical_v1",
@@ -345,6 +378,7 @@ function toApiProfile(profile) {
         algorithm: profile.verification.hmac_signature.algorithm,
         encoding: profile.verification.hmac_signature.encoding,
         secret: profile.verification.hmac_signature.secret,
+        webhook_id_ref: profile.verification.hmac_signature.webhook_id_ref,
         payload_mode: profile.verification.hmac_signature.payload_mode,
         timestamp_header: profile.verification.hmac_signature.timestamp_header,
         max_skew_sec: Number(profile.verification.hmac_signature.max_skew_sec || 300)
@@ -377,6 +411,8 @@ function toApiProfile(profile) {
       protocol: profile.routing.protocol,
       provider_code: profile.routing.provider_code,
       health_status: profile.routing.health_status || "healthy",
+      apple_pay_domain_status: profile.routing.apple_pay_domain_status || "",
+      domain_validation_status: profile.routing.domain_validation_status || "",
       supported_message_types: normalizeList(profile.routing.supported_message_types_text),
       schema_version: profile.routing.schema_version,
       envelope_profile: profile.routing.envelope_profile,
@@ -590,12 +626,44 @@ export default function AdminConnectionsPanelSafe() {
       email: "email"
     };
     const providerCode = kind === "paypal" ? "paypal" : kind === "checkout_com" ? "checkout_com" : "";
+    const setup = PAYMENT_PROVIDER_SETUP[kind];
     const targetChannel = map[kind];
     const patch = {};
     if (targetChannel && selectedConnection.routing?.channel !== targetChannel) patch.channel = targetChannel;
     if (providerCode && selectedConnection.routing?.provider_code !== providerCode) patch.provider_code = providerCode;
     if (providerCode && selectedConnection.routing?.protocol !== providerCode) patch.protocol = providerCode;
+    if (setup && !selectedConnection.routing?.supported_message_types_text) {
+      patch.supported_message_types_text = setup.supportedMethods.join("\n");
+    }
+    if (setup && selectedConnection.routing?.health_status === "healthy") patch.health_status = "pending";
     if (Object.keys(patch).length) updateSection("routing", patch);
+    if (setup) {
+      const identityPatch = {};
+      if (selectedConnection.identity?.direction === "inbound") identityPatch.direction = "both";
+      if (selectedConnection.identity?.environment !== "sandbox") identityPatch.environment = "sandbox";
+      if (Object.keys(identityPatch).length) updateSection("identity", identityPatch);
+
+      const outboundPatch = {};
+      if (!selectedConnection.outbound?.base_url) outboundPatch.base_url = setup.baseUrl;
+      if (!selectedConnection.outbound?.path_prefix) outboundPatch.path_prefix = "/";
+      if (selectedConnection.outbound?.auth_mode === "none") outboundPatch.auth_mode = setup.authMode;
+      if (!selectedConnection.outbound?.healthcheck_path || selectedConnection.outbound.healthcheck_path === "/health") {
+        outboundPatch.healthcheck_path = setup.healthcheckPath;
+      }
+      if (Object.keys(outboundPatch).length) updateSection("outbound", outboundPatch);
+
+      const hmacPatch = {};
+      if (!selectedConnection.verification?.hmac_signature?.header_name) hmacPatch.header_name = setup.signatureHeader;
+      if (!selectedConnection.verification?.hmac_signature?.timestamp_header) hmacPatch.timestamp_header = setup.timestampHeader;
+      if (Object.keys(hmacPatch).length) updateNested("verification", "hmac_signature", hmacPatch);
+
+      const idempotencyPatch = {};
+      if (selectedConnection.idempotency?.event_id_location !== "header") idempotencyPatch.event_id_location = "header";
+      if (!selectedConnection.idempotency?.event_id_key || selectedConnection.idempotency.event_id_key === "X-Event-Id") {
+        idempotencyPatch.event_id_key = setup.eventIdKey;
+      }
+      if (Object.keys(idempotencyPatch).length) updateSection("idempotency", idempotencyPatch);
+    }
   }, [selectedConnection?.identity?.connection_kind]);
 
   const buildUniqueCode = (name, currentId, avoidCode = null) => {
@@ -747,6 +815,41 @@ export default function AdminConnectionsPanelSafe() {
   const mappingStudioHref = selectedConnection?.identity?.connection_code
     ? `?surface=dashboard&module=content&storefront_connection=${encodeURIComponent(selectedConnection.identity.connection_code)}`
     : "?surface=dashboard&module=content";
+  const paymentSetup = PAYMENT_PROVIDER_SETUP[selectedConnection?.identity?.connection_kind] || null;
+  const paymentAuth = selectedConnection?.outbound?.auth || {};
+  const paymentHmac = selectedConnection?.verification?.hmac_signature || {};
+  const paymentChecks = paymentSetup ? [
+    {
+      label: selectedConnection.identity.connection_kind === "paypal" ? "Client ID reference" : "Secret key reference",
+      ok: selectedConnection.identity.connection_kind === "paypal"
+        ? Boolean(paymentAuth.client_id)
+        : hasStoredSecret(paymentAuth, "secret")
+    },
+    {
+      label: selectedConnection.identity.connection_kind === "paypal" ? "Client secret reference" : "Webhook signing secret",
+      ok: selectedConnection.identity.connection_kind === "paypal"
+        ? hasStoredSecret(paymentAuth, "client_secret")
+        : hasStoredSecret(paymentHmac, "secret")
+    },
+    {
+      label: "Health status",
+      ok: ["healthy", "configured", "ready"].includes(String(selectedConnection.routing?.health_status || "").toLowerCase())
+    },
+    {
+      label: "Supported methods",
+      ok: paymentSetup.supportedMethods.every((method) =>
+        normalizeList(selectedConnection.routing?.supported_message_types_text).map((item) => item.toUpperCase()).includes(method)
+      )
+    }
+  ] : [];
+  if (paymentSetup?.providerCode === "checkout_com") {
+    paymentChecks.push({
+      label: "Apple Pay domain",
+      ok: ["validated", "verified", "active", "configured", "ready"].includes(
+        String(selectedConnection.routing?.apple_pay_domain_status || "").toLowerCase()
+      )
+    });
+  }
 
   return (
     <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
@@ -822,6 +925,38 @@ export default function AdminConnectionsPanelSafe() {
                 {selectedConnection.identity.direction !== "inbound" ? <button type="button" onClick={() => handleTest("outbound")} disabled={Boolean(testing)} className="rounded-full border border-ink-200/70 bg-white px-3 py-2 text-[0.6rem] uppercase tracking-[0.2em] text-ink-600">{testing === "outbound" ? "Testing..." : "Test outbound"}</button> : null}
               </div>
             </div>
+
+            {paymentSetup ? (
+              <div className="mt-4 rounded-xl border border-ink-100 bg-white/80 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[0.65rem] font-semibold uppercase tracking-[0.22em] text-ink-400">{paymentSetup.title}</p>
+                    <p className="mt-1 text-xs text-ink-500">Sandbox references are stored through Admin Console Connections. Raw secret values are never displayed after save.</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {paymentChecks.map((check) => (
+                      <StatusPill key={check.label} ok={check.ok}>{check.label}: {check.ok ? "ready" : "missing"}</StatusPill>
+                    ))}
+                  </div>
+                </div>
+                <Grid>
+                  {paymentSetup.providerCode === "paypal" ? (
+                    <>
+                      <Field label="Client ID reference"><input value={selectedConnection.outbound.auth.client_id} onChange={(event) => updateNested("outbound", "auth", { client_id: event.target.value })} placeholder="PayPal sandbox client ID reference" className={inputClass} /></Field>
+                      <SecretField label="Client secret reference" value={selectedConnection.outbound.auth.client_secret} stored={selectedConnection.outbound.auth.client_secret_set} onChange={(value) => updateNested("outbound", "auth", { client_secret: value })} />
+                      <Field label="Webhook ID reference"><input value={selectedConnection.verification.hmac_signature.webhook_id_ref || ""} onChange={(event) => updateNested("verification", "hmac_signature", { webhook_id_ref: event.target.value })} placeholder="PayPal sandbox webhook ID reference" className={inputClass} /></Field>
+                    </>
+                  ) : (
+                    <>
+                      <SecretField label="Secret key reference" value={selectedConnection.outbound.auth.secret} stored={selectedConnection.outbound.auth.secret_set} onChange={(value) => updateNested("outbound", "auth", { secret: value })} />
+                      <Field label="Public key / safe config"><input value={selectedConnection.outbound.auth.public_key_ref || ""} onChange={(event) => updateNested("outbound", "auth", { public_key_ref: event.target.value })} placeholder="Checkout.com public key or safe config reference" className={inputClass} /></Field>
+                      <SecretField label="Webhook signing secret" value={selectedConnection.verification.hmac_signature.secret} stored={selectedConnection.verification.hmac_signature.secret_set} onChange={(value) => updateNested("verification", "hmac_signature", { secret: value })} />
+                      <Field label="Apple Pay domain status"><select value={selectedConnection.routing.apple_pay_domain_status || ""} onChange={(event) => updateSection("routing", { apple_pay_domain_status: event.target.value, domain_validation_status: event.target.value })} className={inputClass}><option value="">Missing</option><option value="pending">Pending</option><option value="validated">Validated</option><option value="failed">Failed</option></select></Field>
+                    </>
+                  )}
+                </Grid>
+              </div>
+            ) : null}
 
             <div className="mt-4 flex flex-wrap gap-2">
               {visibleSteps.map((step) => <TabButton key={step.id} active={activeStep === step.id} onClick={() => setActiveStep(step.id)}>{step.label}</TabButton>)}
@@ -916,7 +1051,7 @@ export default function AdminConnectionsPanelSafe() {
                 <Field label="Channel"><select value={selectedConnection.routing.channel} onChange={(e) => updateSection("routing", { channel: e.target.value })} className={inputClass}>{CHANNEL_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>
                 <Field label="Protocol"><input value={selectedConnection.routing.protocol} onChange={(e) => updateSection("routing", { protocol: e.target.value })} className={inputClass} /></Field>
                 <Field label="Provider code"><input list="payment-provider-codes" value={selectedConnection.routing.provider_code || ""} onChange={(e) => updateSection("routing", { provider_code: e.target.value })} className={inputClass} /></Field>
-                <Field label="Health status"><select value={selectedConnection.routing.health_status || "healthy"} onChange={(e) => updateSection("routing", { health_status: e.target.value })} className={inputClass}><option value="healthy">Healthy</option><option value="pending">Pending</option><option value="unhealthy">Unhealthy</option></select></Field>
+                <Field label="Health status"><select value={selectedConnection.routing.health_status || "pending"} onChange={(e) => updateSection("routing", { health_status: e.target.value })} className={inputClass}><option value="pending">Pending</option><option value="healthy">Healthy</option><option value="unknown">Unknown</option><option value="unhealthy">Unhealthy</option><option value="failed">Failed</option><option value="disabled">Disabled</option></select></Field>
                 <Field label="Schema version"><input value={selectedConnection.routing.schema_version} onChange={(e) => updateSection("routing", { schema_version: e.target.value })} className={inputClass} /></Field>
                 <Field label="Envelope profile"><input value={selectedConnection.routing.envelope_profile} onChange={(e) => updateSection("routing", { envelope_profile: e.target.value })} className={inputClass} /></Field>
                 <Field label="Mapping mode"><select value={selectedConnection.routing.mapping_mode} onChange={(e) => updateSection("routing", { mapping_mode: e.target.value })} className={inputClass}>{MAPPING_MODES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>

@@ -38,8 +38,9 @@ const PAYMENT_CONNECTION_TYPES = {
     channel: "payments",
     sandbox_live_supported: true,
     supported_payment_methods: ["PAYPAL"],
-    required_secret_fields: ["outbound.auth.client_secret"],
-    safe_public_metadata: ["provider_code", "environment", "supported_payment_methods"],
+    required_secret_fields: ["outbound.auth.client_secret", "verification.hmac_signature.secret"],
+    required_sandbox_fields: ["outbound.auth.client_id", "outbound.auth.client_secret"],
+    safe_public_metadata: ["provider_code", "environment", "supported_payment_methods", "health_status"],
     webhook: {
       supported: true,
       verification_mode: "hmac_signature",
@@ -56,8 +57,15 @@ const PAYMENT_CONNECTION_TYPES = {
     channel: "payments",
     sandbox_live_supported: true,
     supported_payment_methods: ["CARD", "GOOGLE_PAY", "APPLE_PAY"],
-    required_secret_fields: ["outbound.auth.secret"],
-    safe_public_metadata: ["provider_code", "environment", "supported_payment_methods"],
+    required_secret_fields: ["outbound.auth.secret", "verification.hmac_signature.secret"],
+    required_sandbox_fields: ["outbound.auth.secret"],
+    safe_public_metadata: [
+      "provider_code",
+      "environment",
+      "supported_payment_methods",
+      "apple_pay_domain_status",
+      "health_status"
+    ],
     webhook: {
       supported: true,
       verification_mode: "hmac_signature",
@@ -189,6 +197,7 @@ function normalizeProfile(raw = {}, fallbackId) {
   const connectionCodeRaw = normalizeText(identity.connection_code || raw.connection_code);
   const connectionCode = connectionCodeRaw || slugifyCode(connectionName);
   const connectionKind = normalizeConnectionKind(identity.connection_kind || raw.connection_kind || "custom");
+  const paymentConnectionDefaultHealth = ["paypal", "checkout_com"].includes(connectionKind) ? "pending" : "healthy";
   const storefrontDefault =
     ["website", "ecommerce"].includes(connectionKind) ||
     normalizeText(routing.channel || raw.channel) === "website_intake" ||
@@ -287,7 +296,14 @@ function normalizeProfile(raw = {}, fallbackId) {
       channel: normalizeText(routing.channel || raw.channel || "custom"),
       protocol: normalizeText(routing.protocol || raw.protocol),
       provider_code: normalizeText(routing.provider_code || raw.provider_code),
-      health_status: normalizeText(routing.health_status || raw.health_status || "healthy").toLowerCase(),
+      health_status: normalizeText(routing.health_status || raw.health_status || paymentConnectionDefaultHealth).toLowerCase(),
+      apple_pay_domain_status: normalizeText(
+        routing.apple_pay_domain_status ||
+          raw.apple_pay_domain_status ||
+          routing.domain_validation_status ||
+          raw.domain_validation_status
+      ).toLowerCase(),
+      domain_validation_status: normalizeText(routing.domain_validation_status || raw.domain_validation_status).toLowerCase(),
       supported_message_types: normalizeArray(routing.supported_message_types || raw.supported_message_types),
       schema_version: normalizeText(routing.schema_version || raw.schema_version || "v1"),
       envelope_profile: normalizeText(routing.envelope_profile || raw.envelope_profile || "canonical_v1"),

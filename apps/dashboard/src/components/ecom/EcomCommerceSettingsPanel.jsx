@@ -1363,9 +1363,11 @@ export default function EcomCommerceSettingsPanel({ node } = {}) {
             const effectiveEnvironment =
               readiness?.environment ||
               normalizePaymentEnvironment(provider.environment || provider.mode, code === "manual_test" ? "sandbox" : "production");
+            const readinessStatus = String(readiness?.status || readiness?.reason || "").toLowerCase();
             const configured = providerCode === "manual_test"
               ? effectiveEnvironment === "sandbox"
-              : Boolean(readiness?.connection_code || provider.connection_code || readiness?.available);
+              : Boolean(readiness?.connection_code || provider.connection_code || readiness?.available) &&
+                !["provider_not_configured", "sandbox_credentials_missing"].includes(readinessStatus);
             const available = Boolean(readiness?.available);
             const connectionOptionsForProvider = connectionOptions.filter((conn) => {
               const value = `${conn.connection_code || ""} ${conn.connection_kind || ""} ${conn.connection_name || ""}`.toLowerCase();
@@ -1465,7 +1467,7 @@ export default function EcomCommerceSettingsPanel({ node } = {}) {
                   <div>
                     <div className="text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-ink-400">Readiness</div>
                     <div className={available ? "font-semibold text-emerald-700" : "font-semibold text-amber-700"}>
-                      {formatStatus(readiness?.status, "not checked")}
+                      {formatStatus(readiness?.status || readiness?.reason, "not checked")}
                     </div>
                   </div>
                   <div className="md:col-span-6">
