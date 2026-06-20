@@ -60,6 +60,7 @@ export const envSchema = {
     ASSET_ROOT: { type: "string", default: "" },
     ASSET_TOKEN_REQUIRED: { type: "boolean", default: true },
     ASSET_TOKEN_TTL_SEC: { type: "integer", default: 604800 },
+    UPLOAD_MAX_BYTES: { type: "integer", default: 15728640 },
     UPLOAD_SCAN_MODE: { type: "string", default: "inline_blocking" },
     UPLOAD_SCAN_ENDPOINT: { type: "string", default: "" },
     UPLOAD_SCAN_API_KEY: { type: "string", default: "" },

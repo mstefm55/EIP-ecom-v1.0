@@ -1,14 +1,19 @@
 // services/api/src/routes/ecom.js
-import fs from "node:fs";
-import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { hasPermission } from "../auth/perm.js";
 import { sha256Hex } from "../auth/crypto.js";
 import { buildSignedAssetUrl } from "../services/assets/signing.js";
-import { resolveAssetRoot } from "../services/assets/root.js";
+import { ensureUploadDirectory, resolveAssetRoot } from "../services/assets/root.js";
 import { sanitizeMediaForStorage } from "../services/assets/url_policy.js";
-import { safeUploadTarget, uploadPartToBuffer, validateEcomUpload, writeVerifiedUpload } from "../lib/uploadSecurity.js";
+import {
+  DEFAULT_MAX_UPLOAD_BYTES,
+  normalizeUploadError,
+  safeUploadTarget,
+  uploadPartToBuffer,
+  validateEcomUpload,
+  writeVerifiedUpload
+} from "../lib/uploadSecurity.js";
 import { extractProfiles } from "../services/gateway/connectionProfile.js";
 import { assertOutboundUrlAllowed, fetchWithTimeout } from "../services/gateway/outbound.js";
 import {
@@ -3601,67 +3606,108 @@ function normalizeVariantsForStorage(value) {
   return { ...raw, enabled, headers, items };
 }
 
+function sendUploadFailure(req, reply, error) {
+  const failure = normalizeUploadError(error);
+  req.log.error({
+    event: "ecom_upload_error",
+    err: error,
+    stack: error?.stack || null,
+    upload_error: failure.code,
+    request_id: req.id
+  });
+  return reply.code(failure.statusCode).send({
+    ok: false,
+    error: failure.code,
+    message: failure.message,
+    request_id: req.id
+  });
+}
+
+export function ecomUploadErrorHandler(error, req, reply) {
+  return sendUploadFailure(req, reply, error);
+}
+
 
 export default async function ecomRoutes(app) {
   app.post(
     "/uploads",
+    { errorHandler: ecomUploadErrorHandler },
     async (req, reply) => {
       const session = await requireWrite(app, req, reply, "ECOM_PRODUCT_WRITE");
       if (!session) return;
 
-      if (!req.isMultipart()) {
-        return reply.code(415).send({ ok: false, error: "MULTIPART_REQUIRED" });
-      }
-
-      const bodyFile = req.body?.file;
-      let filePart = bodyFile;
-      if (!filePart?.file && typeof filePart?.toBuffer !== "function") {
-        filePart = await req.file();
-      }
-      if (!filePart || (!filePart.file && typeof filePart.toBuffer !== "function")) {
-        return reply.code(400).send({ ok: false, error: "FILE_REQUIRED" });
-      }
-
-      const { filename, mimetype } = filePart;
-      const assetKind = readMultipartValue(req.body?.asset_kind).toLowerCase() === "document"
-        ? "document"
-        : "media";
-      const buffer = await uploadPartToBuffer(filePart);
-      const validation = validateEcomUpload({
-        buffer,
-        filename,
-        mimetype,
-        assetKind,
-        allowedDocumentExt: DOCUMENT_ALLOWED_EXT,
-        allowedDocumentMime: DOCUMENT_ALLOWED_MIME
-      });
-      if (!validation.ok) {
-        auditSecurityEvent(app, "upload.rejected", {
-          category: "upload",
-          source: "ecom.uploads",
-          severity: "warning",
-          outcome: "rejected",
-          tenantId: session.tenant_id,
-          identityId: session.identity_id,
-          reason: validation.error,
-          ip: req.ip,
-          userAgent: req.headers["user-agent"] || null,
-          metadata: { filename, mimetype, asset_kind: assetKind }
-        });
-        return reply.code(415).send({ ok: false, error: validation.error });
-      }
-      const uploadDir = path.join(
-        resolveAssetRoot(app.config),
-        session.tenant_id,
-        "products",
-        assetKind === "document" ? "documents" : ""
-      );
-      fs.mkdirSync(uploadDir, { recursive: true });
-
-      const storedName = `${randomUUID()}${validation.safeExt}`;
-      const targetPath = safeUploadTarget(uploadDir, storedName);
-
       try {
+        if (!req.isMultipart()) {
+          return reply.code(415).send({
+            ok: false,
+            error: "MULTIPART_REQUIRED",
+            message: "Upload requests must use multipart form data."
+          });
+        }
+
+        const bodyFile = req.body?.file;
+        let filePart = bodyFile;
+        if (!filePart?.file && typeof filePart?.toBuffer !== "function") {
+          filePart = await req.file();
+        }
+        if (!filePart || (!filePart.file && typeof filePart.toBuffer !== "function")) {
+          return reply.code(400).send({
+            ok: false,
+            error: "FILE_REQUIRED",
+            message: "Select a file to upload."
+          });
+        }
+
+        const { filename, mimetype } = filePart;
+        const assetKind = readMultipartValue(req.body?.asset_kind).toLowerCase() === "document"
+          ? "document"
+          : "media";
+        const buffer = await uploadPartToBuffer(filePart, {
+          maxBytes: Number(app.config.UPLOAD_MAX_BYTES || DEFAULT_MAX_UPLOAD_BYTES)
+        });
+        const validation = validateEcomUpload({
+          buffer,
+          filename,
+          mimetype,
+          assetKind,
+          allowedDocumentExt: DOCUMENT_ALLOWED_EXT,
+          allowedDocumentMime: DOCUMENT_ALLOWED_MIME
+        });
+        if (!validation.ok) {
+          auditSecurityEvent(app, "upload.rejected", {
+            category: "upload",
+            source: "ecom.uploads",
+            severity: "warning",
+            outcome: "rejected",
+            tenantId: session.tenant_id,
+            identityId: session.identity_id,
+            reason: validation.error,
+            ip: req.ip,
+            userAgent: req.headers["user-agent"] || null,
+            metadata: { filename, mimetype, asset_kind: assetKind }
+          });
+          const error = assetKind === "media" ? "INVALID_IMAGE" : validation.error;
+          return reply.code(415).send({
+            ok: false,
+            error,
+            reason: validation.error,
+            message: assetKind === "media"
+              ? "The selected file is not a valid supported image or video."
+              : "The selected document type is not supported."
+          });
+        }
+
+        const uploadDir = ensureUploadDirectory(
+          resolveAssetRoot(app.config),
+          [
+            session.tenant_id,
+            "products",
+            ...(assetKind === "document" ? ["documents"] : [])
+          ]
+        );
+        const storedName = `${randomUUID()}${validation.safeExt}`;
+        const targetPath = safeUploadTarget(uploadDir, storedName);
+
         const stored = await writeVerifiedUpload({
           app,
           targetPath,
@@ -3692,29 +3738,28 @@ export default async function ecomRoutes(app) {
             scan_status: stored.scan_status
           });
         }
-      } catch (err) {
-        app.log.error({ event: "ecom_upload_error", error: err.message });
-        return reply.code(500).send({ ok: false, error: "UPLOAD_FAILED" });
-      }
 
-      const rawUrl =
-        assetKind === "document"
-          ? `/assets/${session.tenant_id}/products/documents/${storedName}`
-          : `/assets/${session.tenant_id}/products/${storedName}`;
-      const ttlSec = Number(app.config.ASSET_TOKEN_TTL_SEC || 604800);
-      const expiresAt = Math.floor(Date.now() / 1000) + (Number.isFinite(ttlSec) ? ttlSec : 604800);
-      const signedUrl = buildSignedAssetUrl(rawUrl, expiresAt, app.config.API_KEY_PEPPER);
-      return reply.send({
-        ok: true,
-        asset: {
-          name: filename || storedName,
-          url: signedUrl,
-          raw_url: rawUrl,
-          expires_at: new Date(expiresAt * 1000).toISOString(),
-          type: mimetype || "",
-          kind: assetKind
-        }
-      });
+        const rawUrl =
+          assetKind === "document"
+            ? `/assets/${session.tenant_id}/products/documents/${storedName}`
+            : `/assets/${session.tenant_id}/products/${storedName}`;
+        const ttlSec = Number(app.config.ASSET_TOKEN_TTL_SEC || 604800);
+        const expiresAt = Math.floor(Date.now() / 1000) + (Number.isFinite(ttlSec) ? ttlSec : 604800);
+        const signedUrl = buildSignedAssetUrl(rawUrl, expiresAt, app.config.API_KEY_PEPPER);
+        return reply.send({
+          ok: true,
+          asset: {
+            name: filename || storedName,
+            url: signedUrl,
+            raw_url: rawUrl,
+            expires_at: new Date(expiresAt * 1000).toISOString(),
+            type: mimetype || "",
+            kind: assetKind
+          }
+        });
+      } catch (error) {
+        return sendUploadFailure(req, reply, error);
+      }
     }
   );
 

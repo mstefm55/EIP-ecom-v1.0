@@ -1,14 +1,45 @@
 import path from "node:path";
 import fs from "node:fs";
 import crypto from "node:crypto";
+import { classifyStorageError, STORAGE_ERROR_CODES } from "../services/assets/root.js";
 
 const IMAGE_EXT = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp"]);
 const VIDEO_EXT = new Set([".mp4", ".m4v", ".mov", ".webm"]);
+const IMAGE_MIME_BY_EXT = new Map([
+  [".jpg", new Set(["image/jpeg"])],
+  [".jpeg", new Set(["image/jpeg"])],
+  [".png", new Set(["image/png"])],
+  [".gif", new Set(["image/gif"])],
+  [".webp", new Set(["image/webp"])]
+]);
+const VIDEO_MIME_BY_EXT = new Map([
+  [".mp4", new Set(["video/mp4"])],
+  [".m4v", new Set(["video/mp4", "video/x-m4v"])],
+  [".mov", new Set(["video/quicktime"])],
+  [".webm", new Set(["video/webm"])]
+]);
 const ZIP_EXT = new Set([".zip", ".docx", ".xlsx", ".pptx", ".zprj", ".zpac"]);
 const TEXT_EXT = new Set([".txt", ".csv", ".json", ".dxf"]);
 const EICAR = "X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*";
 const ACTIVE_CONTENT_PATTERN = /<\s*(script|iframe|object|embed|svg|link|meta)\b|javascript\s*:|on[a-z]+\s*=/i;
 const DEFAULT_SCAN_TIMEOUT_MS = 5000;
+const DEFAULT_MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
+
+const UPLOAD_RESPONSE = Object.freeze({
+  FILE_TOO_LARGE: { statusCode: 413, message: "The selected file exceeds the upload limit." },
+  INVALID_IMAGE: { statusCode: 415, message: "The selected file is not a valid supported image." },
+  UPLOAD_DIRECTORY_NOT_FOUND: { statusCode: 503, message: "Upload storage is not available." },
+  STORAGE_NOT_WRITABLE: { statusCode: 503, message: "Upload storage is not writable." },
+  UPLOAD_WRITE_FAILED: { statusCode: 500, message: "The file could not be stored." }
+});
+
+class UploadRequestError extends Error {
+  constructor(code, message, cause) {
+    super(message, cause ? { cause } : undefined);
+    this.name = "UploadRequestError";
+    this.code = code;
+  }
+}
 
 function startsWith(buffer, bytes) {
   if (!Buffer.isBuffer(buffer) || buffer.length < bytes.length) return false;
@@ -19,18 +50,62 @@ function hasAscii(buffer, offset, value) {
   return buffer.length >= offset + value.length && buffer.subarray(offset, offset + value.length).toString("ascii") === value;
 }
 
-export async function uploadPartToBuffer(filePart) {
-  if (typeof filePart?.toBuffer === "function") {
-    return filePart.toBuffer();
+function isFileTooLargeError(error) {
+  const code = String(error?.code || "").toUpperCase();
+  return (
+    code === "FST_REQ_FILE_TOO_LARGE" ||
+    code === "FILE_TOO_LARGE" ||
+    error?.name === "RequestFileTooLargeError"
+  );
+}
+
+export function normalizeUploadError(error) {
+  let code = String(error?.code || "").toUpperCase();
+  if (isFileTooLargeError(error)) code = "FILE_TOO_LARGE";
+  if (["EACCES", "EPERM", "EROFS", "ENOENT", "ENOTDIR"].includes(code)) {
+    code = classifyStorageError(error).code;
   }
-  if (!filePart?.file) {
-    throw new Error("FILE_REQUIRED");
+  if (!UPLOAD_RESPONSE[code]) {
+    code = Object.values(STORAGE_ERROR_CODES).includes(code)
+      ? code
+      : "UPLOAD_WRITE_FAILED";
   }
-  const chunks = [];
-  for await (const chunk of filePart.file) {
-    chunks.push(Buffer.from(chunk));
+  return { code, ...UPLOAD_RESPONSE[code] };
+}
+
+export async function uploadPartToBuffer(filePart, { maxBytes = DEFAULT_MAX_UPLOAD_BYTES } = {}) {
+  const limit = Math.max(1, Number(maxBytes) || DEFAULT_MAX_UPLOAD_BYTES);
+  try {
+    if (typeof filePart?.toBuffer === "function") {
+      const buffer = await filePart.toBuffer();
+      if (filePart?.file?.truncated || buffer.length > limit) {
+        throw new UploadRequestError("FILE_TOO_LARGE", "Upload exceeds the configured size limit.");
+      }
+      return buffer;
+    }
+    if (!filePart?.file) {
+      throw new UploadRequestError("FILE_REQUIRED", "A file is required.");
+    }
+    const chunks = [];
+    let totalBytes = 0;
+    for await (const chunk of filePart.file) {
+      const bufferedChunk = Buffer.from(chunk);
+      totalBytes += bufferedChunk.length;
+      if (totalBytes > limit) {
+        throw new UploadRequestError("FILE_TOO_LARGE", "Upload exceeds the configured size limit.");
+      }
+      chunks.push(bufferedChunk);
+    }
+    if (filePart.file.truncated) {
+      throw new UploadRequestError("FILE_TOO_LARGE", "Upload exceeds the configured size limit.");
+    }
+    return Buffer.concat(chunks);
+  } catch (error) {
+    if (isFileTooLargeError(error)) {
+      throw new UploadRequestError("FILE_TOO_LARGE", "Upload exceeds the configured size limit.", error);
+    }
+    throw error;
   }
-  return Buffer.concat(chunks);
 }
 
 export function safeUploadTarget(rootDir, storedName) {
@@ -140,7 +215,7 @@ export async function writeVerifiedUpload({
   fs.mkdirSync(finalDir, { recursive: true });
   const mode = normalizeScanMode(app);
   if (mode !== "external_required") {
-    fs.writeFileSync(targetPath, buffer);
+    fs.writeFileSync(targetPath, buffer, { flag: "wx" });
     return { ok: true, scan_status: "clean", scanner: "inline_v1" };
   }
 
@@ -155,7 +230,7 @@ export async function writeVerifiedUpload({
   const quarantineName = `${crypto.randomUUID()}-${storedName || path.basename(targetPath)}`;
   const quarantinePath = safeUploadTarget(quarantineDir, quarantineName);
   const sha256 = crypto.createHash("sha256").update(buffer).digest("hex");
-  fs.writeFileSync(quarantinePath, buffer);
+  fs.writeFileSync(quarantinePath, buffer, { flag: "wx" });
   writeQuarantineMetadata(quarantinePath, {
     status: "pending",
     tenant_id: String(tenantId || ""),
@@ -235,7 +310,7 @@ export function validateImageUpload({ buffer, filename, mimetype }) {
   if (!scan.ok) return scan;
   const extension = path.extname(filename || "").toLowerCase();
   const mime = String(mimetype || "").toLowerCase();
-  if (!IMAGE_EXT.has(extension) || !mime.startsWith("image/")) {
+  if (!IMAGE_EXT.has(extension) || !IMAGE_MIME_BY_EXT.get(extension)?.has(mime)) {
     return { ok: false, error: "UNSUPPORTED_MEDIA" };
   }
   const signature = detectFileSignature(buffer);
@@ -261,6 +336,9 @@ export function validateEcomUpload({ buffer, filename, mimetype, assetKind, allo
       return { ok: false, error: "UNSUPPORTED_MEDIA" };
     }
     if (IMAGE_EXT.has(extension)) return validateImageUpload({ buffer, filename, mimetype });
+    if (!VIDEO_MIME_BY_EXT.get(extension)?.has(mime)) {
+      return { ok: false, error: "UNSUPPORTED_MEDIA" };
+    }
     if (extension === ".webm" && signature !== "webm") return { ok: false, error: "FILE_SIGNATURE_MISMATCH" };
     if ((extension === ".mp4" || extension === ".m4v" || extension === ".mov") && signature !== "mp4") {
       return { ok: false, error: "FILE_SIGNATURE_MISMATCH" };
@@ -280,5 +358,7 @@ export function validateEcomUpload({ buffer, filename, mimetype, assetKind, allo
 }
 
 export {
+  DEFAULT_MAX_UPLOAD_BYTES,
+  UploadRequestError,
   quarantineMetadataPath
 };

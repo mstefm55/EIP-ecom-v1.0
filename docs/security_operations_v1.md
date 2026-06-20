@@ -168,6 +168,9 @@ Asset persistence:
 | Setting | Purpose |
 | --- | --- |
 | `ASSET_ROOT` | Optional filesystem root for served tenant assets. Defaults to `services/api/assets`. On Railway, point this at a mounted persistent volume so profile avatars and tenant uploads survive redeploy/restart. |
+| `UPLOAD_MAX_BYTES` | Maximum accepted multipart file size in bytes; defaults to 15 MiB. |
+
+On Railway, the API automatically uses `/data/eip-assets` when `/data` is mounted. `ASSET_ROOT` remains the explicit override for volumes mounted elsewhere. Startup logs emit `UPLOAD_ROOT`, `DIRECTORY_EXISTS`, `WRITABLE`, and `STORAGE_MODE` without exposing secrets.
 
 ## Admin Usage
 

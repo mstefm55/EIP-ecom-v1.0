@@ -1,5 +1,4 @@
 import Fastify from "fastify";
-import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import cors from "@fastify/cors";
@@ -55,12 +54,12 @@ import { auditSecurityEvent } from "./lib/securityAudit.js";
 import { advanceInstance, createInstance, findActiveInstance, updateTaskStatus } from "./core/core_process_engine.js";
 import { verifyAssetToken } from "./services/assets/signing.js";
 import { sessionCanAccessAssetTenant } from "./services/assets/access.js";
-import { resolveAssetRoot } from "./services/assets/root.js";
+import { inspectUploadStorage } from "./services/assets/root.js";
+import { DEFAULT_MAX_UPLOAD_BYTES } from "./lib/uploadSecurity.js";
 import { syncAllTenantMarketplaceFx } from "./services/fx/marketFxSync.js";
 import { buildRenderedDomScannerDiagnostic } from "./services/storefront/renderedDomScanner.js";
 
 const DEFAULT_BODY_LIMIT = 1024 * 1024; // 1 MiB
-const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 const STATE_CHANGING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -220,21 +219,41 @@ async function buildServer() {
   });
 
   // ---- static file serving for local uploads (dev/local) ----
-  const assetsRoot = resolveAssetRoot(app.config);
+  const uploadStorage = inspectUploadStorage(app.config);
+  const assetsRoot = uploadStorage.uploadRoot;
   app.decorate("ASSET_ROOT", assetsRoot);
-  fs.mkdirSync(assetsRoot, { recursive: true });
-  await app.register(staticPlugin, {
-    root: assetsRoot,
-    prefix: "/assets/",
-    decorateReply: false,
-    setHeaders: (res, filePath) => {
-      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-      res.setHeader("Cache-Control", "public, max-age=3600");
-    },
+  app.decorate("UPLOAD_STORAGE", uploadStorage);
+  app.log.info({
+    event: "upload_storage_diagnostic",
+    UPLOAD_ROOT: uploadStorage.uploadRoot,
+    DIRECTORY_EXISTS: uploadStorage.directoryExists,
+    WRITABLE: uploadStorage.writable,
+    STORAGE_MODE: uploadStorage.storageMode,
+    error: uploadStorage.error?.code || null
   });
+  if (uploadStorage.directoryExists) {
+    await app.register(staticPlugin, {
+      root: assetsRoot,
+      prefix: "/assets/",
+      decorateReply: false,
+      setHeaders: (res) => {
+        res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+        res.setHeader("Cache-Control", "public, max-age=3600");
+      },
+    });
+  } else {
+    app.log.error({
+      event: "upload_storage_unavailable",
+      error: uploadStorage.error?.code || "UPLOAD_DIRECTORY_NOT_FOUND",
+      stack: uploadStorage.error?.stack
+    });
+  }
 
   // ---- multipart for file uploads ----
-  await app.register(multipart, { attachFieldsToBody: true, limits: { fileSize: MAX_UPLOAD_BYTES } });
+  await app.register(multipart, {
+    attachFieldsToBody: true,
+    limits: { fileSize: Number(app.config.UPLOAD_MAX_BYTES || DEFAULT_MAX_UPLOAD_BYTES) }
+  });
 
   // ============================================================
   // REALMS
