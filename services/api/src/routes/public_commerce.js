@@ -26,6 +26,7 @@ import { auditSecurityEvent } from "../lib/securityAudit.js";
 import { normalizeProductSource, resolveProductDrivenRows } from "../lib/storefrontContentResolution.js";
 import {
   buildPublicCheckoutConfig,
+  buildPaymentConnectionHealth,
   buildPublicPaymentMethods,
   getPaymentAdapter,
   normalizePaymentEnvironment,
@@ -4965,6 +4966,39 @@ export default async function publicCommerceRoutes(app) {
     getPublicPaymentMethods
   );
 
+  const getPublicPaymentHealth = async (req, reply) => {
+    const access = await resolveConnection(app, req, reply, ["website_intake", "custom", "payments"]);
+    if (!access) return;
+
+    const payment = await loadCommercePaymentSettings(app, access.tenant.id);
+    const providers = buildPaymentConnectionHealth({
+      settings: payment,
+      profiles: extractProfiles(access.tenant.attrs || {})
+    });
+
+    return reply.send({
+      ok: true,
+      providers,
+      payment: {
+        providers,
+        default_currency: payment.default_currency || "USD",
+        capture_mode: payment.capture_mode || "automatic"
+      }
+    });
+  };
+
+  app.get(
+    "/checkout/payment-health",
+    { config: { rateLimit: RATE_LIMIT, cors: false } },
+    getPublicPaymentHealth
+  );
+
+  app.get(
+    "/commerce/:suffix/checkout/payment-health",
+    { config: { rateLimit: RATE_LIMIT, cors: false } },
+    getPublicPaymentHealth
+  );
+
   const createCheckoutSession = async (req, reply) => {
     const access = await resolveConnection(app, req, reply, ["payments", "custom", "website_intake"]);
     if (!access) return;
@@ -5390,6 +5424,7 @@ export default async function publicCommerceRoutes(app) {
     } catch {
       return reply.code(400).send({ ok: false, error: "INVALID_JSON" });
     }
+    const eventId = paymentWebhookEventId(provider, body, req);
     const adapter = getPaymentAdapter(provider);
     const verification = await adapter.verifyWebhookSignature({
       headers: req.headers,
@@ -5405,9 +5440,10 @@ export default async function publicCommerceRoutes(app) {
         `,
         [
           access.tenant.id,
-          `payment.webhook.${provider}.rejected`,
+          `payment.webhook.${provider}.${eventId}.rejected`,
           JSON.stringify(sanitizePaymentMetadata({
             provider,
+            event_id: eventId,
             event_type: "webhook_failed_verification",
             connection_code: access.profile.identity?.connection_code,
             error: verification.error
@@ -5418,7 +5454,6 @@ export default async function publicCommerceRoutes(app) {
       return reply.code(status).send({ ok: false, error: verification.error });
     }
 
-    const eventId = paymentWebhookEventId(provider, body, req);
     const rawBody = Buffer.isBuffer(req.rawBody) ? req.rawBody : Buffer.from(req.rawBody || "");
     const scope = `commerce.payment.webhook.${provider}.${access.profile.identity?.connection_code}`;
     const idem = await ensureIdempotency(app.db, {

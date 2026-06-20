@@ -4,6 +4,7 @@ import { sha256Hex } from "../auth/crypto.js";
 import { extractProfiles } from "../services/gateway/connectionProfile.js";
 import {
   DEFAULT_PAYMENT_SETTINGS,
+  buildPaymentConnectionHealth,
   buildPaymentReadiness,
   normalizePaymentSettings,
   sanitizePaymentMetadata
@@ -978,7 +979,8 @@ export default async function commerceOrdersRoutes(app) {
       ]);
       return reply.send({
         ok: true,
-        readiness: buildPaymentReadiness({ settings: settings.payment, profiles })
+        readiness: buildPaymentReadiness({ settings: settings.payment, profiles }),
+        connection_health: buildPaymentConnectionHealth({ settings: settings.payment, profiles })
       });
     }
   );

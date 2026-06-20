@@ -9,6 +9,11 @@ const PAYMENT_METHODS = [
 ];
 
 const PROVIDER_CODES = new Set(["checkout_com", "paypal", "manual_test"]);
+const PAYMENT_PROVIDER_METHODS = {
+  checkout_com: ["card", "google_pay", "apple_pay"],
+  paypal: ["paypal"],
+  manual_test: ["manual_test"]
+};
 const SENSITIVE_KEY = /(authorization|cookie|password|secret|token|signature|api[_-]?key|card[_-]?number|pan|cvc|cvv|cryptogram)/i;
 const SAFE_CARD_KEYS = new Set(["brand", "card_last4", "last4"]);
 
@@ -131,6 +136,27 @@ function normalizePaymentMethods(input, fallback = DEFAULT_PAYMENT_SETTINGS.meth
     if (!seen.has(baseline.code)) out.push({ code: baseline.code, label: baseline.label, enabled: baseline.enabled });
   }
   return out;
+}
+
+function orderPaymentMethods(methods, displayOrder = []) {
+  const source = Array.isArray(methods) ? methods : [];
+  const configuredOrder = Array.from(
+    new Set((Array.isArray(displayOrder) ? displayOrder : []).map(normalizePaymentMethodCode).filter(Boolean))
+  );
+  const configuredRank = new Map(configuredOrder.map((code, index) => [code, index]));
+  const defaultRank = new Map(PAYMENT_METHODS.map((item, index) => [item.code, index]));
+
+  return [...source].sort((left, right) => {
+    const leftCode = normalizePaymentMethodCode(left?.code || left?.methodCode || left?.method || left?.id);
+    const rightCode = normalizePaymentMethodCode(right?.code || right?.methodCode || right?.method || right?.id);
+    const leftRank = configuredRank.has(leftCode)
+      ? configuredRank.get(leftCode)
+      : configuredOrder.length + (defaultRank.get(leftCode) ?? PAYMENT_METHODS.length);
+    const rightRank = configuredRank.has(rightCode)
+      ? configuredRank.get(rightCode)
+      : configuredOrder.length + (defaultRank.get(rightCode) ?? PAYMENT_METHODS.length);
+    return leftRank - rightRank;
+  });
 }
 
 function normalizePaymentProviders(input = {}) {
@@ -271,6 +297,14 @@ function selectProviderProfile(profiles, providerCode, configuredCode) {
   );
 }
 
+function selectProviderProfileForHealth(profiles, providerCode, configuredCode) {
+  const source = Array.isArray(profiles) ? profiles : [];
+  if (configuredCode) {
+    return source.find((profile) => normalizeText(profile?.identity?.connection_code) === configuredCode) || null;
+  }
+  return source.find((profile) => profileProviderCode(profile) === providerCode) || null;
+}
+
 export function buildPaymentReadiness({ settings, profiles = [] } = {}) {
   const normalized = normalizePaymentSettings(settings);
   const methods = normalized.methods.map((method) => {
@@ -307,14 +341,106 @@ export function buildPaymentReadiness({ settings, profiles = [] } = {}) {
       wallet: method.code === "google_pay" || method.code === "apple_pay"
     };
   });
+  const orderedMethods = orderPaymentMethods(methods, normalized.display_order);
 
   return {
     default_currency: normalized.default_currency,
     capture_mode: normalized.capture_mode,
     allowed_countries: normalized.allowed_countries,
-    methods,
-    ready_methods: methods.filter((method) => method.enabled && method.available).map((method) => method.code)
+    methods: orderedMethods,
+    ready_methods: orderedMethods.filter((method) => method.enabled && method.available).map((method) => method.code)
   };
+}
+
+function providerWebhookState(profile, providerCode) {
+  if (!profile) return "missing";
+  const hmac = profile?.verification?.hmac_signature || {};
+  if (providerCode === "paypal" && hasConfiguredValue(hmac, "webhook_id")) return "configured";
+  if (hasConfiguredValue(hmac, "secret")) return "configured";
+  return "missing";
+}
+
+function providerHealthSummary({ profile, missingRequirements = [], warnings = [] } = {}) {
+  if (!profile) return "not_ready";
+  if (!profileIsEnabled(profile)) return "disabled";
+  const healthReason = profileHealthReason(profile);
+  if (healthReason === "provider_health_failed") return "failed";
+  if (missingRequirements.length) return "not_ready";
+  if (healthReason === "provider_health_unknown") return "warning";
+  if (warnings.length) return "warning";
+  return "healthy";
+}
+
+function missingCredentialRequirement(reason) {
+  if (reason === "sandbox_credentials_missing") return "sandbox_credentials";
+  if (reason === "provider_not_configured") return "provider_credentials";
+  return reason || null;
+}
+
+export function buildPaymentConnectionHealth({ settings, profiles = [] } = {}) {
+  const normalized = normalizePaymentSettings(settings);
+  const readiness = buildPaymentReadiness({ settings: normalized, profiles });
+
+  return Object.entries(PAYMENT_PROVIDER_METHODS)
+    .filter(([providerCode]) => providerCode !== "manual_test")
+    .map(([providerCode, methodCodes]) => {
+      const configuredProviders = methodCodes
+        .map((methodCode) => normalized.providers?.[methodCode] || {})
+        .filter((provider, index) => normalizePaymentProviderCode(provider.provider_code, methodCodes[index]) === providerCode);
+      const configuredProvider = configuredProviders.find((provider) => provider.connection_code) || configuredProviders[0] || {};
+      const profile = selectProviderProfileForHealth(profiles, providerCode, configuredProvider.connection_code);
+      const methods = readiness.methods
+        .filter((method) => methodCodes.includes(normalizePaymentMethodCode(method.code)))
+        .map((method) => ({
+          method: toPublicPaymentCode(method.code),
+          enabled: method.enabled !== false,
+          available: method.enabled !== false && method.available === true,
+          status: method.status || method.reason || null,
+          reason: method.enabled === false
+            ? "payment_method_disabled"
+            : method.available
+              ? null
+              : method.reason || method.status || "provider_not_configured"
+        }));
+      const missingRequirements = [];
+      const warnings = [];
+      if (!profile) {
+        missingRequirements.push("provider_connection");
+      } else {
+        if (!profileIsEnabled(profile)) missingRequirements.push("provider_enabled");
+        const credentialReason = providerCredentialReason(profile, providerCode);
+        const credentialRequirement = missingCredentialRequirement(credentialReason);
+        if (credentialRequirement) missingRequirements.push(credentialRequirement);
+        const healthReason = profileHealthReason(profile);
+        if (healthReason === "provider_health_failed") missingRequirements.push("provider_health");
+        if (healthReason === "provider_health_unknown") warnings.push("provider_health_unknown");
+      }
+      const webhookState = providerWebhookState(profile, providerCode);
+      if (webhookState !== "configured") warnings.push("webhook_signing_secret_missing");
+      if (
+        providerCode === "checkout_com" &&
+        methods.some((method) => method.method === "APPLE_PAY" && method.enabled) &&
+        (!profile || !applePayDomainReady(profile))
+      ) {
+        missingRequirements.push("apple_pay_domain_validation");
+      }
+      const uniqueMissing = Array.from(new Set(missingRequirements.filter(Boolean)));
+      const uniqueWarnings = Array.from(new Set(warnings.filter(Boolean)));
+
+      return {
+        provider: toPublicPaymentCode(providerCode),
+        mode: normalizePaymentEnvironment(profile?.identity?.environment || configuredProvider.environment, "production"),
+        enabled: Boolean(profile && profileIsEnabled(profile) && methods.some((method) => method.enabled)),
+        configured: uniqueMissing.length === 0,
+        health: providerHealthSummary({ profile, missingRequirements: uniqueMissing, warnings: uniqueWarnings }),
+        missing_requirements: uniqueMissing,
+        warnings: uniqueWarnings,
+        webhook_state: webhookState,
+        available_methods: methods.filter((method) => method.available).map((method) => method.method),
+        methods_supported: methods.map((method) => method.method),
+        methods
+      };
+    });
 }
 
 export function resolvePaymentMethodContext({ settings, profiles = [], method } = {}) {

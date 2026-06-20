@@ -77,6 +77,12 @@ const PAYMENT_PROVIDER_SETUP = {
   }
 };
 
+const PAYMENT_CARD_TONE_CLASS = {
+  green: "border-emerald-200 bg-emerald-50/80 text-emerald-900",
+  yellow: "border-amber-200 bg-amber-50/80 text-amber-900",
+  red: "border-rose-200 bg-rose-50/80 text-rose-900"
+};
+
 function normalizeList(text) {
   return String(text || "")
     .split(/[\n,]+/)
@@ -112,7 +118,68 @@ function formatDate(value) {
 }
 
 function hasStoredSecret(container, key) {
-  return Boolean(container?.[key] || container?.[`${key}_set`]);
+  return Boolean(container?.[key] || container?.[`${key}_ref`] || container?.[`${key}_set`]);
+}
+
+function formatCardStatus(value, fallback = "-") {
+  return String(value || fallback)
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function isPaymentProviderConnection(conn) {
+  return Boolean(PAYMENT_PROVIDER_SETUP[String(conn?.identity?.connection_kind || "").toLowerCase()]);
+}
+
+function paymentConnectionWebhookState(conn) {
+  if (!isPaymentProviderConnection(conn)) return "-";
+  const kind = String(conn?.identity?.connection_kind || "").toLowerCase();
+  const hmac = conn?.verification?.hmac_signature || {};
+  if (kind === "paypal") {
+    return hasStoredSecret(hmac, "secret") || hasStoredSecret(hmac, "webhook_id") ? "configured" : "missing";
+  }
+  return hasStoredSecret(hmac, "secret") ? "configured" : "missing";
+}
+
+function paymentConnectionCardState(conn) {
+  const kind = String(conn?.identity?.connection_kind || "").toLowerCase();
+  const setup = PAYMENT_PROVIDER_SETUP[kind];
+  if (!setup) return null;
+  const auth = conn?.outbound?.auth || {};
+  const supported = normalizeList(conn?.routing?.supported_message_types_text).map((item) => item.toUpperCase());
+  const methods = supported.length ? supported : setup.supportedMethods;
+  const methodMetadataReady = setup.supportedMethods.every((method) => methods.includes(method));
+  const health = String(conn?.routing?.health_status || "pending").toLowerCase();
+  const enabled = conn?.identity?.is_enabled !== false;
+  const credentialsReady = kind === "paypal"
+    ? Boolean(auth.client_id) && hasStoredSecret(auth, "client_secret")
+    : hasStoredSecret(auth, "secret");
+  const webhook = paymentConnectionWebhookState(conn);
+  const applePayReady = ["validated", "verified", "active", "configured", "ready"].includes(
+    String(conn?.routing?.apple_pay_domain_status || conn?.routing?.domain_validation_status || "").toLowerCase()
+  );
+  const hardHealth = ["disabled", "failed", "unhealthy", "down", "error"].includes(health);
+  const healthy = ["healthy", "configured", "ready"].includes(health);
+  const blockers = [];
+  const warnings = [];
+
+  if (!enabled) blockers.push("disabled");
+  if (!credentialsReady) blockers.push("credentials missing");
+  if (hardHealth) blockers.push("health failed");
+  if (!healthy && !hardHealth) warnings.push("health pending");
+  if (webhook !== "configured") warnings.push("webhook missing");
+  if (!methodMetadataReady) warnings.push("method metadata missing");
+  if (kind === "checkout_com" && methods.includes("APPLE_PAY") && !applePayReady) warnings.push("apple pay domain missing");
+
+  return {
+    tone: blockers.length ? "red" : warnings.length ? "yellow" : "green",
+    status: blockers[0] || warnings[0] || "healthy",
+    mode: conn?.identity?.environment || "production",
+    enabled,
+    health,
+    webhook,
+    methods: methods.join(", ")
+  };
 }
 
 function buildProfile(id, overrides = {}) {
@@ -901,13 +968,39 @@ export default function AdminConnectionsPanelSafe() {
           {testResult ? <Notice tone={testResult.tone}>{testResult.text}</Notice> : null}
 
           <div className="mt-4 flex flex-wrap gap-2">
-            {connections.map((conn) => (
-              <button key={conn.id} type="button" onClick={() => setSelectedConnectionId(conn.id)} className={`rounded-xl border px-3 py-2 text-left text-[0.7rem] ${conn.id === selectedConnection?.id ? "border-ink-900/10 bg-white shadow-soft" : "border-white/60 bg-white/70 text-ink-500"}`}>
-                <p className="font-semibold text-ink-900">{conn.identity.connection_name || "New connection"}</p>
-                <p className="uppercase tracking-[0.2em] text-ink-400">{conn.identity.connection_code || "auto-generated"}</p>
-                <p className="mt-1 text-[0.6rem] uppercase tracking-[0.2em] text-ink-400">{conn.identity.connection_kind || "custom"}</p>
-              </button>
-            ))}
+            {connections.map((conn) => {
+              const selected = conn.id === selectedConnection?.id;
+              const paymentCard = paymentConnectionCardState(conn);
+              const toneClass = paymentCard ? PAYMENT_CARD_TONE_CLASS[paymentCard.tone] : "";
+              return (
+                <button
+                  key={conn.id}
+                  type="button"
+                  onClick={() => setSelectedConnectionId(conn.id)}
+                  className={`rounded-xl border px-3 py-2 text-left text-[0.7rem] ${paymentCard ? toneClass : selected ? "border-ink-900/10 bg-white shadow-soft" : "border-white/60 bg-white/70 text-ink-500"} ${selected ? "shadow-soft ring-2 ring-ink-900/10" : ""}`}
+                >
+                  <p className="font-semibold text-ink-900">{conn.identity.connection_name || "New connection"}</p>
+                  <p className="uppercase tracking-[0.2em] text-ink-400">{conn.identity.connection_code || "auto-generated"}</p>
+                  {paymentCard ? (
+                    <div className="mt-2 grid gap-1 text-[0.58rem] uppercase tracking-[0.14em]">
+                      <div className="flex flex-wrap gap-x-3 gap-y-1">
+                        <span>Name {formatCardStatus(conn.identity.connection_kind || "payment")}</span>
+                        <span>Mode {formatCardStatus(paymentCard.mode)}</span>
+                        <span>Enabled {paymentCard.enabled ? "Yes" : "No"}</span>
+                      </div>
+                      <div className="flex flex-wrap gap-x-3 gap-y-1">
+                        <span>Health {formatCardStatus(paymentCard.health)}</span>
+                        <span>Webhook {formatCardStatus(paymentCard.webhook)}</span>
+                        <span>Status {formatCardStatus(paymentCard.status)}</span>
+                      </div>
+                      <span>Methods {paymentCard.methods}</span>
+                    </div>
+                  ) : (
+                    <p className="mt-1 text-[0.6rem] uppercase tracking-[0.2em] text-ink-400">{conn.identity.connection_kind || "custom"}</p>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
 

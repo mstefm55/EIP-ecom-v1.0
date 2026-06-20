@@ -292,6 +292,27 @@ function yesNo(value) {
   return value ? "Yes" : "No";
 }
 
+function orderPaymentSettingsMethods(methods, displayOrder = []) {
+  const source = Array.isArray(methods) ? methods : [];
+  const configuredOrder = Array.from(
+    new Set((Array.isArray(displayOrder) ? displayOrder : []).map(normalizePaymentMethodCode).filter(Boolean))
+  );
+  const configuredRank = new Map(configuredOrder.map((code, index) => [code, index]));
+  const defaultRank = new Map(DEFAULT_PAYMENT_SETTINGS.methods.map((item, index) => [item.code, index]));
+
+  return [...source].sort((left, right) => {
+    const leftCode = normalizePaymentMethodCode(left?.code || left?.id);
+    const rightCode = normalizePaymentMethodCode(right?.code || right?.id);
+    const leftRank = configuredRank.has(leftCode)
+      ? configuredRank.get(leftCode)
+      : configuredOrder.length + (defaultRank.get(leftCode) ?? DEFAULT_PAYMENT_SETTINGS.methods.length);
+    const rightRank = configuredRank.has(rightCode)
+      ? configuredRank.get(rightCode)
+      : configuredOrder.length + (defaultRank.get(rightCode) ?? DEFAULT_PAYMENT_SETTINGS.methods.length);
+    return leftRank - rightRank;
+  });
+}
+
 function normalizePaymentProviderCode(value, method = "") {
   const normalized = String(value || "").trim().toLowerCase().replace(/[-.\s]+/g, "_");
   if (["checkout", "checkoutcom", "checkout_com"].includes(normalized)) return "checkout_com";
@@ -720,6 +741,27 @@ export default function EcomCommerceSettingsPanel({ node } = {}) {
     }));
   };
 
+  const updatePaymentMethodPriority = (code, nextIndex) => {
+    const methodCode = normalizePaymentMethodCode(code);
+    if (!methodCode) return;
+    updatePayment((current) => {
+      const methodCodes = current.methods.map((item) => normalizePaymentMethodCode(item.code)).filter(Boolean);
+      const currentOrder = Array.from(
+        new Set([
+          ...(Array.isArray(current.display_order) ? current.display_order : []).map(normalizePaymentMethodCode).filter((item) => methodCodes.includes(item)),
+          ...methodCodes
+        ])
+      );
+      const withoutMethod = currentOrder.filter((item) => item !== methodCode);
+      const boundedIndex = Math.max(0, Math.min(Number(nextIndex) || 0, withoutMethod.length));
+      withoutMethod.splice(boundedIndex, 0, methodCode);
+      return {
+        ...current,
+        display_order: withoutMethod
+      };
+    });
+  };
+
   const handleAddMarketplace = () => {
     const draftJurisdiction = normalizeJurisdictionCode(marketplaceDraft.jurisdiction_code);
     const draftPrimary = normalizeLocale(marketplaceDraft.primary_locale) || translation.default_locale || "en";
@@ -1089,6 +1131,10 @@ export default function EcomCommerceSettingsPanel({ node } = {}) {
     }
     return map;
   }, [paymentReadiness]);
+  const orderedPaymentMethods = useMemo(
+    () => orderPaymentSettingsMethods(payment.methods, payment.display_order),
+    [payment.display_order, payment.methods]
+  );
   const selectedProvider = providerOptions.find(
     (provider) => String(provider?.code || "").toLowerCase() === String(translationEngine.provider_code || "").toLowerCase()
   );
@@ -1355,7 +1401,7 @@ export default function EcomCommerceSettingsPanel({ node } = {}) {
         </div>
 
         <div className="grid gap-3">
-          {payment.methods.map((method) => {
+          {orderedPaymentMethods.map((method, priorityIndex) => {
             const code = normalizePaymentMethodCode(method.code);
             const provider = payment.providers?.[code] || {};
             const readiness = paymentReadinessByMethod.get(code);
@@ -1377,7 +1423,7 @@ export default function EcomCommerceSettingsPanel({ node } = {}) {
             });
             return (
               <div key={code} className="rounded-xl border border-ink-100 bg-white/80 p-3">
-                <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_150px_150px_minmax(0,1fr)]">
+                <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_115px_150px_150px_minmax(0,1fr)]">
                   <label className="flex flex-col gap-1 text-[0.7rem] font-semibold uppercase tracking-[0.2em] text-ink-400">
                     Method
                     <div className="flex items-center gap-3">
@@ -1393,6 +1439,21 @@ export default function EcomCommerceSettingsPanel({ node } = {}) {
                         className="w-full rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs text-ink-700"
                       />
                     </div>
+                  </label>
+
+                  <label className="flex flex-col gap-1 text-[0.7rem] font-semibold uppercase tracking-[0.2em] text-ink-400">
+                    Priority
+                    <select
+                      value={priorityIndex}
+                      onChange={(event) => updatePaymentMethodPriority(code, Number(event.target.value))}
+                      className="rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs text-ink-700"
+                    >
+                      {orderedPaymentMethods.map((item, index) => (
+                        <option key={`${code}-priority-${normalizePaymentMethodCode(item.code)}`} value={index}>
+                          {index + 1}
+                        </option>
+                      ))}
+                    </select>
                   </label>
 
                   <label className="flex flex-col gap-1 text-[0.7rem] font-semibold uppercase tracking-[0.2em] text-ink-400">

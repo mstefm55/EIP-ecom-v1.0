@@ -359,6 +359,40 @@ function humanizePaymentReason(reason) {
   return normalized ? normalized.replace(/_/g, " ") : "not available";
 }
 
+function paymentMethodDisplayName(code) {
+  const normalized = normalizePaymentMethodCode(code);
+  if (normalized === "paypal") return "PayPal";
+  if (normalized === "google_pay") return "Google Pay";
+  if (normalized === "apple_pay") return "Apple Pay";
+  if (normalized === "manual_test") return "Sandbox manual test";
+  return "Card";
+}
+
+function paymentUnavailableExplanation(option, fallback = "Selected payment method is unavailable.") {
+  const methodCode = normalizePaymentMethodCode(option?.code || option?.methodCode || option?.method);
+  const label = option?.label || paymentMethodDisplayName(methodCode);
+  const reason = String(option?.reason || option?.status || "").trim().toLowerCase();
+  if (reason === "sandbox_credentials_missing") {
+    return `${label} unavailable because sandbox credentials are missing.`;
+  }
+  if (reason === "domain_validation_missing") {
+    return `${label} unavailable because domain validation has not been completed.`;
+  }
+  if (reason === "provider_not_configured") {
+    return `${label} unavailable because provider setup is incomplete.`;
+  }
+  if (reason === "provider_disabled" || reason === "payment_method_disabled") {
+    return `${label} unavailable because it is disabled.`;
+  }
+  if (reason === "provider_health_unknown") {
+    return `${label} unavailable because provider health has not been verified.`;
+  }
+  if (reason === "provider_health_failed" || reason === "provider_unhealthy") {
+    return `${label} unavailable because provider health checks are failing.`;
+  }
+  return reason ? `${label} unavailable because ${humanizePaymentReason(reason)}.` : fallback;
+}
+
 function friendlyCheckoutError(error, fallback) {
   const message = String(error?.message || "");
   const match = message.match(/API Error \(\d+\):\s*(.*)$/);
@@ -370,6 +404,7 @@ function friendlyCheckoutError(error, fallback) {
       return match[1] || fallback;
     }
   }
+  if (/\n\s*at\s+|\bstack\b/i.test(message)) return fallback;
   return message || fallback;
 }
 
@@ -5580,6 +5615,10 @@ function CartModal({
     if (normalized === "sandbox") return "sandbox";
     return normalized || "not configured";
   };
+  const selectedPaymentExplanation =
+    selectedPaymentOption && (selectedPaymentOption.available === false || selectedPaymentOption.reason)
+      ? paymentUnavailableExplanation(selectedPaymentOption)
+      : "";
   const subtotalLabel =
     currencies.length === 1
       ? formatCurrencyAmount(subtotal, currencies[0])
@@ -5806,17 +5845,15 @@ function CartModal({
                 </label>
                 {selectedPaymentOption ? (
                   <p className="modal-alert">
-                    {paymentMethodLabel(selectedPaymentOption.code)} via{" "}
-                    {String(selectedPaymentOption.provider_code || "").replace(/_/g, " ") || "payment provider"} -{" "}
-                    {paymentModeLabel(selectedPaymentOption.mode)}
-                    {selectedPaymentOption.available === false || selectedPaymentOption.reason
-                      ? ` - ${paymentReasonLabel(selectedPaymentOption.reason || selectedPaymentOption.status)}`
-                      : " - available"}
+                    {selectedPaymentExplanation ||
+                      `${paymentMethodLabel(selectedPaymentOption.code)} via ${
+                        String(selectedPaymentOption.provider_code || "").replace(/_/g, " ") || "payment provider"
+                      } - ${paymentModeLabel(selectedPaymentOption.mode)} - available`}
                   </p>
                 ) : null}
-                {selectedPaymentOption?.reason ? (
+                {selectedPaymentExplanation ? (
                   <p className="modal-alert error">
-                    {paymentMethodLabel(selectedPaymentOption.code)}: {paymentReasonLabel(selectedPaymentOption.reason)}
+                    {selectedPaymentExplanation}
                   </p>
                 ) : null}
                 <p className="modal-alert">
@@ -7378,6 +7415,9 @@ export default function App() {
       return;
     }
     const selectedMethod = normalizePaymentMethodCode(checkoutForm.payment_method);
+    const selectedOption = checkoutPaymentMethods.find(
+      (item) => normalizePaymentMethodCode(item.code) === selectedMethod
+    );
     if (
       !selectedMethod ||
       !checkoutPaymentMethods.some((item) =>
@@ -7388,7 +7428,7 @@ export default function App() {
     ) {
       setCheckoutStatus({
         loading: false,
-        error: t("errors.paymentMethodUnavailable"),
+        error: paymentUnavailableExplanation(selectedOption, t("errors.paymentMethodUnavailable")),
         success: false,
         orderCode: "",
         paymentCode: "",

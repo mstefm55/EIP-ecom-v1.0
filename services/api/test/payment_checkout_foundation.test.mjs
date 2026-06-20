@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 import {
+  buildPaymentConnectionHealth,
   buildPaymentReadiness,
   buildPublicCheckoutConfig,
   buildPublicPaymentMethods,
@@ -126,6 +127,104 @@ test("payment readiness and public checkout config expose only secret-free provi
   assert.deepEqual(publicMethods.map((item) => item.methodCode).sort(), ["APPLE_PAY", "CARD", "GOOGLE_PAY", "PAYPAL"]);
   assert.equal(publicMethods.find((item) => item.methodCode === "PAYPAL").reason, "provider_not_configured");
   assert.doesNotMatch(JSON.stringify(publicMethods), /manual_test|do-not-leak|secret|client_secret/i);
+});
+
+test("payment method priority and connection health are metadata driven and secret-free", () => {
+  const settings = normalizePaymentSettings({
+    methods: [
+      { code: "card", label: "Card", enabled: true },
+      { code: "paypal", label: "PayPal", enabled: true },
+      { code: "google_pay", label: "Google Pay", enabled: true },
+      { code: "apple_pay", label: "Apple Pay", enabled: true },
+      { code: "manual_test", label: "Sandbox", enabled: true }
+    ],
+    display_order: ["paypal", "card", "google_pay", "apple_pay", "manual_test"],
+    providers: {
+      card: { provider_code: "checkout_com", environment: "sandbox" },
+      paypal: { provider_code: "paypal", environment: "sandbox" },
+      google_pay: { provider_code: "checkout_com", environment: "sandbox" },
+      apple_pay: { provider_code: "checkout_com", environment: "sandbox" },
+      manual_test: { provider_code: "manual_test", environment: "sandbox" }
+    }
+  });
+  const profiles = [
+    {
+      identity: { connection_code: "checkout-sandbox", connection_kind: "checkout_com", environment: "sandbox", is_enabled: true },
+      outbound: { auth: { secret: "sk_test_never_expose" } },
+      routing: { provider_code: "checkout_com", health_status: "healthy", apple_pay_domain_status: "validated" },
+      verification: { hmac_signature: { secret_set: true } }
+    },
+    {
+      identity: { connection_code: "paypal-sandbox", connection_kind: "paypal", environment: "sandbox", is_enabled: true },
+      outbound: { auth: { client_id: "paypal-client-ref", client_secret: "paypal-secret-never-expose" } },
+      routing: { provider_code: "paypal", health_status: "healthy" },
+      verification: { hmac_signature: { webhook_id_ref: "paypal-webhook-ref" } }
+    }
+  ];
+
+  const readiness = buildPaymentReadiness({ settings, profiles });
+  assert.deepEqual(readiness.methods.map((item) => item.code), ["paypal", "card", "google_pay", "apple_pay", "manual_test"]);
+  assert.deepEqual(buildPublicPaymentMethods({ settings, profiles }).map((item) => item.methodCode), [
+    "PAYPAL",
+    "CARD",
+    "GOOGLE_PAY",
+    "APPLE_PAY"
+  ]);
+
+  const health = buildPaymentConnectionHealth({ settings, profiles });
+  const paypal = health.find((item) => item.provider === "PAYPAL");
+  const checkout = health.find((item) => item.provider === "CHECKOUT_COM");
+  assert.equal(paypal.mode, "sandbox");
+  assert.equal(paypal.health, "healthy");
+  assert.equal(paypal.webhook_state, "configured");
+  assert.deepEqual(paypal.available_methods, ["PAYPAL"]);
+  assert.equal(checkout.configured, true);
+  assert.deepEqual(checkout.available_methods, ["CARD", "GOOGLE_PAY", "APPLE_PAY"]);
+  assert.doesNotMatch(JSON.stringify(health), /sk_test_never_expose|paypal-secret-never-expose/);
+});
+
+test("payment connection health reports missing secrets, disabled providers, and optional warnings safely", () => {
+  const settings = normalizePaymentSettings({
+    methods: [
+      { code: "card", label: "Card", enabled: true },
+      { code: "paypal", label: "PayPal", enabled: true },
+      { code: "apple_pay", label: "Apple Pay", enabled: true }
+    ],
+    providers: {
+      card: { provider_code: "checkout_com", environment: "sandbox" },
+      paypal: { provider_code: "paypal", environment: "sandbox" },
+      apple_pay: { provider_code: "checkout_com", environment: "sandbox" }
+    }
+  });
+  const health = buildPaymentConnectionHealth({
+    settings,
+    profiles: [
+      {
+        identity: { connection_code: "checkout-sandbox", connection_kind: "checkout_com", environment: "sandbox", is_enabled: true },
+        outbound: { auth: {} },
+        routing: { provider_code: "checkout_com", health_status: "pending" },
+        verification: { hmac_signature: {} }
+      },
+      {
+        identity: { connection_code: "paypal-sandbox", connection_kind: "paypal", environment: "sandbox", is_enabled: false },
+        outbound: { auth: { client_id: "paypal-client-ref" } },
+        routing: { provider_code: "paypal", health_status: "healthy" },
+        verification: { hmac_signature: {} }
+      }
+    ]
+  });
+
+  const checkout = health.find((item) => item.provider === "CHECKOUT_COM");
+  const paypal = health.find((item) => item.provider === "PAYPAL");
+  assert.equal(checkout.health, "not_ready");
+  assert.equal(checkout.webhook_state, "missing");
+  assert.equal(checkout.missing_requirements.includes("sandbox_credentials"), true);
+  assert.equal(checkout.missing_requirements.includes("apple_pay_domain_validation"), true);
+  assert.equal(checkout.warnings.includes("webhook_signing_secret_missing"), true);
+  assert.equal(paypal.enabled, false);
+  assert.equal(paypal.missing_requirements.includes("provider_enabled"), true);
+  assert.equal(paypal.missing_requirements.includes("sandbox_credentials"), true);
+  assert.doesNotMatch(JSON.stringify(health), /client_secret|secret_ref|raw_secret/);
 });
 
 test("payment connection provider types are registered as existing Admin Console Connections kinds", () => {
@@ -283,14 +382,21 @@ test("payment metadata sanitizer strips raw payment credentials and keeps safe c
 test("payment routes and storefront integration expose governed checkout sessions without raw card collection", () => {
   assert.match(publicCommerceRoute, /"\/commerce\/:suffix\/checkout\/session"/);
   assert.match(publicCommerceRoute, /"\/checkout\/payment-methods"/);
+  assert.match(publicCommerceRoute, /"\/checkout\/payment-health"/);
   assert.match(publicCommerceRoute, /"\/checkout\/payment-session"/);
   assert.match(publicCommerceRoute, /"\/payments\/webhooks\/:provider"/);
   assert.match(publicCommerceRoute, /browser_amount_not_accepted/);
   assert.match(publicCommerceRoute, /pricing_snapshot/);
   assert.match(publicCommerceRoute, /buildPublicPaymentMethods/);
+  assert.match(publicCommerceRoute, /buildPaymentConnectionHealth/);
   assert.match(publicCommerceRoute, /"\/commerce\/:suffix\/checkout\/confirm"/);
   assert.match(publicCommerceRoute, /"\/commerce\/:suffix\/payments\/:provider\/webhook"/);
+  assert.match(publicCommerceRoute, /paymentWebhookEventId\(provider, body, req\)/);
+  assert.match(publicCommerceRoute, /ensureIdempotency/);
+  assert.match(publicCommerceRoute, /finalizeIdempotency/);
+  assert.match(publicCommerceRoute, /sanitizePaymentMetadata/);
   assert.doesNotMatch(publicCommerceRoute, /normalizeProviderMode/);
+  assert.match(commerceOrdersRoute, /connection_health/);
   assert.match(commerceOrdersRoute, /"\/commerce\/payments"/);
   assert.match(commerceOrdersRoute, /ECOM_PAYMENT_CAPTURE/);
   assert.match(commerceOrdersRoute, /CRM_PAYMENT_SIGNAL/);
@@ -305,6 +411,9 @@ test("payment routes and storefront integration expose governed checkout session
   assert.match(samaraApp, /paymentMethodApplePay/);
   assert.match(samaraApp, /sandbox_credentials_missing/);
   assert.match(samaraApp, /domain_validation_missing/);
+  assert.match(samaraApp, /paymentUnavailableExplanation/);
+  assert.match(samaraApp, /unavailable because sandbox credentials are missing/);
+  assert.match(samaraApp, /unavailable because domain validation has not been completed/);
   assert.match(samaraApp, /friendlyCheckoutError/);
   assert.match(samaraApp, /No raw card details are collected by EIP/);
 });
@@ -321,6 +430,11 @@ test("admin connection UI exposes payment sandbox setup without raw secret displ
   assert.match(adminConnections, /Webhook signing secret/);
   assert.match(adminConnections, /Apple Pay domain status/);
   assert.match(adminConnections, /Raw secret values are never displayed after save/);
+  assert.match(adminConnections, /paymentConnectionCardState/);
+  assert.match(adminConnections, /PAYMENT_CARD_TONE_CLASS/);
+  assert.match(adminConnections, /Webhook \{formatCardStatus\(paymentCard\.webhook\)\}/);
+  assert.match(adminConnections, /Methods \{paymentCard\.methods\}/);
+  assert.match(adminConnections, /apple pay domain missing/);
 });
 
 test("payment governance migration is additive and keeps future clones on role/template metadata", () => {
@@ -342,6 +456,10 @@ test("dashboard payment settings no longer render raw provider credential fields
   assert.match(dashboardSettings, /Commerce \/ Payments/);
   assert.match(dashboardSettings, /Configured/);
   assert.match(dashboardSettings, /Available/);
+  assert.match(dashboardSettings, /Priority/);
+  assert.match(dashboardSettings, /display_order/);
+  assert.match(dashboardSettings, /updatePaymentMethodPriority/);
+  assert.match(dashboardSettings, /orderPaymentSettingsMethods/);
   assert.match(dashboardSettings, /Capture mode/);
   assert.match(dashboardSettings, /Default currency/);
   assert.match(dashboardSettings, /Dashboard > Orders & Payments > Payments/);
