@@ -10,7 +10,8 @@ test("API Dockerfile installs Debian Bookworm Chromium at the scanner path", () 
   assert.match(dockerfile, /FROM node:22-bookworm-slim/);
   assert.match(dockerfile, /apt-get install -y --no-install-recommends[\s\S]*chromium/);
   assert.match(dockerfile, /STOREFRONT_RENDERED_SCAN_EXECUTABLE_PATH=\/usr\/bin\/chromium/);
-  assert.match(dockerfile, /USER node/);
+  assert.match(dockerfile, /gosu/);
+  assert.match(dockerfile, /docker-entrypoint\.sh/);
   assert.doesNotMatch(dockerfile, /--no-sandbox/);
 });
 

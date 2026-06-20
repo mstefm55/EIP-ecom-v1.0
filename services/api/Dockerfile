@@ -10,6 +10,7 @@ RUN apt-get update \
       chromium \
       dumb-init \
       fonts-liberation \
+      gosu \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -19,11 +20,10 @@ RUN npm install --omit=dev --no-audit --no-fund
 
 COPY . .
 RUN mkdir -p /app/assets \
-    && chown -R node:node /app
-
-USER node
+    && chown -R node:node /app \
+    && chmod 0755 /app/docker-entrypoint.sh
 
 EXPOSE 4000
 
-ENTRYPOINT ["dumb-init", "--"]
+ENTRYPOINT ["dumb-init", "--", "/app/docker-entrypoint.sh"]
 CMD ["npm", "start"]

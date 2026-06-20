@@ -83,3 +83,15 @@ test("reusable auth-system upload snapshots carry the same hardened boundary", (
     assert.doesNotMatch(source, /fs\.writeFileSync/);
   }
 });
+
+test("API container initializes Railway volume ownership before dropping privileges", () => {
+  const dockerfile = read("services/api/Dockerfile");
+  const entrypoint = read("services/api/docker-entrypoint.sh");
+
+  assert.match(dockerfile, /gosu/);
+  assert.match(dockerfile, /ENTRYPOINT \["dumb-init", "--", "\/app\/docker-entrypoint\.sh"\]/);
+  assert.match(entrypoint, /upload_root="\/data\/eip-assets"/);
+  assert.match(entrypoint, /chown -R node:node/);
+  assert.match(entrypoint, /exec gosu node "\$@"/);
+  assert.match(entrypoint, /"\/"\|"\/app"\|"\/data"/);
+});
