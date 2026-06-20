@@ -10,6 +10,7 @@ const dashboardSurface = read("../../../apps/dashboard/src/engine/surfaces/dashb
 const registry = read("../../../apps/dashboard/src/engine/registry.jsx");
 const seedSurface = read("../db/seed/ui_surface_dashboard.sql");
 const migration = read("../db/migrations/0130_kernel_ux_shell_v1.sql");
+const formErrorMigration = read("../db/migrations/0132_form_error_address_layout_v1.sql");
 const docs = read("../../../docs/kernel_ux_shell_v1.md");
 
 function count(text, pattern) {
@@ -49,6 +50,35 @@ test("disabled action reasons and metadata tabs are visible, not dead controls",
   assert.match(workspace, /activeTabConfig\.id === "overview"/);
   assert.match(workspace, /tabs\.map/);
   assert.match(workspace, /tab\.type === "communications"/);
+});
+
+test("kernel forms mark invalid fields and support metadata-driven field spans", () => {
+  for (const token of [
+    "fieldErrorsFromApi",
+    "validateFormValues",
+    "fieldGridClass",
+    "aria-invalid",
+    "border-rose-300",
+    "text-rose-700",
+    "text-rose-600",
+    "field.maxLength",
+    "span === \"full\""
+  ]) {
+    assert.match(workspace, new RegExp(token.replace(/[(){}[\].?*+^$|\\]/g, "\\$&")));
+  }
+
+  assert.match(descriptors, /name: "line1", label: "Line 1", span: "full", maxLength: 240/);
+  assert.match(descriptors, /name: "line2", label: "Line 2", span: "full", maxLength: 240/);
+  assert.match(descriptors, /name: "country_code", label: "Country", maxLength: 2/);
+  assert.match(formErrorMigration, /0132_form_error_address_layout_v1/);
+  assert.match(formErrorMigration, /form_error_address_patch_fields/);
+  assert.match(formErrorMigration, /form_error_address_patch_workspace/);
+  assert.match(formErrorMigration, /"line1","span":"full","maxLength":240/);
+  assert.match(formErrorMigration, /"line2","span":"full","maxLength":240/);
+  assert.doesNotMatch(formErrorMigration, /CREATE\s+TABLE/i);
+  assert.doesNotMatch(formErrorMigration, /ALTER\s+TABLE/i);
+  assert.doesNotMatch(formErrorMigration, /DROP\s+/i);
+  assert.doesNotMatch(formErrorMigration, /DELETE\s+FROM/i);
 });
 
 test("released module descriptors carry process, overview, and master-card metadata", () => {

@@ -187,6 +187,77 @@ function parseApiError(error) {
   return message;
 }
 
+function parseApiErrorPayload(error) {
+  const message = error?.message || "Request failed.";
+  const match = message.match(/API\s+(\d+):\s*(.*)$/s);
+  if (!match) return null;
+  try {
+    return JSON.parse(match[2]);
+  } catch {
+    return null;
+  }
+}
+
+function fieldName(field) {
+  return field?.name || field?.key || "";
+}
+
+function fieldLabel(field) {
+  return field?.label || titleize(fieldName(field));
+}
+
+function fieldErrorMessage(errorCode, details, field) {
+  const label = fieldLabel(field);
+  if (errorCode === "TEXT_TOO_LONG" && details?.maxLength) return `${label} must be ${details.maxLength} characters or fewer.`;
+  if (errorCode === "TEXT_TOO_LONG") return `${label} is too long.`;
+  if (errorCode === "INVALID_COUNTRY_CODE") return `${label} must be a valid country code.`;
+  if (errorCode === "INVALID_CURRENCY_CODE") return `${label} must be a valid currency code.`;
+  if (errorCode === "INVALID_CODE") return `${label} has an invalid code format.`;
+  return titleize(errorCode || "Invalid value");
+}
+
+function fieldErrorKey(value, fields) {
+  const normalized = String(value || "").trim();
+  if (!normalized) return "";
+  const direct = fields.find((field) => fieldName(field) === normalized);
+  if (direct) return fieldName(direct);
+  const lowered = normalized.toLowerCase();
+  const match = fields.find((field) => fieldName(field).toLowerCase() === lowered);
+  return match ? fieldName(match) : normalized;
+}
+
+function fieldErrorsFromApi(error, fields, values) {
+  const payload = parseApiErrorPayload(error);
+  const details = payload?.details && typeof payload.details === "object" ? payload.details : {};
+  const out = {};
+  const add = (fieldValue, message = null) => {
+    const key = fieldErrorKey(fieldValue, fields);
+    if (!key) return;
+    const field = fields.find((candidate) => fieldName(candidate) === key);
+    out[key] = message || fieldErrorMessage(payload?.error, details, field || { name: key });
+  };
+
+  add(details.field || details.path || payload?.field);
+
+  if (Array.isArray(details.fields)) {
+    for (const item of details.fields) {
+      if (typeof item === "string") add(item);
+      else add(item?.field || item?.path || item?.name, item?.message);
+    }
+  }
+
+  if (payload?.error === "TEXT_TOO_LONG" && Object.keys(out).length === 0) {
+    for (const field of fields) {
+      const maxLength = Number(field.maxLength);
+      if (!Number.isFinite(maxLength) || maxLength <= 0) continue;
+      const value = inputValue(values, field);
+      if (String(value ?? "").trim().length > maxLength) add(fieldName(field));
+    }
+  }
+
+  return out;
+}
+
 function Pill({ children, tone }) {
   const tones = {
     green: "border-emerald-200 bg-emerald-50 text-emerald-700",
@@ -262,12 +333,20 @@ function updateInputValue(setValues, field, value) {
   });
 }
 
-function LookupField({ field, values, setValues, disabled }) {
+function LookupField({ field, values, setValues, disabled, error, clearFieldError }) {
   const value = inputValue(values, field);
-  const label = field.label || titleize(field.name || field.key);
+  const label = fieldLabel(field);
   const [query, setQuery] = useState("");
   const [options, setOptions] = useState([]);
   const [loading, setLoading] = useState(false);
+  const hasError = Boolean(error);
+  const labelClass = hasError ? "text-rose-600" : "text-ink-400";
+  const inputClass = hasError
+    ? "mb-2 w-full rounded-xl border border-rose-300 bg-rose-50/70 px-3 py-2 text-sm text-rose-700 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-100 disabled:opacity-60"
+    : "mb-2 w-full rounded-xl border border-ink-100 bg-white/90 px-3 py-2 text-sm text-ink-700 outline-none transition focus:border-brand-300 focus:ring-2 focus:ring-brand-100 disabled:opacity-60";
+  const selectClass = hasError
+    ? "w-full rounded-xl border border-rose-300 bg-rose-50/70 px-3 py-2 text-sm text-rose-700 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-100 disabled:opacity-60"
+    : "w-full rounded-xl border border-ink-100 bg-white/90 px-3 py-2 text-sm text-ink-700 outline-none transition focus:border-brand-300 focus:ring-2 focus:ring-brand-100 disabled:opacity-60";
 
   useEffect(() => {
     if (!field.endpoint) return;
@@ -295,19 +374,27 @@ function LookupField({ field, values, setValues, disabled }) {
 
   return (
     <label className="block">
-      <span className="mb-1 block text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-ink-400">{label}</span>
+      <span className={`mb-1 block text-[0.62rem] font-semibold uppercase tracking-[0.18em] ${labelClass}`}>{label}</span>
       <input
         disabled={disabled}
         value={query}
-        onChange={(event) => setQuery(event.target.value)}
+        onChange={(event) => {
+          setQuery(event.target.value);
+          clearFieldError?.();
+        }}
         placeholder={field.placeholder || "Search"}
-        className="mb-2 w-full rounded-xl border border-ink-100 bg-white/90 px-3 py-2 text-sm text-ink-700 outline-none transition focus:border-brand-300 focus:ring-2 focus:ring-brand-100 disabled:opacity-60"
+        aria-invalid={hasError || undefined}
+        className={inputClass}
       />
       <select
         disabled={disabled || loading}
         value={value}
-        onChange={(event) => updateInputValue(setValues, field, event.target.value)}
-        className="w-full rounded-xl border border-ink-100 bg-white/90 px-3 py-2 text-sm text-ink-700 outline-none transition focus:border-brand-300 focus:ring-2 focus:ring-brand-100 disabled:opacity-60"
+        onChange={(event) => {
+          updateInputValue(setValues, field, event.target.value);
+          clearFieldError?.();
+        }}
+        aria-invalid={hasError || undefined}
+        className={selectClass}
       >
         <option value="">{loading ? "Loading..." : field.emptyLabel || "Select"}</option>
         {options.map((option) => {
@@ -320,31 +407,43 @@ function LookupField({ field, values, setValues, disabled }) {
           );
         })}
       </select>
+      {hasError ? <span className="mt-1 block text-xs font-semibold text-rose-600">{error}</span> : null}
     </label>
   );
 }
 
-function FieldInput({ field, values, setValues, disabled, optionsPayload }) {
+function FieldInput({ field, values, setValues, disabled, optionsPayload, error, clearFieldError }) {
   const value = inputValue(values, field);
-  const label = field.label || titleize(field.name || field.key);
-  const baseClass = "w-full rounded-xl border border-ink-100 bg-white/90 px-3 py-2 text-sm text-ink-700 outline-none transition focus:border-brand-300 focus:ring-2 focus:ring-brand-100 disabled:opacity-60";
+  const label = fieldLabel(field);
+  const hasError = Boolean(error);
+  const labelClass = hasError ? "text-rose-600" : "text-ink-400";
+  const baseClass = hasError
+    ? "w-full rounded-xl border border-rose-300 bg-rose-50/70 px-3 py-2 text-sm text-rose-700 outline-none transition placeholder:text-rose-300 focus:border-rose-400 focus:ring-2 focus:ring-rose-100 disabled:opacity-60"
+    : "w-full rounded-xl border border-ink-100 bg-white/90 px-3 py-2 text-sm text-ink-700 outline-none transition focus:border-brand-300 focus:ring-2 focus:ring-brand-100 disabled:opacity-60";
+  const describedBy = hasError ? `${fieldName(field)}-error` : undefined;
+  const handleValueChange = (nextValue) => {
+    updateInputValue(setValues, field, nextValue);
+    clearFieldError?.();
+  };
 
   if (field.type === "hidden") {
     return null;
   }
 
   if (field.type === "lookup") {
-    return <LookupField field={field} values={values} setValues={setValues} disabled={disabled} />;
+    return <LookupField field={field} values={values} setValues={setValues} disabled={disabled} error={error} clearFieldError={clearFieldError} />;
   }
 
   if (field.type === "select") {
     return (
       <label className="block">
-        <span className="mb-1 block text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-ink-400">{label}</span>
+        <span className={`mb-1 block text-[0.62rem] font-semibold uppercase tracking-[0.18em] ${labelClass}`}>{label}</span>
         <select
           disabled={disabled}
           value={value}
-          onChange={(event) => updateInputValue(setValues, field, event.target.value)}
+          onChange={(event) => handleValueChange(event.target.value)}
+          aria-describedby={describedBy}
+          aria-invalid={hasError || undefined}
           className={baseClass}
         >
           {field.allowEmpty ? <option value="">{field.emptyLabel || "Any"}</option> : null}
@@ -354,6 +453,7 @@ function FieldInput({ field, values, setValues, disabled, optionsPayload }) {
             </option>
           ))}
         </select>
+        {hasError ? <span id={describedBy} className="mt-1 block text-xs font-semibold text-rose-600">{error}</span> : null}
       </label>
     );
   }
@@ -362,8 +462,8 @@ function FieldInput({ field, values, setValues, disabled, optionsPayload }) {
     const selected = new Set(normalizeList(value));
     return (
       <fieldset disabled={disabled} className="block">
-        <legend className="mb-1 block text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-ink-400">{label}</legend>
-        <div className="flex flex-wrap gap-2 rounded-xl border border-ink-100 bg-white/90 p-2">
+        <legend className={`mb-1 block text-[0.62rem] font-semibold uppercase tracking-[0.18em] ${labelClass}`}>{label}</legend>
+        <div className={`flex flex-wrap gap-2 rounded-xl border p-2 ${hasError ? "border-rose-300 bg-rose-50/70 text-rose-700" : "border-ink-100 bg-white/90"}`}>
           {fieldOptions(field, optionsPayload).map((option) => (
             <label key={option.value} className="inline-flex items-center gap-2 rounded-lg border border-ink-100 bg-white px-2 py-1 text-xs text-ink-600">
               <input
@@ -373,13 +473,14 @@ function FieldInput({ field, values, setValues, disabled, optionsPayload }) {
                   const next = new Set(selected);
                   if (event.target.checked) next.add(option.value);
                   else next.delete(option.value);
-                  updateInputValue(setValues, field, [...next]);
+                  handleValueChange([...next]);
                 }}
               />
               {option.label}
             </label>
           ))}
         </div>
+        {hasError ? <span className="mt-1 block text-xs font-semibold text-rose-600">{error}</span> : null}
       </fieldset>
     );
   }
@@ -387,44 +488,53 @@ function FieldInput({ field, values, setValues, disabled, optionsPayload }) {
   if (field.type === "textarea") {
     return (
       <label className="block">
-        <span className="mb-1 block text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-ink-400">{label}</span>
+        <span className={`mb-1 block text-[0.62rem] font-semibold uppercase tracking-[0.18em] ${labelClass}`}>{label}</span>
         <textarea
           disabled={disabled}
           rows={field.rows || 3}
           value={value}
           placeholder={field.placeholder}
-          onChange={(event) => updateInputValue(setValues, field, event.target.value)}
+          onChange={(event) => handleValueChange(event.target.value)}
+          aria-describedby={describedBy}
+          aria-invalid={hasError || undefined}
           className={baseClass}
         />
+        {hasError ? <span id={describedBy} className="mt-1 block text-xs font-semibold text-rose-600">{error}</span> : null}
       </label>
     );
   }
 
   if (field.type === "checkbox") {
     return (
-      <label className="inline-flex items-center gap-2 rounded-xl border border-ink-100 bg-white/90 px-3 py-2 text-sm text-ink-600">
+      <label className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm ${hasError ? "border-rose-300 bg-rose-50/70 text-rose-700" : "border-ink-100 bg-white/90 text-ink-600"}`}>
         <input
           disabled={disabled}
           type="checkbox"
           checked={value === true}
-          onChange={(event) => updateInputValue(setValues, field, event.target.checked)}
+          onChange={(event) => handleValueChange(event.target.checked)}
+          aria-describedby={describedBy}
+          aria-invalid={hasError || undefined}
         />
         {label}
+        {hasError ? <span id={describedBy} className="text-xs font-semibold text-rose-600">{error}</span> : null}
       </label>
     );
   }
 
   return (
     <label className="block">
-      <span className="mb-1 block text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-ink-400">{label}</span>
+      <span className={`mb-1 block text-[0.62rem] font-semibold uppercase tracking-[0.18em] ${labelClass}`}>{label}</span>
       <input
         disabled={disabled}
         type={field.type || "text"}
         value={value}
         placeholder={field.placeholder}
-        onChange={(event) => updateInputValue(setValues, field, event.target.value)}
+        onChange={(event) => handleValueChange(event.target.value)}
+        aria-describedby={describedBy}
+        aria-invalid={hasError || undefined}
         className={baseClass}
       />
+      {hasError ? <span id={describedBy} className="mt-1 block text-xs font-semibold text-rose-600">{error}</span> : null}
     </label>
   );
 }
@@ -449,19 +559,62 @@ function ManagedForm({ config, source, selected, row, optionsPayload, permission
   );
 }
 
+function validateFormValues(fields, values) {
+  const fieldErrors = {};
+  for (const field of fields) {
+    const name = fieldName(field);
+    if (!name || field.type === "hidden") continue;
+    const value = inputValue(values, field);
+    const text = Array.isArray(value) ? value.join(", ") : String(value ?? "");
+    if (field.required && !text.trim()) {
+      fieldErrors[name] = `${fieldLabel(field)} is required.`;
+      continue;
+    }
+    const maxLength = Number(field.maxLength);
+    if (Number.isFinite(maxLength) && maxLength > 0 && text.trim().length > maxLength) {
+      fieldErrors[name] = `${fieldLabel(field)} must be ${maxLength} characters or fewer.`;
+    }
+  }
+  return fieldErrors;
+}
+
+function fieldGridClass(field) {
+  const span = field.span || field.layout || field.width;
+  if (span === "full" || field.fullWidth) return "md:col-span-2 xl:col-span-3";
+  if (span === "wide" || span === 2 || span === "2") return "md:col-span-2";
+  return "";
+}
+
 function ManagedFormState({ config, fields, initialValues, selected, row, optionsPayload, permissions, onSaved }) {
   const [values, setValues] = useState(initialValues);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState({});
 
   const permission = config?.permission;
   const disabled = Boolean(permission) && !permissions.includes(permission);
+  const clearFieldError = (name) => {
+    if (!name) return;
+    setFieldErrors((current) => {
+      if (!current[name]) return current;
+      const next = { ...current };
+      delete next[name];
+      return next;
+    });
+  };
 
   async function submit(event) {
     event.preventDefault();
     if (disabled) return;
-    setSaving(true);
     setError("");
+    setFieldErrors({});
+    const localFieldErrors = validateFormValues(fields, values);
+    if (Object.keys(localFieldErrors).length) {
+      setFieldErrors(localFieldErrors);
+      setError("Review the highlighted field.");
+      return;
+    }
+    setSaving(true);
     try {
       const body = cleanBody(values);
       await apiFetch(endpointFor(config.endpoint, selected, row), {
@@ -471,6 +624,8 @@ function ManagedFormState({ config, fields, initialValues, selected, row, option
       await onSaved?.();
       if (config.resetOnSave !== false) setValues(initialValues);
     } catch (err) {
+      const nextFieldErrors = fieldErrorsFromApi(err, fields, values);
+      setFieldErrors(nextFieldErrors);
       setError(parseApiError(err));
     } finally {
       setSaving(false);
@@ -483,16 +638,34 @@ function ManagedFormState({ config, fields, initialValues, selected, row, option
       {config.subtitle ? <p className="mt-1 text-sm text-ink-400">{config.subtitle}</p> : null}
       {error ? <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
       <div className={`mt-4 grid gap-3 ${config.columns === 1 ? "" : "md:grid-cols-2 xl:grid-cols-3"}`}>
-        {fields.map((field) => (
-          <FieldInput
-            key={field.name || field.key}
-            field={field}
-            values={values}
-            setValues={setValues}
-            disabled={disabled || saving}
-            optionsPayload={optionsPayload}
-          />
-        ))}
+        {fields.map((field) => {
+          const name = fieldName(field);
+          if (field.type === "hidden") {
+            return (
+              <FieldInput
+                key={name}
+                field={field}
+                values={values}
+                setValues={setValues}
+                disabled={disabled || saving}
+                optionsPayload={optionsPayload}
+              />
+            );
+          }
+          return (
+            <div key={name} className={fieldGridClass(field)}>
+              <FieldInput
+                field={field}
+                values={values}
+                setValues={setValues}
+                disabled={disabled || saving}
+                optionsPayload={optionsPayload}
+                error={fieldErrors[name]}
+                clearFieldError={() => clearFieldError(name)}
+              />
+            </div>
+          );
+        })}
       </div>
       <div className="mt-4 flex justify-end">
         <button type="submit" disabled={disabled || saving} title={disabled && permission ? `Missing ${permission}` : undefined} className={buttonClass(true)}>

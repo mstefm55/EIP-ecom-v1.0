@@ -147,65 +147,65 @@ function normalizeText(value) {
   return String(value ?? "").trim();
 }
 
-function normalizeOptionalText(value, maxLength = 500) {
+function normalizeOptionalText(value, maxLength = 500, field = null) {
   const text = normalizeText(value);
   if (!text) return null;
-  if (text.length > maxLength) throw new EntityInputError("TEXT_TOO_LONG");
+  if (text.length > maxLength) throw new EntityInputError("TEXT_TOO_LONG", { field, maxLength });
   return text;
 }
 
-function normalizeCode(value, fallback = null) {
-  const text = normalizeOptionalText(value, 80);
+function normalizeCode(value, fallback = null, field = null) {
+  const text = normalizeOptionalText(value, 80, field);
   if (!text) return fallback;
   const code = text.toUpperCase().replace(/\s+/g, "_");
-  if (!CODE_RE.test(code)) throw new EntityInputError("INVALID_CODE", { code });
+  if (!CODE_RE.test(code)) throw new EntityInputError("INVALID_CODE", { field, code });
   return code;
 }
 
 function normalizeUuid(value, field) {
-  const text = normalizeOptionalText(value, 64);
+  const text = normalizeOptionalText(value, 64, field);
   if (!text) return null;
   if (!UUID_RE.test(text)) throw new EntityInputError("INVALID_UUID", { field });
   return text;
 }
 
-function normalizeCountry(value) {
-  const text = normalizeOptionalText(value, 2);
+function normalizeCountry(value, field = "country_code") {
+  const text = normalizeOptionalText(value, 2, field);
   if (!text) return null;
   const country = text.toUpperCase();
-  if (!COUNTRY_RE.test(country)) throw new EntityInputError("INVALID_COUNTRY_CODE");
+  if (!COUNTRY_RE.test(country)) throw new EntityInputError("INVALID_COUNTRY_CODE", { field });
   return country;
 }
 
-function normalizeCurrency(value) {
-  const text = normalizeOptionalText(value, 3);
+function normalizeCurrency(value, field = "currency_code") {
+  const text = normalizeOptionalText(value, 3, field);
   if (!text) return null;
   const currency = text.toUpperCase();
-  if (!CURRENCY_RE.test(currency)) throw new EntityInputError("INVALID_CURRENCY_CODE");
+  if (!CURRENCY_RE.test(currency)) throw new EntityInputError("INVALID_CURRENCY_CODE", { field });
   return currency;
 }
 
 function normalizeStatus(value, fallback = "ACTIVE", governance = null) {
-  const status = normalizeCode(value, fallback);
+  const status = normalizeCode(value, fallback, "status");
   const allowed = allowedCodesFrom(governance, "ENTITY_STATUS", ENTITY_STATUSES);
-  if (!allowed.includes(status)) throw new EntityInputError("INVALID_ENTITY_STATUS");
+  if (!allowed.includes(status)) throw new EntityInputError("INVALID_ENTITY_STATUS", { field: "status" });
   return status;
 }
 
 function normalizeRoles(value, fallback = ["OTHER"], governance = null) {
   const roles = Array.isArray(value) ? value : value ? [value] : fallback;
-  const normalized = [...new Set(roles.map((item) => normalizeCode(item, null)).filter(Boolean))];
+  const normalized = [...new Set(roles.map((item) => normalizeCode(item, null, "roles")).filter(Boolean))];
   const allowed = allowedCodesFrom(governance, "ENTITY_ROLE", DEFAULT_ENTITY_ROLES);
   for (const role of normalized) {
-    if (!allowed.includes(role)) throw new EntityInputError("INVALID_ENTITY_ROLE", { role });
+    if (!allowed.includes(role)) throw new EntityInputError("INVALID_ENTITY_ROLE", { field: "roles", role });
   }
   return normalized.length ? normalized : fallback;
 }
 
 function normalizeEntityKind(value, fallback = "ORG", governance = null) {
-  const entityKind = normalizeCode(value, fallback);
+  const entityKind = normalizeCode(value, fallback, "entity_kind");
   const allowed = allowedCodesFrom(governance, "ENTITY_KIND", ["ORG", "PERSON"]);
-  if (allowed.length && !allowed.includes(entityKind)) throw new EntityInputError("INVALID_ENTITY_KIND", { entity_kind: entityKind });
+  if (allowed.length && !allowed.includes(entityKind)) throw new EntityInputError("INVALID_ENTITY_KIND", { field: "entity_kind", entity_kind: entityKind });
   return entityKind;
 }
 
@@ -242,10 +242,10 @@ function normalizeAttrs(value) {
   return value;
 }
 
-function normalizeUrl(value) {
-  const text = normalizeOptionalText(value, 300);
+function normalizeUrl(value, field = "website") {
+  const text = normalizeOptionalText(value, 300, field);
   if (!text) return null;
-  if (!URL_RE.test(text)) throw new EntityInputError("INVALID_WEBSITE_URL");
+  if (!URL_RE.test(text)) throw new EntityInputError("INVALID_WEBSITE_URL", { field });
   return text;
 }
 
@@ -407,7 +407,7 @@ function buildEntityAttrs(body, existingAttrs = {}, partial = false, governance 
     ["default_language", 12],
     ["notes", 2000]
   ]) {
-    if (hasOwn(body, field)) next[field] = normalizeOptionalText(body[field], max);
+    if (hasOwn(body, field)) next[field] = normalizeOptionalText(body[field], max, field);
   }
   if (hasOwn(body, "country_code")) next.country_code = normalizeCountry(body.country_code);
   if (hasOwn(body, "currency_code")) next.currency_code = normalizeCurrency(body.currency_code);
@@ -525,10 +525,10 @@ export async function createEntity(app, session, body = {}) {
   rejectUnknownKeys(body, ENTITY_MUTATION_KEYS, "entity");
   const tenantId = session.tenant_id;
   const governance = await loadDropdownCodeSets(app, tenantId, ["ENTITY_STATUS", "ENTITY_ROLE", "ENTITY_KIND"]);
-  const displayName = normalizeOptionalText(body.display_name, 300);
-  if (!displayName) throw new EntityInputError("DISPLAY_NAME_REQUIRED");
+  const displayName = normalizeOptionalText(body.display_name, 300, "display_name");
+  if (!displayName) throw new EntityInputError("DISPLAY_NAME_REQUIRED", { field: "display_name" });
   const entityKind = normalizeEntityKind(body.entity_kind, "ORG", governance);
-  const code = body.code === undefined ? null : normalizeCode(body.code, null);
+  const code = body.code === undefined ? null : normalizeCode(body.code, null, "code");
   const parentEntityId = normalizeUuid(body.parent_entity_id, "parent_entity_id");
   if (parentEntityId && !(await ensureEntity(app.db, tenantId, parentEntityId))) {
     throw new EntityInputError("PARENT_ENTITY_NOT_FOUND");
@@ -612,8 +612,8 @@ export async function updateEntity(app, session, entityId, body = {}) {
       session.tenant_id,
       current.id,
       hasOwn(body, "entity_kind") ? normalizeEntityKind(body.entity_kind, "ORG", governance) : current.agent_type,
-      hasOwn(body, "code") ? normalizeCode(body.code, null) : current.code,
-      hasOwn(body, "display_name") ? normalizeOptionalText(body.display_name, 300) : current.name,
+      hasOwn(body, "code") ? normalizeCode(body.code, null, "code") : current.code,
+      hasOwn(body, "display_name") ? normalizeOptionalText(body.display_name, 300, "display_name") : current.name,
       JSON.stringify(nextAttrs),
       parentEntityId,
       lifecycleIsActive(nextAttrs.status)
@@ -643,13 +643,13 @@ export async function listEntityAddresses(app, session, entityId) {
 function normalizeAddress(body, current = {}, partial = false) {
   rejectUnknownKeys(body, ADDRESS_KEYS, "address");
   const next = {
-    address_type: hasOwn(body, "address_type") ? normalizeCode(body.address_type, "MAIN") : current.address_type || "MAIN",
-    label: hasOwn(body, "label") ? normalizeOptionalText(body.label, 120) : current.label || null,
-    line1: hasOwn(body, "line1") ? normalizeOptionalText(body.line1, 240) : current.line1 || null,
-    line2: hasOwn(body, "line2") ? normalizeOptionalText(body.line2, 240) : current.line2 || null,
-    city: hasOwn(body, "city") ? normalizeOptionalText(body.city, 120) : current.city || null,
-    state_region: hasOwn(body, "state_region") ? normalizeOptionalText(body.state_region, 120) : current.state_region || null,
-    postal_code: hasOwn(body, "postal_code") ? normalizeOptionalText(body.postal_code, 40) : current.postal_code || null,
+    address_type: hasOwn(body, "address_type") ? normalizeCode(body.address_type, "MAIN", "address_type") : current.address_type || "MAIN",
+    label: hasOwn(body, "label") ? normalizeOptionalText(body.label, 120, "label") : current.label || null,
+    line1: hasOwn(body, "line1") ? normalizeOptionalText(body.line1, 240, "line1") : current.line1 || null,
+    line2: hasOwn(body, "line2") ? normalizeOptionalText(body.line2, 240, "line2") : current.line2 || null,
+    city: hasOwn(body, "city") ? normalizeOptionalText(body.city, 120, "city") : current.city || null,
+    state_region: hasOwn(body, "state_region") ? normalizeOptionalText(body.state_region, 120, "state_region") : current.state_region || null,
+    postal_code: hasOwn(body, "postal_code") ? normalizeOptionalText(body.postal_code, 40, "postal_code") : current.postal_code || null,
     country_code: hasOwn(body, "country_code") ? normalizeCountry(body.country_code) : current.country_code || null,
     latitude: hasOwn(body, "latitude") ? body.latitude ?? null : current.latitude ?? null,
     longitude: hasOwn(body, "longitude") ? body.longitude ?? null : current.longitude ?? null,
@@ -749,14 +749,14 @@ export async function listEntityContacts(app, session, entityId) {
 
 function normalizeContact(body, current = {}, partial = false) {
   rejectUnknownKeys(body, CONTACT_KEYS, "contact");
-  const contactType = hasOwn(body, "contact_type") ? normalizeCode(body.contact_type, "EMAIL") : current.contact_type || "EMAIL";
-  const value = hasOwn(body, "value") ? normalizeOptionalText(body.value, 300) : current.value || null;
-  if (!partial && !value) throw new EntityInputError("CONTACT_VALUE_REQUIRED");
-  if (value && contactType === "EMAIL" && !EMAIL_RE.test(value)) throw new EntityInputError("INVALID_EMAIL_CONTACT");
-  if (value && contactType === "WEBSITE" && !URL_RE.test(value)) throw new EntityInputError("INVALID_WEBSITE_URL");
+  const contactType = hasOwn(body, "contact_type") ? normalizeCode(body.contact_type, "EMAIL", "contact_type") : current.contact_type || "EMAIL";
+  const value = hasOwn(body, "value") ? normalizeOptionalText(body.value, 300, "value") : current.value || null;
+  if (!partial && !value) throw new EntityInputError("CONTACT_VALUE_REQUIRED", { field: "value" });
+  if (value && contactType === "EMAIL" && !EMAIL_RE.test(value)) throw new EntityInputError("INVALID_EMAIL_CONTACT", { field: "value" });
+  if (value && contactType === "WEBSITE" && !URL_RE.test(value)) throw new EntityInputError("INVALID_WEBSITE_URL", { field: "value" });
   return {
     contact_type: contactType,
-    label: hasOwn(body, "label") ? normalizeOptionalText(body.label, 120) : current.label || null,
+    label: hasOwn(body, "label") ? normalizeOptionalText(body.label, 120, "label") : current.label || null,
     value,
     is_primary: hasOwn(body, "is_primary") ? body.is_primary === true : current.is_primary === true,
     is_active: hasOwn(body, "is_active") ? body.is_active !== false : current.is_active !== false,
@@ -842,13 +842,13 @@ export async function listEntityBankAccounts(app, session, entityId) {
 function normalizeBank(body, current = {}, partial = false) {
   rejectUnknownKeys(body, BANK_KEYS, "bank_account");
   const input = {
-    account_type: hasOwn(body, "account_type") ? normalizeCode(body.account_type, "BANK") : current.account_type || "BANK",
-    label: hasOwn(body, "label") ? normalizeOptionalText(body.label, 120) : current.label || null,
-    bank_name: hasOwn(body, "bank_name") ? normalizeOptionalText(body.bank_name, 160) : current.bank_name || null,
-    account_name: hasOwn(body, "account_name") ? normalizeOptionalText(body.account_name, 240) : current.account_name || null,
-    account_number: hasOwn(body, "account_number") ? normalizeOptionalText(body.account_number, 120) : current.account_number || null,
-    iban: hasOwn(body, "iban") ? normalizeOptionalText(body.iban, 120) : current.iban || null,
-    swift_bic: hasOwn(body, "swift_bic") ? normalizeCode(body.swift_bic, null) : current.swift_bic || null,
+    account_type: hasOwn(body, "account_type") ? normalizeCode(body.account_type, "BANK", "account_type") : current.account_type || "BANK",
+    label: hasOwn(body, "label") ? normalizeOptionalText(body.label, 120, "label") : current.label || null,
+    bank_name: hasOwn(body, "bank_name") ? normalizeOptionalText(body.bank_name, 160, "bank_name") : current.bank_name || null,
+    account_name: hasOwn(body, "account_name") ? normalizeOptionalText(body.account_name, 240, "account_name") : current.account_name || null,
+    account_number: hasOwn(body, "account_number") ? normalizeOptionalText(body.account_number, 120, "account_number") : current.account_number || null,
+    iban: hasOwn(body, "iban") ? normalizeOptionalText(body.iban, 120, "iban") : current.iban || null,
+    swift_bic: hasOwn(body, "swift_bic") ? normalizeCode(body.swift_bic, null, "swift_bic") : current.swift_bic || null,
     currency_code: hasOwn(body, "currency_code") ? normalizeCurrency(body.currency_code) : current.currency_code || null,
     is_primary: hasOwn(body, "is_primary") ? body.is_primary === true : current.is_primary === true,
     is_active: hasOwn(body, "is_active") ? body.is_active !== false : current.is_active !== false,
@@ -962,11 +962,11 @@ function normalizeRelationship(body, current = {}, partial = false) {
     ? normalizeUuid(body.related_entity_id, "related_entity_id")
     : current.related_entity_id || current.dst_id || null;
   const relationType = hasOwn(body, "relation_type")
-    ? normalizeCode(body.relation_type, "RELATED_TO")
+    ? normalizeCode(body.relation_type, "RELATED_TO", "relation_type")
     : current.relation_type || "RELATED_TO";
-  if (!partial && !relatedEntityId) throw new EntityInputError("RELATED_ENTITY_REQUIRED");
-  const direction = normalizeCode(body.direction || current.direction || "OUTGOING", "OUTGOING");
-  if (!["OUTGOING", "INCOMING"].includes(direction)) throw new EntityInputError("INVALID_RELATIONSHIP_DIRECTION");
+  if (!partial && !relatedEntityId) throw new EntityInputError("RELATED_ENTITY_REQUIRED", { field: "related_entity_id" });
+  const direction = normalizeCode(body.direction || current.direction || "OUTGOING", "OUTGOING", "direction");
+  if (!["OUTGOING", "INCOMING"].includes(direction)) throw new EntityInputError("INVALID_RELATIONSHIP_DIRECTION", { field: "direction" });
   return {
     related_entity_id: relatedEntityId,
     relation_type: relationType,

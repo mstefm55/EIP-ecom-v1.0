@@ -15,13 +15,13 @@ const entityFields = [
 
 const addressFields = [
   { name: "address_type", label: "Address type", type: "select", optionList: "ENTITY_ADDRESS_TYPE", options: ["MAIN", "BILLING", "SHIPPING"] },
-  { name: "label", label: "Label" },
-  { name: "line1", label: "Line 1" },
-  { name: "line2", label: "Line 2" },
-  { name: "city", label: "City" },
-  { name: "state_region", label: "State/Region" },
-  { name: "postal_code", label: "Postal code" },
-  { name: "country_code", label: "Country" },
+  { name: "label", label: "Label", maxLength: 120 },
+  { name: "line1", label: "Line 1", span: "full", maxLength: 240 },
+  { name: "line2", label: "Line 2", span: "full", maxLength: 240 },
+  { name: "city", label: "City", maxLength: 120 },
+  { name: "state_region", label: "State/Region", maxLength: 120 },
+  { name: "postal_code", label: "Postal code", maxLength: 40 },
+  { name: "country_code", label: "Country", maxLength: 2 },
   { name: "is_primary", label: "Primary", type: "checkbox" },
   { name: "is_active", label: "Active", type: "checkbox", defaultValue: true }
 ];

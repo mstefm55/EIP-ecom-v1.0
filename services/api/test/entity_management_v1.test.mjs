@@ -9,6 +9,7 @@ import {
   createEntityBankAccount,
   createEntityContact,
   createEntityRelationship,
+  EntityInputError,
   listEntities,
   updateEntity
 } from "../src/services/entities/entityManagement.js";
@@ -20,6 +21,7 @@ const service = read("../src/services/entities/entityManagement.js");
 const server = read("../src/server.js");
 const migration = read("../db/migrations/0124_entity_management_v1.sql");
 const repairMigration = read("../db/migrations/0126_engine_first_module_workspace_repair.sql");
+const formErrorMigration = read("../db/migrations/0132_form_error_address_layout_v1.sql");
 const registry = read("../../../apps/dashboard/src/engine/registry.jsx");
 const dashboardSurface = read("../../../apps/dashboard/src/engine/surfaces/dashboard.js");
 const moduleDescriptors = read("../../../apps/dashboard/src/engine/surfaces/kernelModuleDescriptors.js");
@@ -297,6 +299,43 @@ test("address, contact, bank account, and relationship writes use existing subta
   assert.equal(relationship.item.related_entity_id, other.id);
 });
 
+test("entity input validation returns impacted field metadata", async () => {
+  const db = buildDb();
+  const app = appWithDb(db);
+  const session = { tenant_id: TENANT_A, identity_id: IDENTITY_A };
+  const entityId = db.state.agents[0].id;
+
+  await assert.rejects(
+    () => createEntityAddress(app, session, entityId, {
+      line1: "A62 Avenue Martin Luther",
+      city: "Rose Hill",
+      country_code: "Mauritius"
+    }),
+    (error) => {
+      assert.equal(error instanceof EntityInputError, true);
+      assert.equal(error.code, "TEXT_TOO_LONG");
+      assert.equal(error.details.field, "country_code");
+      assert.equal(error.details.maxLength, 2);
+      return true;
+    }
+  );
+
+  await assert.rejects(
+    () => createEntityAddress(app, session, entityId, {
+      line1: "x".repeat(241),
+      city: "Rose Hill",
+      country_code: "MU"
+    }),
+    (error) => {
+      assert.equal(error instanceof EntityInputError, true);
+      assert.equal(error.code, "TEXT_TOO_LONG");
+      assert.equal(error.details.field, "line1");
+      assert.equal(error.details.maxLength, 240);
+      return true;
+    }
+  );
+});
+
 test("route rejects permission denied and tenant_id override", async () => {
   const forbidden = Fastify({ logger: false });
   forbidden.decorate("db", {
@@ -412,6 +451,9 @@ test("dashboard registry, source descriptor, and seed descriptor are aligned", (
   assert.match(dashboardSurface, /\{ code: "entities", label: "Entities", icon: "Users", module: "entity-management" \}/);
   assert.match(dashboardSurface, /entityKernelWorkspaceNode/);
   assert.match(moduleDescriptors, /type: "KernelModuleWorkspace"/);
+  assert.match(moduleDescriptors, /name: "line1", label: "Line 1", span: "full", maxLength: 240/);
+  assert.match(moduleDescriptors, /name: "line2", label: "Line 2", span: "full", maxLength: 240/);
+  assert.match(moduleDescriptors, /name: "country_code", label: "Country", maxLength: 2/);
   assert.match(moduleDescriptors, /\/api\/eip\/entities\/governance\/options/);
   assert.match(seedSurface, /"code": "entities"/);
   assert.match(seedSurface, /"type": "KernelModuleWorkspace"/);
@@ -420,6 +462,10 @@ test("dashboard registry, source descriptor, and seed descriptor are aligned", (
     assert.match(moduleDescriptors, new RegExp(tab));
   }
   assert.match(workspace, /configEndpoint/);
+  assert.match(formErrorMigration, /0132_form_error_address_layout_v1/);
+  assert.match(formErrorMigration, /form_error_address_patch_workspace/);
+  assert.match(formErrorMigration, /"line1","span":"full","maxLength":240/);
+  assert.match(formErrorMigration, /"line2","span":"full","maxLength":240/);
 });
 
 test("workspace and docs are tenant agnostic and avoid fake data", () => {
