@@ -81,7 +81,7 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION pg_temp.ensure_jsonb_text_item(source jsonb, value text)
+CREATE OR REPLACE FUNCTION pg_temp.ensure_jsonb_text_item(source jsonb, p_value text)
 RETURNS jsonb LANGUAGE plpgsql AS $$
 DECLARE
   out jsonb := COALESCE(source, '[]'::jsonb);
@@ -92,9 +92,9 @@ BEGIN
   IF NOT EXISTS (
     SELECT 1
     FROM jsonb_array_elements_text(out) entry
-    WHERE entry = value
+    WHERE entry = p_value
   ) THEN
-    out := out || to_jsonb(value);
+    out := out || to_jsonb(p_value);
   END IF;
   RETURN out;
 END;

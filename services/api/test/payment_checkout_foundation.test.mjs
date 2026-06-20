@@ -364,6 +364,8 @@ test("payment settings are descriptor-owned by Settings, not the operational pay
   assert.match(paymentConnectionsMigration, /EIP_CONNECTION_KIND/);
   assert.match(paymentConnectionsMigration, /checkout_com/);
   assert.match(paymentConnectionsMigration, /paypal/);
+  assert.match(paymentConnectionsMigration, /p_value text/);
+  assert.doesNotMatch(paymentConnectionsMigration, /ensure_jsonb_text_item\(source jsonb, value text\)/);
 
   assert.match(dashboardOrdersPanel, /title: "Orders & payments"/);
   assert.match(dashboardOrdersPanel, /\{ id: "payments", label: "Payments"/);
