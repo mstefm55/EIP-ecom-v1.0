@@ -197,5 +197,10 @@ function handleParsedError(response, errorText, payload) {
   if (response.status === 401) {
     resetCsrfToken();
   }
-  throw new Error(`API ${response.status}: ${errorText}`);
+  const error = new Error(`API ${response.status}: ${errorText}`);
+  error.status = response.status;
+  error.code = payload?.error || null;
+  error.payload = payload;
+  error.userMessage = typeof payload?.message === "string" ? payload.message : "";
+  throw error;
 }

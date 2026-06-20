@@ -407,7 +407,7 @@ export default function AdminUsersPanel({ node }) {
       await loadTenantData(selectedTenant.id);
       setProfileNotice("Avatar updated.");
     } catch (err) {
-      setProfileError(err.message || "Failed to upload avatar.");
+      setProfileError(err.userMessage || err.message || "Failed to upload avatar.");
     } finally {
       event.target.value = "";
     }

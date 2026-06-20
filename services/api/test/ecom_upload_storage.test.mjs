@@ -11,13 +11,15 @@ import {
   resolveAssetRoot
 } from "../src/services/assets/root.js";
 import {
+  createUploadErrorHandler,
   normalizeUploadError,
   safeUploadTarget,
   uploadPartToBuffer,
   validateEcomUpload,
   writeVerifiedUpload
 } from "../src/lib/uploadSecurity.js";
-import { ecomUploadErrorHandler } from "../src/routes/ecom.js";
+
+const uploadErrorHandler = createUploadErrorHandler("test_upload_error");
 
 const PNG_1X1 = Buffer.from(
   "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082",
@@ -140,7 +142,7 @@ test("multipart parser size failures use the structured upload error response", 
     attachFieldsToBody: true,
     limits: { fileSize: 4 }
   });
-  app.post("/upload", { errorHandler: ecomUploadErrorHandler }, async () => ({ ok: true }));
+  app.post("/upload", { errorHandler: uploadErrorHandler }, async () => ({ ok: true }));
 
   const form = new FormData();
   form.append("file", new Blob([Buffer.alloc(5)]), "oversized.png");
@@ -165,7 +167,7 @@ test("upload route errors include a safe code and retain stack diagnostics", () 
   const reply = replyRecorder();
   const error = Object.assign(new Error("host path is read only"), { code: "EROFS" });
 
-  ecomUploadErrorHandler(error, request, reply);
+  uploadErrorHandler(error, request, reply);
 
   assert.equal(reply.statusCode, 503);
   assert.deepEqual(reply.payload, {

@@ -1,8 +1,6 @@
 // services/api/src/routes/auth.js
 import { hasPermission } from "../auth/perm.js";
 
-import fs from "node:fs";
-import path from "node:path";
 import crypto from "node:crypto";
 import { promisify } from "node:util";
 import argon2 from "argon2";
@@ -24,7 +22,15 @@ import {
 } from "../lib/authCookies.js";
 import { auditSecurityEvent } from "../lib/securityAudit.js";
 import { resolveEipSurfaceAccess } from "../lib/surfaceAccess.js";
-import { safeUploadTarget, uploadPartToBuffer, validateImageUpload, writeVerifiedUpload } from "../lib/uploadSecurity.js";
+import {
+  DEFAULT_MAX_UPLOAD_BYTES,
+  createUploadErrorHandler,
+  safeUploadTarget,
+  sendUploadFailure,
+  uploadPartToBuffer,
+  validateImageUpload,
+  writeVerifiedUpload
+} from "../lib/uploadSecurity.js";
 import {
   clearFailedLoginAttempts,
   checkIdentityLoginLock,
@@ -48,7 +54,7 @@ import {
 } from "../auth/passkeys.js";
 import { buildSignedAssetUrl } from "../services/assets/signing.js";
 import { isTenantAssetPath, sanitizeAssetUrlForStorage, toLocalAssetPath } from "../services/assets/url_policy.js";
-import { resolveAssetRoot } from "../services/assets/root.js";
+import { ensureUploadDirectory, resolveAssetRoot } from "../services/assets/root.js";
 
 const OTP_REQUEST_LIMIT_MAX = 5;
 const OTP_REQUEST_LIMIT_WINDOW_MIN = 10;
@@ -2612,52 +2618,72 @@ export default async function authRoutes(app) {
     return reply.send({ ok: true, profile: serializeUserProfile(app, profile) });
   });
 
-  app.post("/auth/profile/avatar", async (req, reply) => {
+  app.post(
+    "/auth/profile/avatar",
+    { errorHandler: createUploadErrorHandler("profile_avatar_upload_request_error") },
+    async (req, reply) => {
     const s = await app.requireSession(req, { realm: "EIP" });
     if (!s.ok) return reply.code(s.status).send({ ok: false, error: s.error });
     const c = await app.requireCsrf(req);
     if (!c.ok) return reply.code(c.status).send({ ok: false, error: c.error });
 
-    if (!req.isMultipart()) {
-      return reply.code(415).send({ ok: false, error: "MULTIPART_REQUIRED" });
-    }
-
     const { tenant_id, identity_id } = s.session;
-    const bodyFile = req.body?.file;
-    let filePart = bodyFile;
-    if (!filePart?.file && typeof filePart?.toBuffer !== "function") {
-      filePart = await req.file();
-    }
-    if (!filePart || (!filePart.file && typeof filePart.toBuffer !== "function")) {
-      return reply.code(400).send({ ok: false, error: "FILE_REQUIRED" });
-    }
-
-    const { filename, mimetype } = filePart;
-    const buffer = await uploadPartToBuffer(filePart);
-    const validation = validateImageUpload({ buffer, filename, mimetype });
-    if (!validation.ok) {
-      auditSecurityEvent(app, "upload.rejected", {
-        category: "upload",
-        source: "auth.profile_avatar",
-        severity: "warning",
-        outcome: "rejected",
-        tenantId: tenant_id,
-        identityId: identity_id,
-        reason: validation.error,
-        ip: req.ip,
-        userAgent: req.headers["user-agent"] || null,
-        metadata: { filename, mimetype }
-      });
-      return reply.code(415).send({ ok: false, error: validation.error });
-    }
-
-    const uploadDir = path.join(resolveAssetRoot(app.config), tenant_id, "avatars");
-    fs.mkdirSync(uploadDir, { recursive: true });
-
-    const storedName = `${identity_id}-${crypto.randomUUID()}${validation.safeExt}`;
-    const targetPath = safeUploadTarget(uploadDir, storedName);
+    let storedName;
 
     try {
+      if (!req.isMultipart()) {
+        return reply.code(415).send({
+          ok: false,
+          error: "MULTIPART_REQUIRED",
+          message: "Upload requests must use multipart form data."
+        });
+      }
+
+      const bodyFile = req.body?.file;
+      let filePart = bodyFile;
+      if (!filePart?.file && typeof filePart?.toBuffer !== "function") {
+        filePart = await req.file();
+      }
+      if (!filePart || (!filePart.file && typeof filePart.toBuffer !== "function")) {
+        return reply.code(400).send({
+          ok: false,
+          error: "FILE_REQUIRED",
+          message: "Select an image to upload."
+        });
+      }
+
+      const { filename, mimetype } = filePart;
+      const buffer = await uploadPartToBuffer(filePart, {
+        maxBytes: Number(app.config.UPLOAD_MAX_BYTES || DEFAULT_MAX_UPLOAD_BYTES)
+      });
+      const validation = validateImageUpload({ buffer, filename, mimetype });
+      if (!validation.ok) {
+        auditSecurityEvent(app, "upload.rejected", {
+          category: "upload",
+          source: "auth.profile_avatar",
+          severity: "warning",
+          outcome: "rejected",
+          tenantId: tenant_id,
+          identityId: identity_id,
+          reason: validation.error,
+          ip: req.ip,
+          userAgent: req.headers["user-agent"] || null,
+          metadata: { filename, mimetype }
+        });
+        return reply.code(415).send({
+          ok: false,
+          error: "INVALID_IMAGE",
+          reason: validation.error,
+          message: "The selected file is not a valid supported image."
+        });
+      }
+
+      const uploadDir = ensureUploadDirectory(
+        resolveAssetRoot(app.config),
+        [tenant_id, "avatars"]
+      );
+      storedName = `${identity_id}-${crypto.randomUUID()}${validation.safeExt}`;
+      const targetPath = safeUploadTarget(uploadDir, storedName);
       const stored = await writeVerifiedUpload({
         app,
         targetPath,
@@ -2688,9 +2714,11 @@ export default async function authRoutes(app) {
           scan_status: stored.scan_status
         });
       }
-    } catch (err) {
-      app.log.error({ event: "profile_avatar_upload_error", error: err.message });
-      return reply.code(500).send({ ok: false, error: "UPLOAD_FAILED" });
+    } catch (error) {
+      return sendUploadFailure(req, reply, error, {
+        event: "profile_avatar_upload_error",
+        context: { tenantId: tenant_id, identityId: identity_id }
+      });
     }
 
     const rawUrl = `/assets/${tenant_id}/avatars/${storedName}`;
@@ -2709,7 +2737,8 @@ export default async function authRoutes(app) {
       avatar_display_url: serializedProfile?.avatar_display_url || rawUrl,
       profile: serializedProfile
     });
-  });
+    }
+  );
 
   /* ===================== DEVICES LIST (EIP) ===================== */
   app.get("/auth/devices", async (req, reply) => {

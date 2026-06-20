@@ -73,6 +73,30 @@ export function normalizeUploadError(error) {
   return { code, ...UPLOAD_RESPONSE[code] };
 }
 
+export function sendUploadFailure(req, reply, error, { event = "upload_error", context = {} } = {}) {
+  const failure = normalizeUploadError(error);
+  req.log.error({
+    event,
+    ...context,
+    err: error,
+    stack: error?.stack || null,
+    upload_error: failure.code,
+    request_id: req.id
+  });
+  return reply.code(failure.statusCode).send({
+    ok: false,
+    error: failure.code,
+    message: failure.message,
+    request_id: req.id
+  });
+}
+
+export function createUploadErrorHandler(event = "upload_request_error") {
+  return function uploadErrorHandler(error, req, reply) {
+    return sendUploadFailure(req, reply, error, { event });
+  };
+}
+
 export async function uploadPartToBuffer(filePart, { maxBytes = DEFAULT_MAX_UPLOAD_BYTES } = {}) {
   const limit = Math.max(1, Number(maxBytes) || DEFAULT_MAX_UPLOAD_BYTES);
   try {

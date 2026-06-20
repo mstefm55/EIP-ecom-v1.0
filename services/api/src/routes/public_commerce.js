@@ -1,12 +1,10 @@
 // services/api/src/routes/public_commerce.js
 // Public commerce intake for tenant storefronts (orders, payments, entitlements).
 import crypto from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
 import { promisify } from "node:util";
 import argon2 from "argon2";
 import { buildSignedAssetUrl } from "../services/assets/signing.js";
-import { resolveAssetRoot } from "../services/assets/root.js";
+import { ensureUploadDirectory, resolveAssetRoot } from "../services/assets/root.js";
 import { randomToken, sha256Hex, timingSafeEqual } from "../auth/crypto.js";
 import { buildRequestHash, ensureIdempotency, finalizeIdempotency } from "../services/gateway/idempotency.js";
 import {
@@ -19,7 +17,16 @@ import { hydrateConnectionProfileSecrets } from "../services/gateway/secretStore
 import { connectionAllowsOrigin, extractEventId, verifyConnectionRequest } from "../services/gateway/verification.js";
 import { isTenantAssetPath, toLocalAssetPath } from "../services/assets/url_policy.js";
 import { sendEmail } from "../lib/email.js";
-import { safeUploadTarget, uploadPartToBuffer, validateImageUpload, writeVerifiedUpload } from "../lib/uploadSecurity.js";
+import {
+  DEFAULT_MAX_UPLOAD_BYTES,
+  createUploadErrorHandler,
+  normalizeUploadError,
+  safeUploadTarget,
+  sendUploadFailure,
+  uploadPartToBuffer,
+  validateImageUpload,
+  writeVerifiedUpload
+} from "../lib/uploadSecurity.js";
 import { enforceConnectionQuota } from "../lib/abuseQuota.js";
 import { resolveMarketplaceFxContext } from "../services/fx/marketFxSync.js";
 import { auditSecurityEvent } from "../lib/securityAudit.js";
@@ -3414,7 +3421,11 @@ export default async function publicCommerceRoutes(app) {
 
   app.post(
     "/commerce/:suffix/member/uploads",
-    { config: { rateLimit: RATE_LIMIT, cors: false }, bodyLimit: MAX_BODY },
+    {
+      config: { rateLimit: RATE_LIMIT, cors: false },
+      bodyLimit: Number(app.config.UPLOAD_MAX_BYTES || DEFAULT_MAX_UPLOAD_BYTES) + 64 * 1024,
+      errorHandler: createUploadErrorHandler("member_blog_upload_request_error")
+    },
     async (req, reply) => {
       const access = await resolveConnection(app, req, reply, ["website_intake", "custom", "payments"]);
       if (!access) return;
@@ -3423,65 +3434,84 @@ export default async function publicCommerceRoutes(app) {
       if (!member) return;
       if (!requireMemberCsrf(member, req, reply)) return;
 
-      if (!req.isMultipart()) {
-        return reply.code(415).send({ ok: false, error: "MULTIPART_REQUIRED" });
-      }
-
-      const bodyFile = req.body?.file;
-      let filePart = bodyFile;
-      if (!filePart?.file && typeof filePart?.toBuffer !== "function") {
-        filePart = await req.file();
-      }
-      if (!filePart || (!filePart.file && typeof filePart.toBuffer !== "function")) {
-        return reply.code(400).send({ ok: false, error: "FILE_REQUIRED" });
-      }
-
-      const filename = normalizeText(filePart.filename || "");
-      const mimetype = normalizeText(filePart.mimetype || "").toLowerCase();
-      const buffer = await uploadPartToBuffer(filePart);
-      const validation = validateImageUpload({ buffer, filename, mimetype });
-      if (!validation.ok) {
-        auditSecurityEvent(app, "upload.rejected", {
-          category: "upload",
-          source: "public_commerce.member_upload",
-          severity: "warning",
-          outcome: "rejected",
-          tenantId: access.tenant.id,
-          connectionCode: access.profile?.identity?.connection_code,
-          suffix: req.params?.suffix,
-          reason: validation.error,
-          ip: req.ip,
-          userAgent: req.headers["user-agent"] || null,
-          metadata: { filename, mimetype }
-        });
-        return reply.code(415).send({ ok: false, error: validation.error });
-      }
-
-      const uploadIdempotencyBody = {
-        idempotency_key:
-          normalizeText(req.body?.idempotency_key?.value || req.body?.idempotency_key) ||
-          normalizeText(req.body?.idempotencyKey?.value || req.body?.idempotencyKey)
-      };
-      const requestHash = commerceRequestHash(
-        req,
-        uploadIdempotencyBody,
-        Buffer.concat([Buffer.from(`${filename}\n${mimetype}\n`), buffer])
-      );
-      const idem = await beginCommerceIdempotency(req, reply, {
-        access,
-        body: uploadIdempotencyBody,
-        action: "member_upload",
-        requestHash
-      });
-      if (!idem || idem.replay) return;
-
-      const uploadDir = path.join(resolveAssetRoot(app.config), access.tenant.id, "blog");
-      fs.mkdirSync(uploadDir, { recursive: true });
-
-      const storedName = `${crypto.randomUUID()}${validation.safeExt}`;
-      const targetPath = safeUploadTarget(uploadDir, storedName);
-
+      let filename = "";
+      let mimetype = "";
+      let storedName = "";
+      let idem = null;
       try {
+        if (!req.isMultipart()) {
+          return reply.code(415).send({
+            ok: false,
+            error: "MULTIPART_REQUIRED",
+            message: "Upload requests must use multipart form data."
+          });
+        }
+
+        const bodyFile = req.body?.file;
+        let filePart = bodyFile;
+        if (!filePart?.file && typeof filePart?.toBuffer !== "function") {
+          filePart = await req.file();
+        }
+        if (!filePart || (!filePart.file && typeof filePart.toBuffer !== "function")) {
+          return reply.code(400).send({
+            ok: false,
+            error: "FILE_REQUIRED",
+            message: "Select an image to upload."
+          });
+        }
+
+        filename = normalizeText(filePart.filename || "");
+        mimetype = normalizeText(filePart.mimetype || "").toLowerCase();
+        const buffer = await uploadPartToBuffer(filePart, {
+          maxBytes: Number(app.config.UPLOAD_MAX_BYTES || DEFAULT_MAX_UPLOAD_BYTES)
+        });
+        const validation = validateImageUpload({ buffer, filename, mimetype });
+        if (!validation.ok) {
+          auditSecurityEvent(app, "upload.rejected", {
+            category: "upload",
+            source: "public_commerce.member_upload",
+            severity: "warning",
+            outcome: "rejected",
+            tenantId: access.tenant.id,
+            connectionCode: access.profile?.identity?.connection_code,
+            suffix: req.params?.suffix,
+            reason: validation.error,
+            ip: req.ip,
+            userAgent: req.headers["user-agent"] || null,
+            metadata: { filename, mimetype }
+          });
+          return reply.code(415).send({
+            ok: false,
+            error: "INVALID_IMAGE",
+            reason: validation.error,
+            message: "The selected file is not a valid supported image."
+          });
+        }
+
+        const uploadIdempotencyBody = {
+          idempotency_key:
+            normalizeText(req.body?.idempotency_key?.value || req.body?.idempotency_key) ||
+            normalizeText(req.body?.idempotencyKey?.value || req.body?.idempotencyKey)
+        };
+        const requestHash = commerceRequestHash(
+          req,
+          uploadIdempotencyBody,
+          Buffer.concat([Buffer.from(`${filename}\n${mimetype}\n`), buffer])
+        );
+        idem = await beginCommerceIdempotency(req, reply, {
+          access,
+          body: uploadIdempotencyBody,
+          action: "member_upload",
+          requestHash
+        });
+        if (!idem || idem.replay) return;
+
+        const uploadDir = ensureUploadDirectory(
+          resolveAssetRoot(app.config),
+          [access.tenant.id, "blog"]
+        );
+        storedName = `${crypto.randomUUID()}${validation.safeExt}`;
+        const targetPath = safeUploadTarget(uploadDir, storedName);
         const stored = await writeVerifiedUpload({
           app,
           targetPath,
@@ -3522,15 +3552,35 @@ export default async function publicCommerceRoutes(app) {
           });
         }
       } catch (error) {
-        app.log.error({ event: "member_blog_upload_failed", tenantId: access.tenant.id, error: error.message });
-        await finalizeIdempotency(app.db, {
-          tenantId: access.tenant.id,
-          scope: idem.scope,
-          key: idem.key,
-          response: { ok: false, error: "UPLOAD_FAILED" },
-          status: "error"
+        const failure = normalizeUploadError(error);
+        if (idem && !idem.replay) {
+          try {
+            await finalizeIdempotency(app.db, {
+              tenantId: access.tenant.id,
+              scope: idem.scope,
+              key: idem.key,
+              response: { ok: false, error: failure.code, message: failure.message },
+              status: "error"
+            });
+          } catch (finalizeError) {
+            req.log.error({
+              event: "member_blog_upload_idempotency_finalize_error",
+              err: finalizeError,
+              stack: finalizeError?.stack || null,
+              tenantId: access.tenant.id,
+              request_id: req.id
+            });
+          }
+        }
+        return sendUploadFailure(req, reply, error, {
+          event: "member_blog_upload_failed",
+          context: {
+            tenantId: access.tenant.id,
+            identityId: member.profile.identity_id,
+            connectionCode: access.profile?.identity?.connection_code,
+            suffix: req.params?.suffix
+          }
         });
-        return reply.code(500).send({ ok: false, error: "UPLOAD_FAILED" });
       }
 
       const rawUrl = `/assets/${access.tenant.id}/blog/${storedName}`;

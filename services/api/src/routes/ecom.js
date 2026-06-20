@@ -8,8 +8,9 @@ import { ensureUploadDirectory, resolveAssetRoot } from "../services/assets/root
 import { sanitizeMediaForStorage } from "../services/assets/url_policy.js";
 import {
   DEFAULT_MAX_UPLOAD_BYTES,
-  normalizeUploadError,
+  createUploadErrorHandler,
   safeUploadTarget,
+  sendUploadFailure,
   uploadPartToBuffer,
   validateEcomUpload,
   writeVerifiedUpload
@@ -3606,32 +3607,10 @@ function normalizeVariantsForStorage(value) {
   return { ...raw, enabled, headers, items };
 }
 
-function sendUploadFailure(req, reply, error) {
-  const failure = normalizeUploadError(error);
-  req.log.error({
-    event: "ecom_upload_error",
-    err: error,
-    stack: error?.stack || null,
-    upload_error: failure.code,
-    request_id: req.id
-  });
-  return reply.code(failure.statusCode).send({
-    ok: false,
-    error: failure.code,
-    message: failure.message,
-    request_id: req.id
-  });
-}
-
-export function ecomUploadErrorHandler(error, req, reply) {
-  return sendUploadFailure(req, reply, error);
-}
-
-
 export default async function ecomRoutes(app) {
   app.post(
     "/uploads",
-    { errorHandler: ecomUploadErrorHandler },
+    { errorHandler: createUploadErrorHandler("ecom_upload_request_error") },
     async (req, reply) => {
       const session = await requireWrite(app, req, reply, "ECOM_PRODUCT_WRITE");
       if (!session) return;
@@ -3758,7 +3737,7 @@ export default async function ecomRoutes(app) {
           }
         });
       } catch (error) {
-        return sendUploadFailure(req, reply, error);
+        return sendUploadFailure(req, reply, error, { event: "ecom_upload_error" });
       }
     }
   );
