@@ -1,10 +1,6 @@
 // services/api/src/routes/auth.js
 import { hasPermission } from "../auth/perm.js";
 
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { pipeline } from "node:stream/promises";
 import crypto from "node:crypto";
 import { promisify } from "node:util";
 import argon2 from "argon2";
@@ -16,6 +12,16 @@ import {
   timingSafeEqual
 } from "../auth/crypto.js";
 import { sendEmail } from "../lib/email.js";
+import {
+  DEFAULT_MAX_UPLOAD_BYTES,
+  createUploadErrorHandler,
+  safeUploadTarget,
+  sendUploadFailure,
+  uploadPartToBuffer,
+  validateImageUpload,
+  writeVerifiedUpload
+} from "../lib/uploadSecurity.js";
+import { ensureUploadDirectory, resolveAssetRoot } from "../services/assets/root.js";
 import { evaluatePasswordStrength, generateStrongPassword, checkPasswordHistory } from "../auth/password.js";
 
 const OTP_REQUEST_LIMIT_MAX = 5;
@@ -35,10 +41,6 @@ const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const DEVICE_COOKIE_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000;
 const RECOVERY_TOKEN_DEFAULT_TTL_MIN = 30;
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const ASSET_ROOT = path.join(__dirname, "../../assets");
-const AVATAR_MIME_PREFIX = ["image/"];
 
 function getRecoveryPepper(app) {
   const raw = String(app?.config?.RECOVERY_TOKEN_PEPPER || "").trim();
@@ -2314,49 +2316,83 @@ export default async function authRoutes(app) {
     return reply.send({ ok: true, profile });
   });
 
-  app.post("/auth/profile/avatar", async (req, reply) => {
+  app.post(
+    "/auth/profile/avatar",
+    { errorHandler: createUploadErrorHandler("profile_avatar_upload_request_error") },
+    async (req, reply) => {
     const s = await app.requireSession(req, { realm: "EIP" });
     if (!s.ok) return reply.code(s.status).send({ ok: false, error: s.error });
     const c = await app.requireCsrf(req);
     if (!c.ok) return reply.code(c.status).send({ ok: false, error: c.error });
 
-    if (!req.isMultipart()) {
-      return reply.code(415).send({ ok: false, error: "MULTIPART_REQUIRED" });
-    }
-
     const { tenant_id, identity_id } = s.session;
-    const bodyFile = req.body?.file;
-    let filePart = bodyFile;
-    if (!filePart?.file && typeof filePart?.toBuffer !== "function") {
-      filePart = await req.file();
-    }
-    if (!filePart || (!filePart.file && typeof filePart.toBuffer !== "function")) {
-      return reply.code(400).send({ ok: false, error: "FILE_REQUIRED" });
-    }
-
-    const { filename, mimetype, file } = filePart;
-    const allowed = AVATAR_MIME_PREFIX.some((prefix) => String(mimetype || "").startsWith(prefix));
-    if (!allowed) {
-      return reply.code(415).send({ ok: false, error: "UNSUPPORTED_MEDIA" });
-    }
-
-    const safeExt = path.extname(filename || "").slice(0, 10) || "";
-    const uploadDir = path.join(ASSET_ROOT, tenant_id, "avatars");
-    fs.mkdirSync(uploadDir, { recursive: true });
-
-    const storedName = `${identity_id}-${crypto.randomUUID()}${safeExt}`;
-    const targetPath = path.join(uploadDir, storedName);
+    let storedName;
 
     try {
-      if (typeof filePart.toBuffer === "function") {
-        const buffer = await filePart.toBuffer();
-        fs.writeFileSync(targetPath, buffer);
-      } else {
-        await pipeline(file, fs.createWriteStream(targetPath, { flags: "w" }));
+      if (!req.isMultipart()) {
+        return reply.code(415).send({
+          ok: false,
+          error: "MULTIPART_REQUIRED",
+          message: "Upload requests must use multipart form data."
+        });
       }
-    } catch (err) {
-      app.log.error({ event: "profile_avatar_upload_error", error: err.message });
-      return reply.code(500).send({ ok: false, error: "UPLOAD_FAILED" });
+
+      const bodyFile = req.body?.file;
+      let filePart = bodyFile;
+      if (!filePart?.file && typeof filePart?.toBuffer !== "function") {
+        filePart = await req.file();
+      }
+      if (!filePart || (!filePart.file && typeof filePart.toBuffer !== "function")) {
+        return reply.code(400).send({
+          ok: false,
+          error: "FILE_REQUIRED",
+          message: "Select an image to upload."
+        });
+      }
+
+      const { filename, mimetype } = filePart;
+      const buffer = await uploadPartToBuffer(filePart, {
+        maxBytes: Number(app.config.UPLOAD_MAX_BYTES || DEFAULT_MAX_UPLOAD_BYTES)
+      });
+      const validation = validateImageUpload({ buffer, filename, mimetype });
+      if (!validation.ok) {
+        return reply.code(415).send({
+          ok: false,
+          error: "INVALID_IMAGE",
+          reason: validation.error,
+          message: "The selected file is not a valid supported image."
+        });
+      }
+
+      const uploadDir = ensureUploadDirectory(
+        resolveAssetRoot(app.config),
+        [tenant_id, "avatars"]
+      );
+      storedName = `${identity_id}-${crypto.randomUUID()}${validation.safeExt}`;
+      const targetPath = safeUploadTarget(uploadDir, storedName);
+      const stored = await writeVerifiedUpload({
+        app,
+        targetPath,
+        buffer,
+        tenantId: tenant_id,
+        storedName,
+        assetKind: "media",
+        category: "avatars",
+        filename,
+        mimetype
+      });
+      if (!stored.ok) {
+        return reply.code(stored.status === "blocked" ? 415 : 202).send({
+          ok: false,
+          error: stored.error,
+          scan_status: stored.scan_status
+        });
+      }
+    } catch (error) {
+      return sendUploadFailure(req, reply, error, {
+        event: "profile_avatar_upload_error",
+        context: { tenantId: tenant_id, identityId: identity_id }
+      });
     }
 
     const rawUrl = `/assets/${tenant_id}/avatars/${storedName}`;
@@ -2365,7 +2401,8 @@ export default async function authRoutes(app) {
     });
 
     return reply.send({ ok: true, avatar_url: rawUrl, profile });
-  });
+    }
+  );
 
   /* ===================== DEVICES LIST (EIP) ===================== */
   app.get("/auth/devices", async (req, reply) => {

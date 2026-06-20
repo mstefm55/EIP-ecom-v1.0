@@ -33,7 +33,18 @@ export async function callEndpoint(endpoint, options = {}) {
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`API Error (${response.status}): ${errorText}`);
+    let payload = null;
+    try {
+      payload = JSON.parse(errorText);
+    } catch {
+      payload = null;
+    }
+    const message = payload?.message || payload?.error || `Request failed (${response.status}).`;
+    const error = new Error(message);
+    error.status = response.status;
+    error.code = payload?.error || null;
+    error.payload = payload;
+    throw error;
   }
 
   return await response.json();

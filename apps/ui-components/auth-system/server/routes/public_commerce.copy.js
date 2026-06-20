@@ -1,10 +1,7 @@
 // services/api/src/routes/public_commerce.js
 // Public commerce intake for tenant storefronts (orders, payments, entitlements).
 import crypto from "node:crypto";
-import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
 import argon2 from "argon2";
 import { buildSignedAssetUrl } from "../services/assets/signing.js";
@@ -14,6 +11,16 @@ import { extractProfiles } from "../services/gateway/connectionProfile.js";
 import { registerRawBody, parseJsonBody } from "../services/gateway/rawBody.js";
 import { isTenantAssetPath, toLocalAssetPath } from "../services/assets/url_policy.js";
 import { sendEmail } from "../lib/email.js";
+import {
+  DEFAULT_MAX_UPLOAD_BYTES,
+  createUploadErrorHandler,
+  safeUploadTarget,
+  sendUploadFailure,
+  uploadPartToBuffer,
+  validateImageUpload,
+  writeVerifiedUpload
+} from "../lib/uploadSecurity.js";
+import { ensureUploadDirectory, resolveAssetRoot } from "../services/assets/root.js";
 
 const RATE_LIMIT = { max: 120, timeWindow: "1 minute" };
 const MAX_BODY = 512 * 1024;
@@ -46,10 +53,6 @@ const STOREFRONT_CTA_ACTIONS = new Set([
   "navigate_external",
   "scroll_to"
 ]);
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const ASSET_ROOT = path.join(__dirname, "../../assets");
-const BLOG_MEDIA_ALLOWED_MIME_PREFIX = ["image/"];
 const COMMERCE_SETTINGS_MODULE = "ecom";
 const COMMERCE_SETTINGS_CODE = "commerce";
 const DEFAULT_PAYMENT_SETTINGS = {
@@ -2671,7 +2674,11 @@ export default async function publicCommerceRoutes(app) {
 
   app.post(
     "/commerce/:suffix/member/uploads",
-    { config: { rateLimit: RATE_LIMIT, cors: false }, bodyLimit: MAX_BODY },
+    {
+      config: { rateLimit: RATE_LIMIT, cors: false },
+      bodyLimit: Number(app.config.UPLOAD_MAX_BYTES || DEFAULT_MAX_UPLOAD_BYTES) + 64 * 1024,
+      errorHandler: createUploadErrorHandler("member_blog_upload_request_error")
+    },
     async (req, reply) => {
       const access = await resolveConnection(app, req, reply, ["website_intake", "custom", "payments"]);
       if (!access) return;
@@ -2680,42 +2687,76 @@ export default async function publicCommerceRoutes(app) {
       if (!member) return;
       if (!requireMemberCsrf(member, req, reply)) return;
 
-      if (!req.isMultipart()) {
-        return reply.code(415).send({ ok: false, error: "MULTIPART_REQUIRED" });
-      }
-
-      const bodyFile = req.body?.file;
-      let filePart = bodyFile;
-      if (!filePart?.file && typeof filePart?.toBuffer !== "function") {
-        filePart = await req.file();
-      }
-      if (!filePart || (!filePart.file && typeof filePart.toBuffer !== "function")) {
-        return reply.code(400).send({ ok: false, error: "FILE_REQUIRED" });
-      }
-
-      const filename = normalizeText(filePart.filename || "");
-      const mimetype = normalizeText(filePart.mimetype || "").toLowerCase();
-      if (!BLOG_MEDIA_ALLOWED_MIME_PREFIX.some((prefix) => mimetype.startsWith(prefix))) {
-        return reply.code(415).send({ ok: false, error: "UNSUPPORTED_MEDIA" });
-      }
-
-      const extension = path.extname(filename).toLowerCase().slice(0, 10);
-      const uploadDir = path.join(ASSET_ROOT, access.tenant.id, "blog");
-      fs.mkdirSync(uploadDir, { recursive: true });
-
-      const storedName = `${crypto.randomUUID()}${extension || ""}`;
-      const targetPath = path.join(uploadDir, storedName);
+      let filename = "";
+      let mimetype = "";
+      let storedName = "";
 
       try {
-        if (typeof filePart.toBuffer === "function") {
-          const buffer = await filePart.toBuffer();
-          fs.writeFileSync(targetPath, buffer);
-        } else {
-          await pipeline(filePart.file, fs.createWriteStream(targetPath, { flags: "w" }));
+        if (!req.isMultipart()) {
+          return reply.code(415).send({
+            ok: false,
+            error: "MULTIPART_REQUIRED",
+            message: "Upload requests must use multipart form data."
+          });
+        }
+
+        const bodyFile = req.body?.file;
+        let filePart = bodyFile;
+        if (!filePart?.file && typeof filePart?.toBuffer !== "function") {
+          filePart = await req.file();
+        }
+        if (!filePart || (!filePart.file && typeof filePart.toBuffer !== "function")) {
+          return reply.code(400).send({
+            ok: false,
+            error: "FILE_REQUIRED",
+            message: "Select an image to upload."
+          });
+        }
+
+        filename = normalizeText(filePart.filename || "");
+        mimetype = normalizeText(filePart.mimetype || "").toLowerCase();
+        const buffer = await uploadPartToBuffer(filePart, {
+          maxBytes: Number(app.config.UPLOAD_MAX_BYTES || DEFAULT_MAX_UPLOAD_BYTES)
+        });
+        const validation = validateImageUpload({ buffer, filename, mimetype });
+        if (!validation.ok) {
+          return reply.code(415).send({
+            ok: false,
+            error: "INVALID_IMAGE",
+            reason: validation.error,
+            message: "The selected file is not a valid supported image."
+          });
+        }
+
+        const uploadDir = ensureUploadDirectory(
+          resolveAssetRoot(app.config),
+          [access.tenant.id, "blog"]
+        );
+        storedName = `${crypto.randomUUID()}${validation.safeExt}`;
+        const targetPath = safeUploadTarget(uploadDir, storedName);
+        const stored = await writeVerifiedUpload({
+          app,
+          targetPath,
+          buffer,
+          tenantId: access.tenant.id,
+          storedName,
+          assetKind: "media",
+          category: "blog",
+          filename,
+          mimetype
+        });
+        if (!stored.ok) {
+          return reply.code(stored.status === "blocked" ? 415 : 202).send({
+            ok: false,
+            error: stored.error,
+            scan_status: stored.scan_status
+          });
         }
       } catch (error) {
-        app.log.error({ event: "member_blog_upload_failed", tenantId: access.tenant.id, error: error.message });
-        return reply.code(500).send({ ok: false, error: "UPLOAD_FAILED" });
+        return sendUploadFailure(req, reply, error, {
+          event: "member_blog_upload_failed",
+          context: { tenantId: access.tenant.id, suffix: req.params?.suffix }
+        });
       }
 
       const rawUrl = `/assets/${access.tenant.id}/blog/${storedName}`;

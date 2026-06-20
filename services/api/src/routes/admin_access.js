@@ -1,6 +1,4 @@
 // services/api/src/routes/admin_access.js
-import fs from "node:fs";
-import path from "node:path";
 import { randomUUID } from "node:crypto";
 import argon2 from "argon2";
 import { hasPermission } from "../auth/perm.js";
@@ -8,8 +6,16 @@ import { requirePrivilegedStepUp } from "../auth/privilegedStepUp.js";
 import { evaluatePasswordStrength } from "../auth/password.js";
 import { loadActivePasskeys, publicPasskey } from "../auth/passkeys.js";
 import { auditSecurityEvent } from "../lib/securityAudit.js";
-import { safeUploadTarget, uploadPartToBuffer, validateImageUpload, writeVerifiedUpload } from "../lib/uploadSecurity.js";
-import { resolveAssetRoot } from "../services/assets/root.js";
+import {
+  DEFAULT_MAX_UPLOAD_BYTES,
+  createUploadErrorHandler,
+  safeUploadTarget,
+  sendUploadFailure,
+  uploadPartToBuffer,
+  validateImageUpload,
+  writeVerifiedUpload
+} from "../lib/uploadSecurity.js";
+import { ensureUploadDirectory, resolveAssetRoot } from "../services/assets/root.js";
 
 const DEFAULT_TRANSLATION_BILLING = {
   charge_mode: "pass_through",
@@ -682,13 +688,12 @@ export default async function adminAccessRoutes(app) {
     return reply.send({ ok: true, profile });
   });
 
-  app.post("/admin/tenants/:tenantId/users/:identityId/avatar", async (req, reply) => {
+  app.post(
+    "/admin/tenants/:tenantId/users/:identityId/avatar",
+    { errorHandler: createUploadErrorHandler("admin_avatar_upload_request_error") },
+    async (req, reply) => {
     const session = await requireAdminPerm(app, req, reply, "admin.user.write", { csrf: true });
     if (!session) return;
-
-    if (!req.isMultipart()) {
-      return reply.code(415).send({ ok: false, error: "MULTIPART_REQUIRED" });
-    }
 
     const tenantId = normalizeText(req.params.tenantId);
     const identityId = normalizeText(req.params.identityId);
@@ -699,43 +704,64 @@ export default async function adminAccessRoutes(app) {
       return reply.code(404).send({ ok: false, error: "IDENTITY_NOT_FOUND" });
     }
 
-    const bodyFile = req.body?.file;
-    let filePart = bodyFile;
-    if (!filePart?.file && typeof filePart?.toBuffer !== "function") {
-      filePart = await req.file();
-    }
-    if (!filePart || (!filePart.file && typeof filePart.toBuffer !== "function")) {
-      return reply.code(400).send({ ok: false, error: "FILE_REQUIRED" });
-    }
-
-    const { filename, mimetype } = filePart;
-    const buffer = await uploadPartToBuffer(filePart);
-    const validation = validateImageUpload({ buffer, filename, mimetype });
-    if (!validation.ok) {
-      auditSecurityEvent(app, "upload.rejected", {
-        category: "upload",
-        source: "admin.user_avatar",
-        severity: "warning",
-        outcome: "rejected",
-        actorTenantId: session.tenant_id,
-        actorIdentityId: session.identity_id,
-        targetTenantId: tenantId,
-        targetIdentityId: identityId,
-        reason: validation.error,
-        ip: req.ip,
-        userAgent: req.headers["user-agent"] || null,
-        metadata: { filename, mimetype }
-      });
-      return reply.code(415).send({ ok: false, error: validation.error });
-    }
-
-    const uploadDir = path.join(resolveAssetRoot(app.config), tenantId, "avatars");
-    fs.mkdirSync(uploadDir, { recursive: true });
-
-    const storedName = `${identityId}-${randomUUID()}${validation.safeExt}`;
-    const targetPath = safeUploadTarget(uploadDir, storedName);
+    let storedName;
 
     try {
+      if (!req.isMultipart()) {
+        return reply.code(415).send({
+          ok: false,
+          error: "MULTIPART_REQUIRED",
+          message: "Upload requests must use multipart form data."
+        });
+      }
+
+      const bodyFile = req.body?.file;
+      let filePart = bodyFile;
+      if (!filePart?.file && typeof filePart?.toBuffer !== "function") {
+        filePart = await req.file();
+      }
+      if (!filePart || (!filePart.file && typeof filePart.toBuffer !== "function")) {
+        return reply.code(400).send({
+          ok: false,
+          error: "FILE_REQUIRED",
+          message: "Select an image to upload."
+        });
+      }
+
+      const { filename, mimetype } = filePart;
+      const buffer = await uploadPartToBuffer(filePart, {
+        maxBytes: Number(app.config.UPLOAD_MAX_BYTES || DEFAULT_MAX_UPLOAD_BYTES)
+      });
+      const validation = validateImageUpload({ buffer, filename, mimetype });
+      if (!validation.ok) {
+        auditSecurityEvent(app, "upload.rejected", {
+          category: "upload",
+          source: "admin.user_avatar",
+          severity: "warning",
+          outcome: "rejected",
+          actorTenantId: session.tenant_id,
+          actorIdentityId: session.identity_id,
+          targetTenantId: tenantId,
+          targetIdentityId: identityId,
+          reason: validation.error,
+          ip: req.ip,
+          userAgent: req.headers["user-agent"] || null,
+          metadata: { filename, mimetype }
+        });
+        return reply.code(415).send({
+          ok: false,
+          error: "INVALID_IMAGE",
+          reason: validation.error,
+          message: "The selected file is not a valid supported image."
+        });
+      }
+
+      const uploadDir = ensureUploadDirectory(
+        resolveAssetRoot(app.config),
+        [tenantId, "avatars"]
+      );
+      storedName = `${identityId}-${randomUUID()}${validation.safeExt}`;
+      const targetPath = safeUploadTarget(uploadDir, storedName);
       const stored = await writeVerifiedUpload({
         app,
         targetPath,
@@ -768,9 +794,16 @@ export default async function adminAccessRoutes(app) {
           scan_status: stored.scan_status
         });
       }
-    } catch (err) {
-      app.log.error({ event: "profile_avatar_upload_error", error: err.message });
-      return reply.code(500).send({ ok: false, error: "UPLOAD_FAILED" });
+    } catch (error) {
+      return sendUploadFailure(req, reply, error, {
+        event: "admin_avatar_upload_error",
+        context: {
+          actorTenantId: session.tenant_id,
+          actorIdentityId: session.identity_id,
+          targetTenantId: tenantId,
+          targetIdentityId: identityId
+        }
+      });
     }
 
     const rawUrl = `/assets/${tenantId}/avatars/${storedName}`;
@@ -787,7 +820,8 @@ export default async function adminAccessRoutes(app) {
     });
 
     return reply.send({ ok: true, avatar_url: rawUrl, profile });
-  });
+    }
+  );
 
   app.get("/admin/tenants/:tenantId/users/:identityId/passkeys", async (req, reply) => {
     const session = await requireAdminPerm(app, req, reply, "admin.user.read");

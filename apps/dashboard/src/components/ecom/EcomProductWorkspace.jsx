@@ -597,6 +597,14 @@ function stripRichTextToPlain(value) {
 }
 
 function parseApiError(err) {
+  if (err?.payload && typeof err.payload === "object") {
+    return {
+      status: Number(err.status) || null,
+      error: err.code || err.payload.error || null,
+      raw: err.message || "",
+      payload: err.payload
+    };
+  }
   const message = err?.message || "";
   const match = message.match(/API\s+(\d+):\s*(.*)$/s);
   if (!match) return { status: null, error: null, raw: message };
@@ -656,6 +664,15 @@ function formatApiError(err, fallback) {
   }
   if (code === "ASSET_TENANT_MISMATCH") {
     return "One or more media URLs point to another tenant. Re-upload the files in this tenant.";
+  }
+  if ([
+    "INVALID_IMAGE",
+    "FILE_TOO_LARGE",
+    "UPLOAD_DIRECTORY_NOT_FOUND",
+    "UPLOAD_WRITE_FAILED",
+    "STORAGE_NOT_WRITABLE"
+  ].includes(code)) {
+    return parsed.payload?.message || "The file could not be uploaded. Check the file and storage configuration.";
   }
   if (code === "SUPPLIER_CODE_REQUIRED") {
     return "Supplier code is required to generate the SKU.";

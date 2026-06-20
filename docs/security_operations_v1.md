@@ -168,6 +168,18 @@ Asset persistence:
 | Setting | Purpose |
 | --- | --- |
 | `ASSET_ROOT` | Optional filesystem root for served tenant assets. Defaults to `services/api/assets`. On Railway, point this at a mounted persistent volume so profile avatars and tenant uploads survive redeploy/restart. |
+| `UPLOAD_MAX_BYTES` | Maximum accepted multipart file size in bytes; defaults to 15 MiB. |
+
+On Railway, the API automatically uses `/data/eip-assets` when `/data` is mounted. `ASSET_ROOT` remains the explicit override for volumes mounted elsewhere. Startup logs emit `UPLOAD_ROOT`, `DIRECTORY_EXISTS`, `WRITABLE`, and `STORAGE_MODE` without exposing secrets.
+
+The shared upload storage and validation boundary applies to all live upload surfaces:
+
+- Product Studio media and documents: `POST /api/eip/ecom/uploads`
+- Current-user profile avatars: `POST /api/eip/auth/profile/avatar`
+- Admin-managed user avatars: `POST /api/eip/admin/tenants/:tenantId/users/:identityId/avatar`
+- Storefront member/blog images: `POST /api/public/commerce/:suffix/member/uploads`
+
+All four routes auto-create tenant directories, enforce `UPLOAD_MAX_BYTES`, verify MIME and file signatures, prevent path traversal, and return structured `INVALID_IMAGE`, `FILE_TOO_LARGE`, `UPLOAD_DIRECTORY_NOT_FOUND`, `STORAGE_NOT_WRITABLE`, or `UPLOAD_WRITE_FAILED` responses. Exceptions are logged with stack traces and without file contents or secrets.
 
 ## Admin Usage
 

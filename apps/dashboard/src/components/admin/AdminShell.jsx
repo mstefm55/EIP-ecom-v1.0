@@ -292,7 +292,7 @@ export default function AdminShell({ node, children, ctx }) {
       }));
       setProfileNotice("Avatar updated.");
     } catch (err) {
-      setProfileError(err.message || "Failed to upload avatar.");
+      setProfileError(err.userMessage || err.message || "Failed to upload avatar.");
     } finally {
       event.target.value = "";
     }
