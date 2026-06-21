@@ -54,10 +54,18 @@ const HTTP_METHODS = ["POST", "PUT", "PATCH"];
 
 const PAYMENT_PROVIDER_SETUP = {
   paypal: {
-    title: "PayPal sandbox setup",
+    title: "PayPal provider setup",
+    displayName: "PayPal",
     providerCode: "paypal",
     authMode: "oauth2_client_credentials",
-    baseUrl: "https://api-m.sandbox.paypal.com",
+    baseUrls: {
+      sandbox: "https://api-m.sandbox.paypal.com",
+      production: "https://api-m.paypal.com"
+    },
+    tokenUrls: {
+      sandbox: "https://api-m.sandbox.paypal.com/v1/oauth2/token",
+      production: "https://api-m.paypal.com/v1/oauth2/token"
+    },
     healthcheckPath: "/v1/oauth2/token",
     supportedMethods: ["PAYPAL"],
     signatureHeader: "paypal-transmission-sig",
@@ -65,10 +73,15 @@ const PAYMENT_PROVIDER_SETUP = {
     eventIdKey: "paypal-transmission-id"
   },
   checkout_com: {
-    title: "Checkout.com sandbox setup",
+    title: "Checkout.com provider setup",
+    displayName: "Checkout.com",
     providerCode: "checkout_com",
     authMode: "api_key_header",
-    baseUrl: "https://api.sandbox.checkout.com",
+    authHeader: "Authorization",
+    baseUrls: {
+      sandbox: "https://api.sandbox.checkout.com",
+      production: "https://api.checkout.com"
+    },
     healthcheckPath: "/",
     supportedMethods: ["CARD", "GOOGLE_PAY", "APPLE_PAY"],
     signatureHeader: "cko-signature",
@@ -112,7 +125,16 @@ function formatDate(value) {
 }
 
 function hasStoredSecret(container, key) {
-  return Boolean(container?.[key] || container?.[`${key}_set`]);
+  return Boolean(container?.[key] || container?.[`${key}_ref`] || container?.[`${key}_set`]);
+}
+
+function paymentEnvironmentValue(setup, environment, key) {
+  const mode = environment === "production" ? "production" : "sandbox";
+  return setup?.[key]?.[mode] || "";
+}
+
+function isPaymentConnection(connection) {
+  return Boolean(PAYMENT_PROVIDER_SETUP[connection?.identity?.connection_kind]);
 }
 
 function buildProfile(id, overrides = {}) {
@@ -204,7 +226,9 @@ function buildProfile(id, overrides = {}) {
       health_status: "healthy",
       apple_pay_domain_status: "",
       domain_validation_status: "",
+      supported_payment_methods_text: "",
       supported_message_types_text: "",
+      payment_provider: null,
       schema_version: "v1",
       envelope_profile: "canonical_v1",
       mapping_mode: "passthrough",
@@ -214,6 +238,8 @@ function buildProfile(id, overrides = {}) {
       scan_allowed: true,
       loader_enabled: false,
       public_api_enabled: true,
+      google_pay_enabled: false,
+      apple_pay_domain_status: "",
       allowed_scan_modes: ["auto", "rendered", "generic", "tagged"],
       scopes: [
         "storefront.mapping.read",
@@ -324,7 +350,15 @@ function fromApiProfile(profile) {
       health_status: profile.routing?.health_status || "healthy",
       apple_pay_domain_status: profile.routing?.apple_pay_domain_status || "",
       domain_validation_status: profile.routing?.domain_validation_status || "",
+      supported_payment_methods_text: Array.isArray(profile.routing?.supported_payment_methods)
+        ? profile.routing.supported_payment_methods.join("\n")
+        : Array.isArray(profile.routing?.supported_message_types)
+          ? profile.routing.supported_message_types.join("\n")
+          : "",
       supported_message_types_text: Array.isArray(profile.routing?.supported_message_types) ? profile.routing.supported_message_types.join("\n") : "",
+      payment_provider: profile.routing?.payment_provider && typeof profile.routing.payment_provider === "object"
+        ? profile.routing.payment_provider
+        : null,
       schema_version: profile.routing?.schema_version || "v1",
       envelope_profile: profile.routing?.envelope_profile || "canonical_v1",
       mapping_mode: profile.routing?.mapping_mode || "passthrough",
@@ -334,6 +368,11 @@ function fromApiProfile(profile) {
       scan_allowed: profile.public_storefront?.scan_allowed !== false,
       loader_enabled: profile.public_storefront?.loader_enabled === true,
       public_api_enabled: profile.public_storefront?.public_api_enabled !== false,
+      google_pay_enabled: profile.public_storefront?.google_pay_enabled === true,
+      apple_pay_domain_status:
+        profile.public_storefront?.apple_pay_domain_status ||
+        profile.routing?.apple_pay_domain_status ||
+        "",
       allowed_scan_modes: Array.isArray(profile.public_storefront?.allowed_scan_modes)
         ? profile.public_storefront.allowed_scan_modes
         : ["auto", "rendered", "generic", "tagged"],
@@ -352,6 +391,30 @@ function fromApiProfile(profile) {
 }
 
 function toApiProfile(profile) {
+  const paymentSetup = PAYMENT_PROVIDER_SETUP[profile.identity.connection_kind] || null;
+  const supportedPaymentMethods = paymentSetup
+    ? normalizeList(profile.routing.supported_payment_methods_text || profile.routing.supported_message_types_text)
+        .map((method) => method.toUpperCase())
+    : [];
+  const paymentProviderMetadata = paymentSetup
+    ? {
+        ...(profile.routing.payment_provider && typeof profile.routing.payment_provider === "object"
+          ? profile.routing.payment_provider
+          : {}),
+        code: paymentSetup.providerCode,
+        label: profile.identity.connection_name || paymentSetup.displayName,
+        enabled: profile.identity.is_enabled !== false,
+        visible: true,
+        adapter_code: paymentSetup.providerCode,
+        methods: supportedPaymentMethods.map((method, index) => ({
+          code: method,
+          label: method.replace(/_/g, " "),
+          enabled: method !== "GOOGLE_PAY" || profile.public_storefront.google_pay_enabled === true,
+          visible: true,
+          priority: (index + 1) * 10
+        }))
+      }
+    : profile.routing.payment_provider;
   return {
     id: profile.id,
     identity: { ...profile.identity },
@@ -413,14 +476,20 @@ function toApiProfile(profile) {
       health_status: profile.routing.health_status || "healthy",
       apple_pay_domain_status: profile.routing.apple_pay_domain_status || "",
       domain_validation_status: profile.routing.domain_validation_status || "",
+      supported_payment_methods: supportedPaymentMethods,
       supported_message_types: normalizeList(profile.routing.supported_message_types_text),
+      payment_provider: paymentProviderMetadata || null,
       schema_version: profile.routing.schema_version,
       envelope_profile: profile.routing.envelope_profile,
       mapping_mode: profile.routing.mapping_mode,
       mapping_rules: normalizeJson(profile.routing.mapping_rules_text)
     },
     public_storefront: {
-      ...profile.public_storefront
+      ...profile.public_storefront,
+      apple_pay_domain_status:
+        profile.public_storefront.apple_pay_domain_status ||
+        profile.routing.apple_pay_domain_status ||
+        ""
     },
     audit: {
       audit_record_type: profile.audit.audit_record_type,
@@ -434,6 +503,7 @@ function toApiProfile(profile) {
 
 function validateProfile(profile) {
   const errors = [];
+  const paymentSetup = PAYMENT_PROVIDER_SETUP[profile.identity.connection_kind] || null;
   if (!profile.identity.connection_name) errors.push("Connection name is required");
   if (!profile.identity.connection_code) errors.push("Connection code is required");
   if (["website", "ecommerce"].includes(profile.identity.connection_kind) && profile.identity.direction !== "outbound" && !profile.identity.frontend_url) {
@@ -441,7 +511,9 @@ function validateProfile(profile) {
   }
   if (profile.identity.direction !== "outbound") {
     if (!profile.inbound.inbound_path_suffix) errors.push("Inbound path suffix is required");
-    if (!profile.inbound.origin_allowlist_text) errors.push("Origin allowlist is required for inbound connections");
+    if (!profile.inbound.origin_allowlist_text && profile.identity.environment !== "sandbox") {
+      errors.push("Origin allowlist is required for production inbound connections");
+    }
   }
   if (profile.identity.direction !== "inbound" && !profile.outbound.base_url) {
     errors.push("Outbound base URL is required for outbound/both connections");
@@ -456,11 +528,17 @@ function validateProfile(profile) {
   if (!profile.idempotency.event_id_location) errors.push("Idempotency location is required");
   if (!profile.idempotency.event_id_key) errors.push("Idempotency key is required");
   if (!profile.routing.channel) errors.push("Routing channel is required");
-  if (["paypal", "checkout_com"].includes(profile.identity.connection_kind)) {
-    const expected = profile.identity.connection_kind;
+  if (paymentSetup) {
+    const expected = paymentSetup.providerCode;
     if (profile.routing.channel !== "payments") errors.push("Payment provider connections must use the payments channel");
     if ((profile.routing.provider_code || profile.routing.protocol) && (profile.routing.provider_code || profile.routing.protocol) !== expected) {
       errors.push(`Provider code must be ${expected}`);
+    }
+    const supportedMethods = normalizeList(
+      profile.routing.supported_payment_methods_text || profile.routing.supported_message_types_text
+    ).map((method) => method.toUpperCase());
+    if (!paymentSetup.supportedMethods.every((method) => supportedMethods.includes(method))) {
+      errors.push(`${paymentSetup.displayName} supported payment methods are incomplete`);
     }
   }
   if (!profile.routing.schema_version) errors.push("Schema version is required");
@@ -635,6 +713,26 @@ export default function AdminConnectionsPanelSafe() {
     if (setup && !selectedConnection.routing?.supported_message_types_text) {
       patch.supported_message_types_text = setup.supportedMethods.join("\n");
     }
+    if (setup && !selectedConnection.routing?.supported_payment_methods_text) {
+      patch.supported_payment_methods_text = setup.supportedMethods.join("\n");
+    }
+    if (setup) {
+      patch.payment_provider = {
+        ...(selectedConnection.routing?.payment_provider || {}),
+        code: setup.providerCode,
+        label: selectedConnection.identity?.connection_name || setup.displayName,
+        enabled: selectedConnection.identity?.is_enabled !== false,
+        visible: true,
+        adapter_code: setup.providerCode,
+        methods: setup.supportedMethods.map((method, index) => ({
+          code: method,
+          label: method.replace(/_/g, " "),
+          enabled: method !== "GOOGLE_PAY" || selectedConnection.public_storefront?.google_pay_enabled === true,
+          visible: true,
+          priority: (index + 1) * 10
+        }))
+      };
+    }
     if (setup && selectedConnection.routing?.health_status === "healthy") patch.health_status = "pending";
     if (Object.keys(patch).length) updateSection("routing", patch);
     if (setup) {
@@ -644,7 +742,9 @@ export default function AdminConnectionsPanelSafe() {
       if (Object.keys(identityPatch).length) updateSection("identity", identityPatch);
 
       const outboundPatch = {};
-      if (!selectedConnection.outbound?.base_url) outboundPatch.base_url = setup.baseUrl;
+      if (!selectedConnection.outbound?.base_url) {
+        outboundPatch.base_url = paymentEnvironmentValue(setup, "sandbox", "baseUrls");
+      }
       if (!selectedConnection.outbound?.path_prefix) outboundPatch.path_prefix = "/";
       if (selectedConnection.outbound?.auth_mode === "none") outboundPatch.auth_mode = setup.authMode;
       if (!selectedConnection.outbound?.healthcheck_path || selectedConnection.outbound.healthcheck_path === "/health") {
@@ -652,10 +752,20 @@ export default function AdminConnectionsPanelSafe() {
       }
       if (Object.keys(outboundPatch).length) updateSection("outbound", outboundPatch);
 
+      const authPatch = {};
+      if (setup.authHeader && !selectedConnection.outbound?.auth?.header_name) authPatch.header_name = setup.authHeader;
+      if (setup.tokenUrls && !selectedConnection.outbound?.auth?.token_url) {
+        authPatch.token_url = paymentEnvironmentValue(setup, "sandbox", "tokenUrls");
+      }
+      if (Object.keys(authPatch).length) updateNested("outbound", "auth", authPatch);
+
       const hmacPatch = {};
       if (!selectedConnection.verification?.hmac_signature?.header_name) hmacPatch.header_name = setup.signatureHeader;
       if (!selectedConnection.verification?.hmac_signature?.timestamp_header) hmacPatch.timestamp_header = setup.timestampHeader;
       if (Object.keys(hmacPatch).length) updateNested("verification", "hmac_signature", hmacPatch);
+      if (selectedConnection.verification?.mode === "none") {
+        updateSection("verification", { mode: "hmac_signature", allow_unverified: false });
+      }
 
       const idempotencyPatch = {};
       if (selectedConnection.idempotency?.event_id_location !== "header") idempotencyPatch.event_id_location = "header";
@@ -663,8 +773,42 @@ export default function AdminConnectionsPanelSafe() {
         idempotencyPatch.event_id_key = setup.eventIdKey;
       }
       if (Object.keys(idempotencyPatch).length) updateSection("idempotency", idempotencyPatch);
+
+      updateSection("public_storefront", {
+        scan_allowed: false,
+        loader_enabled: false,
+        public_api_enabled: false,
+        google_pay_enabled: selectedConnection.public_storefront?.google_pay_enabled === true,
+        apple_pay_domain_status:
+          selectedConnection.public_storefront?.apple_pay_domain_status ||
+          selectedConnection.routing?.apple_pay_domain_status ||
+          ""
+      });
     }
   }, [selectedConnection?.identity?.connection_kind]);
+
+  useEffect(() => {
+    if (!selectedConnection) return;
+    const setup = PAYMENT_PROVIDER_SETUP[selectedConnection.identity?.connection_kind];
+    if (!setup) return;
+    const environment = selectedConnection.identity?.environment === "production" ? "production" : "sandbox";
+    const knownBaseUrls = Object.values(setup.baseUrls || {});
+    const nextBaseUrl = paymentEnvironmentValue(setup, environment, "baseUrls");
+    if (!selectedConnection.outbound?.base_url || knownBaseUrls.includes(selectedConnection.outbound.base_url)) {
+      if (nextBaseUrl && selectedConnection.outbound.base_url !== nextBaseUrl) {
+        updateSection("outbound", { base_url: nextBaseUrl });
+      }
+    }
+    const knownTokenUrls = Object.values(setup.tokenUrls || {});
+    const nextTokenUrl = paymentEnvironmentValue(setup, environment, "tokenUrls");
+    if (
+      nextTokenUrl &&
+      (!selectedConnection.outbound?.auth?.token_url || knownTokenUrls.includes(selectedConnection.outbound.auth.token_url)) &&
+      selectedConnection.outbound.auth.token_url !== nextTokenUrl
+    ) {
+      updateNested("outbound", "auth", { token_url: nextTokenUrl });
+    }
+  }, [selectedConnection?.identity?.connection_kind, selectedConnection?.identity?.environment]);
 
   const buildUniqueCode = (name, currentId, avoidCode = null) => {
     const base = slugifyCode(name);
@@ -681,13 +825,27 @@ export default function AdminConnectionsPanelSafe() {
     const nextName = event.target.value;
     setConnections((prev) => prev.map((item) => {
       if (item.id !== selectedConnection.id) return item;
+      const connectionCode = nextName ? item.identity.connection_code || buildUniqueCode(nextName, item.id) : "";
+      const paymentConnection = Boolean(PAYMENT_PROVIDER_SETUP[item.identity.connection_kind]);
       return {
         ...item,
         identity: {
           ...item.identity,
           connection_name: nextName,
-          connection_code: nextName ? item.identity.connection_code || buildUniqueCode(nextName, item.id) : ""
-        }
+          connection_code: connectionCode
+        },
+        inbound: paymentConnection && !item.inbound.inbound_path_suffix
+          ? { ...item.inbound, inbound_path_suffix: connectionCode }
+          : item.inbound,
+        routing: paymentConnection
+          ? {
+              ...item.routing,
+              payment_provider: {
+                ...(item.routing.payment_provider || {}),
+                label: nextName || PAYMENT_PROVIDER_SETUP[item.identity.connection_kind].displayName
+              }
+            }
+          : item.routing
       };
     }));
   };
@@ -842,13 +1000,22 @@ export default function AdminConnectionsPanelSafe() {
       )
     }
   ] : [];
+  if (paymentSetup?.providerCode === "paypal") {
+    paymentChecks.push(
+      { label: "Webhook ID", ok: Boolean(paymentHmac.webhook_id_ref) },
+      { label: "Webhook signing", ok: hasStoredSecret(paymentHmac, "secret") }
+    );
+  }
   if (paymentSetup?.providerCode === "checkout_com") {
-    paymentChecks.push({
-      label: "Apple Pay domain",
-      ok: ["validated", "verified", "active", "configured", "ready"].includes(
-        String(selectedConnection.routing?.apple_pay_domain_status || "").toLowerCase()
-      )
-    });
+    paymentChecks.push(
+      {
+        label: "Apple Pay domain",
+        ok: ["validated", "verified", "active", "configured", "ready"].includes(
+          String(selectedConnection.routing?.apple_pay_domain_status || "").toLowerCase()
+        )
+      },
+      { label: "Google Pay metadata", ok: selectedConnection.public_storefront?.google_pay_enabled === true }
+    );
   }
 
   return (
@@ -909,6 +1076,11 @@ export default function AdminConnectionsPanelSafe() {
               </button>
             ))}
           </div>
+          {!connections.some(isPaymentConnection) ? (
+            <div className="mt-4 rounded-xl border border-dashed border-amber-200 bg-amber-50/70 px-4 py-3 text-xs text-amber-800">
+              No payment provider connection configured. Add PayPal or Checkout.com in Admin Console → Gateway Connection Profiles.
+            </div>
+          ) : null}
         </div>
 
         {selectedConnection ? (
@@ -931,7 +1103,7 @@ export default function AdminConnectionsPanelSafe() {
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <p className="text-[0.65rem] font-semibold uppercase tracking-[0.22em] text-ink-400">{paymentSetup.title}</p>
-                    <p className="mt-1 text-xs text-ink-500">Sandbox references are stored through Admin Console Connections. Raw secret values are never displayed after save.</p>
+                    <p className="mt-1 text-xs text-ink-500">Complete provider setup in the existing tabs below. Raw secret values are never displayed after save.</p>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {paymentChecks.map((check) => (
@@ -939,22 +1111,6 @@ export default function AdminConnectionsPanelSafe() {
                     ))}
                   </div>
                 </div>
-                <Grid>
-                  {paymentSetup.providerCode === "paypal" ? (
-                    <>
-                      <Field label="Client ID reference"><input value={selectedConnection.outbound.auth.client_id} onChange={(event) => updateNested("outbound", "auth", { client_id: event.target.value })} placeholder="PayPal sandbox client ID reference" className={inputClass} /></Field>
-                      <SecretField label="Client secret reference" value={selectedConnection.outbound.auth.client_secret} stored={selectedConnection.outbound.auth.client_secret_set} onChange={(value) => updateNested("outbound", "auth", { client_secret: value })} />
-                      <Field label="Webhook ID reference"><input value={selectedConnection.verification.hmac_signature.webhook_id_ref || ""} onChange={(event) => updateNested("verification", "hmac_signature", { webhook_id_ref: event.target.value })} placeholder="PayPal sandbox webhook ID reference" className={inputClass} /></Field>
-                    </>
-                  ) : (
-                    <>
-                      <SecretField label="Secret key reference" value={selectedConnection.outbound.auth.secret} stored={selectedConnection.outbound.auth.secret_set} onChange={(value) => updateNested("outbound", "auth", { secret: value })} />
-                      <Field label="Public key / safe config"><input value={selectedConnection.outbound.auth.public_key_ref || ""} onChange={(event) => updateNested("outbound", "auth", { public_key_ref: event.target.value })} placeholder="Checkout.com public key or safe config reference" className={inputClass} /></Field>
-                      <SecretField label="Webhook signing secret" value={selectedConnection.verification.hmac_signature.secret} stored={selectedConnection.verification.hmac_signature.secret_set} onChange={(value) => updateNested("verification", "hmac_signature", { secret: value })} />
-                      <Field label="Apple Pay domain status"><select value={selectedConnection.routing.apple_pay_domain_status || ""} onChange={(event) => updateSection("routing", { apple_pay_domain_status: event.target.value, domain_validation_status: event.target.value })} className={inputClass}><option value="">Missing</option><option value="pending">Pending</option><option value="validated">Validated</option><option value="failed">Failed</option></select></Field>
-                    </>
-                  )}
-                </Grid>
               </div>
             ) : null}
 
@@ -964,13 +1120,13 @@ export default function AdminConnectionsPanelSafe() {
 
             {activeStep === "identity" ? (
               <Grid>
-                <Field label="Connection name"><input value={selectedConnection.identity.connection_name} onChange={handleConnectionNameChange} className={inputClass} /></Field>
+                <Field label={paymentSetup ? "Provider name" : "Connection name"}><input value={selectedConnection.identity.connection_name} onChange={handleConnectionNameChange} placeholder={paymentSetup?.displayName || ""} className={inputClass} /></Field>
                 <Field label="Connection code"><input value={selectedConnection.identity.connection_code} readOnly placeholder="auto-generated" className={`${inputClass} bg-slate-50 text-ink-600`} /></Field>
                 <Field label="Connection kind"><select value={selectedConnection.identity.connection_kind} onChange={(e) => updateSection("identity", { connection_kind: e.target.value })} className={inputClass}>{KIND_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>
-                <Field label="Direction"><select value={selectedConnection.identity.direction} onChange={(e) => updateSection("identity", { direction: e.target.value })} className={inputClass}>{DIRECTION_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>
-                <Field label="Environment"><select value={selectedConnection.identity.environment} onChange={(e) => updateSection("identity", { environment: e.target.value })} className={inputClass}>{ENV_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>
-                <Field label="Frontend URL"><input value={selectedConnection.identity.frontend_url} onChange={(e) => { updateSection("identity", { frontend_url: e.target.value }); if (!selectedConnection.inbound.origin_allowlist_text) updateSection("inbound", { origin_allowlist_text: e.target.value }); }} placeholder="https://storefront.example.com" className={inputClass} /></Field>
-                <Field label="Portal URL"><input value={selectedConnection.identity.portal_url} onChange={(e) => updateSection("identity", { portal_url: e.target.value })} className={inputClass} /></Field>
+                {!paymentSetup ? <Field label="Direction"><select value={selectedConnection.identity.direction} onChange={(e) => updateSection("identity", { direction: e.target.value })} className={inputClass}>{DIRECTION_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field> : null}
+                <Field label={paymentSetup ? "Provider mode" : "Environment"}><select value={selectedConnection.identity.environment} onChange={(e) => updateSection("identity", { environment: e.target.value })} className={inputClass}>{ENV_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>
+                {!paymentSetup ? <Field label="Frontend URL"><input value={selectedConnection.identity.frontend_url} onChange={(e) => { updateSection("identity", { frontend_url: e.target.value }); if (!selectedConnection.inbound.origin_allowlist_text) updateSection("inbound", { origin_allowlist_text: e.target.value }); }} placeholder="https://storefront.example.com" className={inputClass} /></Field> : null}
+                {!paymentSetup ? <Field label="Portal URL"><input value={selectedConnection.identity.portal_url} onChange={(e) => updateSection("identity", { portal_url: e.target.value })} className={inputClass} /></Field> : null}
                 <label className="flex items-center gap-2 text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink-400"><input type="checkbox" checked={selectedConnection.identity.is_enabled} onChange={(e) => updateSection("identity", { is_enabled: e.target.checked })} />Enabled</label>
               </Grid>
             ) : null}
@@ -991,51 +1147,81 @@ export default function AdminConnectionsPanelSafe() {
 
             {activeStep === "verification" ? (
               <div className="mt-4 space-y-4">
-                <Grid>
-                  <Field label="Verification mode"><select value={selectedConnection.verification.mode} onChange={(e) => updateSection("verification", { mode: e.target.value })} className={inputClass}>{VERIFICATION_MODES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>
-                  <label className="flex items-center gap-2 rounded-lg border border-ink-200/70 bg-white px-3 py-2 text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink-400"><input type="checkbox" checked={selectedConnection.verification.allow_unverified} onChange={(e) => updateSection("verification", { allow_unverified: e.target.checked })} />Allow unverified (sandbox only)</label>
-                </Grid>
-
-                {selectedConnection.verification.mode === "api_key" ? (
+                {paymentSetup ? (
                   <Grid>
-                    <Field label="API key header name"><input value={selectedConnection.verification.api_key.header_name} onChange={(e) => updateNested("verification", "api_key", { header_name: e.target.value })} placeholder="X-API-Key" className={inputClass} /></Field>
+                    {paymentSetup.providerCode === "paypal" ? (
+                      <Field label="Webhook ID / reference"><input value={selectedConnection.verification.hmac_signature.webhook_id_ref || ""} onChange={(event) => updateNested("verification", "hmac_signature", { webhook_id_ref: event.target.value })} placeholder="PayPal webhook ID reference" className={inputClass} /></Field>
+                    ) : null}
                     <SecretField
-                      label="API key secret"
-                      value={selectedConnection.verification.api_key.secret}
-                      stored={selectedConnection.verification.api_key.secret_set}
-                      onChange={(value) => updateNested("verification", "api_key", { secret: value })}
+                      label="Webhook signing secret reference"
+                      value={selectedConnection.verification.hmac_signature.secret}
+                      stored={selectedConnection.verification.hmac_signature.secret_set}
+                      onChange={(value) => updateNested("verification", "hmac_signature", { secret: value })}
                     />
+                    <Field label="Webhook signing status"><input readOnly value={hasStoredSecret(selectedConnection.verification.hmac_signature, "secret") ? "Stored securely" : "Missing"} className={`${inputClass} bg-slate-50 text-ink-600`} /></Field>
+                    <Field label="Signature header"><input readOnly value={selectedConnection.verification.hmac_signature.header_name} className={`${inputClass} bg-slate-50 text-ink-600`} /></Field>
                   </Grid>
-                ) : null}
-
-                {selectedConnection.verification.mode === "hmac_signature" ? (
-                  <Grid>
-                    <Field label="Signature header"><input value={selectedConnection.verification.hmac_signature.header_name} onChange={(e) => updateNested("verification", "hmac_signature", { header_name: e.target.value })} className={inputClass} /></Field>
-                    <Field label="Timestamp header"><input value={selectedConnection.verification.hmac_signature.timestamp_header} onChange={(e) => updateNested("verification", "hmac_signature", { timestamp_header: e.target.value })} className={inputClass} /></Field>
-                    <SecretField label="HMAC secret" value={selectedConnection.verification.hmac_signature.secret} stored={selectedConnection.verification.hmac_signature.secret_set} onChange={(value) => updateNested("verification", "hmac_signature", { secret: value })} />
-                  </Grid>
-                ) : null}
-
-                {selectedConnection.verification.mode === "oauth2_jwt" ? (
-                  <Grid>
-                    <Field label="Header name"><input value={selectedConnection.verification.oauth2_jwt.header_name} onChange={(e) => updateNested("verification", "oauth2_jwt", { header_name: e.target.value })} className={inputClass} /></Field>
-                    <Field label="Token prefix"><input value={selectedConnection.verification.oauth2_jwt.token_prefix} onChange={(e) => updateNested("verification", "oauth2_jwt", { token_prefix: e.target.value })} className={inputClass} /></Field>
-                    <Field label="Issuer"><input value={selectedConnection.verification.oauth2_jwt.issuer} onChange={(e) => updateNested("verification", "oauth2_jwt", { issuer: e.target.value })} className={inputClass} /></Field>
-                    <Field label="Audience"><input value={selectedConnection.verification.oauth2_jwt.audience} onChange={(e) => updateNested("verification", "oauth2_jwt", { audience: e.target.value })} className={inputClass} /></Field>
-                    <Field label="JWKS URL"><input value={selectedConnection.verification.oauth2_jwt.jwks_url} onChange={(e) => updateNested("verification", "oauth2_jwt", { jwks_url: e.target.value })} className={inputClass} /></Field>
-                    <SecretField label="Shared secret optional" value={selectedConnection.verification.oauth2_jwt.secret} stored={selectedConnection.verification.oauth2_jwt.secret_set} onChange={(value) => updateNested("verification", "oauth2_jwt", { secret: value })} />
-                  </Grid>
-                ) : null}
+                ) : (
+                  <>
+                    <Grid>
+                      <Field label="Verification mode"><select value={selectedConnection.verification.mode} onChange={(e) => updateSection("verification", { mode: e.target.value })} className={inputClass}>{VERIFICATION_MODES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>
+                      <label className="flex items-center gap-2 rounded-lg border border-ink-200/70 bg-white px-3 py-2 text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink-400"><input type="checkbox" checked={selectedConnection.verification.allow_unverified} onChange={(e) => updateSection("verification", { allow_unverified: e.target.checked })} />Allow unverified (sandbox only)</label>
+                    </Grid>
+                    {selectedConnection.verification.mode === "api_key" ? (
+                      <Grid>
+                        <Field label="API key header name"><input value={selectedConnection.verification.api_key.header_name} onChange={(e) => updateNested("verification", "api_key", { header_name: e.target.value })} placeholder="X-API-Key" className={inputClass} /></Field>
+                        <SecretField label="API key secret" value={selectedConnection.verification.api_key.secret} stored={selectedConnection.verification.api_key.secret_set} onChange={(value) => updateNested("verification", "api_key", { secret: value })} />
+                      </Grid>
+                    ) : null}
+                    {selectedConnection.verification.mode === "hmac_signature" ? (
+                      <Grid>
+                        <Field label="Signature header"><input value={selectedConnection.verification.hmac_signature.header_name} onChange={(e) => updateNested("verification", "hmac_signature", { header_name: e.target.value })} className={inputClass} /></Field>
+                        <Field label="Timestamp header"><input value={selectedConnection.verification.hmac_signature.timestamp_header} onChange={(e) => updateNested("verification", "hmac_signature", { timestamp_header: e.target.value })} className={inputClass} /></Field>
+                        <SecretField label="HMAC secret" value={selectedConnection.verification.hmac_signature.secret} stored={selectedConnection.verification.hmac_signature.secret_set} onChange={(value) => updateNested("verification", "hmac_signature", { secret: value })} />
+                      </Grid>
+                    ) : null}
+                    {selectedConnection.verification.mode === "oauth2_jwt" ? (
+                      <Grid>
+                        <Field label="Header name"><input value={selectedConnection.verification.oauth2_jwt.header_name} onChange={(e) => updateNested("verification", "oauth2_jwt", { header_name: e.target.value })} className={inputClass} /></Field>
+                        <Field label="Token prefix"><input value={selectedConnection.verification.oauth2_jwt.token_prefix} onChange={(e) => updateNested("verification", "oauth2_jwt", { token_prefix: e.target.value })} className={inputClass} /></Field>
+                        <Field label="Issuer"><input value={selectedConnection.verification.oauth2_jwt.issuer} onChange={(e) => updateNested("verification", "oauth2_jwt", { issuer: e.target.value })} className={inputClass} /></Field>
+                        <Field label="Audience"><input value={selectedConnection.verification.oauth2_jwt.audience} onChange={(e) => updateNested("verification", "oauth2_jwt", { audience: e.target.value })} className={inputClass} /></Field>
+                        <Field label="JWKS URL"><input value={selectedConnection.verification.oauth2_jwt.jwks_url} onChange={(e) => updateNested("verification", "oauth2_jwt", { jwks_url: e.target.value })} className={inputClass} /></Field>
+                        <SecretField label="Shared secret optional" value={selectedConnection.verification.oauth2_jwt.secret} stored={selectedConnection.verification.oauth2_jwt.secret_set} onChange={(value) => updateNested("verification", "oauth2_jwt", { secret: value })} />
+                      </Grid>
+                    ) : null}
+                  </>
+                )}
               </div>
             ) : null}
 
             {activeStep === "outbound" ? (
-              <Grid>
-                <Field label="Base URL"><input value={selectedConnection.outbound.base_url} onChange={(e) => updateSection("outbound", { base_url: e.target.value })} className={inputClass} /></Field>
-                <Field label="Path prefix"><input value={selectedConnection.outbound.path_prefix} onChange={(e) => updateSection("outbound", { path_prefix: e.target.value })} className={inputClass} /></Field>
-                <Field label="Auth mode"><input value={selectedConnection.outbound.auth_mode} onChange={(e) => updateSection("outbound", { auth_mode: e.target.value })} className={inputClass} /></Field>
-                <Field label="Healthcheck path"><input value={selectedConnection.outbound.healthcheck_path} onChange={(e) => updateSection("outbound", { healthcheck_path: e.target.value })} className={inputClass} /></Field>
-              </Grid>
+              paymentSetup ? (
+                <Grid>
+                  <Field label={`${paymentSetup.displayName} API base mode`}><select value={selectedConnection.identity.environment} onChange={(event) => updateSection("identity", { environment: event.target.value })} className={inputClass}>{ENV_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></Field>
+                  <Field label="API base URL"><input readOnly value={selectedConnection.outbound.base_url} className={`${inputClass} bg-slate-50 text-ink-600`} /></Field>
+                  {paymentSetup.providerCode === "paypal" ? (
+                    <>
+                      <Field label="Client ID reference / status"><input value={selectedConnection.outbound.auth.client_id} onChange={(event) => updateNested("outbound", "auth", { client_id: event.target.value })} placeholder="PayPal client ID reference" className={inputClass} /></Field>
+                      <SecretField label="Client secret reference / status" value={selectedConnection.outbound.auth.client_secret} stored={selectedConnection.outbound.auth.client_secret_set} onChange={(value) => updateNested("outbound", "auth", { client_secret: value })} />
+                      <Field label="OAuth token URL"><input readOnly value={selectedConnection.outbound.auth.token_url} className={`${inputClass} bg-slate-50 text-ink-600`} /></Field>
+                    </>
+                  ) : (
+                    <>
+                      <SecretField label="Secret key reference / status" value={selectedConnection.outbound.auth.secret} stored={selectedConnection.outbound.auth.secret_set} onChange={(value) => updateNested("outbound", "auth", { secret: value })} />
+                      <Field label="Public key / safe reference"><input value={selectedConnection.outbound.auth.public_key_ref || ""} onChange={(event) => updateNested("outbound", "auth", { public_key_ref: event.target.value })} placeholder="Checkout.com public key reference" className={inputClass} /></Field>
+                    </>
+                  )}
+                  <Field label="Healthcheck path"><input value={selectedConnection.outbound.healthcheck_path} onChange={(event) => updateSection("outbound", { healthcheck_path: event.target.value })} className={inputClass} /></Field>
+                </Grid>
+              ) : (
+                <Grid>
+                  <Field label="Base URL"><input value={selectedConnection.outbound.base_url} onChange={(e) => updateSection("outbound", { base_url: e.target.value })} className={inputClass} /></Field>
+                  <Field label="Path prefix"><input value={selectedConnection.outbound.path_prefix} onChange={(e) => updateSection("outbound", { path_prefix: e.target.value })} className={inputClass} /></Field>
+                  <Field label="Auth mode"><input value={selectedConnection.outbound.auth_mode} onChange={(e) => updateSection("outbound", { auth_mode: e.target.value })} className={inputClass} /></Field>
+                  <Field label="Healthcheck path"><input value={selectedConnection.outbound.healthcheck_path} onChange={(e) => updateSection("outbound", { healthcheck_path: e.target.value })} className={inputClass} /></Field>
+                </Grid>
+              )
             ) : null}
 
             {activeStep === "idempotency" ? (
@@ -1047,74 +1233,88 @@ export default function AdminConnectionsPanelSafe() {
             ) : null}
 
             {activeStep === "routing" ? (
-              <Grid>
-                <Field label="Channel"><select value={selectedConnection.routing.channel} onChange={(e) => updateSection("routing", { channel: e.target.value })} className={inputClass}>{CHANNEL_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>
-                <Field label="Protocol"><input value={selectedConnection.routing.protocol} onChange={(e) => updateSection("routing", { protocol: e.target.value })} className={inputClass} /></Field>
-                <Field label="Provider code"><input list="payment-provider-codes" value={selectedConnection.routing.provider_code || ""} onChange={(e) => updateSection("routing", { provider_code: e.target.value })} className={inputClass} /></Field>
-                <Field label="Health status"><select value={selectedConnection.routing.health_status || "pending"} onChange={(e) => updateSection("routing", { health_status: e.target.value })} className={inputClass}><option value="pending">Pending</option><option value="healthy">Healthy</option><option value="unknown">Unknown</option><option value="unhealthy">Unhealthy</option><option value="failed">Failed</option><option value="disabled">Disabled</option></select></Field>
-                <Field label="Schema version"><input value={selectedConnection.routing.schema_version} onChange={(e) => updateSection("routing", { schema_version: e.target.value })} className={inputClass} /></Field>
-                <Field label="Envelope profile"><input value={selectedConnection.routing.envelope_profile} onChange={(e) => updateSection("routing", { envelope_profile: e.target.value })} className={inputClass} /></Field>
-                <Field label="Mapping mode"><select value={selectedConnection.routing.mapping_mode} onChange={(e) => updateSection("routing", { mapping_mode: e.target.value })} className={inputClass}>{MAPPING_MODES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>
-                <Field label="Supported message types"><textarea value={selectedConnection.routing.supported_message_types_text} onChange={(e) => updateSection("routing", { supported_message_types_text: e.target.value })} className={`${inputClass} min-h-[70px]`} /></Field>
-              </Grid>
+              paymentSetup ? (
+                <Grid>
+                  <Field label="Provider code"><input readOnly value={selectedConnection.routing.provider_code || paymentSetup.providerCode} className={`${inputClass} bg-slate-50 text-ink-600`} /></Field>
+                  <Field label="Channel"><input readOnly value={selectedConnection.routing.channel || "payments"} className={`${inputClass} bg-slate-50 text-ink-600`} /></Field>
+                  <Field label="Supported payment methods"><textarea readOnly value={selectedConnection.routing.supported_payment_methods_text || paymentSetup.supportedMethods.join("\n")} className={`${inputClass} min-h-[90px] bg-slate-50 text-ink-600`} /></Field>
+                  <Field label="Health status"><select value={selectedConnection.routing.health_status || "pending"} onChange={(e) => updateSection("routing", { health_status: e.target.value })} className={inputClass}><option value="pending">Pending</option><option value="healthy">Healthy</option><option value="unknown">Unknown</option><option value="unhealthy">Unhealthy</option><option value="failed">Failed</option><option value="disabled">Disabled</option></select></Field>
+                </Grid>
+              ) : (
+                <Grid>
+                  <Field label="Channel"><select value={selectedConnection.routing.channel} onChange={(e) => updateSection("routing", { channel: e.target.value })} className={inputClass}>{CHANNEL_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>
+                  <Field label="Protocol"><input value={selectedConnection.routing.protocol} onChange={(e) => updateSection("routing", { protocol: e.target.value })} className={inputClass} /></Field>
+                  <Field label="Provider code"><input list="payment-provider-codes" value={selectedConnection.routing.provider_code || ""} onChange={(e) => updateSection("routing", { provider_code: e.target.value })} className={inputClass} /></Field>
+                  <Field label="Health status"><select value={selectedConnection.routing.health_status || "pending"} onChange={(e) => updateSection("routing", { health_status: e.target.value })} className={inputClass}><option value="pending">Pending</option><option value="healthy">Healthy</option><option value="unknown">Unknown</option><option value="unhealthy">Unhealthy</option><option value="failed">Failed</option><option value="disabled">Disabled</option></select></Field>
+                  <Field label="Schema version"><input value={selectedConnection.routing.schema_version} onChange={(e) => updateSection("routing", { schema_version: e.target.value })} className={inputClass} /></Field>
+                  <Field label="Envelope profile"><input value={selectedConnection.routing.envelope_profile} onChange={(e) => updateSection("routing", { envelope_profile: e.target.value })} className={inputClass} /></Field>
+                  <Field label="Mapping mode"><select value={selectedConnection.routing.mapping_mode} onChange={(e) => updateSection("routing", { mapping_mode: e.target.value })} className={inputClass}>{MAPPING_MODES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>
+                  <Field label="Supported message types"><textarea value={selectedConnection.routing.supported_message_types_text} onChange={(e) => updateSection("routing", { supported_message_types_text: e.target.value })} className={`${inputClass} min-h-[70px]`} /></Field>
+                </Grid>
+              )
             ) : null}
 
             {activeStep === "storefront" ? (
-              <div className="mt-4 space-y-4">
+              paymentSetup?.providerCode === "checkout_com" ? (
                 <Grid>
-                  <label className="flex items-center gap-2 text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink-400"><input type="checkbox" checked={selectedConnection.public_storefront.scan_allowed} onChange={(e) => updateSection("public_storefront", { scan_allowed: e.target.checked })} />Scanner enabled</label>
-                  <label className="flex items-center gap-2 text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink-400"><input type="checkbox" checked={selectedConnection.public_storefront.loader_enabled} onChange={(e) => updateSection("public_storefront", { loader_enabled: e.target.checked })} />Loader script enabled</label>
-                  <label className="flex items-center gap-2 text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink-400"><input type="checkbox" checked={selectedConnection.public_storefront.public_api_enabled} onChange={(e) => updateSection("public_storefront", { public_api_enabled: e.target.checked })} />Public API enabled</label>
+                  <Field label="Apple Pay domain validation status"><select value={selectedConnection.routing.apple_pay_domain_status || ""} onChange={(event) => { const status = event.target.value; updateSection("routing", { apple_pay_domain_status: status, domain_validation_status: status }); updateSection("public_storefront", { apple_pay_domain_status: status }); }} className={inputClass}><option value="">Missing</option><option value="pending">Pending</option><option value="validated">Validated</option><option value="failed">Failed</option></select></Field>
+                  <label className="flex items-center gap-2 rounded-lg border border-ink-200/70 bg-white px-3 py-2 text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink-400"><input type="checkbox" checked={selectedConnection.public_storefront.google_pay_enabled === true} onChange={(event) => updateSection("public_storefront", { google_pay_enabled: event.target.checked })} />Google Pay enabled metadata</label>
                 </Grid>
-                <Field label="Allowed scan modes">
-                  <div className="flex flex-wrap gap-2 rounded-lg border border-ink-200/70 bg-white px-3 py-2">
-                    {["auto", "rendered", "generic", "tagged"].map((mode) => (
-                      <label key={mode} className="flex items-center gap-1.5 text-[0.62rem] normal-case tracking-normal text-ink-600">
-                        <input
-                          type="checkbox"
-                          checked={selectedConnection.public_storefront.allowed_scan_modes.includes(mode)}
-                          onChange={(event) => updateSection("public_storefront", {
-                            allowed_scan_modes: event.target.checked
-                              ? [...new Set([...selectedConnection.public_storefront.allowed_scan_modes, mode])]
-                              : selectedConnection.public_storefront.allowed_scan_modes.filter((item) => item !== mode)
-                          })}
-                        />
-                        {mode}
-                      </label>
-                    ))}
-                  </div>
-                </Field>
-                <Field label="Public storefront scopes">
-                  <div className="flex flex-wrap gap-2 rounded-lg border border-ink-200/70 bg-white px-3 py-2">
-                    {["storefront.mapping.read", "storefront.content.read", "storefront.catalog.read"].map((scope) => (
-                      <label key={scope} className="flex items-center gap-1.5 text-[0.62rem] normal-case tracking-normal text-ink-600">
-                        <input
-                          type="checkbox"
-                          checked={selectedConnection.public_storefront.scopes.includes(scope)}
-                          onChange={(event) => updateSection("public_storefront", {
-                            scopes: event.target.checked
-                              ? [...new Set([...selectedConnection.public_storefront.scopes, scope])]
-                              : selectedConnection.public_storefront.scopes.filter((item) => item !== scope)
-                          })}
-                        />
-                        {scope}
-                      </label>
-                    ))}
-                  </div>
-                </Field>
-                <a href={mappingStudioHref} className="inline-flex rounded-full border border-ink-200/70 bg-white px-3 py-2 text-[0.6rem] font-semibold uppercase tracking-[0.2em] text-ink-600">
-                  Open Mapping Studio
-                </a>
-              </div>
+              ) : paymentSetup ? (
+                <div className="mt-4 rounded-xl border border-dashed border-ink-200 bg-white/70 px-4 py-3 text-xs text-ink-500">
+                  PayPal does not require additional storefront metadata. Configure credentials in Outbound and webhook trust in Security.
+                </div>
+              ) : (
+                <div className="mt-4 space-y-4">
+                  <Grid>
+                    <label className="flex items-center gap-2 text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink-400"><input type="checkbox" checked={selectedConnection.public_storefront.scan_allowed} onChange={(e) => updateSection("public_storefront", { scan_allowed: e.target.checked })} />Scanner enabled</label>
+                    <label className="flex items-center gap-2 text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink-400"><input type="checkbox" checked={selectedConnection.public_storefront.loader_enabled} onChange={(e) => updateSection("public_storefront", { loader_enabled: e.target.checked })} />Loader script enabled</label>
+                    <label className="flex items-center gap-2 text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink-400"><input type="checkbox" checked={selectedConnection.public_storefront.public_api_enabled} onChange={(e) => updateSection("public_storefront", { public_api_enabled: e.target.checked })} />Public API enabled</label>
+                  </Grid>
+                  <Field label="Allowed scan modes">
+                    <div className="flex flex-wrap gap-2 rounded-lg border border-ink-200/70 bg-white px-3 py-2">
+                      {["auto", "rendered", "generic", "tagged"].map((mode) => (
+                        <label key={mode} className="flex items-center gap-1.5 text-[0.62rem] normal-case tracking-normal text-ink-600">
+                          <input type="checkbox" checked={selectedConnection.public_storefront.allowed_scan_modes.includes(mode)} onChange={(event) => updateSection("public_storefront", { allowed_scan_modes: event.target.checked ? [...new Set([...selectedConnection.public_storefront.allowed_scan_modes, mode])] : selectedConnection.public_storefront.allowed_scan_modes.filter((item) => item !== mode) })} />
+                          {mode}
+                        </label>
+                      ))}
+                    </div>
+                  </Field>
+                  <Field label="Public storefront scopes">
+                    <div className="flex flex-wrap gap-2 rounded-lg border border-ink-200/70 bg-white px-3 py-2">
+                      {["storefront.mapping.read", "storefront.content.read", "storefront.catalog.read"].map((scope) => (
+                        <label key={scope} className="flex items-center gap-1.5 text-[0.62rem] normal-case tracking-normal text-ink-600">
+                          <input type="checkbox" checked={selectedConnection.public_storefront.scopes.includes(scope)} onChange={(event) => updateSection("public_storefront", { scopes: event.target.checked ? [...new Set([...selectedConnection.public_storefront.scopes, scope])] : selectedConnection.public_storefront.scopes.filter((item) => item !== scope) })} />
+                          {scope}
+                        </label>
+                      ))}
+                    </div>
+                  </Field>
+                  <a href={mappingStudioHref} className="inline-flex rounded-full border border-ink-200/70 bg-white px-3 py-2 text-[0.6rem] font-semibold uppercase tracking-[0.2em] text-ink-600">Open Mapping Studio</a>
+                </div>
+              )
             ) : null}
 
             {activeStep === "audit" ? (
-              <Grid>
-                <Field label="Audit record type"><input value={selectedConnection.audit.audit_record_type} onChange={(e) => updateSection("audit", { audit_record_type: e.target.value })} className={inputClass} /></Field>
-                <Field label="Max body size"><input type="number" value={selectedConnection.audit.max_body_size} onChange={(e) => updateSection("audit", { max_body_size: Number(e.target.value) })} className={inputClass} /></Field>
-                <Field label="Log level"><select value={selectedConnection.audit.log_level} onChange={(e) => updateSection("audit", { log_level: e.target.value })} className={inputClass}>{LOG_LEVELS.map((level) => <option key={level} value={level}>{level}</option>)}</select></Field>
-                <Field label="IP allowlist"><textarea value={selectedConnection.audit.ip_allowlist_text} onChange={(e) => updateSection("audit", { ip_allowlist_text: e.target.value })} className={`${inputClass} min-h-[70px]`} /></Field>
-              </Grid>
+              <div className="mt-4 space-y-4">
+                {paymentSetup ? (
+                  <div className="rounded-xl border border-ink-100 bg-white/80 p-3">
+                    <p className="text-[0.65rem] font-semibold uppercase tracking-[0.22em] text-ink-400">Payment provider health and readiness</p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {paymentChecks.map((check) => <StatusPill key={`audit-${check.label}`} ok={check.ok}>{check.label}: {check.ok ? "ready" : "missing"}</StatusPill>)}
+                      <StatusPill ok={selectedConnection.identity.is_enabled !== false}>Provider: {selectedConnection.identity.is_enabled !== false ? "enabled" : "disabled"}</StatusPill>
+                      <StatusPill ok={["healthy", "configured", "ready"].includes(String(selectedConnection.routing.health_status || "").toLowerCase())}>Readiness: {selectedConnection.routing.health_status || "pending"}</StatusPill>
+                    </div>
+                  </div>
+                ) : null}
+                <Grid>
+                  <Field label="Audit record type"><input value={selectedConnection.audit.audit_record_type} onChange={(e) => updateSection("audit", { audit_record_type: e.target.value })} className={inputClass} /></Field>
+                  <Field label="Max body size"><input type="number" value={selectedConnection.audit.max_body_size} onChange={(e) => updateSection("audit", { max_body_size: Number(e.target.value) })} className={inputClass} /></Field>
+                  <Field label="Log level"><select value={selectedConnection.audit.log_level} onChange={(e) => updateSection("audit", { log_level: e.target.value })} className={inputClass}>{LOG_LEVELS.map((level) => <option key={level} value={level}>{level}</option>)}</select></Field>
+                  <Field label="IP allowlist"><textarea value={selectedConnection.audit.ip_allowlist_text} onChange={(e) => updateSection("audit", { ip_allowlist_text: e.target.value })} className={`${inputClass} min-h-[70px]`} /></Field>
+                </Grid>
+              </div>
             ) : null}
           </div>
         ) : null}

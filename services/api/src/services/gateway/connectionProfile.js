@@ -204,6 +204,37 @@ function normalizeConnectionKind(value) {
   return CONNECTION_KIND_ALIASES.get(normalized) || normalized || "custom";
 }
 
+function normalizePaymentProviderMetadata(value, fallbackProviderCode = "") {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const code = normalizeText(value.code || value.provider_code || fallbackProviderCode)
+    .toLowerCase()
+    .replace(/[-.\s]+/g, "_");
+  if (!code) return null;
+  const methods = normalizeArray(value.methods)
+    .map((method, index) => {
+      const source = method && typeof method === "object" ? method : { code: method };
+      const methodCode = normalizeText(source.code || source.id || source.method).toUpperCase().replace(/[-.\s]+/g, "_");
+      if (!methodCode) return null;
+      return {
+        code: methodCode,
+        label: normalizeText(source.label || methodCode.replace(/_/g, " ")),
+        enabled: normalizeBool(source.enabled, false),
+        visible: normalizeBool(source.visible, true),
+        priority: normalizeNumber(source.priority, (index + 1) * 10)
+      };
+    })
+    .filter(Boolean);
+  return {
+    code,
+    label: normalizeText(value.label || value.display_name || code.replace(/_/g, " ")),
+    enabled: normalizeBool(value.enabled, false),
+    visible: normalizeBool(value.visible, true),
+    priority: normalizeNumber(value.priority, 100),
+    adapter_code: normalizeText(value.adapter_code || code).toLowerCase().replace(/[-.\s]+/g, "_"),
+    methods
+  };
+}
+
 function normalizeProfile(raw = {}, fallbackId) {
   const identity = raw.identity || {};
   const inbound = raw.inbound || {};
@@ -335,9 +366,9 @@ function normalizeProfile(raw = {}, fallbackId) {
         (requestedChannel === "payments" ? routing.supported_message_types || raw.supported_message_types : [])
       ),
       payment_provider: routing.payment_provider && typeof routing.payment_provider === "object"
-        ? routing.payment_provider
+        ? normalizePaymentProviderMetadata(routing.payment_provider, routing.provider_code || raw.provider_code)
         : raw.payment_provider && typeof raw.payment_provider === "object"
-          ? raw.payment_provider
+          ? normalizePaymentProviderMetadata(raw.payment_provider, routing.provider_code || raw.provider_code)
           : null,
       schema_version: normalizeText(routing.schema_version || raw.schema_version || "v1"),
       envelope_profile: normalizeText(routing.envelope_profile || raw.envelope_profile || "canonical_v1"),
@@ -350,6 +381,12 @@ function normalizeProfile(raw = {}, fallbackId) {
       scan_allowed: normalizeBool(publicStorefront.scan_allowed, storefrontDefault),
       loader_enabled: normalizeBool(publicStorefront.loader_enabled, false),
       public_api_enabled: normalizeBool(publicStorefront.public_api_enabled, storefrontDefault),
+      google_pay_enabled: normalizeBool(publicStorefront.google_pay_enabled, false),
+      apple_pay_domain_status: normalizeText(
+        publicStorefront.apple_pay_domain_status ||
+          routing.apple_pay_domain_status ||
+          raw.apple_pay_domain_status
+      ).toLowerCase(),
       allowed_scan_modes: normalizeArray(publicStorefront.allowed_scan_modes).length
         ? normalizeArray(publicStorefront.allowed_scan_modes).filter((mode) => STOREFRONT_SCAN_MODES.includes(mode))
         : [...STOREFRONT_SCAN_MODES],
@@ -580,22 +617,27 @@ function validateProfile(profile) {
     if (providerCode && providerCode !== paymentType.provider_code) {
       errors.push(`${id}: payment provider code must be ${paymentType.provider_code}`);
     }
+    const supportedMethods = normalizeArray(routing.supported_payment_methods).map((method) => normalizeText(method).toUpperCase());
+    const missingMethods = paymentType.supported_payment_methods.filter((method) => !supportedMethods.includes(method));
+    if (missingMethods.length) {
+      errors.push(`${id}: payment provider methods missing: ${missingMethods.join(", ")}`);
+    }
   }
   if (!normalizeText(routing.schema_version)) errors.push(`${id}: schema_version required`);
   if (!normalizeText(routing.envelope_profile)) errors.push(`${id}: envelope_profile required`);
   if (!MAPPING_MODES.includes(routing.mapping_mode)) errors.push(`${id}: mapping_mode invalid`);
 
   const publicStorefront = profile?.public_storefront || {};
-  if (!Array.isArray(publicStorefront.allowed_scan_modes) || !publicStorefront.allowed_scan_modes.length) {
+  if (!paymentType && (!Array.isArray(publicStorefront.allowed_scan_modes) || !publicStorefront.allowed_scan_modes.length)) {
     errors.push(`${id}: at least one storefront scan mode required`);
   }
-  if ((publicStorefront.loader_enabled || publicStorefront.public_api_enabled) && identity.direction === "outbound") {
+  if (!paymentType && (publicStorefront.loader_enabled || publicStorefront.public_api_enabled) && identity.direction === "outbound") {
     errors.push(`${id}: storefront loader/public API requires inbound or both direction`);
   }
-  if (publicStorefront.scan_allowed && !identity.frontend_url) {
+  if (!paymentType && publicStorefront.scan_allowed && !identity.frontend_url) {
     errors.push(`${id}: frontend_url required when storefront scan is enabled`);
   }
-  if (!Array.isArray(publicStorefront.scopes) || !publicStorefront.scopes.length) {
+  if (!paymentType && (!Array.isArray(publicStorefront.scopes) || !publicStorefront.scopes.length)) {
     errors.push(`${id}: at least one public storefront scope required`);
   }
 

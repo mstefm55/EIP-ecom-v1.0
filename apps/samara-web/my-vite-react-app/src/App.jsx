@@ -345,6 +345,7 @@ function humanizePaymentReason(reason) {
   if (normalized === "provider_not_configured") return "provider not configured";
   if (normalized === "sandbox_credentials_missing") return "sandbox credentials missing";
   if (normalized === "domain_validation_missing") return "domain validation missing";
+  if (normalized === "google_pay_not_enabled") return "Google Pay not enabled by provider metadata";
   if (normalized === "provider_health_unknown") return "provider health unknown";
   if (normalized === "provider_health_failed") return "provider health failed";
   if (normalized === "provider_disabled") return "provider disabled";

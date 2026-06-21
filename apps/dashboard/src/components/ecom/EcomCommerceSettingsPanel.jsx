@@ -1279,6 +1279,10 @@ export default function EcomCommerceSettingsPanel({ node } = {}) {
     }
     return map;
   }, [paymentReadiness]);
+  const hasConfiguredPaymentProviderConnection = (paymentReadiness?.providers || []).some((provider) =>
+    ["paypal", "checkout_com"].includes(normalizePaymentProviderCode(provider.code || provider.provider_code)) &&
+    Boolean(provider.connection_code)
+  );
   const selectedProvider = providerOptions.find(
     (provider) => String(provider?.code || "").toLowerCase() === String(translationEngine.provider_code || "").toLowerCase()
   );
@@ -1496,6 +1500,12 @@ export default function EcomCommerceSettingsPanel({ node } = {}) {
             <div className="mt-1 text-xs text-ink-600">{layout.connectionsPath}</div>
           </div>
         </div>
+
+        {!hasConfiguredPaymentProviderConnection ? (
+          <div className="rounded-xl border border-dashed border-amber-200 bg-amber-50/70 px-4 py-3 text-xs text-amber-800">
+            No payment provider connection configured. Add PayPal or Checkout.com in Admin Console → Gateway Connection Profiles.
+          </div>
+        ) : null}
 
         <div className="grid gap-3 rounded-xl border border-ink-100 bg-white/80 p-3 md:grid-cols-3">
           <label className="flex flex-col gap-1 text-[0.7rem] font-semibold uppercase tracking-[0.2em] text-ink-400">

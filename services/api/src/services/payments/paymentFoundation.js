@@ -545,6 +545,9 @@ function providerAvailability({ profile, providerCode, method }) {
   if (credentialReason) return { available: false, status: credentialReason };
   const healthReason = profileHealthReason(profile);
   if (healthReason) return { available: false, status: healthReason };
+  if (method?.code === "google_pay" && profile?.public_storefront?.google_pay_enabled !== true) {
+    return { available: false, status: "google_pay_not_enabled" };
+  }
   if (method?.requirements?.domain_validation === true && !applePayDomainReady(profile)) {
     return { available: false, status: "domain_validation_missing" };
   }
