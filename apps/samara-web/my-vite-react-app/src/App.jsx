@@ -267,17 +267,11 @@ const DEFAULT_COUNTRY_OPTIONS = FALLBACK_COUNTRY_OPTIONS.map((item) => ({
   iso: normalizeIso(item.iso),
 }));
 const DEFAULT_COUNTRY_ISO = DEFAULT_COUNTRY_OPTIONS[0]?.iso || "US";
-const DEFAULT_CHECKOUT_METHODS = [
-  { code: "card", label: "Credit card", enabled: true },
-  { code: "paypal", label: "PayPal", enabled: false },
-  { code: "google_pay", label: "Google Pay", enabled: false },
-  { code: "apple_pay", label: "Apple Pay", enabled: false },
-  { code: "manual_test", label: "Sandbox manual test", enabled: false },
-];
+const DEFAULT_CHECKOUT_METHODS = [];
 const DEFAULT_CHECKOUT_CONFIG = {
   payment: {
     methods: DEFAULT_CHECKOUT_METHODS,
-    enabled_methods: ["card"],
+    enabled_methods: [],
     ready_methods: [],
   },
 };
@@ -314,17 +308,18 @@ function normalizeCheckoutConfig(input) {
       available: item.available !== false,
       reason: item.reason || null,
       provider_code: item.provider_code || item.providerCode || fallback.provider_code || null,
+      provider_label: item.provider_label || item.providerLabel || fallback.provider_label || null,
+      provider_priority: Number(item.provider_priority ?? item.providerPriority ?? fallback.provider_priority ?? 0),
+      priority: Number(item.priority ?? fallback.priority ?? 0),
+      visible: item.visible !== false,
       mode: item.mode || item.environment || null,
       status: item.status || item.reason || null,
     });
   }
 
-  for (const fallback of DEFAULT_CHECKOUT_METHODS) {
-    if (!seen.has(fallback.code)) {
-      methods.push({ ...fallback, available: fallback.available !== false, reason: fallback.reason || null });
-      seen.add(fallback.code);
-    }
-  }
+  methods.sort((a, b) =>
+    a.provider_priority - b.provider_priority || a.priority - b.priority || a.label.localeCompare(b.label)
+  );
 
   const enabledMethods = Array.isArray(payment.enabled_methods) && payment.enabled_methods.length
     ? payment.enabled_methods.map(normalizePaymentMethodCode).filter(Boolean)
@@ -337,7 +332,7 @@ function normalizeCheckoutConfig(input) {
 
   return {
     payment: {
-      methods,
+      methods: methods.filter((item) => item.visible !== false),
       enabled_methods: enabledMethods,
       ready_methods: readyMethods,
     },
@@ -391,7 +386,8 @@ function buildCheckoutFormDefaults(countryIso = DEFAULT_COUNTRY_ISO) {
     billing_city: "",
     billing_region: "",
     billing_postcode: "",
-    payment_method: "card",
+    payment_method: "",
+    payment_provider: "",
     app_handle: "",
   };
 }
@@ -5558,11 +5554,14 @@ function CartModal({
     : DEFAULT_CHECKOUT_METHODS
   );
   const selectedPaymentMethod = normalizePaymentMethodCode(
-    form.payment_method || paymentMethodOptions[0]?.code || "card"
+    form.payment_method || paymentMethodOptions[0]?.code || ""
   );
+  const selectedPaymentProvider = String(form.payment_provider || paymentMethodOptions[0]?.provider_code || "").trim().toLowerCase();
   const selectedPaymentOption = paymentMethodOptions.find(
-    (item) => normalizePaymentMethodCode(item.code) === selectedPaymentMethod
+    (item) => normalizePaymentMethodCode(item.code) === selectedPaymentMethod &&
+      (!selectedPaymentProvider || String(item.provider_code || "").trim().toLowerCase() === selectedPaymentProvider)
   );
+  const paymentOptionValue = (item) => `${item?.provider_code || "provider"}::${normalizePaymentMethodCode(item?.code)}`;
   const paymentMethodLabel = (code) => {
     const normalized = normalizePaymentMethodCode(code);
     if (normalized === "paypal") return resolveCopy(t, "cart.paymentMethodPaypal", "PayPal");
@@ -5788,13 +5787,17 @@ function CartModal({
                 <label>
                   {resolveCopy(t, "cart.paymentMethod", "Payment method")}
                   <select
-                    value={selectedPaymentMethod}
-                    onChange={(event) => onFormChange("payment_method", event.target.value)}
+                    value={selectedPaymentOption ? paymentOptionValue(selectedPaymentOption) : ""}
+                    onChange={(event) => {
+                      const option = paymentMethodOptions.find((item) => paymentOptionValue(item) === event.target.value);
+                      onFormChange("payment_method", option?.code || "");
+                      onFormChange("payment_provider", option?.provider_code || "");
+                    }}
                   >
                     {paymentMethodOptions.map((item) => (
                       <option
-                        key={item.code}
-                        value={normalizePaymentMethodCode(item.code)}
+                        key={`${item.provider_code || "provider"}-${item.code}`}
+                        value={paymentOptionValue(item)}
                         disabled={item.enabled === false || item.available === false}
                       >
                         {item.label || paymentMethodLabel(item.code)}
@@ -5806,8 +5809,8 @@ function CartModal({
                 </label>
                 {selectedPaymentOption ? (
                   <p className="modal-alert">
-                    {paymentMethodLabel(selectedPaymentOption.code)} via{" "}
-                    {String(selectedPaymentOption.provider_code || "").replace(/_/g, " ") || "payment provider"} -{" "}
+                    {selectedPaymentOption.label || paymentMethodLabel(selectedPaymentOption.code)} via{" "}
+                    {selectedPaymentOption.provider_label || String(selectedPaymentOption.provider_code || "").replace(/_/g, " ") || "payment provider"} -{" "}
                     {paymentModeLabel(selectedPaymentOption.mode)}
                     {selectedPaymentOption.available === false || selectedPaymentOption.reason
                       ? ` - ${paymentReasonLabel(selectedPaymentOption.reason || selectedPaymentOption.status)}`
@@ -6520,8 +6523,19 @@ export default function App() {
         if (!readyMethods.length) return;
         setCheckoutForm((prev) => {
           const currentMethod = normalizePaymentMethodCode(prev.payment_method);
-          if (readyMethods.includes(currentMethod)) return prev;
-          return { ...prev, payment_method: readyMethods[0] };
+          const currentProvider = String(prev.payment_provider || "").trim().toLowerCase();
+          const currentOption = normalized.payment.methods.find((item) =>
+            normalizePaymentMethodCode(item.code) === currentMethod &&
+            (!currentProvider || String(item.provider_code || "").trim().toLowerCase() === currentProvider) &&
+            item.enabled !== false && item.available !== false
+          );
+          if (currentOption) return prev;
+          const firstReady = normalized.payment.methods.find((item) =>
+            readyMethods.includes(normalizePaymentMethodCode(item.code)) && item.enabled !== false && item.available !== false
+          );
+          return firstReady
+            ? { ...prev, payment_method: firstReady.code, payment_provider: firstReady.provider_code || "" }
+            : prev;
         });
       })
       .catch(() => {
@@ -7220,7 +7234,7 @@ export default function App() {
   );
   const checkoutPaymentMethods = useMemo(() => {
     const methods = checkoutConfig?.payment?.methods || [];
-    return methods.filter((item) => normalizePaymentMethodCode(item?.code));
+    return methods.filter((item) => item?.visible !== false && normalizePaymentMethodCode(item?.code));
   }, [checkoutConfig]);
 
   const addToCart = (item, quantity = 1) => {
@@ -7335,7 +7349,7 @@ export default function App() {
         if (field === "delivery_postcode") next.billing_postcode = normalizedValue;
       }
       if (field === "payment_method") {
-        next.payment_method = normalizePaymentMethodCode(value) || "card";
+        next.payment_method = normalizePaymentMethodCode(value);
       }
       return next;
     });
@@ -7378,13 +7392,16 @@ export default function App() {
       return;
     }
     const selectedMethod = normalizePaymentMethodCode(checkoutForm.payment_method);
+    const selectedProvider = String(checkoutForm.payment_provider || "").trim().toLowerCase();
+    const selectedPaymentOption = checkoutPaymentMethods.find((item) =>
+      normalizePaymentMethodCode(item.code) === selectedMethod &&
+      (!selectedProvider || String(item.provider_code || "").trim().toLowerCase() === selectedProvider)
+    );
     if (
       !selectedMethod ||
-      !checkoutPaymentMethods.some((item) =>
-        normalizePaymentMethodCode(item.code) === selectedMethod &&
-        item.enabled !== false &&
-        item.available !== false
-      )
+      !selectedPaymentOption ||
+      selectedPaymentOption.enabled === false ||
+      selectedPaymentOption.available === false
     ) {
       setCheckoutStatus({
         loading: false,
@@ -7509,6 +7526,7 @@ export default function App() {
           cart_count: checkoutItems.length,
           checkout: {
             payment_method: selectedMethod,
+            payment_provider: selectedPaymentOption.provider_code || null,
             billing_same_as_delivery: checkoutForm.billing_same_as_delivery,
           },
         },
@@ -7558,6 +7576,7 @@ export default function App() {
           order_code: orderCode || undefined,
           order_id: orderId || undefined,
           method: selectedMethod,
+          provider_code: selectedPaymentOption.provider_code || undefined,
           metadata: paymentMetadata,
         },
       });

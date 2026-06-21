@@ -1,14 +1,54 @@
 import crypto from "node:crypto";
 
-const PAYMENT_METHODS = [
-  { code: "card", label: "Credit card", provider_code: "checkout_com", enabled: true },
-  { code: "paypal", label: "PayPal", provider_code: "paypal", enabled: false },
-  { code: "google_pay", label: "Google Pay", provider_code: "checkout_com", enabled: false },
-  { code: "apple_pay", label: "Apple Pay", provider_code: "checkout_com", enabled: false },
-  { code: "manual_test", label: "Sandbox manual test", provider_code: "manual_test", enabled: false }
+const DEFAULT_PROVIDER_REGISTRY = [
+  {
+    code: "checkout_com",
+    label: "Checkout.com",
+    enabled: true,
+    visible: true,
+    priority: 10,
+    environment: "production",
+    methods: [
+      { code: "card", label: "Credit card", enabled: true, visible: true, priority: 10 },
+      { code: "google_pay", label: "Google Pay", enabled: false, visible: true, priority: 20, wallet: true },
+      {
+        code: "apple_pay",
+        label: "Apple Pay",
+        enabled: false,
+        visible: true,
+        priority: 30,
+        wallet: true,
+        requirements: { domain_validation: true }
+      }
+    ]
+  },
+  {
+    code: "paypal",
+    label: "PayPal",
+    enabled: true,
+    visible: true,
+    priority: 20,
+    environment: "production",
+    methods: [
+      { code: "paypal", label: "PayPal", enabled: false, visible: true, priority: 10 }
+    ]
+  },
+  {
+    code: "manual_test",
+    label: "Manual test",
+    enabled: false,
+    visible: false,
+    priority: 1000,
+    environment: "sandbox",
+    methods: [
+      { code: "manual_test", label: "Sandbox manual test", enabled: false, visible: false, priority: 10 }
+    ]
+  }
 ];
 
-const PROVIDER_CODES = new Set(["checkout_com", "paypal", "manual_test"]);
+const PAYMENT_METHODS = DEFAULT_PROVIDER_REGISTRY.flatMap((provider) =>
+  provider.methods.map((method) => ({ ...method, provider_code: provider.code }))
+);
 const SENSITIVE_KEY = /(authorization|cookie|password|secret|token|signature|api[_-]?key|card[_-]?number|pan|cvc|cvv|cryptogram)/i;
 const SAFE_CARD_KEYS = new Set(["brand", "card_last4", "last4"]);
 
@@ -23,6 +63,7 @@ export const DEFAULT_PAYMENT_SETTINGS = {
     enabled: true,
     high_value_threshold: null
   },
+  provider_registry: DEFAULT_PROVIDER_REGISTRY,
   providers: {
     card: { provider_code: "checkout_com" },
     paypal: { provider_code: "paypal" },
@@ -67,6 +108,17 @@ function normalizeOptionalAmount(value) {
   return Number.isFinite(amount) && amount >= 0 ? amount : null;
 }
 
+function normalizePriority(value, fallback = 0) {
+  const priority = Number(value);
+  return Number.isFinite(priority) ? Math.trunc(priority) : fallback;
+}
+
+function humanizeCode(value) {
+  return normalizeText(value)
+    .replace(/[-_.]+/g, " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
 export function normalizePaymentMethodCode(value) {
   const normalized = normalizeText(value).toLowerCase();
   if (!normalized) return "";
@@ -87,7 +139,7 @@ export function normalizePaymentProviderCode(value, method = "") {
   if (normalizedMethod === "paypal") return "paypal";
   if (normalizedMethod === "manual_test") return "manual_test";
   if (["card", "google_pay", "apple_pay"].includes(normalizedMethod)) return "checkout_com";
-  return PROVIDER_CODES.has(normalized) ? normalized : normalized;
+  return normalized;
 }
 
 export function toPublicPaymentCode(value) {
@@ -123,20 +175,29 @@ function normalizePaymentMethods(input, fallback = DEFAULT_PAYMENT_SETTINGS.meth
     out.push({
       code,
       label: normalizeText(item.label || baseline.label || code.toUpperCase()),
-      enabled: normalizeBoolean(item.enabled, normalizeBoolean(baseline.enabled, false))
+      enabled: normalizeBoolean(item.enabled, normalizeBoolean(baseline.enabled, false)),
+      visible: normalizeBoolean(
+        item.visible,
+        item.enabled === true ? true : normalizeBoolean(baseline.visible, true)
+      ),
+      priority: normalizePriority(item.priority, normalizePriority(baseline.priority, (out.length + 1) * 10)),
+      wallet: normalizeBoolean(item.wallet, normalizeBoolean(baseline.wallet, false)),
+      requirements: item.requirements && typeof item.requirements === "object"
+        ? item.requirements
+        : baseline.requirements || {}
     });
   }
 
   for (const baseline of PAYMENT_METHODS) {
-    if (!seen.has(baseline.code)) out.push({ code: baseline.code, label: baseline.label, enabled: baseline.enabled });
+    if (!seen.has(baseline.code)) out.push({ ...baseline });
   }
   return out;
 }
 
-function normalizePaymentProviders(input = {}) {
+function normalizeLegacyPaymentProviders(input = {}, methods = PAYMENT_METHODS) {
   const source = input && typeof input === "object" ? input : {};
   const out = {};
-  for (const method of PAYMENT_METHODS.map((item) => item.code)) {
+  for (const method of methods.map((item) => item.code)) {
     const legacyKey = method === "google_pay" ? "app" : method;
     const item = source[method] || source[legacyKey] || {};
     out[method] = {
@@ -148,12 +209,171 @@ function normalizePaymentProviders(input = {}) {
   return out;
 }
 
+function normalizeProviderMethod(item = {}, fallback = {}, index = 0) {
+  const code = normalizePaymentMethodCode(item.code || item.id || item.method || fallback.code);
+  if (!code) return null;
+  const requirements = item.requirements && typeof item.requirements === "object"
+    ? item.requirements
+    : fallback.requirements && typeof fallback.requirements === "object"
+      ? fallback.requirements
+      : {};
+  return {
+    code,
+    label: normalizeText(item.label || fallback.label || humanizeCode(code)),
+    enabled: normalizeBoolean(item.enabled, normalizeBoolean(fallback.enabled, false)),
+    visible: normalizeBoolean(item.visible, normalizeBoolean(fallback.visible, true)),
+    priority: normalizePriority(item.priority, normalizePriority(fallback.priority, (index + 1) * 10)),
+    wallet: normalizeBoolean(item.wallet, normalizeBoolean(fallback.wallet, false)),
+    requirements
+  };
+}
+
+function providerRegistryInput(value) {
+  if (Array.isArray(value)) return value;
+  if (!value || typeof value !== "object") return [];
+  return Object.entries(value).map(([code, provider]) => ({
+    ...(provider && typeof provider === "object" ? provider : {}),
+    code
+  }));
+}
+
+function registryFromLegacy(methods, providers) {
+  const registry = new Map();
+  methods.forEach((method, index) => {
+    const assignment = providers[method.code] || {};
+    const providerCode = normalizePaymentProviderCode(assignment.provider_code, method.code);
+    if (!providerCode) return;
+    if (!registry.has(providerCode)) {
+      registry.set(providerCode, {
+        code: providerCode,
+        label: humanizeCode(providerCode),
+        enabled: true,
+        visible: true,
+        priority: (registry.size + 1) * 10,
+        environment: assignment.environment,
+        connection_code: assignment.connection_code,
+        methods: []
+      });
+    }
+    registry.get(providerCode).methods.push({
+      ...method,
+      visible: method.visible !== false,
+      priority: normalizePriority(method.priority, (index + 1) * 10)
+    });
+  });
+  return [...registry.values()];
+}
+
+function normalizePaymentProviderRegistry(input, { methods, providers, fallback } = {}) {
+  const fallbackList = providerRegistryInput(fallback);
+  const sourceList = providerRegistryInput(input);
+  const source = sourceList.length ? sourceList : registryFromLegacy(methods || [], providers || {});
+  const fallbackByCode = new Map(
+    fallbackList
+      .map((provider) => [normalizePaymentProviderCode(provider.code || provider.provider_code), provider])
+      .filter(([code]) => code)
+  );
+  const registry = [];
+  const seen = new Set();
+
+  source.forEach((provider, providerIndex) => {
+    if (!provider || typeof provider !== "object") return;
+    const code = normalizePaymentProviderCode(provider.code || provider.provider_code || provider.id);
+    if (!code || seen.has(code)) return;
+    seen.add(code);
+    const baseline = fallbackByCode.get(code) || {};
+    const fallbackMethods = Array.isArray(baseline.methods) ? baseline.methods : [];
+    const fallbackMethodsByCode = new Map(
+      fallbackMethods
+        .map((method) => [normalizePaymentMethodCode(method.code || method.id), method])
+        .filter(([methodCode]) => methodCode)
+    );
+    const configuredMethods = Array.isArray(provider.methods) ? provider.methods : fallbackMethods;
+    const normalizedMethods = [];
+    const methodSeen = new Set();
+    configuredMethods.forEach((method, methodIndex) => {
+      const methodCode = normalizePaymentMethodCode(method?.code || method?.id || method);
+      const normalized = normalizeProviderMethod(
+        typeof method === "string" ? { code: method } : method,
+        fallbackMethodsByCode.get(methodCode) || {},
+        methodIndex
+      );
+      if (!normalized || methodSeen.has(normalized.code)) return;
+      methodSeen.add(normalized.code);
+      normalizedMethods.push(normalized);
+    });
+
+    registry.push({
+      code,
+      label: normalizeText(provider.label || provider.display_name || baseline.label || humanizeCode(code)),
+      enabled: normalizeBoolean(provider.enabled, normalizeBoolean(baseline.enabled, true)),
+      visible: normalizeBoolean(provider.visible, normalizeBoolean(baseline.visible, true)),
+      priority: normalizePriority(provider.priority, normalizePriority(baseline.priority, (providerIndex + 1) * 10)),
+      environment: normalizePaymentEnvironment(
+        provider.environment || provider.mode || baseline.environment,
+        code === "manual_test" ? "sandbox" : "production"
+      ),
+      connection_code: normalizeText(provider.connection_code || baseline.connection_code) || null,
+      adapter_code: normalizePaymentProviderCode(provider.adapter_code || baseline.adapter_code || code),
+      methods: normalizedMethods.sort((a, b) => a.priority - b.priority || a.label.localeCompare(b.label))
+    });
+  });
+
+  return registry.sort((a, b) => a.priority - b.priority || a.label.localeCompare(b.label));
+}
+
 export function normalizePaymentSettings(input = {}, fallback = DEFAULT_PAYMENT_SETTINGS) {
   const base = fallback && typeof fallback === "object" ? fallback : DEFAULT_PAYMENT_SETTINGS;
   const source = input && typeof input === "object" ? input : {};
   const merged = { ...base, ...source };
+  const methods = normalizePaymentMethods(source.methods, base.methods);
+  const providers = normalizeLegacyPaymentProviders(
+    { ...(base.providers || {}), ...(source.providers || {}) },
+    methods
+  );
+  const providerRegistry = normalizePaymentProviderRegistry(source.provider_registry, {
+    methods,
+    providers,
+    fallback: base.provider_registry || DEFAULT_PROVIDER_REGISTRY
+  });
+  if (Array.isArray(source.methods)) {
+    const legacyOverrides = new Map(
+      source.methods
+        .map((method) => [normalizePaymentMethodCode(method?.code || method?.id), method])
+        .filter(([code]) => code)
+    );
+    for (const provider of providerRegistry) {
+      provider.methods = provider.methods.map((method) => {
+        const override = legacyOverrides.get(method.code);
+        if (!override) return method;
+        return {
+          ...method,
+          label: normalizeText(override.label || method.label),
+          enabled: normalizeBoolean(override.enabled, method.enabled),
+          visible: normalizeBoolean(override.visible, method.visible)
+        };
+      });
+    }
+  }
+  const normalizedMethods = providerRegistry.flatMap((provider) =>
+    provider.methods.map((method) => ({
+      ...method,
+      provider_code: provider.code
+    }))
+  );
+  const normalizedProviders = { ...providers };
+  for (const provider of providerRegistry) {
+    for (const method of provider.methods) {
+      if (normalizedProviders[method.code] && !source.provider_registry) continue;
+      normalizedProviders[method.code] = {
+        provider_code: provider.code,
+        connection_code: provider.connection_code,
+        environment: provider.environment
+      };
+    }
+  }
   return {
-    methods: normalizePaymentMethods(source.methods, base.methods),
+    methods: normalizedMethods,
     default_currency: normalizeCurrency(merged.default_currency || "USD"),
     capture_mode: normalizeCaptureMode(merged.capture_mode),
     allowed_countries: normalizeCountryList(merged.allowed_countries),
@@ -169,7 +389,8 @@ export function normalizePaymentSettings(input = {}, fallback = DEFAULT_PAYMENT_
       enabled: normalizeBoolean(merged.manual_review_rules?.enabled, true),
       high_value_threshold: normalizeOptionalAmount(merged.manual_review_rules?.high_value_threshold)
     },
-    providers: normalizePaymentProviders({ ...(base.providers || {}), ...(source.providers || {}) })
+    provider_registry: providerRegistry,
+    providers: normalizedProviders
   };
 }
 
@@ -180,6 +401,76 @@ function profileProviderCode(profile) {
       profile?.identity?.connection_kind ||
       profile?.identity?.connection_code
   );
+}
+
+function registeredProviderMetadata(profile, index = 0) {
+  if (!profile || typeof profile !== "object") return null;
+  const providerCode = profileProviderCode(profile);
+  const channel = normalizeText(profile?.routing?.channel).toLowerCase();
+  if (!providerCode || channel !== "payments") return null;
+  const metadata = profile?.routing?.payment_provider && typeof profile.routing.payment_provider === "object"
+    ? profile.routing.payment_provider
+    : {};
+  const rawMethods = Array.isArray(metadata.methods)
+    ? metadata.methods
+    : Array.isArray(profile?.routing?.supported_payment_methods)
+      ? profile.routing.supported_payment_methods
+      : Array.isArray(profile?.routing?.supported_message_types)
+        ? profile.routing.supported_message_types
+        : [];
+  const methods = rawMethods
+    .map((method, methodIndex) => normalizeProviderMethod(
+      typeof method === "string" ? { code: method } : method,
+      {},
+      methodIndex
+    ))
+    .filter(Boolean);
+  return {
+    code: providerCode,
+    label: normalizeText(
+      metadata.label ||
+      profile?.identity?.provider_display_name ||
+      profile?.identity?.connection_name ||
+      humanizeCode(providerCode)
+    ),
+    enabled: normalizeBoolean(metadata.enabled, false),
+    visible: normalizeBoolean(metadata.visible, true),
+    priority: normalizePriority(metadata.priority, (index + 1) * 10),
+    environment: normalizePaymentEnvironment(profile?.identity?.environment, "production"),
+    connection_code: normalizeText(profile?.identity?.connection_code) || null,
+    adapter_code: normalizePaymentProviderCode(metadata.adapter_code || providerCode),
+    methods
+  };
+}
+
+export function buildPaymentProviderRegistry({ settings, profiles = [] } = {}) {
+  const normalized = normalizePaymentSettings(settings);
+  const registry = new Map(normalized.provider_registry.map((provider) => [provider.code, {
+    ...provider,
+    methods: provider.methods.map((method) => ({ ...method }))
+  }]));
+
+  (Array.isArray(profiles) ? profiles : []).forEach((profile, index) => {
+    const registered = registeredProviderMetadata(profile, index);
+    if (!registered) return;
+    const existing = registry.get(registered.code);
+    if (!existing) {
+      registry.set(registered.code, registered);
+      return;
+    }
+    const methodCodes = new Set(existing.methods.map((method) => method.code));
+    const addedMethods = registered.methods
+      .filter((method) => !methodCodes.has(method.code))
+      .map((method) => ({ ...method, enabled: false }));
+    registry.set(registered.code, {
+      ...existing,
+      connection_code: existing.connection_code || registered.connection_code,
+      methods: [...existing.methods, ...addedMethods]
+        .sort((a, b) => a.priority - b.priority || a.label.localeCompare(b.label))
+    });
+  });
+
+  return [...registry.values()].sort((a, b) => a.priority - b.priority || a.label.localeCompare(b.label));
 }
 
 function profileIsEnabled(profile) {
@@ -247,14 +538,14 @@ function applePayDomainReady(profile) {
   return ["validated", "verified", "active", "configured", "ready"].includes(status);
 }
 
-function providerAvailability({ profile, providerCode, methodCode }) {
+function providerAvailability({ profile, providerCode, method }) {
   if (!profile) return { available: false, status: "provider_not_configured" };
   if (!profileIsEnabled(profile)) return { available: false, status: "provider_disabled" };
   const credentialReason = providerCredentialReason(profile, providerCode);
   if (credentialReason) return { available: false, status: credentialReason };
   const healthReason = profileHealthReason(profile);
   if (healthReason) return { available: false, status: healthReason };
-  if (methodCode === "apple_pay" && providerCode === "checkout_com" && !applePayDomainReady(profile)) {
+  if (method?.requirements?.domain_validation === true && !applePayDomainReady(profile)) {
     return { available: false, status: "domain_validation_missing" };
   }
   return { available: true, status: "configured" };
@@ -273,54 +564,102 @@ function selectProviderProfile(profiles, providerCode, configuredCode) {
 
 export function buildPaymentReadiness({ settings, profiles = [] } = {}) {
   const normalized = normalizePaymentSettings(settings);
-  const methods = normalized.methods.map((method) => {
-    const provider = normalized.providers[method.code] || {};
-    const providerCode = normalizePaymentProviderCode(provider.provider_code, method.code);
+  const providerRegistry = buildPaymentProviderRegistry({ settings: normalized, profiles });
+  const providers = providerRegistry.map((provider) => {
+    const providerCode = provider.code;
     const profile = providerCode === "manual_test"
       ? null
       : selectProviderProfile(profiles, providerCode, provider.connection_code);
-    const providerState = providerCode === "manual_test"
+    const baseProviderState = providerCode === "manual_test"
       ? {
           available: provider.environment === "sandbox",
           status: provider.environment === "sandbox" ? "sandbox_ready" : "provider_not_configured"
         }
-      : providerAvailability({ profile, providerCode, methodCode: method.code });
-    const available = providerState.available;
-    const status = available
-      ? providerCode === "manual_test"
-        ? "sandbox_ready"
-        : "configured"
-      : providerState.status || "provider_not_configured";
-
+      : !getPaymentAdapter(provider.adapter_code || providerCode)
+        ? { available: false, status: "adapter_not_registered" }
+        : providerAvailability({ profile, providerCode, method: null });
+    const providerAvailable = provider.enabled !== false && baseProviderState.available;
+    const providerStatus = provider.enabled === false
+      ? "provider_disabled"
+      : providerAvailable
+        ? providerCode === "manual_test" ? "sandbox_ready" : "configured"
+        : baseProviderState.status || "provider_not_configured";
+    const methods = provider.methods.map((method) => {
+      const methodState = providerCode === "manual_test"
+        ? baseProviderState
+        : baseProviderState.status === "adapter_not_registered"
+          ? baseProviderState
+          : providerAvailability({ profile, providerCode, method });
+      const available = provider.enabled !== false && method.enabled !== false && methodState.available;
+      const status = provider.enabled === false
+        ? "provider_disabled"
+        : method.enabled === false
+          ? "payment_method_disabled"
+          : available
+            ? providerCode === "manual_test" ? "sandbox_ready" : "configured"
+            : methodState.status || providerStatus;
+      return {
+        code: method.code,
+        label: method.label,
+        enabled: method.enabled !== false,
+        visible: method.visible !== false,
+        priority: method.priority,
+        provider_code: providerCode,
+        provider_label: provider.label,
+        provider_enabled: provider.enabled !== false,
+        provider_visible: provider.visible !== false,
+        provider_priority: provider.priority,
+        environment: providerCode === "manual_test"
+          ? "sandbox"
+          : normalizePaymentEnvironment(profile?.identity?.environment || provider.environment, "production"),
+        connection_code: profile?.identity?.connection_code || provider.connection_code || null,
+        available,
+        status,
+        reason: status,
+        wallet: method.wallet === true
+      };
+    });
     return {
-      code: method.code,
-      label: method.label,
-      enabled: method.enabled !== false,
-      provider_code: providerCode,
+      code: providerCode,
+      label: provider.label,
+      enabled: provider.enabled !== false,
+      visible: provider.visible !== false,
+      priority: provider.priority,
       environment: providerCode === "manual_test"
         ? "sandbox"
         : normalizePaymentEnvironment(profile?.identity?.environment || provider.environment, "production"),
       connection_code: profile?.identity?.connection_code || provider.connection_code || null,
-      available,
-      status,
-      reason: status,
-      wallet: method.code === "google_pay" || method.code === "apple_pay"
+      available: providerAvailable,
+      status: providerStatus,
+      reason: providerStatus,
+      methods
     };
   });
+  const methods = providers.flatMap((provider) => provider.methods);
 
   return {
     default_currency: normalized.default_currency,
     capture_mode: normalized.capture_mode,
     allowed_countries: normalized.allowed_countries,
+    providers,
     methods,
-    ready_methods: methods.filter((method) => method.enabled && method.available).map((method) => method.code)
+    ready_methods: methods
+      .filter((method) => method.provider_visible && method.visible && method.enabled && method.available)
+      .map((method) => method.code)
   };
 }
 
-export function resolvePaymentMethodContext({ settings, profiles = [], method } = {}) {
+export function resolvePaymentMethodContext({ settings, profiles = [], method, providerCode } = {}) {
   const normalizedMethod = normalizePaymentMethodCode(method);
+  const normalizedProvider = normalizePaymentProviderCode(providerCode);
   const readiness = buildPaymentReadiness({ settings, profiles });
-  const item = readiness.methods.find((entry) => entry.code === normalizedMethod);
+  const item = normalizedMethod
+    ? readiness.methods.find((entry) =>
+        entry.code === normalizedMethod && (!normalizedProvider || entry.provider_code === normalizedProvider)
+      )
+    : readiness.methods.find((entry) =>
+        entry.provider_visible && entry.visible && entry.provider_enabled && entry.enabled && entry.available
+      );
   if (!item || !item.enabled) return { ok: false, error: "PAYMENT_METHOD_DISABLED" };
   if (!item.available) {
     return {
@@ -332,7 +671,7 @@ export function resolvePaymentMethodContext({ settings, profiles = [], method } 
       environment: item.environment
     };
   }
-  const provider = normalizePaymentSettings(settings).providers[normalizedMethod] || {};
+  const provider = readiness.providers.find((entry) => entry.code === item.provider_code) || {};
   const profile = item.provider_code === "manual_test"
     ? null
     : selectProviderProfile(profiles, item.provider_code, provider.connection_code);
@@ -380,7 +719,7 @@ function buildManualTestSession({ paymentCode, amount, currency, captureMode }) 
 function providerAdapterUnavailable(input = {}, providerCode) {
   const profile = input.connectionProfile || null;
   const methodCode = normalizePaymentMethodCode(input.method || "");
-  const state = providerAvailability({ profile, providerCode, methodCode });
+  const state = providerAvailability({ profile, providerCode, method: { code: methodCode } });
   if (!state.available) return state.status || "provider_not_configured";
   return "provider_health_unknown";
 }
@@ -482,15 +821,47 @@ export function getPaymentAdapter(providerCode) {
   return ADAPTERS[normalizePaymentProviderCode(providerCode)] || null;
 }
 
+export function registerPaymentAdapter(providerCode, adapter) {
+  const code = normalizePaymentProviderCode(providerCode);
+  if (!code || !adapter || typeof adapter.createCheckoutSession !== "function") {
+    throw new TypeError("Payment adapter registration requires a provider code and createCheckoutSession().");
+  }
+  ADAPTERS[code] = { ...adapter, code };
+  return ADAPTERS[code];
+}
+
 export function buildPublicCheckoutConfig({ settings, profiles = [] } = {}) {
   const normalized = normalizePaymentSettings(settings);
   const readiness = buildPaymentReadiness({ settings: normalized, profiles });
+  const visibleProviders = readiness.providers.filter((provider) => provider.visible !== false);
+  const visibleMethods = readiness.methods.filter((method) =>
+    method.provider_visible !== false && method.visible !== false
+  );
   return {
-    methods: readiness.methods.map((method) => ({
+    providers: visibleProviders.map((provider) => ({
+      code: provider.code,
+      label: provider.label,
+      enabled: provider.enabled,
+      visible: provider.visible,
+      priority: provider.priority,
+      mode: provider.environment,
+      environment: provider.environment,
+      available: provider.available,
+      status: provider.status,
+      reason: provider.reason,
+      methods: provider.methods
+        .filter((method) => method.visible !== false)
+        .map((method) => method.code)
+    })),
+    methods: visibleMethods.map((method) => ({
       code: method.code,
       label: method.label,
       enabled: method.enabled,
+      visible: method.visible,
+      priority: method.priority,
       provider_code: method.provider_code,
+      provider_label: method.provider_label,
+      provider_priority: method.provider_priority,
       mode: method.environment,
       environment: method.environment,
       available: method.available,
@@ -502,7 +873,9 @@ export function buildPublicCheckoutConfig({ settings, profiles = [] } = {}) {
       status: method.status,
       wallet: method.wallet
     })),
-    enabled_methods: readiness.methods.filter((method) => method.enabled).map((method) => method.code),
+    enabled_methods: visibleMethods
+      .filter((method) => method.provider_enabled && method.enabled)
+      .map((method) => method.code),
     ready_methods: readiness.ready_methods,
     default_currency: readiness.default_currency,
     capture_mode: readiness.capture_mode,
@@ -517,6 +890,9 @@ export function buildPublicPaymentMethods({ settings, profiles = [] } = {}) {
     .map((method) => ({
       methodCode: toPublicPaymentCode(method.code),
       providerCode: toPublicPaymentCode(method.provider_code),
+      providerLabel: method.provider_label,
+      providerPriority: method.provider_priority,
+      priority: method.priority,
       label: method.label,
       enabled: method.enabled !== false,
       available: method.enabled !== false && method.available === true,

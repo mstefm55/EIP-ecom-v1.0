@@ -75,6 +75,27 @@ const PAYMENT_CONNECTION_TYPES = {
     healthcheck: { supported: true }
   }
 };
+
+function paymentConnectionTypeForKind(kind) {
+  return Object.values(PAYMENT_CONNECTION_TYPES).find((item) => item.connection_kind === kind) || null;
+}
+
+function registerPaymentConnectionType(definition = {}) {
+  const code = normalizeText(definition.code || definition.provider_code).toUpperCase().replace(/[-.\s]+/g, "_");
+  const providerCode = normalizeText(definition.provider_code || code).toLowerCase().replace(/[-.\s]+/g, "_");
+  const connectionKind = normalizeText(definition.connection_kind || providerCode).toLowerCase().replace(/[-.\s]+/g, "_");
+  if (!code || !providerCode || !connectionKind) throw new TypeError("Invalid payment connection registration.");
+  PAYMENT_CONNECTION_TYPES[code] = {
+    ...definition,
+    code,
+    provider_code: providerCode,
+    connection_kind: connectionKind,
+    channel: "payments",
+    supported_payment_methods: normalizeArray(definition.supported_payment_methods).map((method) => method.toUpperCase())
+  };
+  CONNECTION_KIND_ALIASES.set(connectionKind, connectionKind);
+  return PAYMENT_CONNECTION_TYPES[code];
+}
 const CONNECTION_KIND_ALIASES = new Map([
   ["pay_pal", "paypal"],
   ["paypal", "paypal"],
@@ -197,7 +218,10 @@ function normalizeProfile(raw = {}, fallbackId) {
   const connectionCodeRaw = normalizeText(identity.connection_code || raw.connection_code);
   const connectionCode = connectionCodeRaw || slugifyCode(connectionName);
   const connectionKind = normalizeConnectionKind(identity.connection_kind || raw.connection_kind || "custom");
-  const paymentConnectionDefaultHealth = ["paypal", "checkout_com"].includes(connectionKind) ? "pending" : "healthy";
+  const requestedChannel = normalizeText(routing.channel || raw.channel || "custom");
+  const paymentConnectionDefaultHealth = (paymentConnectionTypeForKind(connectionKind) || requestedChannel === "payments")
+    ? "pending"
+    : "healthy";
   const storefrontDefault =
     ["website", "ecommerce"].includes(connectionKind) ||
     normalizeText(routing.channel || raw.channel) === "website_intake" ||
@@ -293,7 +317,7 @@ function normalizeProfile(raw = {}, fallbackId) {
       idempotency_scope: normalizeText(idempotency.idempotency_scope || raw.idempotency_scope)
     },
     routing: {
-      channel: normalizeText(routing.channel || raw.channel || "custom"),
+      channel: requestedChannel,
       protocol: normalizeText(routing.protocol || raw.protocol),
       provider_code: normalizeText(routing.provider_code || raw.provider_code),
       health_status: normalizeText(routing.health_status || raw.health_status || paymentConnectionDefaultHealth).toLowerCase(),
@@ -305,6 +329,16 @@ function normalizeProfile(raw = {}, fallbackId) {
       ).toLowerCase(),
       domain_validation_status: normalizeText(routing.domain_validation_status || raw.domain_validation_status).toLowerCase(),
       supported_message_types: normalizeArray(routing.supported_message_types || raw.supported_message_types),
+      supported_payment_methods: normalizeArray(
+        routing.supported_payment_methods ||
+        raw.supported_payment_methods ||
+        (requestedChannel === "payments" ? routing.supported_message_types || raw.supported_message_types : [])
+      ),
+      payment_provider: routing.payment_provider && typeof routing.payment_provider === "object"
+        ? routing.payment_provider
+        : raw.payment_provider && typeof raw.payment_provider === "object"
+          ? raw.payment_provider
+          : null,
       schema_version: normalizeText(routing.schema_version || raw.schema_version || "v1"),
       envelope_profile: normalizeText(routing.envelope_profile || raw.envelope_profile || "canonical_v1"),
       mapping_mode: MAPPING_MODES.includes(routing.mapping_mode || raw.mapping_mode)
@@ -539,9 +573,7 @@ function validateProfile(profile) {
 
   const routing = profile?.routing || {};
   if (!CHANNELS.includes(routing.channel)) errors.push(`${id}: routing channel invalid`);
-  const paymentType = Object.values(PAYMENT_CONNECTION_TYPES).find(
-    (item) => item.connection_kind === identity.connection_kind
-  );
+  const paymentType = paymentConnectionTypeForKind(identity.connection_kind);
   if (paymentType) {
     if (routing.channel !== "payments") errors.push(`${id}: payment provider connections must use payments channel`);
     const providerCode = normalizeText(routing.provider_code || routing.protocol).toLowerCase().replace(/[-.\s]+/g, "_");
@@ -618,6 +650,7 @@ export {
   normalizeJson,
   normalizeConnectionKind,
   PAYMENT_CONNECTION_TYPES,
+  registerPaymentConnectionType,
   PUBLIC_STOREFRONT_SCOPES,
   STOREFRONT_SCAN_MODES,
   connectionAllowsStorefrontCapability,

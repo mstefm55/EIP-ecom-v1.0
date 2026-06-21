@@ -8,6 +8,7 @@ import {
   getPaymentAdapter,
   normalizePaymentMethodCode,
   normalizePaymentSettings,
+  registerPaymentAdapter,
   resolvePaymentMethodContext,
   sanitizePaymentMetadata
 } from "../src/services/payments/paymentFoundation.js";
@@ -126,6 +127,61 @@ test("payment readiness and public checkout config expose only secret-free provi
   assert.deepEqual(publicMethods.map((item) => item.methodCode).sort(), ["APPLE_PAY", "CARD", "GOOGLE_PAY", "PAYPAL"]);
   assert.equal(publicMethods.find((item) => item.methodCode === "PAYPAL").reason, "provider_not_configured");
   assert.doesNotMatch(JSON.stringify(publicMethods), /manual_test|do-not-leak|secret|client_secret/i);
+});
+
+test("payment provider registry supports dynamic count, visibility, priority, and registered methods", () => {
+  registerPaymentAdapter("future_pay", {
+    async createCheckoutSession() {
+      return { ok: false, error: "FUTURE_PAY_NOT_IMPLEMENTED" };
+    }
+  });
+  const settings = normalizePaymentSettings({
+    provider_registry: [
+      {
+        code: "hidden_pay",
+        label: "Hidden Pay",
+        enabled: true,
+        visible: false,
+        priority: 1,
+        methods: [{ code: "hidden_method", label: "Hidden", enabled: true, visible: true, priority: 1 }]
+      },
+      {
+        code: "future_pay",
+        label: "Future Pay",
+        enabled: true,
+        visible: true,
+        priority: 5,
+        methods: [{ code: "bank_transfer", label: "Bank transfer", enabled: true, visible: true, priority: 7 }]
+      }
+    ]
+  });
+  const profiles = [{
+    identity: {
+      connection_code: "future-pay-live",
+      connection_name: "Future Pay",
+      connection_kind: "payments",
+      environment: "production",
+      is_enabled: true
+    },
+    outbound: { auth: {} },
+    routing: {
+      channel: "payments",
+      provider_code: "future_pay",
+      supported_payment_methods: ["BANK_TRANSFER"],
+      health_status: "healthy"
+    }
+  }];
+
+  const readiness = buildPaymentReadiness({ settings, profiles });
+  assert.equal(readiness.providers.length, 2);
+  assert.equal(readiness.providers[0].code, "hidden_pay");
+  assert.equal(readiness.methods.find((method) => method.code === "bank_transfer").available, true);
+
+  const publicConfig = buildPublicCheckoutConfig({ settings, profiles });
+  assert.deepEqual(publicConfig.providers.map((provider) => provider.code), ["future_pay"]);
+  assert.deepEqual(publicConfig.methods.map((method) => method.code), ["bank_transfer"]);
+  assert.equal(publicConfig.methods[0].provider_code, "future_pay");
+  assert.equal(publicConfig.methods[0].provider_priority, 5);
 });
 
 test("payment connection provider types are registered as existing Admin Console Connections kinds", () => {

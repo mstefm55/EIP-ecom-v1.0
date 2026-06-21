@@ -26,6 +26,42 @@ const DEFAULT_PAYMENT_SETTINGS = {
   display_order: ["card", "paypal", "google_pay", "apple_pay", "manual_test"],
   refund_approval_threshold: null,
   manual_review_rules: { enabled: true, high_value_threshold: null },
+  provider_registry: [
+    {
+      code: "checkout_com",
+      label: "Checkout.com",
+      enabled: true,
+      visible: true,
+      priority: 10,
+      environment: "production",
+      connection_code: null,
+      methods: [
+        { code: "card", label: "Credit card", enabled: true, visible: true, priority: 10 },
+        { code: "google_pay", label: "Google Pay", enabled: false, visible: true, priority: 20, wallet: true },
+        { code: "apple_pay", label: "Apple Pay", enabled: false, visible: true, priority: 30, wallet: true }
+      ]
+    },
+    {
+      code: "paypal",
+      label: "PayPal",
+      enabled: true,
+      visible: true,
+      priority: 20,
+      environment: "production",
+      connection_code: null,
+      methods: [{ code: "paypal", label: "PayPal", enabled: false, visible: true, priority: 10 }]
+    },
+    {
+      code: "manual_test",
+      label: "Manual test",
+      enabled: false,
+      visible: false,
+      priority: 1000,
+      environment: "sandbox",
+      connection_code: null,
+      methods: [{ code: "manual_test", label: "Sandbox manual test", enabled: false, visible: false, priority: 10 }]
+    }
+  ],
   providers: {
     card: { provider_code: "checkout_com", environment: "production", connection_code: null },
     paypal: { provider_code: "paypal", environment: "production", connection_code: null },
@@ -327,6 +363,104 @@ function normalizeOptionalAmount(value) {
   return Number.isFinite(amount) && amount >= 0 ? amount : null;
 }
 
+function normalizeProviderRegistry(input, fallback, methods, providers) {
+  const fallbackList = Array.isArray(fallback) ? fallback : [];
+  const fallbackByCode = new Map(
+    fallbackList.map((provider) => [normalizePaymentProviderCode(provider?.code), provider]).filter(([code]) => code)
+  );
+  let source = Array.isArray(input) ? input : [];
+  if (!source.length) {
+    const byProvider = new Map();
+    methods.forEach((method, index) => {
+      const assignment = providers[method.code] || {};
+      const providerCode = normalizePaymentProviderCode(assignment.provider_code, method.code);
+      if (!byProvider.has(providerCode)) {
+        const baseline = fallbackByCode.get(providerCode) || {};
+        byProvider.set(providerCode, {
+          ...baseline,
+          code: providerCode,
+          connection_code: assignment.connection_code || baseline.connection_code || null,
+          environment: assignment.environment || baseline.environment,
+          methods: []
+        });
+      }
+      byProvider.get(providerCode).methods.push({ ...method, priority: (index + 1) * 10, visible: true });
+    });
+    source = [...byProvider.values()];
+  }
+  return source
+    .map((provider, providerIndex) => {
+      const code = normalizePaymentProviderCode(provider?.code || provider?.provider_code);
+      if (!code) return null;
+      const baseline = fallbackByCode.get(code) || {};
+      const baselineMethods = new Map(
+        (Array.isArray(baseline.methods) ? baseline.methods : [])
+          .map((method) => [normalizePaymentMethodCode(method?.code), method])
+          .filter(([methodCode]) => methodCode)
+      );
+      const providerMethods = Array.isArray(provider.methods) ? provider.methods : baseline.methods || [];
+      return {
+        code,
+        label: String(provider.label || baseline.label || formatStatus(code)).trim(),
+        enabled: normalizeBoolean(provider.enabled, normalizeBoolean(baseline.enabled, true)),
+        visible: normalizeBoolean(provider.visible, normalizeBoolean(baseline.visible, true)),
+        priority: Number.isFinite(Number(provider.priority)) ? Number(provider.priority) : Number(baseline.priority || (providerIndex + 1) * 10),
+        environment: normalizePaymentEnvironment(provider.environment || provider.mode || baseline.environment, code === "manual_test" ? "sandbox" : "production"),
+        connection_code: String(provider.connection_code || baseline.connection_code || "").trim() || null,
+        adapter_code: normalizePaymentProviderCode(provider.adapter_code || baseline.adapter_code || code),
+        methods: providerMethods
+          .map((method, methodIndex) => {
+            const methodCode = normalizePaymentMethodCode(method?.code || method?.id || method);
+            if (!methodCode) return null;
+            const methodBaseline = baselineMethods.get(methodCode) || {};
+            return {
+              ...(typeof method === "object" ? method : {}),
+              code: methodCode,
+              label: String(method?.label || methodBaseline.label || formatStatus(methodCode)).trim(),
+              enabled: normalizeBoolean(method?.enabled, normalizeBoolean(methodBaseline.enabled, false)),
+              visible: normalizeBoolean(method?.visible, normalizeBoolean(methodBaseline.visible, true)),
+              priority: Number.isFinite(Number(method?.priority)) ? Number(method.priority) : Number(methodBaseline.priority || (methodIndex + 1) * 10),
+              wallet: normalizeBoolean(method?.wallet, normalizeBoolean(methodBaseline.wallet, false))
+            };
+          })
+          .filter(Boolean)
+          .sort((a, b) => a.priority - b.priority || a.label.localeCompare(b.label))
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.priority - b.priority || a.label.localeCompare(b.label));
+}
+
+function mergeRegisteredPaymentProviders(payment, readinessProviders) {
+  const current = payment && typeof payment === "object" ? payment : DEFAULT_PAYMENT_SETTINGS;
+  const registry = Array.isArray(current.provider_registry) ? [...current.provider_registry] : [];
+  const seen = new Set(registry.map((provider) => normalizePaymentProviderCode(provider?.code)).filter(Boolean));
+  for (const provider of Array.isArray(readinessProviders) ? readinessProviders : []) {
+    const code = normalizePaymentProviderCode(provider?.code || provider?.provider_code);
+    if (!code || seen.has(code)) continue;
+    seen.add(code);
+    registry.push({
+      code,
+      label: String(provider?.label || formatStatus(code)),
+      enabled: provider?.enabled === true,
+      visible: provider?.visible !== false,
+      priority: Number(provider?.priority || (registry.length + 1) * 10),
+      environment: normalizePaymentEnvironment(provider?.environment, "production"),
+      connection_code: provider?.connection_code || null,
+      adapter_code: normalizePaymentProviderCode(provider?.adapter_code || code),
+      methods: (Array.isArray(provider?.methods) ? provider.methods : []).map((method, index) => ({
+        code: normalizePaymentMethodCode(method?.code),
+        label: String(method?.label || formatStatus(method?.code)),
+        enabled: method?.enabled === true,
+        visible: method?.visible !== false,
+        priority: Number(method?.priority || (index + 1) * 10),
+        wallet: method?.wallet === true
+      })).filter((method) => method.code)
+    });
+  }
+  return { ...current, provider_registry: registry.sort((a, b) => a.priority - b.priority || a.label.localeCompare(b.label)) };
+}
+
 function normalizePaymentSettings(input, fallback = DEFAULT_PAYMENT_SETTINGS) {
   const base = fallback && typeof fallback === "object" ? fallback : DEFAULT_PAYMENT_SETTINGS;
   const source = input && typeof input === "object" ? input : {};
@@ -370,9 +504,26 @@ function normalizePaymentSettings(input, fallback = DEFAULT_PAYMENT_SETTINGS) {
       connection_code: String(sourceProvider.connection_code || baseProvider.connection_code || "").trim() || null
     };
   }
+  const providerRegistry = normalizeProviderRegistry(
+    source.provider_registry,
+    base.provider_registry || DEFAULT_PAYMENT_SETTINGS.provider_registry,
+    methods,
+    providers
+  );
+  const normalizedMethods = Array.isArray(source.provider_registry)
+    ? [...new Map(
+        providerRegistry.flatMap((provider) => provider.methods).map((method) => [method.code, {
+          code: method.code,
+          label: method.label,
+          enabled: method.enabled,
+          visible: method.visible,
+          priority: method.priority
+        }])
+      ).values()]
+    : methods;
 
   return {
-    methods,
+    methods: normalizedMethods,
     default_currency: normalizeCurrency(source.default_currency || base.default_currency || "USD", "USD"),
     capture_mode: normalizeCaptureMode(source.capture_mode || base.capture_mode),
     allowed_countries: normalizeCountryList(source.allowed_countries || base.allowed_countries),
@@ -382,6 +533,7 @@ function normalizePaymentSettings(input, fallback = DEFAULT_PAYMENT_SETTINGS) {
       enabled: normalizeBoolean(source.manual_review_rules?.enabled, normalizeBoolean(base.manual_review_rules?.enabled, true)),
       high_value_threshold: normalizeOptionalAmount(source.manual_review_rules?.high_value_threshold ?? base.manual_review_rules?.high_value_threshold)
     },
+    provider_registry: providerRegistry,
     providers
   };
 }
@@ -694,30 +846,58 @@ export default function EcomCommerceSettingsPanel({ node } = {}) {
     });
   };
 
-  const updatePaymentMethod = (code, patch) => {
-    const methodCode = normalizePaymentMethodCode(code);
-    if (!methodCode) return;
-    updatePayment((current) => ({
-      ...current,
-      methods: current.methods.map((item) =>
-        normalizePaymentMethodCode(item.code) === methodCode ? { ...item, ...patch, code: methodCode } : item
-      )
-    }));
+  const updatePaymentProvider = (code, patch) => {
+    const providerCode = normalizePaymentProviderCode(code);
+    if (!providerCode) return;
+    updatePayment((current) => {
+      const withRegistered = mergeRegisteredPaymentProviders(current, paymentReadiness?.providers);
+      return {
+        ...withRegistered,
+        provider_registry: withRegistered.provider_registry.map((provider) =>
+          normalizePaymentProviderCode(provider.code) === providerCode ? { ...provider, ...patch, code: providerCode } : provider
+        )
+      };
+    });
   };
 
-  const updatePaymentProvider = (code, patch) => {
-    const methodCode = normalizePaymentMethodCode(code);
-    if (!methodCode) return;
-    updatePayment((current) => ({
-      ...current,
-      providers: {
-        ...current.providers,
-        [methodCode]: {
-          ...(current.providers?.[methodCode] || {}),
-          ...patch
-        }
-      }
-    }));
+  const updateProviderMethod = (providerCode, methodCode, patch) => {
+    const normalizedProvider = normalizePaymentProviderCode(providerCode);
+    const normalizedMethod = normalizePaymentMethodCode(methodCode);
+    if (!normalizedProvider || !normalizedMethod) return;
+    updatePayment((current) => {
+      const withRegistered = mergeRegisteredPaymentProviders(current, paymentReadiness?.providers);
+      return {
+        ...withRegistered,
+        provider_registry: withRegistered.provider_registry.map((provider) =>
+          normalizePaymentProviderCode(provider.code) === normalizedProvider
+            ? {
+                ...provider,
+                methods: provider.methods.map((method) =>
+                  normalizePaymentMethodCode(method.code) === normalizedMethod
+                    ? { ...method, ...patch, code: normalizedMethod }
+                    : method
+                )
+              }
+            : provider
+        )
+      };
+    });
+  };
+
+  const movePaymentProvider = (code, direction) => {
+    const providerCode = normalizePaymentProviderCode(code);
+    updatePayment((current) => {
+      const withRegistered = mergeRegisteredPaymentProviders(current, paymentReadiness?.providers);
+      const registry = [...withRegistered.provider_registry].sort((a, b) => a.priority - b.priority || a.label.localeCompare(b.label));
+      const index = registry.findIndex((provider) => normalizePaymentProviderCode(provider.code) === providerCode);
+      const target = index + direction;
+      if (index < 0 || target < 0 || target >= registry.length) return withRegistered;
+      [registry[index], registry[target]] = [registry[target], registry[index]];
+      return {
+        ...withRegistered,
+        provider_registry: registry.map((provider, providerIndex) => ({ ...provider, priority: (providerIndex + 1) * 10 }))
+      };
+    });
   };
 
   const handleAddMarketplace = () => {
@@ -1041,7 +1221,10 @@ export default function EcomCommerceSettingsPanel({ node } = {}) {
   const refundRequests = settings.refund_policy?.request_enabled ?? true;
   const refundAutoApprove = settings.refund_policy?.auto_approve ?? false;
   const returnRequests = settings.return_policy?.request_enabled ?? true;
-  const payment = normalizePaymentSettings(settings.payment, DEFAULT_PAYMENT_SETTINGS);
+  const payment = mergeRegisteredPaymentProviders(
+    normalizePaymentSettings(settings.payment, DEFAULT_PAYMENT_SETTINGS),
+    paymentReadiness?.providers
+  );
   const translation = normalizeTranslationSettings(settings.translation, DEFAULT_SETTINGS.translation);
   const translationEngine = normalizeTranslationEngine(translation.engine, DEFAULT_SETTINGS.translation.engine);
   const translationBilling = normalizeTranslationBilling(translation.billing, DEFAULT_SETTINGS.translation.billing);
@@ -1086,6 +1269,13 @@ export default function EcomCommerceSettingsPanel({ node } = {}) {
     const map = new Map();
     for (const item of paymentReadiness?.methods || []) {
       map.set(normalizePaymentMethodCode(item.code), item);
+    }
+    return map;
+  }, [paymentReadiness]);
+  const paymentReadinessByProvider = useMemo(() => {
+    const map = new Map();
+    for (const item of paymentReadiness?.providers || []) {
+      map.set(normalizePaymentProviderCode(item.code || item.provider_code), item);
     }
     return map;
   }, [paymentReadiness]);
@@ -1355,127 +1545,69 @@ export default function EcomCommerceSettingsPanel({ node } = {}) {
         </div>
 
         <div className="grid gap-3">
-          {payment.methods.map((method) => {
-            const code = normalizePaymentMethodCode(method.code);
-            const provider = payment.providers?.[code] || {};
-            const readiness = paymentReadinessByMethod.get(code);
-            const providerCode = normalizePaymentProviderCode(provider.provider_code, code);
-            const effectiveEnvironment =
-              readiness?.environment ||
-              normalizePaymentEnvironment(provider.environment || provider.mode, code === "manual_test" ? "sandbox" : "production");
-            const readinessStatus = String(readiness?.status || readiness?.reason || "").toLowerCase();
-            const configured = providerCode === "manual_test"
-              ? effectiveEnvironment === "sandbox"
-              : Boolean(readiness?.connection_code || provider.connection_code || readiness?.available) &&
-                !["provider_not_configured", "sandbox_credentials_missing"].includes(readinessStatus);
+          {payment.provider_registry.map((provider, providerIndex) => {
+            const providerCode = normalizePaymentProviderCode(provider.code);
+            const readiness = paymentReadinessByProvider.get(providerCode);
             const available = Boolean(readiness?.available);
-            const connectionOptionsForProvider = connectionOptions.filter((conn) => {
-              const value = `${conn.connection_code || ""} ${conn.connection_kind || ""} ${conn.connection_name || ""}`.toLowerCase();
-              if (providerCode === "checkout_com") return value.includes("checkout") || !value.includes("paypal");
-              if (providerCode === "paypal") return value.includes("paypal");
-              return true;
-            });
+            const connectionOptionsForProvider = connectionOptions.filter((connection) =>
+              normalizePaymentProviderCode(connection.provider_code || connection.connection_kind) === providerCode
+            );
             return (
-              <div key={code} className="rounded-xl border border-ink-100 bg-white/80 p-3">
-                <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_150px_150px_minmax(0,1fr)]">
-                  <label className="flex flex-col gap-1 text-[0.7rem] font-semibold uppercase tracking-[0.2em] text-ink-400">
-                    Method
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="checkbox"
-                        checked={method.enabled !== false}
-                        onChange={(event) => updatePaymentMethod(code, { enabled: event.target.checked })}
-                        className="h-4 w-4 rounded border-ink-300 text-ink-900"
-                      />
-                      <input
-                        value={method.label || ""}
-                        onChange={(event) => updatePaymentMethod(code, { label: event.target.value })}
-                        className="w-full rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs text-ink-700"
-                      />
-                    </div>
-                  </label>
+              <div key={providerCode} className="rounded-xl border border-ink-100 bg-white/80 p-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-ink-800">{provider.label}</div>
+                    <div className="text-xs text-ink-400">{providerCode} · priority {provider.priority}</div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3 text-xs text-ink-600">
+                    <label className="flex items-center gap-2">
+                      <input type="checkbox" checked={provider.enabled !== false} onChange={(event) => updatePaymentProvider(providerCode, { enabled: event.target.checked })} />
+                      Enabled
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input type="checkbox" checked={provider.visible !== false} onChange={(event) => updatePaymentProvider(providerCode, { visible: event.target.checked })} />
+                      Visible
+                    </label>
+                    <button type="button" onClick={() => movePaymentProvider(providerCode, -1)} disabled={providerIndex === 0} className="rounded border border-ink-200 px-2 py-1 disabled:opacity-40">Move up</button>
+                    <button type="button" onClick={() => movePaymentProvider(providerCode, 1)} disabled={providerIndex === payment.provider_registry.length - 1} className="rounded border border-ink-200 px-2 py-1 disabled:opacity-40">Move down</button>
+                  </div>
+                </div>
 
-                  <label className="flex flex-col gap-1 text-[0.7rem] font-semibold uppercase tracking-[0.2em] text-ink-400">
-                    Provider
-                    <select
-                      value={providerCode}
-                      onChange={(event) => updatePaymentProvider(code, { provider_code: event.target.value })}
-                      className="rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs text-ink-700"
-                    >
-                      <option value="checkout_com">Checkout.com</option>
-                      <option value="paypal">PayPal</option>
-                      <option value="manual_test">Manual test</option>
-                    </select>
-                  </label>
-
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
                   <label className="flex flex-col gap-1 text-[0.7rem] font-semibold uppercase tracking-[0.2em] text-ink-400">
                     Environment
-                    <select
-                      value={normalizePaymentEnvironment(provider.environment || provider.mode, code === "manual_test" ? "sandbox" : "production")}
-                      onChange={(event) => updatePaymentProvider(code, { environment: event.target.value })}
-                      className="rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs text-ink-700"
-                    >
+                    <select value={provider.environment} onChange={(event) => updatePaymentProvider(providerCode, { environment: event.target.value })} className="rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs text-ink-700">
                       <option value="production">Production</option>
                       <option value="sandbox">Sandbox</option>
                     </select>
                   </label>
-
                   <label className="flex flex-col gap-1 text-[0.7rem] font-semibold uppercase tracking-[0.2em] text-ink-400">
                     Admin connection
-                    <select
-                      value={provider.connection_code || ""}
-                      onChange={(event) => updatePaymentProvider(code, { connection_code: event.target.value || null })}
-                      disabled={providerCode === "manual_test"}
-                      className="rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs text-ink-700 disabled:opacity-50"
-                    >
-                      <option value="">Auto-match configured provider</option>
-                      {connectionOptionsForProvider.map((conn) => (
-                        <option key={`${code}-${conn.connection_code}`} value={conn.connection_code}>
-                          {conn.connection_name} ({conn.connection_code})
-                        </option>
+                    <select value={provider.connection_code || ""} onChange={(event) => updatePaymentProvider(providerCode, { connection_code: event.target.value || null })} className="rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs text-ink-700">
+                      <option value="">Auto-match registered connection</option>
+                      {connectionOptionsForProvider.map((connection) => (
+                        <option key={`${providerCode}-${connection.connection_code}`} value={connection.connection_code}>{connection.connection_name} ({connection.connection_code})</option>
                       ))}
                     </select>
                   </label>
                 </div>
-                <div className="mt-3 grid gap-2 rounded-lg border border-ink-100 bg-ink-50/70 px-3 py-2 text-xs text-ink-500 md:grid-cols-6">
-                  <div>
-                    <div className="text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-ink-400">Enabled</div>
-                    <div className={method.enabled !== false ? "font-semibold text-emerald-700" : "font-semibold text-ink-500"}>
-                      {yesNo(method.enabled !== false)}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-ink-400">Configured</div>
-                    <div className={configured ? "font-semibold text-emerald-700" : "font-semibold text-amber-700"}>
-                      {yesNo(configured)}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-ink-400">Available</div>
-                    <div className={available ? "font-semibold text-emerald-700" : "font-semibold text-amber-700"}>
-                      {yesNo(available)}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-ink-400">Provider</div>
-                    <div className="font-semibold text-ink-700">{formatStatus(providerCode)}</div>
-                  </div>
-                  <div>
-                    <div className="text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-ink-400">Mode</div>
-                    <div className="font-semibold text-ink-700">{formatStatus(effectiveEnvironment)}</div>
-                  </div>
-                  <div>
-                    <div className="text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-ink-400">Readiness</div>
-                    <div className={available ? "font-semibold text-emerald-700" : "font-semibold text-amber-700"}>
-                      {formatStatus(readiness?.status || readiness?.reason, "not checked")}
-                    </div>
-                  </div>
-                  <div className="md:col-span-6">
-                    <span className="font-semibold text-ink-500">Connection:</span>{" "}
-                    {readiness?.connection_code || provider.connection_code || "No provider connection selected"}
-                    {code === "manual_test" ? " - sandbox-only development path." : ""}
-                    {readiness?.wallet ? " - wallet method." : ""}
-                  </div>
+
+                <div className="mt-3 grid gap-2">
+                  {provider.methods.map((method) => {
+                    const methodCode = normalizePaymentMethodCode(method.code);
+                    const methodReadiness = (readiness?.methods || []).find((item) => normalizePaymentMethodCode(item.code) === methodCode) || paymentReadinessByMethod.get(methodCode);
+                    return (
+                      <div key={`${providerCode}-${methodCode}`} className="grid gap-2 rounded-lg border border-ink-100 bg-ink-50/70 px-3 py-2 text-xs md:grid-cols-[minmax(0,1fr)_100px_100px_140px]">
+                        <input value={method.label || ""} onChange={(event) => updateProviderMethod(providerCode, methodCode, { label: event.target.value })} className="rounded border border-ink-200 bg-white px-2 py-1" />
+                        <label className="flex items-center gap-2"><input type="checkbox" checked={method.enabled !== false} onChange={(event) => updateProviderMethod(providerCode, methodCode, { enabled: event.target.checked })} /> Enabled</label>
+                        <label className="flex items-center gap-2"><input type="checkbox" checked={method.visible !== false} onChange={(event) => updateProviderMethod(providerCode, methodCode, { visible: event.target.checked })} /> Visible</label>
+                        <span className={methodReadiness?.available ? "font-semibold text-emerald-700" : "font-semibold text-amber-700"}>{formatStatus(methodReadiness?.status || methodReadiness?.reason, "not checked")}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="mt-3 text-xs text-ink-500">
+                  Configured: {yesNo(Boolean(readiness?.connection_code || provider.connection_code || available))} · Available: {yesNo(available)} · {formatStatus(readiness?.status || readiness?.reason, "not checked")} · {readiness?.connection_code || provider.connection_code || "No registered connection selected"}
                 </div>
               </div>
             );

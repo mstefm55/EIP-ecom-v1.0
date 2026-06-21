@@ -374,6 +374,10 @@ async function loadOutboundConnections(client, tenantId) {
       connection_code: normalizeText(profile?.identity?.connection_code),
       connection_name: normalizeText(profile?.identity?.connection_name) || normalizeText(profile?.identity?.connection_code),
       connection_kind: normalizeText(profile?.identity?.connection_kind || "custom"),
+      provider_code: normalizeText(profile?.routing?.provider_code || profile?.routing?.protocol || ""),
+      supported_payment_methods: Array.isArray(profile?.routing?.supported_payment_methods)
+        ? profile.routing.supported_payment_methods
+        : [],
       environment: normalizeText(profile?.identity?.environment || "production"),
       base_url: normalizeText(profile?.outbound?.base_url || "")
     }))

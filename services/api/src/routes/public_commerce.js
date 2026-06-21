@@ -37,6 +37,7 @@ import {
   getPaymentAdapter,
   normalizePaymentEnvironment,
   normalizePaymentMethodCode,
+  normalizePaymentProviderCode,
   normalizePaymentSettings,
   resolvePaymentMethodContext,
   sanitizePaymentMetadata
@@ -5095,7 +5096,8 @@ export default async function publicCommerceRoutes(app) {
     const methodContext = resolvePaymentMethodContext({
       settings: paymentSettings,
       profiles,
-      method: requestedMethod || paymentSettings.methods?.find((item) => item.enabled !== false)?.code
+      method: requestedMethod,
+      providerCode: body.provider_code || body.providerCode || body.provider
     });
     if (!methodContext.ok) {
       const out = { ok: false, error: methodContext.error };
@@ -5251,7 +5253,8 @@ export default async function publicCommerceRoutes(app) {
       const methodContext = resolvePaymentMethodContext({
         settings: paymentSettings,
         profiles,
-        method: requestedMethod || paymentSettings.methods?.find((item) => item.enabled !== false)?.code
+        method: requestedMethod,
+        providerCode: body.provider_code || body.providerCode || body.provider
       });
       if (!methodContext.ok) {
         const disabled = methodContext.error === "PAYMENT_METHOD_DISABLED";
@@ -5430,8 +5433,14 @@ export default async function publicCommerceRoutes(app) {
   const handlePaymentWebhook = async (req, reply, allowedChannels = ["payments", "custom"]) => {
     const access = await resolveConnection(app, req, reply, allowedChannels);
     if (!access) return;
-    const provider = normalizeText(req.params.provider).toLowerCase().replace(/-/g, "_");
-    if (!["checkout_com", "paypal"].includes(provider)) {
+    const provider = normalizePaymentProviderCode(req.params.provider);
+    const adapter = getPaymentAdapter(provider);
+    const registeredProvider = normalizePaymentProviderCode(
+      access.profile?.routing?.provider_code ||
+      access.profile?.routing?.protocol ||
+      access.profile?.identity?.connection_kind
+    );
+    if (!adapter || (registeredProvider && registeredProvider !== provider)) {
       return reply.code(404).send({ ok: false, error: "PAYMENT_PROVIDER_NOT_SUPPORTED" });
     }
     let body;
@@ -5440,7 +5449,6 @@ export default async function publicCommerceRoutes(app) {
     } catch {
       return reply.code(400).send({ ok: false, error: "INVALID_JSON" });
     }
-    const adapter = getPaymentAdapter(provider);
     const verification = await adapter.verifyWebhookSignature({
       headers: req.headers,
       body,
