@@ -67,6 +67,30 @@ test("dashboard and Samara upload clients surface safe structured API messages",
   }
 });
 
+test("dashboard product uploads reject incomplete payloads and throttle media batches", () => {
+  const productStudio = read("apps/dashboard/src/components/ecom/EcomProductWorkspace.jsx");
+  const uploadSecurity = read("services/api/src/lib/uploadSecurity.js");
+
+  assert.match(productStudio, /payload\?\.ok !== true/);
+  assert.match(productStudio, /UPLOAD_SCAN_PENDING/);
+  assert.match(productStudio, /UPLOAD_MISSING_URL/);
+  assert.match(productStudio, /UPLOAD_BATCH_CONCURRENCY\s*=\s*2/);
+  assert.match(productStudio, /function uploadFilesWithLimit/);
+  assert.match(productStudio, /uploadFilesWithLimit\(preparedFiles,\s*\{ assetKind: "media" \}\)/);
+  assert.match(productStudio, /uploadFilesWithLimit\(files,\s*\{ assetKind: "document" \}\)/);
+  assert.doesNotMatch(
+    productStudio,
+    /Promise\.all\(\s*preparedFiles\.map\(\(file\) => fileToAsset\(file,\s*\{ assetKind: "media" \}\)\)\s*\)/s
+  );
+  assert.doesNotMatch(
+    productStudio,
+    /Promise\.all\(\s*files\.map\(\(file\) => fileToAsset\(file,\s*\{ assetKind: "document" \}\)\)\s*\)/s
+  );
+
+  assert.match(uploadSecurity, /await fs\.promises\.writeFile\(targetPath/);
+  assert.match(uploadSecurity, /await fs\.promises\.rename\(quarantinePath,\s*targetPath\)/);
+});
+
 test("reusable auth-system upload snapshots carry the same hardened boundary", () => {
   const readme = read("apps/ui-components/auth-system/README.md");
   assert.match(readme, /copy repository.*not the live runtime source/is);

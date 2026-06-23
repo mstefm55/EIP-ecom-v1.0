@@ -175,8 +175,8 @@ function quarantineMetadataPath(quarantinePath) {
   return `${quarantinePath}.json`;
 }
 
-function writeQuarantineMetadata(quarantinePath, metadata) {
-  fs.writeFileSync(
+async function writeQuarantineMetadata(quarantinePath, metadata) {
+  await fs.promises.writeFile(
     quarantineMetadataPath(quarantinePath),
     `${JSON.stringify(metadata, null, 2)}\n`,
     { flag: "w" }
@@ -236,10 +236,10 @@ export async function writeVerifiedUpload({
   mimetype
 }) {
   const finalDir = path.dirname(targetPath);
-  fs.mkdirSync(finalDir, { recursive: true });
+  await fs.promises.mkdir(finalDir, { recursive: true });
   const mode = normalizeScanMode(app);
   if (mode !== "external_required") {
-    fs.writeFileSync(targetPath, buffer, { flag: "wx" });
+    await fs.promises.writeFile(targetPath, buffer, { flag: "wx" });
     return { ok: true, scan_status: "clean", scanner: "inline_v1" };
   }
 
@@ -250,12 +250,12 @@ export async function writeVerifiedUpload({
       ? path.resolve(targetPath).slice(0, markerIndex)
       : path.resolve(finalDir, "..", "..");
   const quarantineDir = path.resolve(assetsRoot, "..", "upload-quarantine", String(tenantId || "unknown"), category);
-  fs.mkdirSync(quarantineDir, { recursive: true });
+  await fs.promises.mkdir(quarantineDir, { recursive: true });
   const quarantineName = `${crypto.randomUUID()}-${storedName || path.basename(targetPath)}`;
   const quarantinePath = safeUploadTarget(quarantineDir, quarantineName);
   const sha256 = crypto.createHash("sha256").update(buffer).digest("hex");
-  fs.writeFileSync(quarantinePath, buffer, { flag: "wx" });
-  writeQuarantineMetadata(quarantinePath, {
+  await fs.promises.writeFile(quarantinePath, buffer, { flag: "wx" });
+  await writeQuarantineMetadata(quarantinePath, {
     status: "pending",
     tenant_id: String(tenantId || ""),
     asset_kind: String(assetKind || ""),
@@ -271,7 +271,7 @@ export async function writeVerifiedUpload({
 
   const scan = await requestExternalScan(app, { buffer, filename, mimetype, assetKind, tenantId });
   if (!scan.ok) {
-    writeQuarantineMetadata(quarantinePath, {
+    await writeQuarantineMetadata(quarantinePath, {
       status: scan.status || "pending",
       error: scan.error || "UPLOAD_SCAN_PENDING",
       tenant_id: String(tenantId || ""),
@@ -295,8 +295,8 @@ export async function writeVerifiedUpload({
     };
   }
 
-  fs.renameSync(quarantinePath, targetPath);
-  fs.rmSync(quarantineMetadataPath(quarantinePath), { force: true });
+  await fs.promises.rename(quarantinePath, targetPath);
+  await fs.promises.rm(quarantineMetadataPath(quarantinePath), { force: true });
   return scan;
 }
 

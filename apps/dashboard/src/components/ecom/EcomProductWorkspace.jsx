@@ -665,6 +665,12 @@ function formatApiError(err, fallback) {
   if (code === "ASSET_TENANT_MISMATCH") {
     return "One or more media URLs point to another tenant. Re-upload the files in this tenant.";
   }
+  if (code === "UPLOAD_SCAN_PENDING") {
+    return parsed.payload?.message || "The upload is still waiting for scanner approval. Try again shortly or ask an admin to check upload scanner readiness.";
+  }
+  if (code === "UPLOAD_MISSING_URL" || code === "UPLOAD_INCOMPLETE") {
+    return parsed.payload?.message || "The upload did not return a stored asset URL. Please try again.";
+  }
   if ([
     "INVALID_IMAGE",
     "FILE_TOO_LARGE",
@@ -847,6 +853,23 @@ function pickThumbnail(item) {
   return galleryUrl?.url ? resolveAssetUrl(galleryUrl.url) : "";
 }
 
+const UPLOAD_BATCH_CONCURRENCY = 2;
+
+function createUploadPayloadError(payload, fallback = "Upload did not complete.") {
+  const safePayload = payload && typeof payload === "object" ? payload : {};
+  const error = new Error(safePayload.message || fallback);
+  error.status = Number(safePayload.statusCode || safePayload.status_code) || null;
+  error.code = safePayload.error || "UPLOAD_INCOMPLETE";
+  error.payload = {
+    ok: false,
+    error: error.code,
+    message: safePayload.message || fallback,
+    ...safePayload
+  };
+  error.userMessage = error.payload.message;
+  return error;
+}
+
 async function fileToAsset(file, options = {}) {
   const assetKind = options.assetKind === "document" ? "document" : "media";
   const formData = new FormData();
@@ -856,14 +879,46 @@ async function fileToAsset(file, options = {}) {
     method: "POST",
     body: formData
   });
+  if (payload?.ok !== true) {
+    throw createUploadPayloadError(payload, "Upload did not complete.");
+  }
   const asset = payload?.asset || {};
+  const url = asset.raw_url || asset.url;
+  if (!url) {
+    throw createUploadPayloadError(
+      { ok: false, error: "UPLOAD_MISSING_URL", message: "Upload completed without a stored asset URL." },
+      "Upload completed without a stored asset URL."
+    );
+  }
   return {
     name: asset.name || file.name,
     type: asset.type || file.type || (guessVideoFromUrl(file.name) ? "video" : assetKind),
     kind: asset.kind || assetKind,
     // Persist canonical local path; signed URLs are generated at read time.
-    url: asset.raw_url || asset.url
+    url
   };
+}
+
+async function mapWithConcurrency(items, limit, mapper) {
+  const list = Array.from(items || []);
+  if (!list.length) return [];
+  const concurrency = Math.max(1, Math.min(Number(limit) || 1, list.length));
+  const results = new Array(list.length);
+  let nextIndex = 0;
+  await Promise.all(
+    Array.from({ length: concurrency }, async () => {
+      while (nextIndex < list.length) {
+        const currentIndex = nextIndex;
+        nextIndex += 1;
+        results[currentIndex] = await mapper(list[currentIndex], currentIndex);
+      }
+    })
+  );
+  return results;
+}
+
+function uploadFilesWithLimit(files, options = {}) {
+  return mapWithConcurrency(files, UPLOAD_BATCH_CONCURRENCY, (file) => fileToAsset(file, options));
 }
 
 function defaultDraft() {
@@ -4603,9 +4658,7 @@ export default function EcomProductWorkspace({ node }) {
       return next;
     });
     try {
-      const assets = await Promise.all(
-        preparedFiles.map((file) => fileToAsset(file, { assetKind: "media" }))
-      );
+      const assets = await uploadFilesWithLimit(preparedFiles, { assetKind: "media" });
       setDraft((prev) => {
         const next = { ...prev };
         const attrs = { ...(prev.attrs || {}) };
@@ -4677,9 +4730,7 @@ export default function EcomProductWorkspace({ node }) {
     });
 
     try {
-      const assets = await Promise.all(
-        files.map((file) => fileToAsset(file, { assetKind: "document" }))
-      );
+      const assets = await uploadFilesWithLimit(files, { assetKind: "document" });
       setDraft((prev) => {
         const next = { ...prev };
         const attrs = { ...(prev.attrs || {}) };
