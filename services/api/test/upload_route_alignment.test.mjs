@@ -69,6 +69,7 @@ test("dashboard and Samara upload clients surface safe structured API messages",
 
 test("dashboard product uploads reject incomplete payloads and throttle media batches", () => {
   const productStudio = read("apps/dashboard/src/components/ecom/EcomProductWorkspace.jsx");
+  const imageStudio = read("apps/dashboard/src/components/shared/ImageAssetStudioModal.jsx");
   const uploadSecurity = read("services/api/src/lib/uploadSecurity.js");
 
   assert.match(productStudio, /payload\?\.ok !== true/);
@@ -89,6 +90,10 @@ test("dashboard product uploads reject incomplete payloads and throttle media ba
 
   assert.match(uploadSecurity, /await fs\.promises\.writeFile\(targetPath/);
   assert.match(uploadSecurity, /await fs\.promises\.rename\(quarantinePath,\s*targetPath\)/);
+  assert.match(imageStudio, /IMAGE_STUDIO_EXPORT_TIMEOUT_MS\s*=\s*30000/);
+  assert.match(imageStudio, /canvasToBlobWithTimeout/);
+  assert.match(imageStudio, /setProcessingError\(formatImageStudioError\(error\)\)/);
+  assert.match(imageStudio, /role="alert"/);
 });
 
 test("reusable auth-system upload snapshots carry the same hardened boundary", () => {

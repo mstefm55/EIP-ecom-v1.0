@@ -16,6 +16,8 @@ const FORMAT_OPTIONS = [
   { value: "image/webp", label: "WEBP" },
 ];
 
+const IMAGE_STUDIO_EXPORT_TIMEOUT_MS = 30000;
+
 const DEFAULT_WORKFLOW_PROFILES = [
   {
     id: "product-card",
@@ -76,6 +78,52 @@ const DEFAULT_WORKFLOW_PROFILES = [
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function canvasToBlobWithTimeout(canvas, mimeType, quality, timeoutMs = IMAGE_STUDIO_EXPORT_TIMEOUT_MS) {
+  return new Promise((resolve, reject) => {
+    if (!canvas || typeof canvas.toBlob !== "function") {
+      reject(new Error("IMAGE_EXPORT_UNSUPPORTED"));
+      return;
+    }
+    let settled = false;
+    const timer = window.setTimeout(() => {
+      settled = true;
+      reject(new Error("IMAGE_EXPORT_TIMEOUT"));
+    }, timeoutMs);
+    try {
+      canvas.toBlob(
+        (blob) => {
+          if (settled) return;
+          settled = true;
+          window.clearTimeout(timer);
+          if (blob) resolve(blob);
+          else reject(new Error("IMAGE_EXPORT_FAILED"));
+        },
+        mimeType,
+        quality
+      );
+    } catch (error) {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      reject(error);
+    }
+  });
+}
+
+function formatImageStudioError(error) {
+  const code = String(error?.code || error?.message || "").toUpperCase();
+  if (code === "IMAGE_EXPORT_TIMEOUT") {
+    return "Image processing took too long. Try a smaller image, choose JPEG, or reduce the output size before applying.";
+  }
+  if (code === "IMAGE_EXPORT_UNSUPPORTED") {
+    return "This browser cannot export the edited image. Try another browser or upload the original file.";
+  }
+  if (code === "CANVAS_CONTEXT_UNAVAILABLE") {
+    return "The browser could not prepare the image canvas. Try a smaller image or reload the page.";
+  }
+  return "Image processing failed. Try a smaller image, switch to JPEG, or upload the original file.";
 }
 
 function roundedInt(value, fallback) {
@@ -201,6 +249,7 @@ export default function ImageAssetStudioModal({
   const [quality, setQuality] = useState(92);
   const [activeProfileId, setActiveProfileId] = useState("");
   const [working, setWorking] = useState(false);
+  const [processingError, setProcessingError] = useState("");
   const [dragging, setDragging] = useState(false);
   const dragRef = useRef({
     startX: 0,
@@ -374,10 +423,12 @@ export default function ImageAssetStudioModal({
     if (!open) return undefined;
     if (!sourceFile || !isImageFile(sourceFile)) {
       setSourceObjectUrl("");
+      setProcessingError("");
       return undefined;
     }
     const objectUrl = URL.createObjectURL(sourceFile);
     setSourceObjectUrl(objectUrl);
+    setProcessingError("");
     return () => {
       URL.revokeObjectURL(objectUrl);
       setSourceObjectUrl("");
@@ -392,6 +443,7 @@ export default function ImageAssetStudioModal({
     extraObjectUrlsRef.current.clear();
     setSourceCrop({ ...INITIAL_SOURCE_CROP });
     setCropDragging(false);
+    setProcessingError("");
   }, [open]);
 
   useEffect(
@@ -456,6 +508,7 @@ export default function ImageAssetStudioModal({
     setNaturalSize({ width: 0, height: 0 });
     setSourceCrop({ ...INITIAL_SOURCE_CROP });
     setCropDragging(false);
+    setProcessingError("");
   }, [open, sourceFile, presetOptions, defaultProfileId, profileOptions]);
 
   useEffect(() => {
@@ -650,6 +703,7 @@ export default function ImageAssetStudioModal({
     if (cropX <= 0 && cropY <= 0 && cropW >= sourceW && cropH >= sourceH) return;
 
     setWorking(true);
+    setProcessingError("");
     try {
       const canvas = document.createElement("canvas");
       canvas.width = cropW;
@@ -658,11 +712,8 @@ export default function ImageAssetStudioModal({
       if (!ctx) throw new Error("CANVAS_CONTEXT_UNAVAILABLE");
       ctx.drawImage(imgRef.current, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
       const cropMime = mimeType === "image/png" ? "image/png" : "image/jpeg";
-      const blob = await new Promise((resolve) => {
-        const q = cropMime === "image/png" ? undefined : 0.98;
-        canvas.toBlob((nextBlob) => resolve(nextBlob), cropMime, q);
-      });
-      if (!blob) throw new Error("CROP_EXPORT_FAILED");
+      const q = cropMime === "image/png" ? undefined : 0.98;
+      const blob = await canvasToBlobWithTimeout(canvas, cropMime, q);
       const nextFile = new File([blob], deriveFileName(sourceName, cropMime), {
         type: cropMime,
         lastModified: Date.now(),
@@ -683,6 +734,7 @@ export default function ImageAssetStudioModal({
       setFlipY(false);
     } catch (error) {
       console.error(error);
+      setProcessingError(formatImageStudioError(error));
     } finally {
       setWorking(false);
     }
@@ -711,6 +763,7 @@ export default function ImageAssetStudioModal({
   async function handleApply() {
     if (!imageReady || !imgRef.current) return;
     setWorking(true);
+    setProcessingError("");
     try {
       const canvas = document.createElement("canvas");
       const outW = roundedInt(outputWidth, transformed.frameW);
@@ -737,11 +790,8 @@ export default function ImageAssetStudioModal({
       );
       ctx.restore();
 
-      const blob = await new Promise((resolve) => {
-        const qualityValue = mimeType === "image/png" ? undefined : clamp(quality / 100, 0.1, 1);
-        canvas.toBlob((nextBlob) => resolve(nextBlob), mimeType, qualityValue);
-      });
-      if (!blob) throw new Error("IMAGE_EXPORT_FAILED");
+      const qualityValue = mimeType === "image/png" ? undefined : clamp(quality / 100, 0.1, 1);
+      const blob = await canvasToBlobWithTimeout(canvas, mimeType, qualityValue);
 
       const outputFile = new File([blob], deriveFileName(sourceName, mimeType), {
         type: mimeType,
@@ -756,7 +806,8 @@ export default function ImageAssetStudioModal({
         mime_type: mimeType,
       });
     } catch (error) {
-      onApply(null, error);
+      console.error(error);
+      setProcessingError(formatImageStudioError(error));
     } finally {
       setWorking(false);
     }
@@ -1062,6 +1113,12 @@ export default function ImageAssetStudioModal({
         ) : (
           <div className="image-studio-empty">Select an image file to start editing.</div>
         )}
+
+        {processingError ? (
+          <div className="image-studio-error" role="alert">
+            {processingError}
+          </div>
+        ) : null}
 
         <footer className="image-studio-footer">
           <span>
