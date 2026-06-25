@@ -68,6 +68,7 @@ test("dashboard and Samara upload clients surface safe structured API messages",
 });
 
 test("dashboard product uploads reject incomplete payloads and throttle media batches", () => {
+  const apiClient = read("apps/dashboard/src/services/apiClient.js");
   const productStudio = read("apps/dashboard/src/components/ecom/EcomProductWorkspace.jsx");
   const imageStudio = read("apps/dashboard/src/components/shared/ImageAssetStudioModal.jsx");
   const uploadSecurity = read("services/api/src/lib/uploadSecurity.js");
@@ -76,6 +77,10 @@ test("dashboard product uploads reject incomplete payloads and throttle media ba
   assert.match(productStudio, /UPLOAD_SCAN_PENDING/);
   assert.match(productStudio, /UPLOAD_MISSING_URL/);
   assert.match(productStudio, /UPLOAD_BATCH_CONCURRENCY\s*=\s*2/);
+  assert.match(productStudio, /UPLOAD_REQUEST_TIMEOUT_MS\s*=\s*120000/);
+  assert.match(productStudio, /timeoutMs:\s*UPLOAD_REQUEST_TIMEOUT_MS/);
+  assert.match(productStudio, /REQUEST_TIMEOUT/);
+  assert.match(productStudio, /NETWORK_REQUEST_FAILED/);
   assert.match(productStudio, /function uploadFilesWithLimit/);
   assert.match(productStudio, /uploadFilesWithLimit\(preparedFiles,\s*\{ assetKind: "media" \}\)/);
   assert.match(productStudio, /uploadFilesWithLimit\(files,\s*\{ assetKind: "document" \}\)/);
@@ -94,6 +99,11 @@ test("dashboard product uploads reject incomplete payloads and throttle media ba
   assert.match(imageStudio, /canvasToBlobWithTimeout/);
   assert.match(imageStudio, /setProcessingError\(formatImageStudioError\(error\)\)/);
   assert.match(imageStudio, /role="alert"/);
+  assert.match(apiClient, /DEFAULT_CSRF_TIMEOUT_MS\s*=\s*15000/);
+  assert.match(apiClient, /createTimeoutController/);
+  assert.match(apiClient, /signal:\s*timeout\.signal/);
+  assert.match(apiClient, /REQUEST_TIMEOUT/);
+  assert.match(apiClient, /NETWORK_REQUEST_FAILED/);
 });
 
 test("reusable auth-system upload snapshots carry the same hardened boundary", () => {

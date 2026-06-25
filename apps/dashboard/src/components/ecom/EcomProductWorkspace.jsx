@@ -668,6 +668,12 @@ function formatApiError(err, fallback) {
   if (code === "UPLOAD_SCAN_PENDING") {
     return parsed.payload?.message || "The upload is still waiting for scanner approval. Try again shortly or ask an admin to check upload scanner readiness.";
   }
+  if (code === "REQUEST_TIMEOUT") {
+    return parsed.payload?.message || "The upload took too long and was stopped. Try again with a smaller file or check the connection.";
+  }
+  if (code === "NETWORK_REQUEST_FAILED") {
+    return parsed.payload?.message || "The upload request could not complete. Check your connection and try again.";
+  }
   if (code === "UPLOAD_MISSING_URL" || code === "UPLOAD_INCOMPLETE") {
     return parsed.payload?.message || "The upload did not return a stored asset URL. Please try again.";
   }
@@ -854,6 +860,7 @@ function pickThumbnail(item) {
 }
 
 const UPLOAD_BATCH_CONCURRENCY = 2;
+const UPLOAD_REQUEST_TIMEOUT_MS = 120000;
 
 function createUploadPayloadError(payload, fallback = "Upload did not complete.") {
   const safePayload = payload && typeof payload === "object" ? payload : {};
@@ -877,7 +884,8 @@ async function fileToAsset(file, options = {}) {
   formData.append("asset_kind", assetKind);
   const payload = await apiFetch("/api/eip/ecom/uploads", {
     method: "POST",
-    body: formData
+    body: formData,
+    timeoutMs: UPLOAD_REQUEST_TIMEOUT_MS
   });
   if (payload?.ok !== true) {
     throw createUploadPayloadError(payload, "Upload did not complete.");
