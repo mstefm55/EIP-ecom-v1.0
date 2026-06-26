@@ -1226,6 +1226,9 @@ function resolveStorefrontMappingUi(value) {
             title: String(item?.title || slot).trim(),
             page: normalizeStorefrontSlot(item?.page || slot.split(".")[0] || "home"),
             mode: String(item?.mode || "").trim().toLowerCase() === "cards" ? "cards" : "hero",
+            rendererType: String(item?.rendererType || item?.renderer_type || item?.suggested_renderer || "")
+              .trim()
+              .toLowerCase(),
             description: String(item?.description || "").trim()
           };
         })
@@ -1260,6 +1263,38 @@ function inferProductSourceTag(slotValue) {
   if (slot.includes("drop")) return "drop";
   if (slot.includes("featured")) return "featured";
   return "";
+}
+
+function isProductStorefrontRenderer(rendererType) {
+  const value = String(rendererType || "").trim().toLowerCase();
+  return value === "product_carousel" || value === "product_grid";
+}
+
+function fallbackStorefrontRendererForSlot(slotValue, modeValue = "") {
+  const mode = String(modeValue || storefrontSlotMode(slotValue)).trim().toLowerCase();
+  return mode === "cards" ? "editorial_card_grid" : "hero_slider";
+}
+
+function stripTransientStorefrontSlideFields(slide = {}) {
+  const next = { ...(slide || {}) };
+  delete next.upload_preview_url;
+  delete next.uploadPreviewUrl;
+  delete next.preview_url;
+  delete next.previewUrl;
+  delete next.upload_error;
+  delete next.uploadError;
+  return next;
+}
+
+function stripTransientArticleFields(article = {}) {
+  const next = { ...(article || {}) };
+  delete next.image_preview_url;
+  delete next.imagePreviewUrl;
+  delete next.preview_url;
+  delete next.previewUrl;
+  delete next.upload_error;
+  delete next.uploadError;
+  return next;
 }
 
 function isStorefrontSlideContentful(slide) {
@@ -1912,6 +1947,19 @@ export default function EcomProductWorkspace({ node }) {
     storefrontStructureZones.forEach((zone) => map.set(zone.tag, zone));
     return map;
   }, [storefrontStructureZones]);
+  const effectiveStorefrontRendererFor = (slotValue = storefrontDraft.slot, attrsValue = storefrontDraft.attrs) => {
+    const explicitRenderer = String(attrsValue?.renderer_type || "").trim().toLowerCase();
+    if (explicitRenderer) return explicitRenderer;
+    const slot = normalizeStorefrontSlot(slotValue);
+    const mappedRenderer = String(storefrontStructureZoneByTag.get(slot)?.rendererType || "").trim().toLowerCase();
+    if (mappedRenderer) return mappedRenderer;
+    const preset = getConfiguredStorefrontSlotPreset(slot);
+    const presetRenderer = String(preset?.rendererType || preset?.renderer_type || preset?.suggested_renderer || "")
+      .trim()
+      .toLowerCase();
+    if (presetRenderer) return presetRenderer;
+    return fallbackStorefrontRendererForSlot(slot, storefrontSlotModeFor(slot));
+  };
   const storefrontConnectionOptions = useMemo(() => {
     const list = Array.isArray(storefrontConnections) ? storefrontConnections : [];
     return list
@@ -3244,19 +3292,36 @@ export default function EcomProductWorkspace({ node }) {
     }));
   };
 
+  const updatePageContentArticleFields = (patch = {}) => {
+    setPageContentDraft((prev) => ({
+      ...prev,
+      article: {
+        ...(prev.article || {}),
+        ...(patch || {})
+      }
+    }));
+  };
+
   const savePageContent = async () => {
     const target = String(pageContentDraft?.id || pageContentDraft?.code || "").trim();
     if (!target) return;
+    const pendingPreview = String(pageContentDraft?.article?.image_preview_url || "").trim();
+    if (pageContentUploading || pendingPreview) {
+      setStatusTone("error");
+      setStatusMessage("Article image is still uploading. Wait for the upload to finish before saving.");
+      return;
+    }
     setPageContentSaving(true);
     setStatusMessage("");
     try {
+      const article = stripTransientArticleFields(pageContentDraft.article || {});
       const body = {
         title: String(pageContentDraft.title || pageContentDraft.article?.title || "").trim() || "Untitled article",
         slot: normalizeStorefrontSlot(pageContentDraft.slot || "pages.cards"),
         category_code: normalizeStorefrontCategoryCode(pageContentDraft.category_code || ""),
         is_active: pageContentDraft.is_active !== false,
         article: {
-          ...(pageContentDraft.article || {}),
+          ...article,
           title: String(pageContentDraft.article?.title || pageContentDraft.title || "").trim() || "Untitled article"
         }
       };
@@ -3374,8 +3439,8 @@ export default function EcomProductWorkspace({ node }) {
     const input = event.target;
     const file = input.files?.[0];
     if (!file) return;
-    setPageContentUploading(true);
     setStatusMessage("");
+    let previewUrl = "";
     try {
       const prepared = await openImageStudioForFile(file, {
         title: "Edit article image",
@@ -3383,12 +3448,23 @@ export default function EcomProductWorkspace({ node }) {
         defaultProfileId: "blog-cover"
       });
       if (!prepared) return;
+      previewUrl = URL.createObjectURL(prepared);
+      updatePageContentArticleFields({ image_preview_url: previewUrl });
+      setPageContentUploading(true);
       const asset = await fileToAsset(prepared, { assetKind: "media" });
       if (!asset?.url) throw new Error("UPLOAD_MISSING_URL");
-      updatePageContentArticleField("image", asset.url);
+      updatePageContentArticleFields({ image: asset.url, image_preview_url: "" });
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+        previewUrl = "";
+      }
       setStatusTone("success");
       setStatusMessage("Article image uploaded.");
     } catch (err) {
+      if (previewUrl) {
+        updatePageContentArticleFields({ image_preview_url: "" });
+        URL.revokeObjectURL(previewUrl);
+      }
       setStatusTone("error");
       setStatusMessage(formatApiError(err, "Article image upload failed."));
     } finally {
@@ -3421,11 +3497,38 @@ export default function EcomProductWorkspace({ node }) {
     }));
   };
 
+  const updateStorefrontSourceMode = (value) => {
+    const mode = String(value || "").trim().toLowerCase();
+    setStorefrontDraft((prev) => {
+      const attrs = { ...(prev.attrs || {}) };
+      if (!mode) {
+        delete attrs.source_mode;
+        delete attrs.product_source;
+        return { ...prev, attrs };
+      }
+      attrs.source_mode = mode;
+      attrs.product_source = {
+        ...(attrs.product_source || {}),
+        mode
+      };
+      return { ...prev, attrs };
+    });
+  };
+
   const updateStorefrontSlideField = (index, field, value) => {
     setStorefrontDraft((prev) => {
       const slides = [...(Array.isArray(prev.slides) ? prev.slides : [])];
       if (!slides[index]) return prev;
       slides[index] = { ...slides[index], [field]: value };
+      return { ...prev, slides };
+    });
+  };
+
+  const updateStorefrontSlideFields = (index, patch = {}) => {
+    setStorefrontDraft((prev) => {
+      const slides = [...(Array.isArray(prev.slides) ? prev.slides : [])];
+      if (!slides[index]) return prev;
+      slides[index] = { ...slides[index], ...(patch || {}) };
       return { ...prev, slides };
     });
   };
@@ -3492,8 +3595,8 @@ export default function EcomProductWorkspace({ node }) {
     const file = input.files?.[0];
     if (!file) return;
 
-    setStorefrontUploadingIndex(index);
     setStatusMessage("");
+    let previewUrl = "";
     try {
       const prepared = await openImageStudioForFile(file, {
         title: storefrontMode === "cards" ? "Edit card image" : "Edit hero image",
@@ -3504,12 +3607,23 @@ export default function EcomProductWorkspace({ node }) {
         defaultProfileId: storefrontMode === "cards" ? "content-block" : "hero-banner"
       });
       if (!prepared) return;
+      previewUrl = URL.createObjectURL(prepared);
+      updateStorefrontSlideFields(index, { upload_preview_url: previewUrl });
+      setStorefrontUploadingIndex(index);
       const asset = await fileToAsset(prepared, { assetKind: "media" });
       if (!asset?.url) throw new Error("UPLOAD_MISSING_URL");
-      updateStorefrontSlideField(index, "image", asset.url);
+      updateStorefrontSlideFields(index, { image: asset.url, upload_preview_url: "" });
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+        previewUrl = "";
+      }
       setStatusTone("success");
       setStatusMessage("Slide image uploaded.");
     } catch (err) {
+      if (previewUrl) {
+        updateStorefrontSlideFields(index, { upload_preview_url: "" });
+        URL.revokeObjectURL(previewUrl);
+      }
       setStatusTone("error");
       setStatusMessage(formatApiError(err, "Slide image upload failed."));
     } finally {
@@ -3519,6 +3633,14 @@ export default function EcomProductWorkspace({ node }) {
   };
 
   const saveStorefrontContent = async () => {
+    const pendingSlideUpload = (Array.isArray(storefrontDraft.slides) ? storefrontDraft.slides : []).some(
+      (slide) => String(slide?.upload_preview_url || slide?.preview_url || "").trim()
+    );
+    if (storefrontUploadingIndex !== null || pendingSlideUpload) {
+      setStatusTone("error");
+      setStatusMessage("Slide image is still uploading. Wait for the upload to finish before saving.");
+      return;
+    }
     setStorefrontSaving(true);
     setStatusMessage("");
     try {
@@ -3528,25 +3650,32 @@ export default function EcomProductWorkspace({ node }) {
           storefrontDraft.category_code || ""
         ),
         is_active: storefrontDraft.is_active !== false,
-        attrs: storefrontDraft.attrs || {},
+        attrs: { ...(storefrontDraft.attrs || {}) },
         slides: (Array.isArray(storefrontDraft.slides) ? storefrontDraft.slides : [])
-          .map((slide, index) => ({
-            ...slide,
-            cta: {
-              action: String(slide?.cta_action || "navigate_internal").toLowerCase() === "navigate_external"
-                ? "navigate_external"
-                : String(slide?.cta_action || "navigate_internal").toLowerCase() === "scroll_to"
-                  ? "scroll_to"
-                  : "navigate_internal",
-              target: String(slide?.cta_target || slide?.cta_url || "").trim() || null,
-              new_tab: slide?.cta_new_tab === true || String(slide?.cta_new_tab || "").toLowerCase() === "true"
-            },
-            cta_url: String(slide?.cta_target || slide?.cta_url || "").trim() || null,
-            order: Number.isFinite(Number(slide.order)) ? Number(slide.order) : index + 1
-          }))
+          .map((slide, index) => {
+            const sanitizedSlide = stripTransientStorefrontSlideFields(slide);
+            return {
+              ...sanitizedSlide,
+              cta: {
+                action: String(slide?.cta_action || "navigate_internal").toLowerCase() === "navigate_external"
+                  ? "navigate_external"
+                  : String(slide?.cta_action || "navigate_internal").toLowerCase() === "scroll_to"
+                    ? "scroll_to"
+                    : "navigate_internal",
+                target: String(slide?.cta_target || slide?.cta_url || "").trim() || null,
+                new_tab: slide?.cta_new_tab === true || String(slide?.cta_new_tab || "").toLowerCase() === "true"
+              },
+              cta_url: String(slide?.cta_target || slide?.cta_url || "").trim() || null,
+              order: Number.isFinite(Number(slide.order)) ? Number(slide.order) : index + 1
+            };
+          })
           .filter((slide) => isStorefrontSlideContentful(slide))
       };
-      const rendererType = String(payload.attrs?.renderer_type || "").trim().toLowerCase();
+      const rendererType = effectiveStorefrontRendererFor(storefrontDraft.slot, payload.attrs);
+      if (!isProductStorefrontRenderer(rendererType)) {
+        delete payload.attrs.source_mode;
+        delete payload.attrs.product_source;
+      }
       const requiredFields = Array.isArray(storefrontMappingUi.requiredFieldsByRenderer?.[rendererType])
         ? storefrontMappingUi.requiredFieldsByRenderer[rendererType]
         : [];
@@ -5460,6 +5589,9 @@ export default function EcomProductWorkspace({ node }) {
   }, [activeSection, sectionItems]);
 
   const storefrontSourceMode = String(storefrontDraft?.attrs?.source_mode || "").trim().toLowerCase();
+  const storefrontExplicitRenderer = String(storefrontDraft?.attrs?.renderer_type || "").trim().toLowerCase();
+  const storefrontEffectiveRenderer = effectiveStorefrontRendererFor(storefrontDraft.slot, storefrontDraft.attrs);
+  const storefrontRendererRequiresSource = isProductStorefrontRenderer(storefrontEffectiveRenderer);
   const storefrontProductSource =
     storefrontDraft?.attrs?.product_source && typeof storefrontDraft.attrs.product_source === "object"
       ? storefrontDraft.attrs.product_source
@@ -5508,7 +5640,22 @@ export default function EcomProductWorkspace({ node }) {
           label="Renderer descriptor"
           type="select"
           value={storefrontDraft?.attrs?.renderer_type || ""}
-          onChange={(value) => updateStorefrontAttr("renderer_type", value)}
+          onChange={(value) => {
+            const nextRenderer = String(value || "").trim().toLowerCase();
+            updateStorefrontAttr("renderer_type", nextRenderer);
+            const nextEffectiveRenderer = nextRenderer || effectiveStorefrontRendererFor(storefrontDraft.slot, {
+              ...(storefrontDraft.attrs || {}),
+              renderer_type: nextRenderer
+            });
+            if (!isProductStorefrontRenderer(nextEffectiveRenderer) && storefrontSourceMode) {
+              updateStorefrontSourceMode("");
+            }
+          }}
+          hint={
+            storefrontExplicitRenderer
+              ? `Using ${storefrontExplicitRenderer}.`
+              : `Auto resolves to ${storefrontEffectiveRenderer || "the mapped renderer"} for this slot.`
+          }
           options={[
             { value: "", label: "Auto from mapping" },
             ...storefrontMappingUi.rendererOptions
@@ -5518,10 +5665,12 @@ export default function EcomProductWorkspace({ node }) {
           label="Placement source"
           type="select"
           value={storefrontSourceMode}
-          onChange={(value) => {
-            updateStorefrontAttr("source_mode", value);
-            updateStorefrontProductSource("mode", value);
-          }}
+          onChange={(value) => updateStorefrontSourceMode(value)}
+          hint={
+            storefrontRendererRequiresSource && !storefrontSourceMode
+              ? "This renderer needs a governed product source."
+              : "Editorial content is correct for hero and card slides."
+          }
           options={storefrontMappingUi.productSourceModes}
         />
       </div>
@@ -5592,7 +5741,7 @@ export default function EcomProductWorkspace({ node }) {
       ) : (
         <div className="space-y-3">
           {(Array.isArray(storefrontDraft.slides) ? storefrontDraft.slides : []).map((slide, index) => {
-            const slidePreviewUrl = resolveAssetUrl(slide.image || "");
+            const slidePreviewUrl = resolveAssetUrl(slide.upload_preview_url || slide.image || "");
             return (
             <article
               key={`${slide.id || "slide"}-${index}`}
@@ -6696,8 +6845,13 @@ export default function EcomProductWorkspace({ node }) {
                         {pageContentUploading ? "Uploading..." : "Upload image"}
                         <input type="file" accept="image/*" className="hidden" onChange={handlePageContentImageUpload} />
                       </label>
-                      {pageContentDraft.article?.image ? (
-                        <MediaFrame asset={{ url: pageContentDraft.article.image, name: pageContentDraft.article.title || "Article image" }} />
+                      {pageContentDraft.article?.image || pageContentDraft.article?.image_preview_url ? (
+                        <MediaFrame
+                          asset={{
+                            url: pageContentDraft.article.image_preview_url || pageContentDraft.article.image,
+                            name: pageContentDraft.article.title || "Article image"
+                          }}
+                        />
                       ) : null}
                       <Field
                         label="CTA label"
