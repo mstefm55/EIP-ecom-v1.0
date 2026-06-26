@@ -31,11 +31,14 @@ test("all live media upload routes use the shared hardened storage boundary", ()
     assert.match(source, /createUploadErrorHandler/);
     assert.match(source, /ensureUploadDirectory/);
     assert.match(source, /safeUploadTarget/);
+    assert.match(source, /resolveMultipartFilePart/);
     assert.match(source, /uploadPartToBuffer/);
     assert.match(source, /UPLOAD_MAX_BYTES/);
+    assert.match(source, /bodyLimit:\s*Number\(app\.config\.UPLOAD_MAX_BYTES/);
     assert.match(source, /sendUploadFailure/);
     assert.match(source, /INVALID_IMAGE/);
     assert.doesNotMatch(source, /UPLOAD_FAILED/);
+    assert.doesNotMatch(source, /await req\.file\(\)/);
     assert.doesNotMatch(source, /fs\.mkdirSync/);
     assert.doesNotMatch(source, /fs\.writeFileSync/);
   }

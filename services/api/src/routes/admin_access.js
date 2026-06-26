@@ -9,6 +9,7 @@ import { auditSecurityEvent } from "../lib/securityAudit.js";
 import {
   DEFAULT_MAX_UPLOAD_BYTES,
   createUploadErrorHandler,
+  resolveMultipartFilePart,
   safeUploadTarget,
   sendUploadFailure,
   uploadPartToBuffer,
@@ -690,7 +691,10 @@ export default async function adminAccessRoutes(app) {
 
   app.post(
     "/admin/tenants/:tenantId/users/:identityId/avatar",
-    { errorHandler: createUploadErrorHandler("admin_avatar_upload_request_error") },
+    {
+      errorHandler: createUploadErrorHandler("admin_avatar_upload_request_error"),
+      bodyLimit: Number(app.config.UPLOAD_MAX_BYTES || DEFAULT_MAX_UPLOAD_BYTES) + 64 * 1024
+    },
     async (req, reply) => {
     const session = await requireAdminPerm(app, req, reply, "admin.user.write", { csrf: true });
     if (!session) return;
@@ -715,11 +719,7 @@ export default async function adminAccessRoutes(app) {
         });
       }
 
-      const bodyFile = req.body?.file;
-      let filePart = bodyFile;
-      if (!filePart?.file && typeof filePart?.toBuffer !== "function") {
-        filePart = await req.file();
-      }
+      const filePart = await resolveMultipartFilePart(req);
       if (!filePart || (!filePart.file && typeof filePart.toBuffer !== "function")) {
         return reply.code(400).send({
           ok: false,

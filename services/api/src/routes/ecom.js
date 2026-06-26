@@ -9,6 +9,7 @@ import { sanitizeMediaForStorage } from "../services/assets/url_policy.js";
 import {
   DEFAULT_MAX_UPLOAD_BYTES,
   createUploadErrorHandler,
+  resolveMultipartFilePart,
   safeUploadTarget,
   sendUploadFailure,
   uploadPartToBuffer,
@@ -3610,7 +3611,10 @@ function normalizeVariantsForStorage(value) {
 export default async function ecomRoutes(app) {
   app.post(
     "/uploads",
-    { errorHandler: createUploadErrorHandler("ecom_upload_request_error") },
+    {
+      errorHandler: createUploadErrorHandler("ecom_upload_request_error"),
+      bodyLimit: Number(app.config.UPLOAD_MAX_BYTES || DEFAULT_MAX_UPLOAD_BYTES) + 64 * 1024
+    },
     async (req, reply) => {
       const session = await requireWrite(app, req, reply, "ECOM_PRODUCT_WRITE");
       if (!session) return;
@@ -3624,11 +3628,7 @@ export default async function ecomRoutes(app) {
           });
         }
 
-        const bodyFile = req.body?.file;
-        let filePart = bodyFile;
-        if (!filePart?.file && typeof filePart?.toBuffer !== "function") {
-          filePart = await req.file();
-        }
+        const filePart = await resolveMultipartFilePart(req);
         if (!filePart || (!filePart.file && typeof filePart.toBuffer !== "function")) {
           return reply.code(400).send({
             ok: false,

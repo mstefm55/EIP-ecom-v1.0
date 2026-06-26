@@ -132,6 +132,65 @@ export async function uploadPartToBuffer(filePart, { maxBytes = DEFAULT_MAX_UPLO
   }
 }
 
+function hasOwn(object, key) {
+  return Object.prototype.hasOwnProperty.call(object || {}, key);
+}
+
+function attachedBufferReader(value) {
+  if (!value) return null;
+  if (Buffer.isBuffer(value)) {
+    return async () => Buffer.from(value);
+  }
+  if (value instanceof Uint8Array) {
+    return async () => Buffer.from(value);
+  }
+  if (typeof value.arrayBuffer === "function") {
+    return async () => Buffer.from(await value.arrayBuffer());
+  }
+  return null;
+}
+
+function normalizeAttachedFilePart(input) {
+  if (!input) return null;
+  if (Array.isArray(input)) {
+    for (const item of input) {
+      const normalized = normalizeAttachedFilePart(item);
+      if (normalized) return normalized;
+    }
+    return null;
+  }
+  if (typeof input.toBuffer === "function" || input.file) return input;
+
+  const readBuffer =
+    attachedBufferReader(input) ||
+    attachedBufferReader(input.value) ||
+    attachedBufferReader(input.buffer) ||
+    attachedBufferReader(input.data) ||
+    attachedBufferReader(input._buf);
+  if (!readBuffer) return null;
+
+  return {
+    ...input,
+    filename: input.filename || input.name || "upload",
+    mimetype: input.mimetype || input.mimeType || input.contentType || "",
+    toBuffer: readBuffer
+  };
+}
+
+export async function resolveMultipartFilePart(req, fieldName = "file") {
+  const body = req?.body && typeof req.body === "object" ? req.body : null;
+  const hasAttachedField = body ? hasOwn(body, fieldName) : false;
+  const attached = normalizeAttachedFilePart(hasAttachedField ? body[fieldName] : null);
+  if (attached) return attached;
+
+  // With attachFieldsToBody enabled, the multipart stream has already been consumed
+  // into req.body. Falling back to req.file() after seeing the field can wait forever
+  // in cloud runtimes because there is no remaining file stream to read.
+  if (hasAttachedField) return null;
+
+  return typeof req?.file === "function" ? req.file() : null;
+}
+
 export function safeUploadTarget(rootDir, storedName) {
   const root = path.resolve(rootDir);
   const target = path.resolve(root, storedName);

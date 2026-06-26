@@ -21,6 +21,7 @@ import {
   DEFAULT_MAX_UPLOAD_BYTES,
   createUploadErrorHandler,
   normalizeUploadError,
+  resolveMultipartFilePart,
   safeUploadTarget,
   sendUploadFailure,
   uploadPartToBuffer,
@@ -3448,11 +3449,7 @@ export default async function publicCommerceRoutes(app) {
           });
         }
 
-        const bodyFile = req.body?.file;
-        let filePart = bodyFile;
-        if (!filePart?.file && typeof filePart?.toBuffer !== "function") {
-          filePart = await req.file();
-        }
+        const filePart = await resolveMultipartFilePart(req);
         if (!filePart || (!filePart.file && typeof filePart.toBuffer !== "function")) {
           return reply.code(400).send({
             ok: false,

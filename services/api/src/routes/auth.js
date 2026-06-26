@@ -25,6 +25,7 @@ import { resolveEipSurfaceAccess } from "../lib/surfaceAccess.js";
 import {
   DEFAULT_MAX_UPLOAD_BYTES,
   createUploadErrorHandler,
+  resolveMultipartFilePart,
   safeUploadTarget,
   sendUploadFailure,
   uploadPartToBuffer,
@@ -2620,7 +2621,10 @@ export default async function authRoutes(app) {
 
   app.post(
     "/auth/profile/avatar",
-    { errorHandler: createUploadErrorHandler("profile_avatar_upload_request_error") },
+    {
+      errorHandler: createUploadErrorHandler("profile_avatar_upload_request_error"),
+      bodyLimit: Number(app.config.UPLOAD_MAX_BYTES || DEFAULT_MAX_UPLOAD_BYTES) + 64 * 1024
+    },
     async (req, reply) => {
     const s = await app.requireSession(req, { realm: "EIP" });
     if (!s.ok) return reply.code(s.status).send({ ok: false, error: s.error });
@@ -2639,11 +2643,7 @@ export default async function authRoutes(app) {
         });
       }
 
-      const bodyFile = req.body?.file;
-      let filePart = bodyFile;
-      if (!filePart?.file && typeof filePart?.toBuffer !== "function") {
-        filePart = await req.file();
-      }
+      const filePart = await resolveMultipartFilePart(req);
       if (!filePart || (!filePart.file && typeof filePart.toBuffer !== "function")) {
         return reply.code(400).send({
           ok: false,

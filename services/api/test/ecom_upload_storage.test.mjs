@@ -13,6 +13,7 @@ import {
 import {
   createUploadErrorHandler,
   normalizeUploadError,
+  resolveMultipartFilePart,
   safeUploadTarget,
   uploadPartToBuffer,
   validateEcomUpload,
@@ -133,6 +134,39 @@ test("oversized files fail before storage", async () => {
     statusCode: 413,
     message: "The selected file exceeds the upload limit."
   });
+});
+
+test("attached multipart file buffers resolve without falling back to consumed request stream", async () => {
+  const filePart = await resolveMultipartFilePart({
+    body: {
+      file: {
+        value: PNG_1X1,
+        filename: "product.png",
+        mimetype: "image/png"
+      }
+    },
+    file: async () => {
+      throw new Error("REQ_FILE_SHOULD_NOT_BE_CALLED");
+    }
+  });
+
+  assert.equal(filePart.filename, "product.png");
+  assert.equal(filePart.mimetype, "image/png");
+  assert.deepEqual(await uploadPartToBuffer(filePart), PNG_1X1);
+});
+
+test("invalid attached multipart file fields do not wait for a consumed req.file stream", async () => {
+  let fallbackCalled = false;
+  const filePart = await resolveMultipartFilePart({
+    body: { file: { value: "" } },
+    file: async () => {
+      fallbackCalled = true;
+      return { toBuffer: async () => PNG_1X1 };
+    }
+  });
+
+  assert.equal(filePart, null);
+  assert.equal(fallbackCalled, false);
 });
 
 test("multipart parser size failures use the structured upload error response", async (t) => {
