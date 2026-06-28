@@ -179,14 +179,51 @@ function buildOutboundUrl(profile, endpoint) {
 }
 
 async function fetchWithTimeout(url, options = {}) {
+  const { timeout_ms: timeoutOption, signal: externalSignal, ...fetchOptions } = options;
   const controller = new AbortController();
-  const timeout = options.timeout_ms || 8000;
-  const timer = setTimeout(() => controller.abort(), timeout);
+  const timeout = Math.max(1, Number(timeoutOption) || 8000);
+  let timer = null;
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    if (timer) clearTimeout(timer);
+    externalSignal?.removeEventListener?.("abort", abortFromExternal);
+  };
+  const abortFromExternal = () => {
+    if (!controller.signal.aborted) controller.abort(externalSignal?.reason);
+    cleanup();
+  };
+  timer = setTimeout(() => {
+    if (!controller.signal.aborted) controller.abort();
+    cleanup();
+  }, timeout);
+  if (externalSignal?.aborted) abortFromExternal();
+  else externalSignal?.addEventListener?.("abort", abortFromExternal, { once: true });
   try {
-    const response = await fetch(url, { ...options, signal: controller.signal });
+    const response = await fetch(url, { ...fetchOptions, signal: controller.signal });
+    if (!response.body) {
+      cleanup();
+      return response;
+    }
+    for (const method of ["arrayBuffer", "blob", "formData", "json", "text"]) {
+      const consume = response[method]?.bind(response);
+      if (!consume) continue;
+      Object.defineProperty(response, method, {
+        configurable: true,
+        value: async (...args) => {
+          try {
+            return await consume(...args);
+          } finally {
+            cleanup();
+          }
+        }
+      });
+    }
     return response;
-  } finally {
-    clearTimeout(timer);
+  } catch (error) {
+    cleanup();
+    throw error;
   }
 }
 

@@ -43,11 +43,14 @@ Recommended Railway API service variables:
 STOREFRONT_RENDERED_SCAN_ENABLED=true
 STOREFRONT_RENDERED_SCAN_EXECUTABLE_PATH=/usr/bin/chromium
 STOREFRONT_RENDERED_SCAN_ALLOW_NO_SANDBOX=false
+STOREFRONT_STRUCTURE_SCAN_TIMEOUT_MS=30000
 ```
 
 The prior `NIXPACKS_PKGS` and `NIXPACKS_APT_PKGS` attempts are no longer needed. If an operator deliberately changes the image and exposes Chromium elsewhere on `PATH`, leave `STOREFRONT_RENDERED_SCAN_EXECUTABLE_PATH` empty and the API will discover it.
 
 Keep `STOREFRONT_RENDERED_SCAN_ALLOW_NO_SANDBOX=false`. The Docker image runs the API as the non-root `node` user and does not hardcode Chromium's `--no-sandbox` flag. Only change this variable after an explicit container-isolation review.
+
+Keep `STOREFRONT_STRUCTURE_SCAN_TIMEOUT_MS=30000` unless a measured storefront requires a different budget. It bounds the complete scan, including successful HTTP responses whose body streams never finish.
 
 At API startup, the log event `storefront_rendered_dom_scanner_diagnostic` reports:
 

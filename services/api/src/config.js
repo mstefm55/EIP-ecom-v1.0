@@ -79,6 +79,7 @@ export const envSchema = {
     STOREFRONT_RENDERED_SCAN_EXECUTABLE_PATH: { type: "string", default: "" },
     STOREFRONT_RENDERED_SCAN_TIMEOUT_MS: { type: "integer", default: 15000 },
     STOREFRONT_RENDERED_SCAN_WAIT_MS: { type: "integer", default: 900 },
+    STOREFRONT_STRUCTURE_SCAN_TIMEOUT_MS: { type: "integer", default: 30000 },
     STOREFRONT_RENDERED_SCAN_MAX_HTML_CHARS: { type: "integer", default: 1048576 },
     STOREFRONT_RENDERED_SCAN_MAX_REQUESTS: { type: "integer", default: 300 },
     STOREFRONT_RENDERED_SCAN_ALLOW_NO_SANDBOX: { type: "boolean", default: false },

@@ -29,7 +29,10 @@ import {
 import { apiFetch } from "../../services/apiClient";
 import ActionMiniModal from "../shared/ActionMiniModal";
 import ImageAssetStudioModal from "../shared/ImageAssetStudioModal";
-import { prepareWorkspaceImageUpload } from "./contentStudioUpload";
+import {
+  approvedStorefrontRendererForZone,
+  uploadWorkspaceImageAsset
+} from "./contentStudioUpload";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
 const ECOM_PREVIEW_BASE_URL = import.meta.env.VITE_ECOM_PREVIEW_BASE_URL || "http://localhost:5174";
@@ -671,6 +674,9 @@ function formatApiError(err, fallback) {
   }
   if (code === "REQUEST_TIMEOUT") {
     return parsed.payload?.message || "The upload took too long and was stopped. Try again with a smaller file or check the connection.";
+  }
+  if (code === "STRUCTURE_SCAN_TIMEOUT") {
+    return "Storefront scanning exceeded its time limit and was stopped. Use Tagged scan or verify the website connection.";
   }
   if (code === "NETWORK_REQUEST_FAILED") {
     return parsed.payload?.message || "The upload request could not complete. Check your connection and try again.";
@@ -1948,11 +1954,19 @@ export default function EcomProductWorkspace({ node }) {
     storefrontStructureZones.forEach((zone) => map.set(zone.tag, zone));
     return map;
   }, [storefrontStructureZones]);
+  const storefrontApprovedStructureZoneByTag = useMemo(() => {
+    const map = new Map();
+    storefrontStructureZones
+      .filter((zone) => zone.mappingStatus === "approved")
+      .forEach((zone) => map.set(zone.tag, zone));
+    return map;
+  }, [storefrontStructureZones]);
   const effectiveStorefrontRendererFor = (slotValue = storefrontDraft.slot, attrsValue = storefrontDraft.attrs) => {
     const explicitRenderer = String(attrsValue?.renderer_type || "").trim().toLowerCase();
     if (explicitRenderer) return explicitRenderer;
     const slot = normalizeStorefrontSlot(slotValue);
-    const mappedRenderer = String(storefrontStructureZoneByTag.get(slot)?.rendererType || "").trim().toLowerCase();
+    const mappedZone = storefrontApprovedStructureZoneByTag.get(slot);
+    const mappedRenderer = approvedStorefrontRendererForZone(mappedZone);
     if (mappedRenderer) return mappedRenderer;
     const preset = getConfiguredStorefrontSlotPreset(slot);
     const presetRenderer = String(preset?.rendererType || preset?.renderer_type || preset?.suggested_renderer || "")
@@ -3443,7 +3457,7 @@ export default function EcomProductWorkspace({ node }) {
     setStatusMessage("");
     let previewUrl = "";
     try {
-      const prepared = await prepareWorkspaceImageUpload({
+      const uploaded = await uploadWorkspaceImageAsset({
         file,
         contentStudioOnly,
         openImageStudio: openImageStudioForFile,
@@ -3451,15 +3465,17 @@ export default function EcomProductWorkspace({ node }) {
           title: "Edit article image",
           recommendedSize: { width: 1800, height: 1200, label: "Article 3:2" },
           defaultProfileId: "blog-cover"
+        },
+        uploadAsset: (prepared) => fileToAsset(prepared, { assetKind: "media" }),
+        createPreviewUrl: (prepared) => URL.createObjectURL(prepared),
+        onPrepared: ({ previewUrl: nextPreviewUrl }) => {
+          previewUrl = nextPreviewUrl;
+          updatePageContentArticleFields({ image_preview_url: previewUrl });
+          setPageContentUploading(true);
         }
       });
-      if (!prepared) return;
-      previewUrl = URL.createObjectURL(prepared);
-      updatePageContentArticleFields({ image_preview_url: previewUrl });
-      setPageContentUploading(true);
-      const asset = await fileToAsset(prepared, { assetKind: "media" });
-      if (!asset?.url) throw new Error("UPLOAD_MISSING_URL");
-      updatePageContentArticleFields({ image: asset.url, image_preview_url: "" });
+      if (!uploaded) return;
+      updatePageContentArticleFields({ image: uploaded.asset.url, image_preview_url: "" });
       if (previewUrl) {
         URL.revokeObjectURL(previewUrl);
         previewUrl = "";
@@ -3604,7 +3620,7 @@ export default function EcomProductWorkspace({ node }) {
     setStatusMessage("");
     let previewUrl = "";
     try {
-      const prepared = await prepareWorkspaceImageUpload({
+      const uploaded = await uploadWorkspaceImageAsset({
         file,
         contentStudioOnly,
         openImageStudio: openImageStudioForFile,
@@ -3615,15 +3631,17 @@ export default function EcomProductWorkspace({ node }) {
               ? { width: 1400, height: 1050, label: "Card 4:3" }
               : { width: 1920, height: 1080, label: "Hero 16:9" },
           defaultProfileId: storefrontMode === "cards" ? "content-block" : "hero-banner"
+        },
+        uploadAsset: (prepared) => fileToAsset(prepared, { assetKind: "media" }),
+        createPreviewUrl: (prepared) => URL.createObjectURL(prepared),
+        onPrepared: ({ previewUrl: nextPreviewUrl }) => {
+          previewUrl = nextPreviewUrl;
+          updateStorefrontSlideFields(index, { upload_preview_url: previewUrl });
+          setStorefrontUploadingIndex(index);
         }
       });
-      if (!prepared) return;
-      previewUrl = URL.createObjectURL(prepared);
-      updateStorefrontSlideFields(index, { upload_preview_url: previewUrl });
-      setStorefrontUploadingIndex(index);
-      const asset = await fileToAsset(prepared, { assetKind: "media" });
-      if (!asset?.url) throw new Error("UPLOAD_MISSING_URL");
-      updateStorefrontSlideFields(index, { image: asset.url, upload_preview_url: "" });
+      if (!uploaded) return;
+      updateStorefrontSlideFields(index, { image: uploaded.asset.url, upload_preview_url: "" });
       if (previewUrl) {
         URL.revokeObjectURL(previewUrl);
         previewUrl = "";
@@ -4729,44 +4747,48 @@ export default function EcomProductWorkspace({ node }) {
   };
 
   const handleMainUpload = async (event) => {
-    const file = event.target.files?.[0];
+    const input = event.target;
+    const file = input.files?.[0];
     if (!file) return;
-    const prepared = await openImageStudioForFile(file, {
-      title: "Edit main product media",
-      recommendedSize: { width: 1200, height: 1500, label: "Product 4:5" },
-      defaultProfileId: "product-card"
-    });
-    if (!prepared) {
-      event.target.value = "";
-      return;
-    }
-    const previewUrl = URL.createObjectURL(prepared);
-    setDraft((prev) => {
-      const next = { ...prev };
-      const attrs = { ...(prev.attrs || {}) };
-      const media = { ...(attrs.media || {}) };
-      if (media.main_asset) revokePreview(media.main_asset);
-      media.main_asset = {
-        name: prepared.name,
-        type: prepared.type || (guessVideoFromUrl(prepared.name) ? "video" : "image"),
-        preview_url: previewUrl
-      };
-      attrs.media = media;
-      next.attrs = attrs;
-      return next;
-    });
+    let previewUrl = "";
     try {
-      const asset = await fileToAsset(prepared, { assetKind: "media" });
-      updateDraft(["media", "main_asset"], { ...asset, preview_url: previewUrl });
-      if (asset.url) {
-        updateDraft(["media", "main_url"], asset.url);
-        updateDraft(["media", "hero_url"], asset.url);
-      }
+      const uploaded = await uploadWorkspaceImageAsset({
+        file,
+        openImageStudio: openImageStudioForFile,
+        imageStudioOptions: {
+          title: "Edit main product media",
+          recommendedSize: { width: 1200, height: 1500, label: "Product 4:5" },
+          defaultProfileId: "product-card"
+        },
+        uploadAsset: (prepared) => fileToAsset(prepared, { assetKind: "media" }),
+        createPreviewUrl: (prepared) => URL.createObjectURL(prepared),
+        onPrepared: ({ file: prepared, previewUrl: nextPreviewUrl }) => {
+          previewUrl = nextPreviewUrl;
+          setDraft((prev) => {
+            const next = { ...prev };
+            const attrs = { ...(prev.attrs || {}) };
+            const media = { ...(attrs.media || {}) };
+            if (media.main_asset) revokePreview(media.main_asset);
+            media.main_asset = {
+              name: prepared.name,
+              type: prepared.type || (guessVideoFromUrl(prepared.name) ? "video" : "image"),
+              preview_url: previewUrl
+            };
+            attrs.media = media;
+            next.attrs = attrs;
+            return next;
+          });
+        }
+      });
+      if (!uploaded) return;
+      updateDraft(["media", "main_asset"], { ...uploaded.asset, preview_url: previewUrl });
+      updateDraft(["media", "main_url"], uploaded.asset.url);
+      updateDraft(["media", "hero_url"], uploaded.asset.url);
     } catch (err) {
       setStatusTone("error");
       setStatusMessage(formatApiError(err, "Main media upload failed."));
     } finally {
-      event.target.value = "";
+      input.value = "";
     }
   };
 

@@ -235,6 +235,7 @@ const STRUCTURE_SCAN_MANIFEST_PATHS = [
   "/eip/structure.json"
 ];
 const STRUCTURE_SCAN_TIMEOUT_MS = 9000;
+const STRUCTURE_SCAN_TOTAL_TIMEOUT_MS = 30000;
 const STRUCTURE_SCAN_MAX_MODULES = 120;
 const STRUCTURE_SCAN_MAX_DEPTH = 6;
 const STRUCTURE_PARENT_PATTERNS = [
@@ -1267,17 +1268,20 @@ async function fetchStructureUrl(url, profile, options = {}, redirectCount = 0) 
   return response;
 }
 
-async function fetchStructureManifest(frontendUrl, profile) {
+async function fetchStructureManifest(frontendUrl, profile, signal) {
   for (const candidatePath of STRUCTURE_SCAN_MANIFEST_PATHS) {
+    if (signal?.aborted) throw new Error("STRUCTURE_SCAN_TIMEOUT");
     const candidateUrl = new URL(candidatePath, frontendUrl).toString();
     let response;
     try {
       response = await fetchStructureUrl(candidateUrl, profile, {
         method: "GET",
         headers: { Accept: "application/json" },
-        timeout_ms: STRUCTURE_SCAN_TIMEOUT_MS
+        timeout_ms: STRUCTURE_SCAN_TIMEOUT_MS,
+        signal
       });
     } catch {
+      if (signal?.aborted) throw new Error("STRUCTURE_SCAN_TIMEOUT");
       continue;
     }
     if (!response.ok) continue;
@@ -1287,6 +1291,7 @@ async function fetchStructureManifest(frontendUrl, profile) {
     try {
       payload = await response.json();
     } catch {
+      if (signal?.aborted) throw new Error("STRUCTURE_SCAN_TIMEOUT");
       continue;
     }
     const normalized = normalizeStructureManifest(payload);
@@ -1304,11 +1309,12 @@ async function fetchStructureManifest(frontendUrl, profile) {
   return null;
 }
 
-async function fetchTextForStructure(url, profile) {
+async function fetchTextForStructure(url, profile, signal) {
   const response = await fetchStructureUrl(url, profile, {
     method: "GET",
     headers: { Accept: "text/html,application/javascript,text/javascript,*/*;q=0.5" },
-    timeout_ms: STRUCTURE_SCAN_TIMEOUT_MS
+    timeout_ms: STRUCTURE_SCAN_TIMEOUT_MS,
+    signal
   });
   if (!response.ok) {
     throw new Error(`FETCH_FAILED_${response.status}`);
@@ -1335,11 +1341,11 @@ async function fetchTextForStructure(url, profile) {
   return { url: response.url || url, text, contentType };
 }
 
-async function buildStructureScanFromFrontend(frontendUrl, profile, scanMode = "auto", renderedScanConfig = {}) {
+async function buildStructureScanWithinBudget(frontendUrl, profile, scanMode, renderedScanConfig, signal) {
   const mode = ["auto", "rendered", "generic", "tagged"].includes(normalizeText(scanMode).toLowerCase())
     ? normalizeText(scanMode).toLowerCase()
     : "auto";
-  const rootDoc = await fetchTextForStructure(frontendUrl, profile);
+  const rootDoc = await fetchTextForStructure(frontendUrl, profile, signal);
   const staticGenericCandidates = ["auto", "generic"].includes(mode)
     ? scanGenericStorefrontHtml(rootDoc.text)
     : [];
@@ -1347,6 +1353,7 @@ async function buildStructureScanFromFrontend(frontendUrl, profile, scanMode = "
   const renderedDom = ["auto", "rendered"].includes(mode)
     ? await renderStorefrontDom({ url: rootDoc.url, profile, config: renderedScanConfig })
     : null;
+  if (signal?.aborted) throw new Error("STRUCTURE_SCAN_TIMEOUT");
   const renderedGenericCandidates = renderedDom?.ok
     ? scanGenericStorefrontHtml(renderedDom.html).map((candidate) => ({
         ...candidate,
@@ -1365,8 +1372,9 @@ async function buildStructureScanFromFrontend(frontendUrl, profile, scanMode = "
           ? renderedGenericCandidates
           : staticGenericCandidates;
   const manifest = ["auto", "tagged"].includes(mode)
-    ? await fetchStructureManifest(frontendUrl, profile)
+    ? await fetchStructureManifest(frontendUrl, profile, signal)
     : null;
+  if (signal?.aborted) throw new Error("STRUCTURE_SCAN_TIMEOUT");
   const origin = new URL(rootDoc.url).origin;
   const scan = buildStructureScanAccumulator(frontendUrl);
   if (["auto", "tagged"].includes(mode)) appendStructureFromText(scan, rootDoc.url, rootDoc.text);
@@ -1391,13 +1399,15 @@ async function buildStructureScanFromFrontend(frontendUrl, profile, scanMode = "
 
   let fetchedModules = 0;
   while (["auto", "tagged"].includes(mode) && queue.length && fetchedModules < STRUCTURE_SCAN_MAX_MODULES) {
+    if (signal?.aborted) throw new Error("STRUCTURE_SCAN_TIMEOUT");
     const current = queue.shift();
     if (!current || scan.scanned_sources.has(current.url)) continue;
     if (current.depth > STRUCTURE_SCAN_MAX_DEPTH) continue;
     let doc;
     try {
-      doc = await fetchTextForStructure(current.url, profile);
+      doc = await fetchTextForStructure(current.url, profile, signal);
     } catch {
+      if (signal?.aborted) throw new Error("STRUCTURE_SCAN_TIMEOUT");
       scan.scanned_sources.add(current.url);
       continue;
     }
@@ -1475,6 +1485,33 @@ async function buildStructureScanFromFrontend(frontendUrl, profile, scanMode = "
     zones: taggedZones,
     nodes: manifest?.nodes?.length ? manifest.nodes : scan.nodes
   };
+}
+
+async function buildStructureScanFromFrontend(frontendUrl, profile, scanMode = "auto", renderedScanConfig = {}) {
+  const configuredTimeout = Number(renderedScanConfig?.STOREFRONT_STRUCTURE_SCAN_TIMEOUT_MS);
+  const timeoutMs = Number.isFinite(configuredTimeout)
+    ? Math.max(5000, Math.min(60000, Math.floor(configuredTimeout)))
+    : STRUCTURE_SCAN_TOTAL_TIMEOUT_MS;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await buildStructureScanWithinBudget(
+      frontendUrl,
+      profile,
+      scanMode,
+      renderedScanConfig,
+      controller.signal
+    );
+  } catch (error) {
+    if (controller.signal.aborted || error?.message === "STRUCTURE_SCAN_TIMEOUT") {
+      const timeoutError = new Error("STRUCTURE_SCAN_TIMEOUT");
+      timeoutError.code = "STRUCTURE_SCAN_TIMEOUT";
+      throw timeoutError;
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function selectStructureConnection(profiles, requestedConnectionCode = "") {
@@ -4579,7 +4616,11 @@ export default async function ecomRoutes(app) {
           frontend_url: frontendUrl,
           error: error?.message || String(error)
         });
-        return reply.code(500).send({ ok: false, error: "STRUCTURE_SCAN_FAILED" });
+        const timedOut = error?.code === "STRUCTURE_SCAN_TIMEOUT" || error?.message === "STRUCTURE_SCAN_TIMEOUT";
+        return reply.code(timedOut ? 504 : 500).send({
+          ok: false,
+          error: timedOut ? "STRUCTURE_SCAN_TIMEOUT" : "STRUCTURE_SCAN_FAILED"
+        });
       }
 
       if (
