@@ -63,6 +63,7 @@ const PAYMENT_PROVIDER_SETUP = {
     displayName: "PayPal",
     providerCode: "paypal",
     authMode: "oauth2_client_credentials",
+    clientAuthMethod: "basic",
     baseUrls: {
       sandbox: "https://api-m.sandbox.paypal.com",
       production: "https://api-m.paypal.com"
@@ -216,6 +217,7 @@ function buildProfile(id, overrides = {}) {
         client_id: "",
         client_secret: "",
         client_secret_set: false,
+        client_auth_method: "",
         token_url: "",
         scope: ""
       },
@@ -341,6 +343,7 @@ function fromApiProfile(profile) {
         client_id: profile.outbound?.auth?.client_id || "",
         client_secret: "",
         client_secret_set: Boolean(profile.outbound?.auth?.client_secret_set),
+        client_auth_method: profile.outbound?.auth?.client_auth_method || "",
         token_url: profile.outbound?.auth?.token_url || "",
         scope: profile.outbound?.auth?.scope || ""
       },
@@ -535,6 +538,9 @@ function friendlyError(err, fallback) {
         CONNECTION_NOT_FOUND: "Connection not found.",
         DUPLICATE_SUFFIX: "Inbound path suffix already in use.",
         VALIDATION_ERROR: "Validation failed. Review required fields.",
+        OAUTH_TOKEN_FAILED: "PayPal rejected the credentials. Verify the Client ID, Client Secret, and sandbox/production mode.",
+        OAUTH_TOKEN_MISSING: "PayPal authenticated but did not return an access token.",
+        OAUTH_CLIENT_CONFIG_REQUIRED: "PayPal Client ID, Client Secret, or token URL is missing.",
         ORIGIN_NOT_ALLOWED: "Origin not allowed for this connection."
       };
       return map[code] || code || fallback;
@@ -754,6 +760,9 @@ export default function AdminConnectionsPanelSafe() {
       if (setup.tokenUrls && !selectedConnection.outbound?.auth?.token_url) {
         authPatch.token_url = paymentEnvironmentValue(setup, "sandbox", "tokenUrls");
       }
+      if (setup.clientAuthMethod && selectedConnection.outbound?.auth?.client_auth_method !== setup.clientAuthMethod) {
+        authPatch.client_auth_method = setup.clientAuthMethod;
+      }
       if (Object.keys(authPatch).length) updateNested("outbound", "auth", authPatch);
 
       const hmacPatch = {};
@@ -971,6 +980,9 @@ export default function AdminConnectionsPanelSafe() {
         method: "POST",
         body: { connection_code: selectedConnection.identity.connection_code }
       });
+      if (type === "outbound") {
+        updateSection("routing", { health_status: result.ok ? "healthy" : "unhealthy" });
+      }
       setTestResult({ tone: result.ok ? "success" : "error", text: `${type === "outbound" ? "Outbound" : "Inbound"} test ${result.ok ? "passed" : "failed"} (HTTP ${result.status}).` });
     } catch (err) {
       setError(friendlyError(err, "Failed to test connection"));

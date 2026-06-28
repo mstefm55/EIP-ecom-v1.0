@@ -3,10 +3,52 @@ import http from "node:http";
 import test from "node:test";
 import {
   assertOutboundUrlAllowed,
+  buildOAuthClientCredentialsRequest,
   buildOutboundAuth,
   fetchWithTimeout,
   isForbiddenAddress
 } from "../src/services/gateway/outbound.js";
+
+test("PayPal OAuth client credentials use HTTP Basic authentication", () => {
+  const request = buildOAuthClientCredentialsRequest({
+    identity: { connection_kind: "paypal" },
+    routing: { provider_code: "paypal" },
+    outbound: {
+      timeout_ms: 8000,
+      auth: {
+        client_id: "paypal-client-id",
+        client_secret: "paypal-client-secret",
+        token_url: "https://api-m.sandbox.paypal.com/v1/oauth2/token"
+      }
+    }
+  });
+
+  assert.equal(request.client_auth_method, "basic");
+  assert.equal(
+    request.options.headers.Authorization,
+    `Basic ${Buffer.from("paypal-client-id:paypal-client-secret").toString("base64")}`
+  );
+  assert.equal(request.options.body, "grant_type=client_credentials");
+  assert.doesNotMatch(request.options.body, /client_id|client_secret/);
+});
+
+test("generic OAuth connections retain form-body client authentication", () => {
+  const request = buildOAuthClientCredentialsRequest({
+    identity: { connection_kind: "custom" },
+    outbound: {
+      auth: {
+        client_id: "generic-client",
+        client_secret: "generic-secret",
+        token_url: "https://oauth.example/token"
+      }
+    }
+  });
+
+  assert.equal(request.client_auth_method, "body");
+  assert.equal(request.options.headers.Authorization, undefined);
+  assert.match(request.options.body, /client_id=generic-client/);
+  assert.match(request.options.body, /client_secret=generic-secret/);
+});
 
 test("outbound timeout remains active while a successful response body is still streaming", async (t) => {
   const server = http.createServer((_req, res) => {

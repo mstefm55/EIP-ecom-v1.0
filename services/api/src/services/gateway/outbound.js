@@ -178,6 +178,49 @@ function buildOutboundUrl(profile, endpoint) {
   return `${base}${prefix}${suffix}`.replace(/\/\/+/g, "/").replace(":/", "://");
 }
 
+function oauthClientAuthenticationMethod(profile, auth = profile?.outbound?.auth || {}) {
+  const configured = normalizeText(auth.client_auth_method).toLowerCase();
+  if (["basic", "body"].includes(configured)) return configured;
+  const providerCode = normalizeText(
+    profile?.routing?.provider_code ||
+    profile?.routing?.protocol ||
+    profile?.identity?.connection_kind
+  ).toLowerCase().replace(/[-.\s]+/g, "_");
+  return providerCode === "paypal" ? "basic" : "body";
+}
+
+function buildOAuthClientCredentialsRequest(profile) {
+  const outbound = profile?.outbound || {};
+  const auth = outbound.auth || {};
+  if (!auth.client_id || !auth.client_secret || !auth.token_url) {
+    throw new Error("OAUTH_CLIENT_CONFIG_REQUIRED");
+  }
+  const method = oauthClientAuthenticationMethod(profile, auth);
+  const params = new URLSearchParams();
+  params.set("grant_type", "client_credentials");
+  if (auth.scope) params.set("scope", auth.scope);
+  const headers = {
+    Accept: "application/json",
+    "Content-Type": "application/x-www-form-urlencoded"
+  };
+  if (method === "basic") {
+    headers.Authorization = `Basic ${Buffer.from(`${auth.client_id}:${auth.client_secret}`).toString("base64")}`;
+  } else {
+    params.set("client_id", auth.client_id);
+    params.set("client_secret", auth.client_secret);
+  }
+  return {
+    url: auth.token_url,
+    client_auth_method: method,
+    options: {
+      method: "POST",
+      headers,
+      body: params.toString(),
+      timeout_ms: outbound.timeout_ms || 8000
+    }
+  };
+}
+
 async function fetchWithTimeout(url, options = {}) {
   const { timeout_ms: timeoutOption, signal: externalSignal, ...fetchOptions } = options;
   const controller = new AbortController();
@@ -255,21 +298,9 @@ async function buildOutboundAuth(profile) {
     const encoded = Buffer.from(`${auth.username}:${auth.password}`).toString("base64");
     headers.Authorization = `Basic ${encoded}`;
   } else if (mode === "oauth2_client_credentials") {
-    if (!auth.client_id || !auth.client_secret || !auth.token_url) {
-      throw new Error("OAUTH_CLIENT_CONFIG_REQUIRED");
-    }
-    await assertOutboundUrlAllowed(auth.token_url, profile, { purpose: "oauth_token" });
-    const params = new URLSearchParams();
-    params.set("grant_type", "client_credentials");
-    params.set("client_id", auth.client_id);
-    params.set("client_secret", auth.client_secret);
-    if (auth.scope) params.set("scope", auth.scope);
-    const tokenRes = await fetchWithTimeout(auth.token_url, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: params.toString(),
-      timeout_ms: outbound.timeout_ms || 8000
-    });
+    const tokenRequest = buildOAuthClientCredentialsRequest(profile);
+    await assertOutboundUrlAllowed(tokenRequest.url, profile, { purpose: "oauth_token" });
+    const tokenRes = await fetchWithTimeout(tokenRequest.url, tokenRequest.options);
     if (!tokenRes.ok) {
       throw new Error("OAUTH_TOKEN_FAILED");
     }
@@ -385,6 +416,7 @@ async function executeGatewayOutboundRequest(client, ctx, request = {}) {
 
 export {
   fetchWithTimeout,
+  buildOAuthClientCredentialsRequest,
   buildOutboundHeaders,
   buildOutboundAuth,
   executeGatewayOutboundRequest,
