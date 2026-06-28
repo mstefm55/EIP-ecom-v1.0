@@ -65,6 +65,15 @@ test("missing PayPal credentials produce exact field-level errors and labels", (
   });
 });
 
+test("PayPal sandbox account email is rejected as a REST app Client ID", () => {
+  const paypal = paymentProfile("paypal");
+  paypal.outbound.auth.client_id = "sandbox-business@example.com";
+  const errors = validateGatewayConnection(paypal);
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0].path, "outbound.auth.client_id");
+  assert.match(errors[0].message, /REST app Client ID/);
+});
+
 test("backend validation details map back to the exact PayPal fields", () => {
   const errors = gatewayServerValidationErrors([
     "paypal-profile: oauth client_id required",

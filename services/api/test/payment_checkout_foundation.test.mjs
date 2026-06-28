@@ -241,6 +241,10 @@ test("payment profiles do not require inbound suffix or webhook fields until web
 
   assert.deepEqual(validateProfiles([paypal, checkout]), []);
 
+  paypal.outbound.auth.client_id = "sandbox-business@example.com";
+  assert.match(validateProfiles([paypal]).join("\n"), /PayPal REST app Client ID/);
+  paypal.outbound.auth.client_id = "paypal-client-reference";
+
   const websiteWithoutSuffix = normalizeProfile({
     id: "website-no-suffix",
     identity: {

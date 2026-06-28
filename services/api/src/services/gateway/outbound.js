@@ -196,6 +196,9 @@ function buildOAuthClientCredentialsRequest(profile) {
     throw new Error("OAUTH_CLIENT_CONFIG_REQUIRED");
   }
   const method = oauthClientAuthenticationMethod(profile, auth);
+  if (method === "basic" && /^[^@\s]+@[^@\s]+$/.test(normalizeText(auth.client_id))) {
+    throw new Error("OAUTH_CLIENT_ID_INVALID");
+  }
   const params = new URLSearchParams();
   params.set("grant_type", "client_credentials");
   if (auth.scope) params.set("scope", auth.scope);

@@ -541,6 +541,7 @@ function friendlyError(err, fallback) {
         OAUTH_TOKEN_FAILED: "PayPal rejected the credentials. Verify the Client ID, Client Secret, and sandbox/production mode.",
         OAUTH_TOKEN_MISSING: "PayPal authenticated but did not return an access token.",
         OAUTH_CLIENT_CONFIG_REQUIRED: "PayPal Client ID, Client Secret, or token URL is missing.",
+        OAUTH_CLIENT_ID_INVALID: "Enter the PayPal REST app Client ID, not the sandbox account email.",
         ORIGIN_NOT_ALLOWED: "Origin not allowed for this connection."
       };
       return map[code] || code || fallback;
@@ -972,6 +973,14 @@ export default function AdminConnectionsPanelSafe() {
 
   const handleTest = async (type) => {
     if (!selectedTenantId || !selectedConnection) return;
+    const validationErrors = validateGatewayConnections([selectedConnection]);
+    if (validationErrors.length) {
+      setFieldErrors(fieldErrorMap(validationErrors));
+      setValidationSummary(validationErrors);
+      setActiveStep(validationErrors[0].step || "identity");
+      setError(null);
+      return;
+    }
     setTesting(type);
     setError(null);
     setTestResult(null);
@@ -1132,7 +1141,7 @@ export default function AdminConnectionsPanelSafe() {
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <button type="button" onClick={() => handleRemoveConnection(selectedConnection.id)} className="rounded-full border border-rose-200 bg-rose-50 px-3 py-2 text-[0.6rem] uppercase tracking-[0.2em] text-rose-500"><Trash2 className="mr-1 inline h-3 w-3" />Remove</button>
-                <button type="button" onClick={() => handleTest("inbound")} disabled={Boolean(testing)} className="rounded-full border border-ink-200/70 bg-white px-3 py-2 text-[0.6rem] uppercase tracking-[0.2em] text-ink-600">{testing === "inbound" ? "Testing..." : "Test inbound"}</button>
+                {!paymentSetup || selectedConnection.inbound.webhook_enabled === true ? <button type="button" onClick={() => handleTest("inbound")} disabled={Boolean(testing)} className="rounded-full border border-ink-200/70 bg-white px-3 py-2 text-[0.6rem] uppercase tracking-[0.2em] text-ink-600">{testing === "inbound" ? "Testing..." : "Test inbound"}</button> : null}
                 {selectedConnection.identity.direction !== "inbound" ? <button type="button" onClick={() => handleTest("outbound")} disabled={Boolean(testing)} className="rounded-full border border-ink-200/70 bg-white px-3 py-2 text-[0.6rem] uppercase tracking-[0.2em] text-ink-600">{testing === "outbound" ? "Testing..." : "Test outbound"}</button> : null}
               </div>
             </div>
@@ -1146,7 +1155,7 @@ export default function AdminConnectionsPanelSafe() {
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {paymentChecks.map((check) => (
-                      <StatusPill key={check.label} ok={check.ok}>{check.label}: {check.ok ? "ready" : "missing"}</StatusPill>
+                      <StatusPill key={check.label} ok={check.optional || check.ok}>{check.label}: {check.ok ? "ready" : check.optional ? "not configured" : "missing"}</StatusPill>
                     ))}
                   </div>
                 </div>

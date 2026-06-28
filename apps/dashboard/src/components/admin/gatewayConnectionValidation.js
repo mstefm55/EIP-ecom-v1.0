@@ -72,6 +72,16 @@ function validatePaymentProfile(profile, rules, errors) {
     const configured = field.secret ? hasCredential(auth, field.key) : Boolean(text(auth[field.key]));
     if (!configured) addError(errors, profile, field.path, field.label, "outbound");
   });
+  if (rules.displayName === "PayPal" && /^[^@\s]+@[^@\s]+$/.test(text(auth.client_id))) {
+    addError(
+      errors,
+      profile,
+      "outbound.auth.client_id",
+      "Client ID reference",
+      "outbound",
+      "Enter the PayPal REST app Client ID, not the sandbox account email."
+    );
+  }
 
   if (isPaymentWebhookEnabled(profile) && !text(profile?.inbound?.inbound_path_suffix)) {
     addError(errors, profile, "inbound.inbound_path_suffix", "Inbound path suffix", "inbound");

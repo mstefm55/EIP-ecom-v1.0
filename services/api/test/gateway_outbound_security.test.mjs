@@ -32,6 +32,23 @@ test("PayPal OAuth client credentials use HTTP Basic authentication", () => {
   assert.doesNotMatch(request.options.body, /client_id|client_secret/);
 });
 
+test("PayPal OAuth rejects a sandbox account email used as the REST app Client ID", () => {
+  assert.throws(
+    () => buildOAuthClientCredentialsRequest({
+      identity: { connection_kind: "paypal" },
+      routing: { provider_code: "paypal" },
+      outbound: {
+        auth: {
+          client_id: "sandbox-business@example.com",
+          client_secret: "paypal-client-secret",
+          token_url: "https://api-m.sandbox.paypal.com/v1/oauth2/token"
+        }
+      }
+    }),
+    /OAUTH_CLIENT_ID_INVALID/
+  );
+});
+
 test("generic OAuth connections retain form-body client authentication", () => {
   const request = buildOAuthClientCredentialsRequest({
     identity: { connection_kind: "custom" },

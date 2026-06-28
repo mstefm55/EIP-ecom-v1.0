@@ -481,6 +481,9 @@ function validatePaymentProfile(profile, paymentType, errors, id) {
   }
   if (paymentType.provider_code === "paypal") {
     if (!normalizeText(auth.client_id)) errors.push(`${id}: oauth client_id required`);
+    if (/^[^@\s]+@[^@\s]+$/.test(normalizeText(auth.client_id))) {
+      errors.push(`${id}: oauth client_id must be a PayPal REST app Client ID, not an account email`);
+    }
     if (!hasSecretConfigured(auth, "client_secret")) errors.push(`${id}: oauth client_secret required`);
   } else if (!hasSecretConfigured(auth, "secret")) {
     errors.push(`${id}: api key secret required`);
