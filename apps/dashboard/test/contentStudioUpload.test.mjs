@@ -17,18 +17,19 @@ test("automatic renderer mapping ignores unapproved scanner proposals", () => {
   );
 });
 
-test("Content Studio sends the selected image directly without waiting for Image Studio", async () => {
+test("Content Studio uses the same Image Studio preparation and asset upload pipeline", async () => {
   const file = { name: "hero.png", type: "image/png" };
+  const editedFile = { name: "hero-edited.webp", type: "image/webp" };
   let editorCalls = 0;
 
   let uploadedFile = null;
   let preparedPreview = null;
   const result = await uploadWorkspaceImageAsset({
     file,
-    contentStudioOnly: true,
-    openImageStudio: async () => {
+    openImageStudio: async (source) => {
+      assert.equal(source, file);
       editorCalls += 1;
-      return new Promise(() => {});
+      return editedFile;
     },
     uploadAsset: async (selectedFile) => {
       uploadedFile = selectedFile;
@@ -40,11 +41,11 @@ test("Content Studio sends the selected image directly without waiting for Image
     }
   });
 
-  assert.equal(result.file, file);
+  assert.equal(result.file, editedFile);
   assert.equal(result.asset.url, "/assets/hero.png");
-  assert.equal(uploadedFile, file);
+  assert.equal(uploadedFile, editedFile);
   assert.equal(preparedPreview, "blob:hero");
-  assert.equal(editorCalls, 0);
+  assert.equal(editorCalls, 1);
 });
 
 test("Product Studio retains the existing Image Studio preparation flow", async () => {
@@ -55,7 +56,6 @@ test("Product Studio retains the existing Image Studio preparation flow", async 
   let uploadedFile = null;
   const result = await uploadWorkspaceImageAsset({
     file,
-    contentStudioOnly: false,
     openImageStudio: async (source, options) => {
       assert.equal(source, file);
       receivedOptions = options;

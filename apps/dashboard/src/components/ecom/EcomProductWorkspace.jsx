@@ -3459,7 +3459,6 @@ export default function EcomProductWorkspace({ node }) {
     try {
       const uploaded = await uploadWorkspaceImageAsset({
         file,
-        contentStudioOnly,
         openImageStudio: openImageStudioForFile,
         imageStudioOptions: {
           title: "Edit article image",
@@ -3622,7 +3621,6 @@ export default function EcomProductWorkspace({ node }) {
     try {
       const uploaded = await uploadWorkspaceImageAsset({
         file,
-        contentStudioOnly,
         openImageStudio: openImageStudioForFile,
         imageStudioOptions: {
           title: storefrontMode === "cards" ? "Edit card image" : "Edit hero image",

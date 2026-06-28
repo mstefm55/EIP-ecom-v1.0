@@ -5,7 +5,6 @@ export function approvedStorefrontRendererForZone(zone) {
 
 export async function uploadWorkspaceImageAsset({
   file,
-  contentStudioOnly = false,
   openImageStudio,
   imageStudioOptions = {},
   uploadAsset,
@@ -14,11 +13,9 @@ export async function uploadWorkspaceImageAsset({
 } = {}) {
   if (!file) return null;
 
-  // Content Studio already exposes fit, focal point, and overlay controls. Upload
-  // immediately so its request cannot be held open by the optional editor modal.
-  const prepared = contentStudioOnly || typeof openImageStudio !== "function"
-    ? file
-    : await openImageStudio(file, imageStudioOptions);
+  const prepared = typeof openImageStudio === "function"
+    ? await openImageStudio(file, imageStudioOptions)
+    : file;
   if (!prepared) return null;
   if (typeof uploadAsset !== "function") throw new Error("UPLOAD_HANDLER_REQUIRED");
 
