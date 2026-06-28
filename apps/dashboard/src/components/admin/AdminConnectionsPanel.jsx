@@ -124,6 +124,7 @@ function buildProfile(id, overrides = {}) {
     },
     inbound: {
       inbound_path_suffix: "",
+      webhook_enabled: false,
       http_method: "POST",
       expected_content_type: "application/json",
       origin_allowlist_text: "",
@@ -223,6 +224,7 @@ function fromApiProfile(profile) {
     },
     inbound: {
       inbound_path_suffix: profile.inbound?.inbound_path_suffix || "",
+      webhook_enabled: profile.inbound?.webhook_enabled === true,
       http_method: profile.inbound?.http_method || "POST",
       expected_content_type: profile.inbound?.expected_content_type || "application/json",
       origin_allowlist_text: Array.isArray(profile.inbound?.origin_allowlist)
@@ -345,6 +347,7 @@ function toApiProfile(profile) {
     },
     inbound: {
       inbound_path_suffix: profile.inbound.inbound_path_suffix,
+      webhook_enabled: profile.inbound.webhook_enabled === true,
       http_method: profile.inbound.http_method,
       expected_content_type: profile.inbound.expected_content_type,
       origin_allowlist: normalizeList(profile.inbound.origin_allowlist_text),
@@ -435,7 +438,8 @@ function validateProfile(profile) {
   if (!profile.identity.connection_code) errors.push("Connection code is required");
 
   const kind = profile.identity.connection_kind;
-  if (["paypal", "checkout_com"].includes(kind)) {
+  const paymentConnection = ["paypal", "checkout_com"].includes(kind);
+  if (paymentConnection) {
     const expected = kind;
     if (profile.routing.channel !== "payments") errors.push("Payment provider connections must use the payments channel");
     if ((profile.routing.provider_code || profile.routing.protocol) && (profile.routing.provider_code || profile.routing.protocol) !== expected) {
@@ -448,7 +452,7 @@ function validateProfile(profile) {
     }
   }
 
-  if (profile.identity.direction !== "outbound") {
+  if (profile.identity.direction !== "outbound" && (!paymentConnection || profile.inbound.webhook_enabled === true)) {
     if (!profile.inbound.inbound_path_suffix) errors.push("Inbound path suffix is required");
     if (!profile.inbound.expected_content_type) errors.push("Expected content type is required");
     if (!profile.inbound.origin_allowlist_text) {

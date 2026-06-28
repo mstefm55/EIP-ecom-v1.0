@@ -157,6 +157,7 @@ function buildProfile(id, overrides = {}) {
     },
     inbound: {
       inbound_path_suffix: "",
+      webhook_enabled: false,
       http_method: "POST",
       expected_content_type: "application/json",
       origin_allowlist_text: "",
@@ -277,6 +278,7 @@ function fromApiProfile(profile) {
     },
     inbound: {
       inbound_path_suffix: profile.inbound?.inbound_path_suffix || "",
+      webhook_enabled: profile.inbound?.webhook_enabled === true,
       http_method: profile.inbound?.http_method || "POST",
       expected_content_type: profile.inbound?.expected_content_type || "application/json",
       origin_allowlist_text: Array.isArray(profile.inbound?.origin_allowlist) ? profile.inbound.origin_allowlist.join("\n") : "",
@@ -425,6 +427,7 @@ function toApiProfile(profile) {
     identity: { ...profile.identity },
     inbound: {
       inbound_path_suffix: profile.inbound.inbound_path_suffix,
+      webhook_enabled: profile.inbound.webhook_enabled === true,
       http_method: profile.inbound.http_method,
       expected_content_type: profile.inbound.expected_content_type,
       origin_allowlist: normalizeList(profile.inbound.origin_allowlist_text),
@@ -731,7 +734,7 @@ export default function AdminConnectionsPanelSafe() {
     if (Object.keys(patch).length) updateSection("routing", patch);
     if (setup) {
       const identityPatch = {};
-      if (selectedConnection.identity?.direction === "inbound") identityPatch.direction = "outbound";
+      if (selectedConnection.identity?.direction !== "outbound") identityPatch.direction = "outbound";
       if (selectedConnection.identity?.environment !== "sandbox") identityPatch.environment = "sandbox";
       if (Object.keys(identityPatch).length) updateSection("identity", identityPatch);
 
@@ -1147,7 +1150,11 @@ export default function AdminConnectionsPanelSafe() {
                 <Field label={paymentSetup ? "Provider name" : "Connection name"} error={selectedFieldError("identity.connection_name")}><input value={selectedConnection.identity.connection_name} onChange={handleConnectionNameChange} placeholder={paymentSetup?.displayName || ""} className={inputClass} /></Field>
                 <Field label="Connection code" error={selectedFieldError("identity.connection_code")}><input value={selectedConnection.identity.connection_code} readOnly placeholder="auto-generated" className={`${inputClass} bg-slate-50 text-ink-600`} /></Field>
                 <Field label="Connection kind" error={selectedFieldError("identity.connection_kind")}><select value={selectedConnection.identity.connection_kind} onChange={(e) => updateSection("identity", { connection_kind: e.target.value })} className={inputClass}>{KIND_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>
-                <Field label="Direction" error={selectedFieldError("identity.direction")}><select value={selectedConnection.identity.direction} onChange={(e) => updateSection("identity", { direction: e.target.value })} className={inputClass}>{DIRECTION_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>
+                <Field label="Direction" error={selectedFieldError("identity.direction")}>
+                  {paymentSetup
+                    ? <input readOnly value="outbound" className={`${inputClass} bg-slate-50 text-ink-600`} />
+                    : <select value={selectedConnection.identity.direction} onChange={(e) => updateSection("identity", { direction: e.target.value })} className={inputClass}>{DIRECTION_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>}
+                </Field>
                 <Field label={paymentSetup ? "Provider mode" : "Environment"} error={selectedFieldError("identity.environment")}><select value={selectedConnection.identity.environment} onChange={(e) => updateSection("identity", { environment: e.target.value })} className={inputClass}>{ENV_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>
                 {!paymentSetup ? <Field label="Frontend URL" error={selectedFieldError("identity.frontend_url")}><input value={selectedConnection.identity.frontend_url} onChange={(e) => { updateSection("identity", { frontend_url: e.target.value }); if (!selectedConnection.inbound.origin_allowlist_text) updateSection("inbound", { origin_allowlist_text: e.target.value }); }} placeholder="https://storefront.example.com" className={inputClass} /></Field> : null}
                 {!paymentSetup ? <Field label="Portal URL"><input value={selectedConnection.identity.portal_url} onChange={(e) => updateSection("identity", { portal_url: e.target.value })} className={inputClass} /></Field> : null}
@@ -1158,7 +1165,7 @@ export default function AdminConnectionsPanelSafe() {
             {activeStep === "inbound" ? (
               <div className="mt-4 space-y-4">
                 <Grid>
-                  <Field label="Path suffix" error={selectedFieldError("inbound.inbound_path_suffix")}><input value={selectedConnection.inbound.inbound_path_suffix} onChange={(e) => updateSection("inbound", { inbound_path_suffix: e.target.value })} placeholder="tenant-storefront" className={inputClass} /></Field>
+                  <Field label={paymentSetup ? "Webhook path suffix" : "Path suffix"} error={selectedFieldError("inbound.inbound_path_suffix")}><input value={selectedConnection.inbound.inbound_path_suffix} onChange={(e) => updateSection("inbound", { inbound_path_suffix: e.target.value })} placeholder={paymentSetup ? "Optional until webhook is enabled" : "tenant-storefront"} className={inputClass} /></Field>
                   <Field label="HTTP method"><select value={selectedConnection.inbound.http_method} onChange={(e) => updateSection("inbound", { http_method: e.target.value })} className={inputClass}>{HTTP_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}</select></Field>
                   <Field label="Expected content type"><input value={selectedConnection.inbound.expected_content_type} onChange={(e) => updateSection("inbound", { expected_content_type: e.target.value })} className={inputClass} /></Field>
                   <Field label="Rate limit max"><input type="number" value={selectedConnection.inbound.rate_limit_max} onChange={(e) => updateSection("inbound", { rate_limit_max: e.target.value })} className={inputClass} /></Field>
@@ -1173,6 +1180,10 @@ export default function AdminConnectionsPanelSafe() {
               <div className="mt-4 space-y-4">
                 {paymentSetup ? (
                   <Grid>
+                    <label className="flex items-center gap-2 rounded-lg border border-ink-200/70 bg-white px-3 py-2 text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink-400">
+                      <input type="checkbox" checked={selectedConnection.inbound.webhook_enabled === true} onChange={(event) => { updateSection("inbound", { webhook_enabled: event.target.checked }); if (!event.target.checked) clearValidationPaths(selectedConnection.id, ["inbound.inbound_path_suffix"]); }} />
+                      Enable inbound webhook
+                    </label>
                     {paymentSetup.providerCode === "paypal" ? (
                       <Field label="Webhook ID / reference"><input value={selectedConnection.verification.hmac_signature.webhook_id_ref || ""} onChange={(event) => updateNested("verification", "hmac_signature", { webhook_id_ref: event.target.value })} placeholder="PayPal webhook ID reference" className={inputClass} /></Field>
                     ) : null}

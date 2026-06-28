@@ -285,6 +285,7 @@ function normalizeProfile(raw = {}, fallbackId) {
     },
     inbound: {
       inbound_path_suffix: normalizeText(inbound.inbound_path_suffix || raw.inbound_path_suffix),
+      webhook_enabled: normalizeBool(inbound.webhook_enabled ?? raw.webhook_enabled, false),
       http_method: normalizeText(inbound.http_method || raw.http_method || "POST").toUpperCase(),
       expected_content_type: normalizeText(
         inbound.expected_content_type || raw.expected_content_type || "application/json"
@@ -459,11 +460,7 @@ function mergeSecrets(existing, incoming) {
 }
 
 function paymentWebhookEnabled(profile) {
-  const webhook = profile?.verification?.hmac_signature || {};
-  return Boolean(
-    normalizeText(webhook.webhook_id_ref) ||
-    hasSecretConfigured(webhook, "secret")
-  );
+  return profile?.inbound?.webhook_enabled === true;
 }
 
 function validatePaymentProfile(profile, paymentType, errors, id) {
@@ -474,8 +471,8 @@ function validatePaymentProfile(profile, paymentType, errors, id) {
     ? "oauth2_client_credentials"
     : "api_key_header";
 
-  if (!["outbound", "both"].includes(identity.direction)) {
-    errors.push(`${id}: payment direction must allow outbound`);
+  if (identity.direction !== "outbound") {
+    errors.push(`${id}: payment direction must be outbound`);
   }
   if (!normalizeText(outbound.base_url)) errors.push(`${id}: outbound base_url required`);
   if (!normalizeText(outbound.path_prefix)) errors.push(`${id}: outbound path_prefix required`);

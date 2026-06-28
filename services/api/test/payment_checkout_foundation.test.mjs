@@ -241,7 +241,23 @@ test("payment profiles do not require inbound suffix or webhook fields until web
 
   assert.deepEqual(validateProfiles([paypal, checkout]), []);
 
-  paypal.identity.direction = "both";
+  const websiteWithoutSuffix = normalizeProfile({
+    id: "website-no-suffix",
+    identity: {
+      connection_name: "Website",
+      connection_code: "website-no-suffix",
+      connection_kind: "website",
+      direction: "inbound",
+      environment: "sandbox",
+      frontend_url: "https://store.example"
+    },
+    verification: { mode: "none" },
+    idempotency: { event_id_location: "header", event_id_key: "X-Event-Id" },
+    routing: { channel: "website_intake" }
+  });
+  assert.match(validateProfiles([websiteWithoutSuffix]).join("\n"), /inbound_path_suffix required/);
+
+  paypal.inbound.webhook_enabled = true;
   paypal.verification.hmac_signature.webhook_id_ref = "paypal-webhook-reference";
   assert.match(validateProfiles([paypal]).join("\n"), /inbound_path_suffix required when payment webhook is configured/);
 });
@@ -271,7 +287,7 @@ test("gateway connection profile metadata supports PayPal and Checkout.com witho
       connection_name: "PayPal",
       connection_code: "paypal-sandbox",
       connection_kind: "paypal",
-      direction: "both",
+      direction: "outbound",
       environment: "sandbox",
       is_enabled: true
     },
@@ -315,7 +331,7 @@ test("gateway connection profile metadata supports PayPal and Checkout.com witho
       connection_name: "Checkout.com",
       connection_code: "checkout-sandbox",
       connection_kind: "checkout_com",
-      direction: "both",
+      direction: "outbound",
       environment: "sandbox",
       is_enabled: true
     },

@@ -18,7 +18,7 @@ function paymentProfile(kind = "paypal") {
       direction: "outbound",
       environment: "sandbox"
     },
-    inbound: { inbound_path_suffix: "" },
+    inbound: { inbound_path_suffix: "", webhook_enabled: false },
     verification: { mode: "hmac_signature", hmac_signature: { webhook_id_ref: "", secret: "", secret_set: false } },
     outbound: {
       base_url: paypal ? "https://api-m.sandbox.paypal.com" : "https://api.sandbox.checkout.com",
@@ -36,13 +36,20 @@ test("PayPal and Checkout.com save without an inbound suffix when webhook setup 
   assert.deepEqual(validateGatewayConnection(paymentProfile("checkout_com")), []);
 });
 
-test("payment webhook setup requires an inbound suffix only after webhook credentials are configured", () => {
+test("payment webhook setup requires an inbound suffix only after webhook is explicitly enabled", () => {
   const paypal = paymentProfile("paypal");
-  paypal.identity.direction = "both";
+  paypal.inbound.webhook_enabled = true;
   paypal.verification.hmac_signature.webhook_id_ref = "paypal-webhook-reference";
 
   const errors = validateGatewayConnection(paypal);
   assert.deepEqual(errors.map((error) => error.path), ["inbound.inbound_path_suffix"]);
+});
+
+test("stored webhook credentials do not implicitly enable payment inbound validation", () => {
+  const paypal = paymentProfile("paypal");
+  paypal.verification.hmac_signature.webhook_id_ref = "legacy-webhook-reference";
+  paypal.verification.hmac_signature.secret_set = true;
+  assert.deepEqual(validateGatewayConnection(paypal), []);
 });
 
 test("missing PayPal credentials produce exact field-level errors and labels", () => {

@@ -39,8 +39,7 @@ function addError(errors, profile, path, label, step, message = `${label} is req
 }
 
 export function isPaymentWebhookEnabled(profile) {
-  const webhook = profile?.verification?.hmac_signature || {};
-  return Boolean(text(webhook.webhook_id_ref) || hasCredential(webhook, "secret"));
+  return profile?.inbound?.webhook_enabled === true;
 }
 
 function validatePaymentProfile(profile, rules, errors) {
@@ -54,8 +53,8 @@ function validatePaymentProfile(profile, rules, errors) {
   if (!["sandbox", "production"].includes(identity.environment)) {
     addError(errors, profile, "identity.environment", "Environment", "identity", "Environment must be Sandbox or Production.");
   }
-  if (!["outbound", "both"].includes(identity.direction)) {
-    addError(errors, profile, "identity.direction", "Direction", "identity", "Direction must allow outbound connections.");
+  if (identity.direction !== "outbound") {
+    addError(errors, profile, "identity.direction", "Direction", "identity", "Payment provider direction must be Outbound.");
   }
   if (!text(outbound.base_url)) addError(errors, profile, "outbound.base_url", "Outbound base URL", "outbound");
   if (!text(outbound.path_prefix)) addError(errors, profile, "outbound.path_prefix", "Outbound path prefix", "outbound");
