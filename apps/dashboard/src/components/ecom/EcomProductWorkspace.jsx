@@ -29,6 +29,7 @@ import {
 import { apiFetch } from "../../services/apiClient";
 import ActionMiniModal from "../shared/ActionMiniModal";
 import ImageAssetStudioModal from "../shared/ImageAssetStudioModal";
+import { prepareWorkspaceImageUpload } from "./contentStudioUpload";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
 const ECOM_PREVIEW_BASE_URL = import.meta.env.VITE_ECOM_PREVIEW_BASE_URL || "http://localhost:5174";
@@ -3442,10 +3443,15 @@ export default function EcomProductWorkspace({ node }) {
     setStatusMessage("");
     let previewUrl = "";
     try {
-      const prepared = await openImageStudioForFile(file, {
-        title: "Edit article image",
-        recommendedSize: { width: 1800, height: 1200, label: "Article 3:2" },
-        defaultProfileId: "blog-cover"
+      const prepared = await prepareWorkspaceImageUpload({
+        file,
+        contentStudioOnly,
+        openImageStudio: openImageStudioForFile,
+        imageStudioOptions: {
+          title: "Edit article image",
+          recommendedSize: { width: 1800, height: 1200, label: "Article 3:2" },
+          defaultProfileId: "blog-cover"
+        }
       });
       if (!prepared) return;
       previewUrl = URL.createObjectURL(prepared);
@@ -3598,13 +3604,18 @@ export default function EcomProductWorkspace({ node }) {
     setStatusMessage("");
     let previewUrl = "";
     try {
-      const prepared = await openImageStudioForFile(file, {
-        title: storefrontMode === "cards" ? "Edit card image" : "Edit hero image",
-        recommendedSize:
-          storefrontMode === "cards"
-            ? { width: 1400, height: 1050, label: "Card 4:3" }
-            : { width: 1920, height: 1080, label: "Hero 16:9" },
-        defaultProfileId: storefrontMode === "cards" ? "content-block" : "hero-banner"
+      const prepared = await prepareWorkspaceImageUpload({
+        file,
+        contentStudioOnly,
+        openImageStudio: openImageStudioForFile,
+        imageStudioOptions: {
+          title: storefrontMode === "cards" ? "Edit card image" : "Edit hero image",
+          recommendedSize:
+            storefrontMode === "cards"
+              ? { width: 1400, height: 1050, label: "Card 4:3" }
+              : { width: 1920, height: 1080, label: "Hero 16:9" },
+          defaultProfileId: storefrontMode === "cards" ? "content-block" : "hero-banner"
+        }
       });
       if (!prepared) return;
       previewUrl = URL.createObjectURL(prepared);
