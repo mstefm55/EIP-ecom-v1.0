@@ -199,6 +199,51 @@ test("payment connection provider types are registered as existing Admin Console
   assert.deepEqual(PAYMENT_CONNECTION_TYPES.CHECKOUT_COM.supported_payment_methods, ["CARD", "GOOGLE_PAY", "APPLE_PAY"]);
   assert.match(JSON.stringify(PAYMENT_CONNECTION_TYPES), /required_secret_fields|outbound\.auth/);
   assert.match(JSON.stringify(PAYMENT_CONNECTION_TYPES), /required_sandbox_fields|apple_pay_domain_status/);
+  assert.deepEqual(PAYMENT_CONNECTION_TYPES.PAYPAL.required_secret_fields, ["outbound.auth.client_secret"]);
+  assert.deepEqual(PAYMENT_CONNECTION_TYPES.CHECKOUT_COM.required_secret_fields, ["outbound.auth.secret"]);
+});
+
+test("payment profiles do not require inbound suffix or webhook fields until webhook setup is configured", () => {
+  const paypal = normalizeProfile({
+    id: "paypal-no-webhook",
+    identity: {
+      connection_name: "PayPal",
+      connection_code: "paypal-no-webhook",
+      connection_kind: "paypal",
+      direction: "outbound",
+      environment: "sandbox"
+    },
+    outbound: {
+      base_url: "https://api-m.sandbox.paypal.com",
+      path_prefix: "/",
+      auth_mode: "oauth2_client_credentials",
+      auth: { client_id: "paypal-client-reference", client_secret: "paypal-client-secret" }
+    },
+    verification: { mode: "none", hmac_signature: {} }
+  });
+  const checkout = normalizeProfile({
+    id: "checkout-no-webhook",
+    identity: {
+      connection_name: "Checkout.com",
+      connection_code: "checkout-no-webhook",
+      connection_kind: "checkout_com",
+      direction: "outbound",
+      environment: "sandbox"
+    },
+    outbound: {
+      base_url: "https://api.sandbox.checkout.com",
+      path_prefix: "/",
+      auth_mode: "api_key_header",
+      auth: { header_name: "Authorization", secret: "checkout-secret-key" }
+    },
+    verification: { mode: "none", hmac_signature: {} }
+  });
+
+  assert.deepEqual(validateProfiles([paypal, checkout]), []);
+
+  paypal.identity.direction = "both";
+  paypal.verification.hmac_signature.webhook_id_ref = "paypal-webhook-reference";
+  assert.match(validateProfiles([paypal]).join("\n"), /inbound_path_suffix required when payment webhook is configured/);
 });
 
 test("gateway connection profile metadata supports PayPal and Checkout.com without changing Website profiles", () => {

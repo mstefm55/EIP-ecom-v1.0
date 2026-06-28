@@ -1,7 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { cloneElement, isValidElement, useEffect, useMemo, useState } from "react";
 import { CheckCircle2, Clipboard, Copy, EyeOff, Plus, RefreshCw, ShieldCheck, Trash2, XCircle } from "lucide-react";
 import { apiFetch } from "../../services/apiClient";
 import ActionMiniModal from "../shared/ActionMiniModal";
+import {
+  fieldErrorMap,
+  gatewayServerValidationErrors,
+  validateGatewayConnections
+} from "./gatewayConnectionValidation";
 
 const KIND_OPTIONS = [
   { value: "website", label: "Website" },
@@ -501,60 +506,24 @@ function toApiProfile(profile) {
   };
 }
 
-function validateProfile(profile) {
-  const errors = [];
-  const paymentSetup = PAYMENT_PROVIDER_SETUP[profile.identity.connection_kind] || null;
-  if (!profile.identity.connection_name) errors.push("Connection name is required");
-  if (!profile.identity.connection_code) errors.push("Connection code is required");
-  if (["website", "ecommerce"].includes(profile.identity.connection_kind) && profile.identity.direction !== "outbound" && !profile.identity.frontend_url) {
-    errors.push("Frontend URL is required for website/e-commerce connections");
-  }
-  if (profile.identity.direction !== "outbound") {
-    if (!profile.inbound.inbound_path_suffix) errors.push("Inbound path suffix is required");
-    if (!profile.inbound.origin_allowlist_text && profile.identity.environment !== "sandbox") {
-      errors.push("Origin allowlist is required for production inbound connections");
-    }
-  }
-  if (profile.identity.direction !== "inbound" && !profile.outbound.base_url) {
-    errors.push("Outbound base URL is required for outbound/both connections");
-  }
-  if (profile.verification.mode === "api_key") {
-    if (!profile.verification.api_key.header_name) errors.push("API key header name is required");
-    if (!profile.verification.api_key.secret && !profile.verification.api_key.secret_set) errors.push("API key secret is required");
-  }
-  if (profile.verification.mode === "none" && profile.identity.environment !== "sandbox") {
-    errors.push("Verification is required for production connections");
-  }
-  if (!profile.idempotency.event_id_location) errors.push("Idempotency location is required");
-  if (!profile.idempotency.event_id_key) errors.push("Idempotency key is required");
-  if (!profile.routing.channel) errors.push("Routing channel is required");
-  if (paymentSetup) {
-    const expected = paymentSetup.providerCode;
-    if (profile.routing.channel !== "payments") errors.push("Payment provider connections must use the payments channel");
-    if ((profile.routing.provider_code || profile.routing.protocol) && (profile.routing.provider_code || profile.routing.protocol) !== expected) {
-      errors.push(`Provider code must be ${expected}`);
-    }
-    const supportedMethods = normalizeList(
-      profile.routing.supported_payment_methods_text || profile.routing.supported_message_types_text
-    ).map((method) => method.toUpperCase());
-    if (!paymentSetup.supportedMethods.every((method) => supportedMethods.includes(method))) {
-      errors.push(`${paymentSetup.displayName} supported payment methods are incomplete`);
-    }
-  }
-  if (!profile.routing.schema_version) errors.push("Schema version is required");
-  if (!profile.routing.envelope_profile) errors.push("Envelope profile is required");
-  if (!profile.public_storefront.allowed_scan_modes.length) errors.push("At least one storefront scan mode is required");
-  if (!profile.public_storefront.scopes.length) errors.push("At least one public storefront scope is required");
-  if (!profile.audit.audit_record_type) errors.push("Audit record type is required");
-  return errors;
-}
-
-function friendlyError(err, fallback) {
+function apiErrorPayload(err) {
   const message = err?.message || "";
   const match = message.match(/API \d+: (.*)$/);
   if (match) {
     try {
-      const payload = JSON.parse(match[1]);
+      return JSON.parse(match[1]);
+    } catch {
+      return null;
+    }
+  }
+  return err?.payload && typeof err.payload === "object" ? err.payload : null;
+}
+
+function friendlyError(err, fallback) {
+  const message = err?.message || "";
+  const payload = apiErrorPayload(err);
+  if (payload) {
+    try {
       const code = payload?.error;
       const map = {
         STEP_UP_REQUIRED: "Step-up required. Verify using OTP/TOTP/passkey, then try again.",
@@ -566,9 +535,7 @@ function friendlyError(err, fallback) {
         ORIGIN_NOT_ALLOWED: "Origin not allowed for this connection."
       };
       return map[code] || code || fallback;
-    } catch {
-      return message;
-    }
+    } catch { return message; }
   }
   return message || fallback;
 }
@@ -585,6 +552,8 @@ export default function AdminConnectionsPanelSafe() {
   const [testing, setTesting] = useState(null);
   const [testResult, setTestResult] = useState(null);
   const [error, setError] = useState(null);
+  const [fieldErrors, setFieldErrors] = useState({});
+  const [validationSummary, setValidationSummary] = useState([]);
   const [rawKey, setRawKey] = useState(null);
   const [rawKeyMeta, setRawKeyMeta] = useState(null);
   const [miniModalRequest, setMiniModalRequest] = useState(null);
@@ -599,6 +568,9 @@ export default function AdminConnectionsPanelSafe() {
         edi: `${apiBaseUrl}/api/edi/gateway/webhook/${selectedConnection.inbound.inbound_path_suffix}`
       }
     : null;
+  const selectedFieldError = (path) => (
+    selectedConnection ? fieldErrors[`${selectedConnection.id}:${path}`] || "" : ""
+  );
 
   const visibleSteps = useMemo(() => {
     const base = [
@@ -647,6 +619,8 @@ export default function AdminConnectionsPanelSafe() {
         const list = Array.isArray(result.connections) && result.connections.length ? result.connections.map(fromApiProfile) : [buildProfile("conn-1")];
         setConnections(list);
         setSelectedConnectionId(list[0]?.id || null);
+        setFieldErrors({});
+        setValidationSummary([]);
         setRawKey(null);
         setRawKeyMeta(null);
       } catch (err) {
@@ -679,13 +653,33 @@ export default function AdminConnectionsPanelSafe() {
     setMiniModalRequest(null);
   };
 
+  const clearValidationPaths = (connectionId, paths = []) => {
+    if (!connectionId || !paths.length) return;
+    setFieldErrors((current) => {
+      const next = { ...current };
+      paths.forEach((path) => delete next[`${connectionId}:${path}`]);
+      return next;
+    });
+    setValidationSummary((current) => current.filter(
+      (item) => item.connectionId !== connectionId || !paths.includes(item.path)
+    ));
+  };
+
   const updateSection = (section, patch) => {
     if (!selectedConnection) return;
+    clearValidationPaths(
+      selectedConnection.id,
+      Object.keys(patch || {}).map((key) => `${section}.${key}`)
+    );
     setConnections((prev) => prev.map((item) => item.id === selectedConnection.id ? { ...item, [section]: { ...item[section], ...patch } } : item));
   };
 
   const updateNested = (section, key, patch) => {
     if (!selectedConnection) return;
+    clearValidationPaths(
+      selectedConnection.id,
+      Object.keys(patch || {}).map((field) => `${section}.${key}.${field}`)
+    );
     setConnections((prev) => prev.map((item) => item.id === selectedConnection.id ? { ...item, [section]: { ...item[section], [key]: { ...item[section][key], ...patch } } } : item));
   };
 
@@ -737,7 +731,7 @@ export default function AdminConnectionsPanelSafe() {
     if (Object.keys(patch).length) updateSection("routing", patch);
     if (setup) {
       const identityPatch = {};
-      if (selectedConnection.identity?.direction === "inbound") identityPatch.direction = "both";
+      if (selectedConnection.identity?.direction === "inbound") identityPatch.direction = "outbound";
       if (selectedConnection.identity?.environment !== "sandbox") identityPatch.environment = "sandbox";
       if (Object.keys(identityPatch).length) updateSection("identity", identityPatch);
 
@@ -746,7 +740,7 @@ export default function AdminConnectionsPanelSafe() {
         outboundPatch.base_url = paymentEnvironmentValue(setup, "sandbox", "baseUrls");
       }
       if (!selectedConnection.outbound?.path_prefix) outboundPatch.path_prefix = "/";
-      if (selectedConnection.outbound?.auth_mode === "none") outboundPatch.auth_mode = setup.authMode;
+      if (selectedConnection.outbound?.auth_mode !== setup.authMode) outboundPatch.auth_mode = setup.authMode;
       if (!selectedConnection.outbound?.healthcheck_path || selectedConnection.outbound.healthcheck_path === "/health") {
         outboundPatch.healthcheck_path = setup.healthcheckPath;
       }
@@ -823,6 +817,7 @@ export default function AdminConnectionsPanelSafe() {
   const handleConnectionNameChange = (event) => {
     if (!selectedConnection) return;
     const nextName = event.target.value;
+    clearValidationPaths(selectedConnection.id, ["identity.connection_name", "identity.connection_code"]);
     setConnections((prev) => prev.map((item) => {
       if (item.id !== selectedConnection.id) return item;
       const connectionCode = nextName ? item.identity.connection_code || buildUniqueCode(nextName, item.id) : "";
@@ -834,9 +829,6 @@ export default function AdminConnectionsPanelSafe() {
           connection_name: nextName,
           connection_code: connectionCode
         },
-        inbound: paymentConnection && !item.inbound.inbound_path_suffix
-          ? { ...item.inbound, inbound_path_suffix: connectionCode }
-          : item.inbound,
         routing: paymentConnection
           ? {
               ...item.routing,
@@ -859,6 +851,10 @@ export default function AdminConnectionsPanelSafe() {
 
   const handleRemoveConnection = (id) => {
     setConnections((prev) => prev.filter((item) => item.id !== id));
+    setFieldErrors((current) => Object.fromEntries(
+      Object.entries(current).filter(([key]) => !key.startsWith(`${id}:`))
+    ));
+    setValidationSummary((current) => current.filter((item) => item.connectionId !== id));
     if (selectedConnectionId === id) setSelectedConnectionId(connections[0]?.id || null);
   };
 
@@ -867,11 +863,16 @@ export default function AdminConnectionsPanelSafe() {
     setSaving(true);
     setError(null);
     try {
-      const validations = connections.flatMap(validateProfile);
+      const validations = validateGatewayConnections(connections);
       if (validations.length) {
-        setError(validations[0]);
+        setFieldErrors(fieldErrorMap(validations));
+        setValidationSummary(validations);
+        setSelectedConnectionId(validations[0].connectionId);
+        setActiveStep(validations[0].step || "identity");
         return;
       }
+      setFieldErrors({});
+      setValidationSummary([]);
       const result = await apiFetch(`/api/eip/gateway/connections/${selectedTenantId}/profile`, {
         method: "POST",
         body: { connections: connections.map(toApiProfile) }
@@ -883,7 +884,16 @@ export default function AdminConnectionsPanelSafe() {
       setRawKeyMeta(null);
       await refreshDetail({ clearRaw: true });
     } catch (err) {
-      setError(friendlyError(err, "Failed to save profile"));
+      const payload = apiErrorPayload(err);
+      if (payload?.error === "VALIDATION_ERROR" && Array.isArray(payload.details)) {
+        const serverErrors = gatewayServerValidationErrors(payload.details, selectedConnection?.id);
+        setFieldErrors(fieldErrorMap(serverErrors));
+        setValidationSummary(serverErrors);
+        setSelectedConnectionId(serverErrors[0]?.connectionId || selectedConnection?.id || null);
+        setActiveStep(serverErrors[0]?.step || "identity");
+      } else {
+        setError(friendlyError(err, "Failed to save profile"));
+      }
     } finally {
       setSaving(false);
     }
@@ -983,12 +993,9 @@ export default function AdminConnectionsPanelSafe() {
         ? Boolean(paymentAuth.client_id)
         : hasStoredSecret(paymentAuth, "secret")
     },
-    {
-      label: selectedConnection.identity.connection_kind === "paypal" ? "Client secret reference" : "Webhook signing secret",
-      ok: selectedConnection.identity.connection_kind === "paypal"
-        ? hasStoredSecret(paymentAuth, "client_secret")
-        : hasStoredSecret(paymentHmac, "secret")
-    },
+    ...(selectedConnection.identity.connection_kind === "paypal"
+      ? [{ label: "Client secret reference", ok: hasStoredSecret(paymentAuth, "client_secret") }]
+      : []),
     {
       label: "Health status",
       ok: ["healthy", "configured", "ready"].includes(String(selectedConnection.routing?.health_status || "").toLowerCase())
@@ -1002,12 +1009,13 @@ export default function AdminConnectionsPanelSafe() {
   ] : [];
   if (paymentSetup?.providerCode === "paypal") {
     paymentChecks.push(
-      { label: "Webhook ID", ok: Boolean(paymentHmac.webhook_id_ref) },
-      { label: "Webhook signing", ok: hasStoredSecret(paymentHmac, "secret") }
+      { label: "Webhook ID (optional)", ok: Boolean(paymentHmac.webhook_id_ref), optional: true },
+      { label: "Webhook signing (optional)", ok: hasStoredSecret(paymentHmac, "secret"), optional: true }
     );
   }
   if (paymentSetup?.providerCode === "checkout_com") {
     paymentChecks.push(
+      { label: "Webhook signing (optional)", ok: hasStoredSecret(paymentHmac, "secret"), optional: true },
       {
         label: "Apple Pay domain",
         ok: ["validated", "verified", "active", "configured", "ready"].includes(
@@ -1065,11 +1073,27 @@ export default function AdminConnectionsPanelSafe() {
 
           {loading ? <Notice>Loading...</Notice> : null}
           {error ? <Notice tone="error">{error}</Notice> : null}
+          {validationSummary.length ? (
+            <Notice tone="error">
+              <p className="font-semibold">Validation failed. Review these fields:</p>
+              <ul className="mt-2 list-disc space-y-1 pl-5">
+                {validationSummary.map((item, index) => {
+                  const connection = connections.find((entry) => entry.id === item.connectionId);
+                  return (
+                    <li key={`${item.connectionId}:${item.path}:${index}`}>
+                      {connections.length > 1 ? `${connection?.identity?.connection_name || "Connection"}: ` : ""}
+                      {item.label}
+                    </li>
+                  );
+                })}
+              </ul>
+            </Notice>
+          ) : null}
           {testResult ? <Notice tone={testResult.tone}>{testResult.text}</Notice> : null}
 
           <div className="mt-4 flex flex-wrap gap-2">
             {connections.map((conn) => (
-              <button key={conn.id} type="button" onClick={() => setSelectedConnectionId(conn.id)} className={`rounded-xl border px-3 py-2 text-left text-[0.7rem] ${conn.id === selectedConnection?.id ? "border-ink-900/10 bg-white shadow-soft" : "border-white/60 bg-white/70 text-ink-500"}`}>
+              <button key={conn.id} type="button" onClick={() => setSelectedConnectionId(conn.id)} className={`rounded-xl border px-3 py-2 text-left text-[0.7rem] ${validationSummary.some((item) => item.connectionId === conn.id) ? "border-rose-300 bg-rose-50/70" : conn.id === selectedConnection?.id ? "border-ink-900/10 bg-white shadow-soft" : "border-white/60 bg-white/70 text-ink-500"}`}>
                 <p className="font-semibold text-ink-900">{conn.identity.connection_name || "New connection"}</p>
                 <p className="uppercase tracking-[0.2em] text-ink-400">{conn.identity.connection_code || "auto-generated"}</p>
                 <p className="mt-1 text-[0.6rem] uppercase tracking-[0.2em] text-ink-400">{conn.identity.connection_kind || "custom"}</p>
@@ -1120,12 +1144,12 @@ export default function AdminConnectionsPanelSafe() {
 
             {activeStep === "identity" ? (
               <Grid>
-                <Field label={paymentSetup ? "Provider name" : "Connection name"}><input value={selectedConnection.identity.connection_name} onChange={handleConnectionNameChange} placeholder={paymentSetup?.displayName || ""} className={inputClass} /></Field>
-                <Field label="Connection code"><input value={selectedConnection.identity.connection_code} readOnly placeholder="auto-generated" className={`${inputClass} bg-slate-50 text-ink-600`} /></Field>
-                <Field label="Connection kind"><select value={selectedConnection.identity.connection_kind} onChange={(e) => updateSection("identity", { connection_kind: e.target.value })} className={inputClass}>{KIND_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>
-                {!paymentSetup ? <Field label="Direction"><select value={selectedConnection.identity.direction} onChange={(e) => updateSection("identity", { direction: e.target.value })} className={inputClass}>{DIRECTION_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field> : null}
-                <Field label={paymentSetup ? "Provider mode" : "Environment"}><select value={selectedConnection.identity.environment} onChange={(e) => updateSection("identity", { environment: e.target.value })} className={inputClass}>{ENV_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>
-                {!paymentSetup ? <Field label="Frontend URL"><input value={selectedConnection.identity.frontend_url} onChange={(e) => { updateSection("identity", { frontend_url: e.target.value }); if (!selectedConnection.inbound.origin_allowlist_text) updateSection("inbound", { origin_allowlist_text: e.target.value }); }} placeholder="https://storefront.example.com" className={inputClass} /></Field> : null}
+                <Field label={paymentSetup ? "Provider name" : "Connection name"} error={selectedFieldError("identity.connection_name")}><input value={selectedConnection.identity.connection_name} onChange={handleConnectionNameChange} placeholder={paymentSetup?.displayName || ""} className={inputClass} /></Field>
+                <Field label="Connection code" error={selectedFieldError("identity.connection_code")}><input value={selectedConnection.identity.connection_code} readOnly placeholder="auto-generated" className={`${inputClass} bg-slate-50 text-ink-600`} /></Field>
+                <Field label="Connection kind" error={selectedFieldError("identity.connection_kind")}><select value={selectedConnection.identity.connection_kind} onChange={(e) => updateSection("identity", { connection_kind: e.target.value })} className={inputClass}>{KIND_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>
+                <Field label="Direction" error={selectedFieldError("identity.direction")}><select value={selectedConnection.identity.direction} onChange={(e) => updateSection("identity", { direction: e.target.value })} className={inputClass}>{DIRECTION_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>
+                <Field label={paymentSetup ? "Provider mode" : "Environment"} error={selectedFieldError("identity.environment")}><select value={selectedConnection.identity.environment} onChange={(e) => updateSection("identity", { environment: e.target.value })} className={inputClass}>{ENV_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>
+                {!paymentSetup ? <Field label="Frontend URL" error={selectedFieldError("identity.frontend_url")}><input value={selectedConnection.identity.frontend_url} onChange={(e) => { updateSection("identity", { frontend_url: e.target.value }); if (!selectedConnection.inbound.origin_allowlist_text) updateSection("inbound", { origin_allowlist_text: e.target.value }); }} placeholder="https://storefront.example.com" className={inputClass} /></Field> : null}
                 {!paymentSetup ? <Field label="Portal URL"><input value={selectedConnection.identity.portal_url} onChange={(e) => updateSection("identity", { portal_url: e.target.value })} className={inputClass} /></Field> : null}
                 <label className="flex items-center gap-2 text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink-400"><input type="checkbox" checked={selectedConnection.identity.is_enabled} onChange={(e) => updateSection("identity", { is_enabled: e.target.checked })} />Enabled</label>
               </Grid>
@@ -1134,13 +1158,13 @@ export default function AdminConnectionsPanelSafe() {
             {activeStep === "inbound" ? (
               <div className="mt-4 space-y-4">
                 <Grid>
-                  <Field label="Path suffix"><input value={selectedConnection.inbound.inbound_path_suffix} onChange={(e) => updateSection("inbound", { inbound_path_suffix: e.target.value })} placeholder="tenant-storefront" className={inputClass} /></Field>
+                  <Field label="Path suffix" error={selectedFieldError("inbound.inbound_path_suffix")}><input value={selectedConnection.inbound.inbound_path_suffix} onChange={(e) => updateSection("inbound", { inbound_path_suffix: e.target.value })} placeholder="tenant-storefront" className={inputClass} /></Field>
                   <Field label="HTTP method"><select value={selectedConnection.inbound.http_method} onChange={(e) => updateSection("inbound", { http_method: e.target.value })} className={inputClass}>{HTTP_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}</select></Field>
                   <Field label="Expected content type"><input value={selectedConnection.inbound.expected_content_type} onChange={(e) => updateSection("inbound", { expected_content_type: e.target.value })} className={inputClass} /></Field>
                   <Field label="Rate limit max"><input type="number" value={selectedConnection.inbound.rate_limit_max} onChange={(e) => updateSection("inbound", { rate_limit_max: e.target.value })} className={inputClass} /></Field>
                   <Field label="Rate limit window sec"><input type="number" value={selectedConnection.inbound.rate_limit_window_sec} onChange={(e) => updateSection("inbound", { rate_limit_window_sec: e.target.value })} className={inputClass} /></Field>
                 </Grid>
-                <Field label="Origin allowlist"><textarea value={selectedConnection.inbound.origin_allowlist_text} onChange={(e) => updateSection("inbound", { origin_allowlist_text: e.target.value })} placeholder="https://storefront.example.com" className={`${inputClass} min-h-[80px]`} /></Field>
+                <Field label="Origin allowlist" error={selectedFieldError("inbound.origin_allowlist_text")}><textarea value={selectedConnection.inbound.origin_allowlist_text} onChange={(e) => updateSection("inbound", { origin_allowlist_text: e.target.value })} placeholder="https://storefront.example.com" className={`${inputClass} min-h-[80px]`} /></Field>
                 {inboundUrls ? <EndpointGrid urls={inboundUrls} /> : null}
               </div>
             ) : null}
@@ -1164,13 +1188,13 @@ export default function AdminConnectionsPanelSafe() {
                 ) : (
                   <>
                     <Grid>
-                      <Field label="Verification mode"><select value={selectedConnection.verification.mode} onChange={(e) => updateSection("verification", { mode: e.target.value })} className={inputClass}>{VERIFICATION_MODES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>
+                      <Field label="Verification mode" error={selectedFieldError("verification.mode")}><select value={selectedConnection.verification.mode} onChange={(e) => updateSection("verification", { mode: e.target.value })} className={inputClass}>{VERIFICATION_MODES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>
                       <label className="flex items-center gap-2 rounded-lg border border-ink-200/70 bg-white px-3 py-2 text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink-400"><input type="checkbox" checked={selectedConnection.verification.allow_unverified} onChange={(e) => updateSection("verification", { allow_unverified: e.target.checked })} />Allow unverified (sandbox only)</label>
                     </Grid>
                     {selectedConnection.verification.mode === "api_key" ? (
                       <Grid>
-                        <Field label="API key header name"><input value={selectedConnection.verification.api_key.header_name} onChange={(e) => updateNested("verification", "api_key", { header_name: e.target.value })} placeholder="X-API-Key" className={inputClass} /></Field>
-                        <SecretField label="API key secret" value={selectedConnection.verification.api_key.secret} stored={selectedConnection.verification.api_key.secret_set} onChange={(value) => updateNested("verification", "api_key", { secret: value })} />
+                        <Field label="API key header name" error={selectedFieldError("verification.api_key.header_name")}><input value={selectedConnection.verification.api_key.header_name} onChange={(e) => updateNested("verification", "api_key", { header_name: e.target.value })} placeholder="X-API-Key" className={inputClass} /></Field>
+                        <SecretField label="API key secret" value={selectedConnection.verification.api_key.secret} stored={selectedConnection.verification.api_key.secret_set} onChange={(value) => updateNested("verification", "api_key", { secret: value })} error={selectedFieldError("verification.api_key.secret")} />
                       </Grid>
                     ) : null}
                     {selectedConnection.verification.mode === "hmac_signature" ? (
@@ -1198,17 +1222,19 @@ export default function AdminConnectionsPanelSafe() {
             {activeStep === "outbound" ? (
               paymentSetup ? (
                 <Grid>
-                  <Field label={`${paymentSetup.displayName} API base mode`}><select value={selectedConnection.identity.environment} onChange={(event) => updateSection("identity", { environment: event.target.value })} className={inputClass}>{ENV_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></Field>
-                  <Field label="API base URL"><input readOnly value={selectedConnection.outbound.base_url} className={`${inputClass} bg-slate-50 text-ink-600`} /></Field>
+                  <Field label={`${paymentSetup.displayName} API base mode`} error={selectedFieldError("identity.environment")}><select value={selectedConnection.identity.environment} onChange={(event) => updateSection("identity", { environment: event.target.value })} className={inputClass}>{ENV_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></Field>
+                  <Field label="API base URL" error={selectedFieldError("outbound.base_url")}><input readOnly value={selectedConnection.outbound.base_url} className={`${inputClass} bg-slate-50 text-ink-600`} /></Field>
+                  <Field label="Path prefix" error={selectedFieldError("outbound.path_prefix")}><input value={selectedConnection.outbound.path_prefix} onChange={(event) => updateSection("outbound", { path_prefix: event.target.value })} className={inputClass} /></Field>
+                  <Field label="Authentication mode" error={selectedFieldError("outbound.auth_mode")}><input readOnly value={selectedConnection.outbound.auth_mode} className={`${inputClass} bg-slate-50 text-ink-600`} /></Field>
                   {paymentSetup.providerCode === "paypal" ? (
                     <>
-                      <Field label="Client ID reference / status"><input value={selectedConnection.outbound.auth.client_id} onChange={(event) => updateNested("outbound", "auth", { client_id: event.target.value })} placeholder="PayPal client ID reference" className={inputClass} /></Field>
-                      <SecretField label="Client secret reference / status" value={selectedConnection.outbound.auth.client_secret} stored={selectedConnection.outbound.auth.client_secret_set} onChange={(value) => updateNested("outbound", "auth", { client_secret: value })} />
+                      <Field label="Client ID reference / status" error={selectedFieldError("outbound.auth.client_id")}><input value={selectedConnection.outbound.auth.client_id} onChange={(event) => updateNested("outbound", "auth", { client_id: event.target.value })} placeholder="PayPal client ID reference" className={inputClass} /></Field>
+                      <SecretField label="Client secret reference / status" value={selectedConnection.outbound.auth.client_secret} stored={selectedConnection.outbound.auth.client_secret_set} onChange={(value) => updateNested("outbound", "auth", { client_secret: value })} error={selectedFieldError("outbound.auth.client_secret")} />
                       <Field label="OAuth token URL"><input readOnly value={selectedConnection.outbound.auth.token_url} className={`${inputClass} bg-slate-50 text-ink-600`} /></Field>
                     </>
                   ) : (
                     <>
-                      <SecretField label="Secret key reference / status" value={selectedConnection.outbound.auth.secret} stored={selectedConnection.outbound.auth.secret_set} onChange={(value) => updateNested("outbound", "auth", { secret: value })} />
+                      <SecretField label="Secret key reference / status" value={selectedConnection.outbound.auth.secret} stored={selectedConnection.outbound.auth.secret_set} onChange={(value) => updateNested("outbound", "auth", { secret: value })} error={selectedFieldError("outbound.auth.secret")} />
                       <Field label="Public key / safe reference"><input value={selectedConnection.outbound.auth.public_key_ref || ""} onChange={(event) => updateNested("outbound", "auth", { public_key_ref: event.target.value })} placeholder="Checkout.com public key reference" className={inputClass} /></Field>
                     </>
                   )}
@@ -1216,7 +1242,7 @@ export default function AdminConnectionsPanelSafe() {
                 </Grid>
               ) : (
                 <Grid>
-                  <Field label="Base URL"><input value={selectedConnection.outbound.base_url} onChange={(e) => updateSection("outbound", { base_url: e.target.value })} className={inputClass} /></Field>
+                  <Field label="Base URL" error={selectedFieldError("outbound.base_url")}><input value={selectedConnection.outbound.base_url} onChange={(e) => updateSection("outbound", { base_url: e.target.value })} className={inputClass} /></Field>
                   <Field label="Path prefix"><input value={selectedConnection.outbound.path_prefix} onChange={(e) => updateSection("outbound", { path_prefix: e.target.value })} className={inputClass} /></Field>
                   <Field label="Auth mode"><input value={selectedConnection.outbound.auth_mode} onChange={(e) => updateSection("outbound", { auth_mode: e.target.value })} className={inputClass} /></Field>
                   <Field label="Healthcheck path"><input value={selectedConnection.outbound.healthcheck_path} onChange={(e) => updateSection("outbound", { healthcheck_path: e.target.value })} className={inputClass} /></Field>
@@ -1226,8 +1252,8 @@ export default function AdminConnectionsPanelSafe() {
 
             {activeStep === "idempotency" ? (
               <Grid>
-                <Field label="Event ID location"><input value={selectedConnection.idempotency.event_id_location} onChange={(e) => updateSection("idempotency", { event_id_location: e.target.value })} className={inputClass} /></Field>
-                <Field label="Event ID key"><input value={selectedConnection.idempotency.event_id_key} onChange={(e) => updateSection("idempotency", { event_id_key: e.target.value })} className={inputClass} /></Field>
+                <Field label="Event ID location" error={selectedFieldError("idempotency.event_id_location")}><input value={selectedConnection.idempotency.event_id_location} onChange={(e) => updateSection("idempotency", { event_id_location: e.target.value })} className={inputClass} /></Field>
+                <Field label="Event ID key" error={selectedFieldError("idempotency.event_id_key")}><input value={selectedConnection.idempotency.event_id_key} onChange={(e) => updateSection("idempotency", { event_id_key: e.target.value })} className={inputClass} /></Field>
                 <Field label="Idempotency scope"><input value={selectedConnection.idempotency.idempotency_scope} onChange={(e) => updateSection("idempotency", { idempotency_scope: e.target.value })} className={inputClass} /></Field>
               </Grid>
             ) : null}
@@ -1242,12 +1268,12 @@ export default function AdminConnectionsPanelSafe() {
                 </Grid>
               ) : (
                 <Grid>
-                  <Field label="Channel"><select value={selectedConnection.routing.channel} onChange={(e) => updateSection("routing", { channel: e.target.value })} className={inputClass}>{CHANNEL_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>
+                  <Field label="Channel" error={selectedFieldError("routing.channel")}><select value={selectedConnection.routing.channel} onChange={(e) => updateSection("routing", { channel: e.target.value })} className={inputClass}>{CHANNEL_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>
                   <Field label="Protocol"><input value={selectedConnection.routing.protocol} onChange={(e) => updateSection("routing", { protocol: e.target.value })} className={inputClass} /></Field>
                   <Field label="Provider code"><input list="payment-provider-codes" value={selectedConnection.routing.provider_code || ""} onChange={(e) => updateSection("routing", { provider_code: e.target.value })} className={inputClass} /></Field>
                   <Field label="Health status"><select value={selectedConnection.routing.health_status || "pending"} onChange={(e) => updateSection("routing", { health_status: e.target.value })} className={inputClass}><option value="pending">Pending</option><option value="healthy">Healthy</option><option value="unknown">Unknown</option><option value="unhealthy">Unhealthy</option><option value="failed">Failed</option><option value="disabled">Disabled</option></select></Field>
-                  <Field label="Schema version"><input value={selectedConnection.routing.schema_version} onChange={(e) => updateSection("routing", { schema_version: e.target.value })} className={inputClass} /></Field>
-                  <Field label="Envelope profile"><input value={selectedConnection.routing.envelope_profile} onChange={(e) => updateSection("routing", { envelope_profile: e.target.value })} className={inputClass} /></Field>
+                  <Field label="Schema version" error={selectedFieldError("routing.schema_version")}><input value={selectedConnection.routing.schema_version} onChange={(e) => updateSection("routing", { schema_version: e.target.value })} className={inputClass} /></Field>
+                  <Field label="Envelope profile" error={selectedFieldError("routing.envelope_profile")}><input value={selectedConnection.routing.envelope_profile} onChange={(e) => updateSection("routing", { envelope_profile: e.target.value })} className={inputClass} /></Field>
                   <Field label="Mapping mode"><select value={selectedConnection.routing.mapping_mode} onChange={(e) => updateSection("routing", { mapping_mode: e.target.value })} className={inputClass}>{MAPPING_MODES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>
                   <Field label="Supported message types"><textarea value={selectedConnection.routing.supported_message_types_text} onChange={(e) => updateSection("routing", { supported_message_types_text: e.target.value })} className={`${inputClass} min-h-[70px]`} /></Field>
                 </Grid>
@@ -1271,7 +1297,7 @@ export default function AdminConnectionsPanelSafe() {
                     <label className="flex items-center gap-2 text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink-400"><input type="checkbox" checked={selectedConnection.public_storefront.loader_enabled} onChange={(e) => updateSection("public_storefront", { loader_enabled: e.target.checked })} />Loader script enabled</label>
                     <label className="flex items-center gap-2 text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink-400"><input type="checkbox" checked={selectedConnection.public_storefront.public_api_enabled} onChange={(e) => updateSection("public_storefront", { public_api_enabled: e.target.checked })} />Public API enabled</label>
                   </Grid>
-                  <Field label="Allowed scan modes">
+                  <Field label="Allowed scan modes" error={selectedFieldError("public_storefront.allowed_scan_modes")}>
                     <div className="flex flex-wrap gap-2 rounded-lg border border-ink-200/70 bg-white px-3 py-2">
                       {["auto", "rendered", "generic", "tagged"].map((mode) => (
                         <label key={mode} className="flex items-center gap-1.5 text-[0.62rem] normal-case tracking-normal text-ink-600">
@@ -1281,7 +1307,7 @@ export default function AdminConnectionsPanelSafe() {
                       ))}
                     </div>
                   </Field>
-                  <Field label="Public storefront scopes">
+                  <Field label="Public storefront scopes" error={selectedFieldError("public_storefront.scopes")}>
                     <div className="flex flex-wrap gap-2 rounded-lg border border-ink-200/70 bg-white px-3 py-2">
                       {["storefront.mapping.read", "storefront.content.read", "storefront.catalog.read"].map((scope) => (
                         <label key={scope} className="flex items-center gap-1.5 text-[0.62rem] normal-case tracking-normal text-ink-600">
@@ -1302,14 +1328,14 @@ export default function AdminConnectionsPanelSafe() {
                   <div className="rounded-xl border border-ink-100 bg-white/80 p-3">
                     <p className="text-[0.65rem] font-semibold uppercase tracking-[0.22em] text-ink-400">Payment provider health and readiness</p>
                     <div className="mt-3 flex flex-wrap gap-2">
-                      {paymentChecks.map((check) => <StatusPill key={`audit-${check.label}`} ok={check.ok}>{check.label}: {check.ok ? "ready" : "missing"}</StatusPill>)}
+                      {paymentChecks.map((check) => <StatusPill key={`audit-${check.label}`} ok={check.optional || check.ok}>{check.label}: {check.ok ? "ready" : check.optional ? "not configured" : "missing"}</StatusPill>)}
                       <StatusPill ok={selectedConnection.identity.is_enabled !== false}>Provider: {selectedConnection.identity.is_enabled !== false ? "enabled" : "disabled"}</StatusPill>
                       <StatusPill ok={["healthy", "configured", "ready"].includes(String(selectedConnection.routing.health_status || "").toLowerCase())}>Readiness: {selectedConnection.routing.health_status || "pending"}</StatusPill>
                     </div>
                   </div>
                 ) : null}
                 <Grid>
-                  <Field label="Audit record type"><input value={selectedConnection.audit.audit_record_type} onChange={(e) => updateSection("audit", { audit_record_type: e.target.value })} className={inputClass} /></Field>
+                  <Field label="Audit record type" error={selectedFieldError("audit.audit_record_type")}><input value={selectedConnection.audit.audit_record_type} onChange={(e) => updateSection("audit", { audit_record_type: e.target.value })} className={inputClass} /></Field>
                   <Field label="Max body size"><input type="number" value={selectedConnection.audit.max_body_size} onChange={(e) => updateSection("audit", { max_body_size: Number(e.target.value) })} className={inputClass} /></Field>
                   <Field label="Log level"><select value={selectedConnection.audit.log_level} onChange={(e) => updateSection("audit", { log_level: e.target.value })} className={inputClass}>{LOG_LEVELS.map((level) => <option key={level} value={level}>{level}</option>)}</select></Field>
                   <Field label="IP allowlist"><textarea value={selectedConnection.audit.ip_allowlist_text} onChange={(e) => updateSection("audit", { ip_allowlist_text: e.target.value })} className={`${inputClass} min-h-[70px]`} /></Field>
@@ -1413,16 +1439,28 @@ function Grid({ children }) {
   return <div className="mt-4 grid gap-4 md:grid-cols-2">{children}</div>;
 }
 
-function Field({ label, children }) {
+function Field({ label, children, error = "" }) {
+  const control = isValidElement(children)
+    ? cloneElement(children, {
+        className: `${children.props.className || ""}${error ? " border-rose-400 bg-rose-50/40 ring-1 ring-rose-200" : ""}`,
+        "aria-invalid": error ? "true" : undefined,
+        "aria-describedby": error ? `${String(label || "field").toLowerCase().replace(/[^a-z0-9]+/g, "-")}-error` : undefined
+      })
+    : children;
   return (
     <label className="text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink-400">
       <span className="mb-1 block">{label}</span>
-      {children}
+      {control}
+      {error ? (
+        <span id={`${String(label || "field").toLowerCase().replace(/[^a-z0-9]+/g, "-")}-error`} className="mt-1 block text-[0.58rem] normal-case tracking-normal text-rose-600">
+          {error}
+        </span>
+      ) : null}
     </label>
   );
 }
 
-function SecretField({ label, value, stored, onChange }) {
+function SecretField({ label, value, stored, onChange, error = "" }) {
   return (
     <label className="text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink-400">
       <span className="mb-1 flex items-center justify-between gap-2">
@@ -1434,8 +1472,10 @@ function SecretField({ label, value, stored, onChange }) {
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={stored ? "Stored secret hidden — enter a new value only to rotate" : "Enter secret"}
-        className={inputClass}
+        className={`${inputClass}${error ? " border-rose-400 bg-rose-50/40 ring-1 ring-rose-200" : ""}`}
+        aria-invalid={error ? "true" : undefined}
       />
+      {error ? <span className="mt-1 block text-[0.58rem] normal-case tracking-normal text-rose-600">{error}</span> : null}
       <span className="mt-1 block text-[0.55rem] normal-case tracking-normal text-ink-400">
         {stored ? "Saved securely on the server. The raw value is not displayed again." : "Secret will be vaulted on save."}
       </span>

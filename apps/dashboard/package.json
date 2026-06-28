@@ -8,7 +8,8 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test:content-upload": "node --test test/contentStudioUpload.test.mjs"
+    "test:content-upload": "node --test test/contentStudioUpload.test.mjs",
+    "test:gateway-validation": "node --test test/gatewayConnectionValidation.test.mjs"
   },
   "dependencies": {
     "@simplewebauthn/browser": "^13.3.0",

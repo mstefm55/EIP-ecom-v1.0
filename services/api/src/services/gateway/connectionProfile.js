@@ -38,7 +38,7 @@ const PAYMENT_CONNECTION_TYPES = {
     channel: "payments",
     sandbox_live_supported: true,
     supported_payment_methods: ["PAYPAL"],
-    required_secret_fields: ["outbound.auth.client_secret", "verification.hmac_signature.secret"],
+    required_secret_fields: ["outbound.auth.client_secret"],
     required_sandbox_fields: ["outbound.auth.client_id", "outbound.auth.client_secret"],
     safe_public_metadata: ["provider_code", "environment", "supported_payment_methods", "health_status"],
     webhook: {
@@ -57,7 +57,7 @@ const PAYMENT_CONNECTION_TYPES = {
     channel: "payments",
     sandbox_live_supported: true,
     supported_payment_methods: ["CARD", "GOOGLE_PAY", "APPLE_PAY"],
-    required_secret_fields: ["outbound.auth.secret", "verification.hmac_signature.secret"],
+    required_secret_fields: ["outbound.auth.secret"],
     required_sandbox_fields: ["outbound.auth.secret"],
     safe_public_metadata: [
       "provider_code",
@@ -458,6 +458,47 @@ function mergeSecrets(existing, incoming) {
   return merged;
 }
 
+function paymentWebhookEnabled(profile) {
+  const webhook = profile?.verification?.hmac_signature || {};
+  return Boolean(
+    normalizeText(webhook.webhook_id_ref) ||
+    hasSecretConfigured(webhook, "secret")
+  );
+}
+
+function validatePaymentProfile(profile, paymentType, errors, id) {
+  const identity = profile?.identity || {};
+  const outbound = profile?.outbound || {};
+  const auth = outbound.auth || {};
+  const expectedAuthMode = paymentType.provider_code === "paypal"
+    ? "oauth2_client_credentials"
+    : "api_key_header";
+
+  if (!["outbound", "both"].includes(identity.direction)) {
+    errors.push(`${id}: payment direction must allow outbound`);
+  }
+  if (!normalizeText(outbound.base_url)) errors.push(`${id}: outbound base_url required`);
+  if (!normalizeText(outbound.path_prefix)) errors.push(`${id}: outbound path_prefix required`);
+  if (outbound.auth_mode !== expectedAuthMode) {
+    errors.push(`${id}: payment auth_mode must be ${expectedAuthMode}`);
+  }
+  if (paymentType.provider_code === "paypal") {
+    if (!normalizeText(auth.client_id)) errors.push(`${id}: oauth client_id required`);
+    if (!hasSecretConfigured(auth, "client_secret")) errors.push(`${id}: oauth client_secret required`);
+  } else if (!hasSecretConfigured(auth, "secret")) {
+    errors.push(`${id}: api key secret required`);
+  }
+
+  if (paymentWebhookEnabled(profile)) {
+    const suffix = normalizeText(profile?.inbound?.inbound_path_suffix);
+    if (!suffix) errors.push(`${id}: inbound_path_suffix required when payment webhook is configured`);
+    if (suffix && !/^[a-z0-9][a-z0-9-_]{2,64}$/i.test(suffix)) {
+      errors.push(`${id}: inbound_path_suffix must be URL-safe (3-65 chars)`);
+    }
+  }
+  return errors;
+}
+
 function validateProfile(profile) {
   const errors = [];
   const id = profile?.id || "connection";
@@ -476,6 +517,11 @@ function validateProfile(profile) {
   }
   if (identity.portal_url && !/^https?:\/\//i.test(identity.portal_url)) {
     errors.push(`${id}: portal_url must be an http(s) URL`);
+  }
+
+  const paymentType = paymentConnectionTypeForKind(identity.connection_kind);
+  if (paymentType) {
+    return validatePaymentProfile(profile, paymentType, errors, id);
   }
 
   if (identity.direction === "inbound" || identity.direction === "both") {
@@ -610,19 +656,6 @@ function validateProfile(profile) {
 
   const routing = profile?.routing || {};
   if (!CHANNELS.includes(routing.channel)) errors.push(`${id}: routing channel invalid`);
-  const paymentType = paymentConnectionTypeForKind(identity.connection_kind);
-  if (paymentType) {
-    if (routing.channel !== "payments") errors.push(`${id}: payment provider connections must use payments channel`);
-    const providerCode = normalizeText(routing.provider_code || routing.protocol).toLowerCase().replace(/[-.\s]+/g, "_");
-    if (providerCode && providerCode !== paymentType.provider_code) {
-      errors.push(`${id}: payment provider code must be ${paymentType.provider_code}`);
-    }
-    const supportedMethods = normalizeArray(routing.supported_payment_methods).map((method) => normalizeText(method).toUpperCase());
-    const missingMethods = paymentType.supported_payment_methods.filter((method) => !supportedMethods.includes(method));
-    if (missingMethods.length) {
-      errors.push(`${id}: payment provider methods missing: ${missingMethods.join(", ")}`);
-    }
-  }
   if (!normalizeText(routing.schema_version)) errors.push(`${id}: schema_version required`);
   if (!normalizeText(routing.envelope_profile)) errors.push(`${id}: envelope_profile required`);
   if (!MAPPING_MODES.includes(routing.mapping_mode)) errors.push(`${id}: mapping_mode invalid`);
