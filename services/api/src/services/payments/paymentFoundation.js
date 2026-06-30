@@ -52,6 +52,37 @@ const PAYMENT_METHODS = DEFAULT_PROVIDER_REGISTRY.flatMap((provider) =>
 const SENSITIVE_KEY = /(authorization|cookie|password|secret|token|signature|api[_-]?key|card[_-]?number|pan|cvc|cvv|cryptogram)/i;
 const SAFE_CARD_KEYS = new Set(["brand", "card_last4", "last4"]);
 
+export const PAYMENT_READINESS_STATES = Object.freeze({
+  NOT_CONFIGURED: "NOT_CONFIGURED",
+  CONFIGURED: "CONFIGURED",
+  HEALTHY: "HEALTHY",
+  UNHEALTHY: "UNHEALTHY",
+  DISABLED: "DISABLED"
+});
+
+const PAYMENT_READINESS_PRESENTATION = Object.freeze({
+  [PAYMENT_READINESS_STATES.NOT_CONFIGURED]: {
+    status: "provider_not_configured",
+    label: "Not configured"
+  },
+  [PAYMENT_READINESS_STATES.CONFIGURED]: {
+    status: "awaiting_health_verification",
+    label: "Awaiting health verification"
+  },
+  [PAYMENT_READINESS_STATES.HEALTHY]: {
+    status: "healthy",
+    label: "Healthy"
+  },
+  [PAYMENT_READINESS_STATES.UNHEALTHY]: {
+    status: "connection_failed",
+    label: "Connection failed"
+  },
+  [PAYMENT_READINESS_STATES.DISABLED]: {
+    status: "provider_disabled",
+    label: "Provider Disabled"
+  }
+});
+
 export const DEFAULT_PAYMENT_SETTINGS = {
   methods: PAYMENT_METHODS,
   default_currency: "USD",
@@ -421,7 +452,7 @@ function registeredProviderMetadata(profile, index = 0) {
   const methods = rawMethods
     .map((method, methodIndex) => normalizeProviderMethod(
       typeof method === "string" ? { code: method } : method,
-      {},
+      { enabled: true, visible: true },
       methodIndex
     ))
     .filter(Boolean);
@@ -433,7 +464,7 @@ function registeredProviderMetadata(profile, index = 0) {
       profile?.identity?.connection_name ||
       humanizeCode(providerCode)
     ),
-    enabled: normalizeBoolean(metadata.enabled, false),
+    enabled: normalizeBoolean(metadata.enabled, profile?.identity?.is_enabled !== false),
     visible: normalizeBoolean(metadata.visible, true),
     priority: normalizePriority(metadata.priority, (index + 1) * 10),
     environment: normalizePaymentEnvironment(profile?.identity?.environment, "production"),
@@ -481,18 +512,6 @@ function profileHealthStatus(profile) {
   return normalizeText(profile?.routing?.health_status || "pending").toLowerCase();
 }
 
-function profileHealthReason(profile) {
-  const status = profileHealthStatus(profile);
-  if (["healthy", "configured", "ok", "ready"].includes(status)) return null;
-  if (["disabled"].includes(status)) return "provider_disabled";
-  if (["down", "failed", "unhealthy", "error"].includes(status)) return "provider_health_failed";
-  return "provider_health_unknown";
-}
-
-function profileIsHealthy(profile) {
-  return !profileHealthReason(profile);
-}
-
 function hasConfiguredValue(container, key) {
   if (!container || typeof container !== "object") return false;
   return Boolean(
@@ -532,23 +551,63 @@ function applePayDomainReady(profile) {
   return ["validated", "verified", "active", "configured", "ready"].includes(status);
 }
 
-function providerAvailability({ profile, providerCode, method }) {
-  if (!profile) return { available: false, status: "provider_not_configured" };
-  if (!profileIsEnabled(profile)) return { available: false, status: "provider_disabled" };
-  const credentialReason = providerCredentialReason(profile, providerCode);
-  if (credentialReason) return { available: false, status: credentialReason };
-  const healthReason = profileHealthReason(profile);
-  if (healthReason) return { available: false, status: healthReason };
-  if (profile?.routing?.provider_available === false) {
-    return { available: false, status: "provider_health_unknown" };
+function readinessPresentation(state, overrides = {}) {
+  const presentation = PAYMENT_READINESS_PRESENTATION[state] || PAYMENT_READINESS_PRESENTATION.CONFIGURED;
+  return {
+    state,
+    status: presentation.status,
+    label: presentation.label,
+    available: state === PAYMENT_READINESS_STATES.HEALTHY,
+    ...overrides
+  };
+}
+
+export function paymentProviderReadinessState({ profile, providerCode, providerEnabled = true, adapterRegistered = true } = {}) {
+  if (providerEnabled === false || (profile && !profileIsEnabled(profile))) {
+    return readinessPresentation(PAYMENT_READINESS_STATES.DISABLED);
   }
+  if (!profile) return readinessPresentation(PAYMENT_READINESS_STATES.NOT_CONFIGURED);
+
+  const credentialReason = providerCredentialReason(profile, providerCode);
+  if (credentialReason) {
+    return readinessPresentation(PAYMENT_READINESS_STATES.NOT_CONFIGURED, {
+      status: credentialReason,
+      label: credentialReason === "sandbox_credentials_missing"
+        ? "Sandbox credentials missing"
+        : "Credentials missing"
+    });
+  }
+  if (!adapterRegistered) {
+    return readinessPresentation(PAYMENT_READINESS_STATES.CONFIGURED, {
+      status: "adapter_not_registered",
+      label: "Provider adapter not registered"
+    });
+  }
+
+  const healthStatus = profileHealthStatus(profile);
+  if (["down", "failed", "unhealthy", "error"].includes(healthStatus)) {
+    return readinessPresentation(PAYMENT_READINESS_STATES.UNHEALTHY);
+  }
+  const lastSuccessfulTestAt = normalizeText(profile?.routing?.last_successful_test_at);
+  if (
+    ["healthy", "configured", "ok", "ready"].includes(healthStatus) &&
+    lastSuccessfulTestAt &&
+    profile?.routing?.provider_available !== false
+  ) {
+    return readinessPresentation(PAYMENT_READINESS_STATES.HEALTHY);
+  }
+  return readinessPresentation(PAYMENT_READINESS_STATES.CONFIGURED);
+}
+
+function methodAvailability({ providerState, profile, method }) {
+  if (!providerState.available) return providerState;
   if (method?.code === "google_pay" && profile?.public_storefront?.google_pay_enabled !== true) {
-    return { available: false, status: "google_pay_not_enabled" };
+    return { ...providerState, available: false, status: "google_pay_not_enabled", label: "Google Pay not enabled" };
   }
   if (method?.requirements?.domain_validation === true && !applePayDomainReady(profile)) {
-    return { available: false, status: "domain_validation_missing" };
+    return { ...providerState, available: false, status: "domain_validation_missing", label: "Domain validation missing" };
   }
-  return { available: true, status: "configured" };
+  return providerState;
 }
 
 function selectProviderProfile(profiles, providerCode, configuredCode) {
@@ -558,6 +617,7 @@ function selectProviderProfile(profiles, providerCode, configuredCode) {
   }
   return (
     source.find((profile) => profileIsEnabled(profile) && profileProviderCode(profile) === providerCode) ||
+    source.find((profile) => profileProviderCode(profile) === providerCode) ||
     null
   );
 }
@@ -571,33 +631,28 @@ export function buildPaymentReadiness({ settings, profiles = [] } = {}) {
       ? null
       : selectProviderProfile(profiles, providerCode, provider.connection_code);
     const baseProviderState = providerCode === "manual_test"
-      ? {
-          available: provider.environment === "sandbox",
-          status: provider.environment === "sandbox" ? "sandbox_ready" : "provider_not_configured"
-        }
-      : !getPaymentAdapter(provider.adapter_code || providerCode)
-        ? { available: false, status: "adapter_not_registered" }
-        : providerAvailability({ profile, providerCode, method: null });
-    const providerAvailable = provider.enabled !== false && baseProviderState.available;
-    const providerStatus = provider.enabled === false
-      ? "provider_disabled"
-      : providerAvailable
-        ? providerCode === "manual_test" ? "sandbox_ready" : "configured"
-        : baseProviderState.status || "provider_not_configured";
+      ? provider.enabled === false
+        ? readinessPresentation(PAYMENT_READINESS_STATES.DISABLED)
+        : provider.environment === "sandbox"
+          ? readinessPresentation(PAYMENT_READINESS_STATES.HEALTHY, { status: "sandbox_ready", label: "Sandbox ready" })
+          : readinessPresentation(PAYMENT_READINESS_STATES.NOT_CONFIGURED)
+      : paymentProviderReadinessState({
+          profile,
+          providerCode,
+          providerEnabled: provider.enabled !== false,
+          adapterRegistered: Boolean(getPaymentAdapter(provider.adapter_code || providerCode))
+        });
+    const providerAvailable = baseProviderState.available;
+    const providerStatus = baseProviderState.status;
+    const connectionPresent = Boolean(profile);
+    const configured = connectionPresent && !providerCredentialReason(profile, providerCode);
     const methods = provider.methods.map((method) => {
       const methodState = providerCode === "manual_test"
         ? baseProviderState
-        : baseProviderState.status === "adapter_not_registered"
-          ? baseProviderState
-          : providerAvailability({ profile, providerCode, method });
-      const available = provider.enabled !== false && method.enabled !== false && methodState.available;
-      const status = provider.enabled === false
-        ? "provider_disabled"
-        : method.enabled === false
-          ? "payment_method_disabled"
-          : available
-            ? providerCode === "manual_test" ? "sandbox_ready" : "configured"
-            : methodState.status || providerStatus;
+        : methodAvailability({ providerState: baseProviderState, profile, method });
+      const available = method.enabled !== false && methodState.available;
+      const status = method.enabled === false ? "payment_method_disabled" : methodState.status;
+      const statusLabel = method.enabled === false ? "Payment method disabled" : methodState.label;
       return {
         code: method.code,
         label: method.label,
@@ -613,9 +668,14 @@ export function buildPaymentReadiness({ settings, profiles = [] } = {}) {
           ? "sandbox"
           : normalizePaymentEnvironment(profile?.identity?.environment || provider.environment, "production"),
         connection_code: profile?.identity?.connection_code || provider.connection_code || null,
+        connection_present: connectionPresent,
+        configured,
         available,
         status,
         reason: status,
+        readiness_state: methodState.state,
+        readiness_label: methodState.label,
+        status_label: statusLabel,
         wallet: method.wallet === true
       };
     });
@@ -629,9 +689,15 @@ export function buildPaymentReadiness({ settings, profiles = [] } = {}) {
         ? "sandbox"
         : normalizePaymentEnvironment(profile?.identity?.environment || provider.environment, "production"),
       connection_code: profile?.identity?.connection_code || provider.connection_code || null,
+      connection_present: connectionPresent,
+      connection_enabled: profile ? profileIsEnabled(profile) : null,
+      configured,
       available: providerAvailable,
       status: providerStatus,
       reason: providerStatus,
+      readiness_state: baseProviderState.state,
+      readiness_label: baseProviderState.label,
+      status_label: baseProviderState.label,
       methods
     };
   });
@@ -718,10 +784,9 @@ function buildManualTestSession({ paymentCode, amount, currency, captureMode }) 
 
 function providerAdapterUnavailable(input = {}, providerCode) {
   const profile = input.connectionProfile || null;
-  const methodCode = normalizePaymentMethodCode(input.method || "");
-  const state = providerAvailability({ profile, providerCode, method: { code: methodCode } });
+  const state = paymentProviderReadinessState({ profile, providerCode });
   if (!state.available) return state.status || "provider_not_configured";
-  return "provider_health_unknown";
+  return "provider_adapter_unavailable";
 }
 
 function webhookVerificationUnavailable(input = {}) {
@@ -849,6 +914,9 @@ export function buildPublicCheckoutConfig({ settings, profiles = [] } = {}) {
       available: provider.available,
       status: provider.status,
       reason: provider.reason,
+      readiness_state: provider.readiness_state,
+      readiness_label: provider.readiness_label,
+      status_label: provider.status_label,
       methods: provider.methods
         .filter((method) => method.visible !== false)
         .map((method) => method.code)
@@ -871,6 +939,9 @@ export function buildPublicCheckoutConfig({ settings, profiles = [] } = {}) {
           ? null
           : method.status || "provider_not_configured",
       status: method.status,
+      readiness_state: method.readiness_state,
+      readiness_label: method.readiness_label,
+      status_label: method.status_label,
       wallet: method.wallet
     })),
     enabled_methods: visibleMethods
@@ -898,6 +969,9 @@ export function buildPublicPaymentMethods({ settings, profiles = [] } = {}) {
       available: method.enabled !== false && method.available === true,
       mode: method.mode || method.environment || "production",
       status: method.status || method.reason || null,
+      readinessState: method.readiness_state,
+      readinessLabel: method.readiness_label,
+      statusLabel: method.status_label,
       reason: method.enabled === false
         ? "payment_method_disabled"
         : method.available

@@ -314,6 +314,9 @@ function normalizeCheckoutConfig(input) {
       visible: item.visible !== false,
       mode: item.mode || item.environment || null,
       status: item.status || item.reason || null,
+      readiness_state: item.readiness_state || item.readinessState || null,
+      readiness_label: item.readiness_label || item.readinessLabel || null,
+      status_label: item.status_label || item.statusLabel || item.readiness_label || item.readinessLabel || null,
     });
   }
 
@@ -342,14 +345,6 @@ function normalizeCheckoutConfig(input) {
 function humanizePaymentReason(reason) {
   const normalized = String(reason || "").trim().toLowerCase();
   if (normalized === "payment_method_disabled") return "disabled";
-  if (normalized === "provider_not_configured") return "provider not configured";
-  if (normalized === "sandbox_credentials_missing") return "sandbox credentials missing";
-  if (normalized === "domain_validation_missing") return "domain validation missing";
-  if (normalized === "google_pay_not_enabled") return "Google Pay not enabled by provider metadata";
-  if (normalized === "provider_health_unknown") return "provider health unknown";
-  if (normalized === "provider_health_failed") return "provider health failed";
-  if (normalized === "provider_disabled") return "provider disabled";
-  if (normalized === "provider_unhealthy") return "provider unavailable";
   if (normalized === "checkout_source_missing") return "checkout source missing";
   if (normalized === "browser_amount_not_accepted") return "server amount required";
   return normalized ? normalized.replace(/_/g, " ") : "not available";
@@ -5571,8 +5566,11 @@ function CartModal({
     if (normalized === "manual_test") return resolveCopy(t, "cart.paymentMethodManualTest", "Sandbox manual test");
     return resolveCopy(t, "cart.paymentMethodCard", "Credit card");
   };
-  const paymentReasonLabel = (reason) => {
-    return humanizePaymentReason(reason);
+  const paymentReasonLabel = (methodOrReason) => {
+    if (methodOrReason && typeof methodOrReason === "object") {
+      return methodOrReason.status_label || methodOrReason.readiness_label || humanizePaymentReason(methodOrReason.reason || methodOrReason.status);
+    }
+    return humanizePaymentReason(methodOrReason);
   };
   const paymentModeLabel = (value) => {
     const normalized = String(value || "").trim().toLowerCase();
@@ -5803,7 +5801,7 @@ function CartModal({
                       >
                         {item.label || paymentMethodLabel(item.code)}
                         {item.mode ? ` - ${paymentModeLabel(item.mode)}` : ""}
-                        {item.reason ? ` (${paymentReasonLabel(item.reason)})` : ""}
+                        {item.reason ? ` (${paymentReasonLabel(item)})` : ""}
                       </option>
                     ))}
                   </select>
@@ -5814,13 +5812,13 @@ function CartModal({
                     {selectedPaymentOption.provider_label || String(selectedPaymentOption.provider_code || "").replace(/_/g, " ") || "payment provider"} -{" "}
                     {paymentModeLabel(selectedPaymentOption.mode)}
                     {selectedPaymentOption.available === false || selectedPaymentOption.reason
-                      ? ` - ${paymentReasonLabel(selectedPaymentOption.reason || selectedPaymentOption.status)}`
+                      ? ` - ${paymentReasonLabel(selectedPaymentOption)}`
                       : " - available"}
                   </p>
                 ) : null}
                 {selectedPaymentOption?.reason ? (
                   <p className="modal-alert error">
-                    {paymentMethodLabel(selectedPaymentOption.code)}: {paymentReasonLabel(selectedPaymentOption.reason)}
+                    {paymentMethodLabel(selectedPaymentOption.code)}: {paymentReasonLabel(selectedPaymentOption)}
                   </p>
                 ) : null}
                 <p className="modal-alert">

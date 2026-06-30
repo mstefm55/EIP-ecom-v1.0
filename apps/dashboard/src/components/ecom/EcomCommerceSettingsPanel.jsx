@@ -1281,7 +1281,7 @@ export default function EcomCommerceSettingsPanel({ node } = {}) {
   }, [paymentReadiness]);
   const hasConfiguredPaymentProviderConnection = (paymentReadiness?.providers || []).some((provider) =>
     ["paypal", "checkout_com"].includes(normalizePaymentProviderCode(provider.code || provider.provider_code)) &&
-    Boolean(provider.connection_code)
+    provider.connection_present === true
   );
   const selectedProvider = providerOptions.find(
     (provider) => String(provider?.code || "").toLowerCase() === String(translationEngine.provider_code || "").toLowerCase()
@@ -1611,13 +1611,13 @@ export default function EcomCommerceSettingsPanel({ node } = {}) {
                         <input value={method.label || ""} onChange={(event) => updateProviderMethod(providerCode, methodCode, { label: event.target.value })} className="rounded border border-ink-200 bg-white px-2 py-1" />
                         <label className="flex items-center gap-2"><input type="checkbox" checked={method.enabled !== false} onChange={(event) => updateProviderMethod(providerCode, methodCode, { enabled: event.target.checked })} /> Enabled</label>
                         <label className="flex items-center gap-2"><input type="checkbox" checked={method.visible !== false} onChange={(event) => updateProviderMethod(providerCode, methodCode, { visible: event.target.checked })} /> Visible</label>
-                        <span className={methodReadiness?.available ? "font-semibold text-emerald-700" : "font-semibold text-amber-700"}>{formatStatus(methodReadiness?.status || methodReadiness?.reason, "not checked")}</span>
+                        <span className={methodReadiness?.available ? "font-semibold text-emerald-700" : "font-semibold text-amber-700"}>{methodReadiness?.status_label || methodReadiness?.readiness_label || "Not checked"}</span>
                       </div>
                     );
                   })}
                 </div>
                 <div className="mt-3 text-xs text-ink-500">
-                  Configured: {yesNo(Boolean(readiness?.connection_code || provider.connection_code || available))} · Available: {yesNo(available)} · {formatStatus(readiness?.status || readiness?.reason, "not checked")} · {readiness?.connection_code || provider.connection_code || "No registered connection selected"}
+                  Configured: {yesNo(readiness?.configured === true)} · Available: {yesNo(available)} · {readiness?.status_label || readiness?.readiness_label || "Not checked"} · {readiness?.connection_code || provider.connection_code || "No registered connection selected"}
                 </div>
               </div>
             );

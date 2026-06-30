@@ -6,6 +6,7 @@ import {
   buildPublicCheckoutConfig,
   buildPublicPaymentMethods,
   getPaymentAdapter,
+  PAYMENT_READINESS_STATES,
   normalizePaymentMethodCode,
   normalizePaymentSettings,
   registerPaymentAdapter,
@@ -117,7 +118,7 @@ test("payment readiness and public checkout config expose only secret-free provi
       is_enabled: true
     },
     outbound: { auth: { secret_set: true } },
-    routing: { provider_code: "checkout_com", health_status: "healthy", apple_pay_domain_status: "validated" },
+    routing: { provider_code: "checkout_com", health_status: "healthy", provider_available: true, last_successful_test_at: "2026-06-30T08:00:00.000Z", apple_pay_domain_status: "validated" },
     public_storefront: { google_pay_enabled: true },
     verification: { api_key: { secret: "do-not-leak" } }
   }];
@@ -179,7 +180,9 @@ test("payment provider registry supports dynamic count, visibility, priority, an
       channel: "payments",
       provider_code: "future_pay",
       supported_payment_methods: ["BANK_TRANSFER"],
-      health_status: "healthy"
+      health_status: "healthy",
+      provider_available: true,
+      last_successful_test_at: "2026-06-30T08:00:00.000Z"
     }
   }];
 
@@ -400,12 +403,12 @@ test("commerce readiness distinguishes missing and configured Gateway payment pr
     {
       identity: { connection_code: "paypal-live", connection_kind: "paypal", environment: "production", is_enabled: true },
       outbound: { auth: { client_id: "paypal-client-ref", client_secret_set: true } },
-      routing: { channel: "payments", provider_code: "paypal", health_status: "healthy", supported_payment_methods: ["PAYPAL"] }
+      routing: { channel: "payments", provider_code: "paypal", health_status: "healthy", provider_available: true, last_successful_test_at: "2026-06-30T08:00:00.000Z", supported_payment_methods: ["PAYPAL"] }
     },
     {
       identity: { connection_code: "checkout-live", connection_kind: "checkout_com", environment: "production", is_enabled: true },
       outbound: { auth: { secret_set: true } },
-      routing: { channel: "payments", provider_code: "checkout_com", health_status: "healthy", apple_pay_domain_status: "validated", supported_payment_methods: ["CARD", "GOOGLE_PAY", "APPLE_PAY"] },
+      routing: { channel: "payments", provider_code: "checkout_com", health_status: "healthy", provider_available: true, last_successful_test_at: "2026-06-30T08:00:00.000Z", apple_pay_domain_status: "validated", supported_payment_methods: ["CARD", "GOOGLE_PAY", "APPLE_PAY"] },
       public_storefront: { google_pay_enabled: true, apple_pay_domain_status: "validated" }
     }
   ];
@@ -415,6 +418,128 @@ test("commerce readiness distinguishes missing and configured Gateway payment pr
   assert.equal(configured.methods.find((method) => method.code === "card").available, true);
   assert.equal(configured.methods.find((method) => method.code === "google_pay").available, true);
   assert.equal(configured.methods.find((method) => method.code === "apple_pay").available, true);
+});
+
+test("payment readiness implements NOT_CONFIGURED, CONFIGURED, HEALTHY, UNHEALTHY, and DISABLED", () => {
+  const settings = normalizePaymentSettings({
+    provider_registry: [{
+      code: "paypal",
+      enabled: true,
+      visible: true,
+      methods: [{ code: "paypal", enabled: true, visible: true }]
+    }]
+  });
+  const baseProfile = {
+    identity: {
+      connection_code: "p-conn",
+      connection_kind: "paypal",
+      environment: "sandbox",
+      is_enabled: true
+    },
+    outbound: { auth: { client_id: "paypal-client-id", client_secret_set: true } },
+    routing: {
+      channel: "payments",
+      provider_code: "paypal",
+      health_status: "pending",
+      provider_available: false,
+      supported_payment_methods: ["PAYPAL"]
+    }
+  };
+  const providerState = (profiles, stateSettings = settings) =>
+    buildPaymentReadiness({ settings: stateSettings, profiles }).providers.find((provider) => provider.code === "paypal");
+
+  const notConfigured = providerState([]);
+  assert.equal(notConfigured.readiness_state, PAYMENT_READINESS_STATES.NOT_CONFIGURED);
+  assert.equal(notConfigured.available, false);
+  assert.equal(notConfigured.status_label, "Not configured");
+
+  const configured = providerState([baseProfile]);
+  assert.equal(configured.readiness_state, PAYMENT_READINESS_STATES.CONFIGURED);
+  assert.equal(configured.available, false);
+  assert.equal(configured.status_label, "Awaiting health verification");
+
+  const healthy = providerState([{
+    ...baseProfile,
+    routing: {
+      ...baseProfile.routing,
+      health_status: "healthy",
+      provider_available: true,
+      last_successful_test_at: "2026-07-01T08:00:00.000Z"
+    }
+  }]);
+  assert.equal(healthy.readiness_state, PAYMENT_READINESS_STATES.HEALTHY);
+  assert.equal(healthy.available, true);
+  assert.equal(healthy.status_label, "Healthy");
+
+  const unhealthy = providerState([{
+    ...baseProfile,
+    routing: {
+      ...baseProfile.routing,
+      health_status: "unhealthy",
+      health_checked_at: "2026-07-01T08:05:00.000Z",
+      health_error: "OAUTH_TOKEN_FAILED"
+    }
+  }]);
+  assert.equal(unhealthy.readiness_state, PAYMENT_READINESS_STATES.UNHEALTHY);
+  assert.equal(unhealthy.available, false);
+  assert.equal(unhealthy.status_label, "Connection failed");
+
+  const disabled = providerState([{
+    ...baseProfile,
+    identity: { ...baseProfile.identity, is_enabled: false }
+  }]);
+  assert.equal(disabled.readiness_state, PAYMENT_READINESS_STATES.DISABLED);
+  assert.equal(disabled.available, false);
+  assert.equal(disabled.status_label, "Provider Disabled");
+
+  const providerDisabled = providerState([baseProfile], normalizePaymentSettings({
+    provider_registry: [{
+      code: "paypal",
+      enabled: false,
+      visible: true,
+      methods: [{ code: "paypal", enabled: true, visible: true }]
+    }]
+  }));
+  assert.equal(providerDisabled.readiness_state, PAYMENT_READINESS_STATES.DISABLED);
+});
+
+test("auto-matched enabled PayPal connections do not inherit synthetic disabled defaults", () => {
+  const settings = normalizePaymentSettings({
+    provider_registry: [{
+      code: "checkout_com",
+      enabled: true,
+      visible: true,
+      methods: [{ code: "card", enabled: true, visible: true }]
+    }]
+  });
+  const readiness = buildPaymentReadiness({
+    settings,
+    profiles: [{
+      identity: {
+        connection_code: "p-conn",
+        connection_name: "PayPal",
+        connection_kind: "paypal",
+        environment: "sandbox",
+        is_enabled: true
+      },
+      outbound: { auth: { client_id: "paypal-client-id", client_secret_set: true } },
+      routing: {
+        channel: "payments",
+        provider_code: "paypal",
+        health_status: "healthy",
+        provider_available: true,
+        last_successful_test_at: "2026-07-01T08:00:00.000Z",
+        supported_payment_methods: ["PAYPAL"],
+        payment_provider: { code: "paypal", methods: [{ code: "PAYPAL" }] }
+      }
+    }]
+  });
+  const paypal = readiness.providers.find((provider) => provider.code === "paypal");
+  assert.equal(paypal.connection_code, "p-conn");
+  assert.equal(paypal.enabled, true);
+  assert.equal(paypal.methods[0].enabled, true);
+  assert.equal(paypal.readiness_state, PAYMENT_READINESS_STATES.HEALTHY);
+  assert.equal(paypal.available, true);
 });
 
 test("payment adapters fail closed for live placeholders and allow manual_test sandbox only", async () => {
@@ -481,7 +606,7 @@ test("payment sandbox readiness distinguishes provider, credential, health, doma
     profiles: [{
       identity: { connection_code: "checkout-sandbox", connection_kind: "checkout_com", environment: "sandbox", is_enabled: true },
       outbound: { auth: { secret_set: true } },
-      routing: { provider_code: "checkout_com", health_status: "healthy" },
+      routing: { provider_code: "checkout_com", health_status: "healthy", provider_available: true, last_successful_test_at: "2026-06-30T08:00:00.000Z" },
       public_storefront: { google_pay_enabled: true }
     }]
   });
@@ -497,7 +622,7 @@ test("payment sandbox readiness distinguishes provider, credential, health, doma
       routing: { provider_code: "checkout_com", health_status: "pending", apple_pay_domain_status: "validated" }
     }]
   });
-  assert.equal(healthUnknown.find((item) => item.methodCode === "CARD").reason, "provider_health_unknown");
+  assert.equal(healthUnknown.find((item) => item.methodCode === "CARD").reason, "awaiting_health_verification");
 
   const disabled = buildPublicPaymentMethods({
     settings: normalizePaymentSettings({
@@ -579,8 +704,13 @@ test("successful outbound test persists healthy state used by Tenant Dashboard a
   const profiles = state.attrs.connection_profiles.map((profile) => normalizeProfile(profile, profile.id));
   const dashboardReadiness = buildPaymentReadiness({ settings, profiles });
   assert.equal(dashboardReadiness.providers[0].available, true);
-  assert.equal(dashboardReadiness.providers[0].status, "configured");
+  assert.equal(dashboardReadiness.providers[0].status, "healthy");
+  assert.equal(dashboardReadiness.providers[0].readiness_state, PAYMENT_READINESS_STATES.HEALTHY);
   assert.equal(dashboardReadiness.methods[0].available, true);
+  const storefrontMethod = buildPublicPaymentMethods({ settings, profiles })[0];
+  assert.equal(storefrontMethod.readinessState, dashboardReadiness.methods[0].readiness_state);
+  assert.equal(storefrontMethod.statusLabel, dashboardReadiness.methods[0].status_label);
+  assert.equal(storefrontMethod.available, true);
   assert.deepEqual(buildPublicCheckoutConfig({ settings, profiles }).ready_methods, ["paypal"]);
 });
 
@@ -645,7 +775,12 @@ test("failed outbound test persists unhealthy state and removes checkout availab
   const profiles = state.attrs.connection_profiles.map((profile) => normalizeProfile(profile, profile.id));
   const dashboardReadiness = buildPaymentReadiness({ settings, profiles });
   assert.equal(dashboardReadiness.providers[0].available, false);
-  assert.equal(dashboardReadiness.providers[0].status, "provider_health_failed");
+  assert.equal(dashboardReadiness.providers[0].status, "connection_failed");
+  assert.equal(dashboardReadiness.providers[0].readiness_state, PAYMENT_READINESS_STATES.UNHEALTHY);
+  const storefrontMethod = buildPublicPaymentMethods({ settings, profiles })[0];
+  assert.equal(storefrontMethod.readinessState, PAYMENT_READINESS_STATES.UNHEALTHY);
+  assert.equal(storefrontMethod.statusLabel, "Connection failed");
+  assert.equal(storefrontMethod.available, false);
   assert.deepEqual(buildPublicCheckoutConfig({ settings, profiles }).ready_methods, []);
 });
 
@@ -718,8 +853,8 @@ test("payment routes and storefront integration expose governed checkout session
   assert.doesNotMatch(samaraApp, /amount: paymentAmount/);
   assert.doesNotMatch(samaraApp, /selectedPaymentMethod === "card"/);
   assert.match(samaraApp, /paymentMethodApplePay/);
-  assert.match(samaraApp, /sandbox_credentials_missing/);
-  assert.match(samaraApp, /domain_validation_missing/);
+  assert.match(samaraApp, /status_label/);
+  assert.match(samaraApp, /readiness_label/);
   assert.match(samaraApp, /friendlyCheckoutError/);
   assert.match(samaraApp, /No raw card details are collected by EIP/);
   assert.match(samaraApp, /const DEFAULT_CHECKOUT_METHODS = \[\]/);
@@ -770,6 +905,8 @@ test("dashboard payment settings no longer render raw provider credential fields
   assert.match(dashboardSettings, /Commerce \/ Payments/);
   assert.match(dashboardSettings, /Configured/);
   assert.match(dashboardSettings, /Available/);
+  assert.match(dashboardSettings, /status_label/);
+  assert.doesNotMatch(dashboardSettings, /formatStatus\(readiness\?\.|formatStatus\(methodReadiness\?\./);
   assert.match(dashboardSettings, /No payment provider connection configured/);
   assert.match(dashboardSettings, /Capture mode/);
   assert.match(dashboardSettings, /Default currency/);
