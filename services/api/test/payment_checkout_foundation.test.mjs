@@ -18,6 +18,7 @@ import {
   normalizeProfile,
   validateProfiles
 } from "../src/services/gateway/connectionProfile.js";
+import { persistConnectionTestHealth } from "../src/services/gateway/connectionHealth.js";
 
 const publicCommerceRoute = fs.readFileSync(
   new URL("../src/routes/public_commerce.js", import.meta.url),
@@ -25,6 +26,10 @@ const publicCommerceRoute = fs.readFileSync(
 );
 const commerceOrdersRoute = fs.readFileSync(
   new URL("../src/routes/commerce_orders.js", import.meta.url),
+  "utf8"
+);
+const gatewayRoute = fs.readFileSync(
+  new URL("../src/routes/gateway.js", import.meta.url),
   "utf8"
 );
 const migration = fs.readFileSync(
@@ -508,6 +513,142 @@ test("payment sandbox readiness distinguishes provider, credential, health, doma
   assert.equal(disabled.find((item) => item.methodCode === "PAYPAL").reason, "payment_method_disabled");
 });
 
+test("successful outbound test persists healthy state used by Tenant Dashboard and checkout", async () => {
+  const checkedAt = "2026-06-30T08:30:00.000Z";
+  const state = {
+    attrs: {
+      connection_profiles: [{
+        id: "paypal-health",
+        identity: {
+          connection_name: "PayPal",
+          connection_code: "paypal-health",
+          connection_kind: "paypal",
+          direction: "outbound",
+          environment: "sandbox",
+          is_enabled: true
+        },
+        outbound: {
+          base_url: "https://api-m.sandbox.paypal.com",
+          auth_mode: "oauth2_client_credentials",
+          auth: { client_id: "paypal-client-id", client_secret_set: true }
+        },
+        routing: {
+          channel: "payments",
+          provider_code: "paypal",
+          health_status: "pending",
+          provider_available: false,
+          supported_payment_methods: ["PAYPAL"]
+        }
+      }]
+    }
+  };
+  const db = {
+    async query(sql, params) {
+      if (/^SELECT attrs/.test(sql.trim())) {
+        return { rowCount: 1, rows: [{ attrs: state.attrs }] };
+      }
+      if (/^UPDATE eip_core\.tenant/.test(sql.trim())) {
+        state.attrs.connection_profiles = JSON.parse(params[1]);
+        return { rowCount: 1, rows: [] };
+      }
+      throw new Error(`Unexpected SQL: ${sql}`);
+    }
+  };
+
+  const connection = await persistConnectionTestHealth(db, "tenant-1", "paypal-health", {
+    ok: true,
+    checkedAt,
+    mode: "sandbox"
+  });
+  assert.equal(connection.routing.health_status, "healthy");
+  assert.equal(connection.routing.provider_available, true);
+  assert.equal(connection.routing.health_mode, "sandbox");
+  assert.equal(connection.routing.health_checked_at, checkedAt);
+  assert.equal(connection.routing.last_successful_test_at, checkedAt);
+
+  const settings = normalizePaymentSettings({
+    provider_registry: [{
+      code: "paypal",
+      label: "PayPal",
+      enabled: true,
+      visible: true,
+      priority: 10,
+      methods: [{ code: "paypal", label: "PayPal", enabled: true, visible: true, priority: 10 }]
+    }]
+  });
+  const profiles = state.attrs.connection_profiles.map((profile) => normalizeProfile(profile, profile.id));
+  const dashboardReadiness = buildPaymentReadiness({ settings, profiles });
+  assert.equal(dashboardReadiness.providers[0].available, true);
+  assert.equal(dashboardReadiness.providers[0].status, "configured");
+  assert.equal(dashboardReadiness.methods[0].available, true);
+  assert.deepEqual(buildPublicCheckoutConfig({ settings, profiles }).ready_methods, ["paypal"]);
+});
+
+test("failed outbound test persists unhealthy state and removes checkout availability", async () => {
+  const previousSuccess = "2026-06-30T08:30:00.000Z";
+  const failedAt = "2026-06-30T08:45:00.000Z";
+  const state = {
+    attrs: {
+      connection_profiles: [{
+        id: "paypal-health",
+        identity: {
+          connection_name: "PayPal",
+          connection_code: "paypal-health",
+          connection_kind: "paypal",
+          direction: "outbound",
+          environment: "sandbox",
+          is_enabled: true
+        },
+        outbound: { auth: { client_id: "paypal-client-id", client_secret_set: true } },
+        routing: {
+          channel: "payments",
+          provider_code: "paypal",
+          health_status: "healthy",
+          provider_available: true,
+          last_successful_test_at: previousSuccess,
+          supported_payment_methods: ["PAYPAL"]
+        }
+      }]
+    }
+  };
+  const db = {
+    async query(sql, params) {
+      if (/^SELECT attrs/.test(sql.trim())) return { rowCount: 1, rows: [{ attrs: state.attrs }] };
+      if (/^UPDATE eip_core\.tenant/.test(sql.trim())) {
+        state.attrs.connection_profiles = JSON.parse(params[1]);
+        return { rowCount: 1, rows: [] };
+      }
+      throw new Error(`Unexpected SQL: ${sql}`);
+    }
+  };
+
+  const connection = await persistConnectionTestHealth(db, "tenant-1", "paypal-health", {
+    ok: false,
+    checkedAt: failedAt,
+    mode: "sandbox",
+    error: "OAUTH_TOKEN_FAILED"
+  });
+  assert.equal(connection.routing.health_status, "unhealthy");
+  assert.equal(connection.routing.provider_available, false);
+  assert.equal(connection.routing.health_checked_at, failedAt);
+  assert.equal(connection.routing.last_successful_test_at, previousSuccess);
+  assert.equal(connection.routing.health_error, "OAUTH_TOKEN_FAILED");
+
+  const settings = normalizePaymentSettings({
+    provider_registry: [{
+      code: "paypal",
+      enabled: true,
+      visible: true,
+      methods: [{ code: "paypal", enabled: true, visible: true }]
+    }]
+  });
+  const profiles = state.attrs.connection_profiles.map((profile) => normalizeProfile(profile, profile.id));
+  const dashboardReadiness = buildPaymentReadiness({ settings, profiles });
+  assert.equal(dashboardReadiness.providers[0].available, false);
+  assert.equal(dashboardReadiness.providers[0].status, "provider_health_failed");
+  assert.deepEqual(buildPublicCheckoutConfig({ settings, profiles }).ready_methods, []);
+});
+
 test("payment sandbox session and webhook foundations fail closed without trusted setup", async () => {
   const settings = normalizePaymentSettings({
     methods: [{ code: "paypal", label: "PayPal", enabled: true }],
@@ -603,7 +744,11 @@ test("admin connection UI exposes payment sandbox setup without raw secret displ
   assert.match(adminConnections, /Supported payment methods/);
   assert.match(adminConnections, /No payment provider connection configured/);
   assert.match(adminConnections, /Raw secret values are never displayed after save/);
+  assert.match(adminConnections, /Last successful test/);
+  assert.doesNotMatch(adminConnections, /health_status === "healthy"\) patch\.health_status = "pending"/);
   assert.doesNotMatch(adminConnections, /localStorage.*client_secret|localStorage.*secret key/i);
+  assert.match(gatewayRoute, /persistConnectionTestHealth/);
+  assert.match(gatewayRoute, /PayPal OAuth token acquired successfully[\s\S]*connection/);
 });
 
 test("payment governance migration is additive and keeps future clones on role/template metadata", () => {

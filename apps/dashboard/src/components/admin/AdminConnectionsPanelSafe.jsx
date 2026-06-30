@@ -232,6 +232,11 @@ function buildProfile(id, overrides = {}) {
       protocol: "",
       provider_code: "",
       health_status: "healthy",
+      provider_available: true,
+      health_mode: "production",
+      health_checked_at: "",
+      last_successful_test_at: "",
+      health_error: "",
       apple_pay_domain_status: "",
       domain_validation_status: "",
       supported_payment_methods_text: "",
@@ -358,6 +363,11 @@ function fromApiProfile(profile) {
       protocol: profile.routing?.protocol || "",
       provider_code: profile.routing?.provider_code || "",
       health_status: profile.routing?.health_status || "healthy",
+      provider_available: profile.routing?.provider_available === true,
+      health_mode: profile.routing?.health_mode || profile.identity?.environment || "production",
+      health_checked_at: profile.routing?.health_checked_at || "",
+      last_successful_test_at: profile.routing?.last_successful_test_at || "",
+      health_error: profile.routing?.health_error || "",
       apple_pay_domain_status: profile.routing?.apple_pay_domain_status || "",
       domain_validation_status: profile.routing?.domain_validation_status || "",
       supported_payment_methods_text: Array.isArray(profile.routing?.supported_payment_methods)
@@ -485,6 +495,11 @@ function toApiProfile(profile) {
       protocol: profile.routing.protocol,
       provider_code: profile.routing.provider_code,
       health_status: profile.routing.health_status || "healthy",
+      provider_available: profile.routing.provider_available === true,
+      health_mode: profile.routing.health_mode || profile.identity.environment,
+      health_checked_at: profile.routing.health_checked_at || "",
+      last_successful_test_at: profile.routing.last_successful_test_at || "",
+      health_error: profile.routing.health_error || "",
       apple_pay_domain_status: profile.routing.apple_pay_domain_status || "",
       domain_validation_status: profile.routing.domain_validation_status || "",
       supported_payment_methods: supportedPaymentMethods,
@@ -737,7 +752,6 @@ export default function AdminConnectionsPanelSafe() {
         }))
       };
     }
-    if (setup && selectedConnection.routing?.health_status === "healthy") patch.health_status = "pending";
     if (Object.keys(patch).length) updateSection("routing", patch);
     if (setup) {
       const identityPatch = {};
@@ -853,6 +867,23 @@ export default function AdminConnectionsPanelSafe() {
           : item.routing
       };
     }));
+  };
+
+  const handleConnectionKindChange = (event) => {
+    if (!selectedConnection) return;
+    const nextKind = event.target.value;
+    const changedProvider = nextKind !== selectedConnection.identity?.connection_kind;
+    updateSection("identity", { connection_kind: nextKind });
+    if (changedProvider && PAYMENT_PROVIDER_SETUP[nextKind]) {
+      updateSection("routing", {
+        health_status: "pending",
+        provider_available: false,
+        health_mode: selectedConnection.identity?.environment || "sandbox",
+        health_checked_at: "",
+        last_successful_test_at: "",
+        health_error: ""
+      });
+    }
   };
 
   const handleAddConnection = () => {
@@ -989,11 +1020,20 @@ export default function AdminConnectionsPanelSafe() {
         method: "POST",
         body: { connection_code: selectedConnection.identity.connection_code }
       });
-      if (type === "outbound") {
-        updateSection("routing", { health_status: result.ok ? "healthy" : "unhealthy" });
+      if (type === "outbound" && result.connection) {
+        const persisted = fromApiProfile(result.connection);
+        setConnections((current) => current.map((item) =>
+          item.identity?.connection_code === persisted.identity?.connection_code ? persisted : item
+        ));
       }
       setTestResult({ tone: result.ok ? "success" : "error", text: `${type === "outbound" ? "Outbound" : "Inbound"} test ${result.ok ? "passed" : "failed"} (HTTP ${result.status}).` });
     } catch (err) {
+      if (type === "outbound" && err?.payload?.connection) {
+        const persisted = fromApiProfile(err.payload.connection);
+        setConnections((current) => current.map((item) =>
+          item.identity?.connection_code === persisted.identity?.connection_code ? persisted : item
+        ));
+      }
       setError(friendlyError(err, "Failed to test connection"));
     } finally {
       setTesting(null);
@@ -1170,7 +1210,7 @@ export default function AdminConnectionsPanelSafe() {
               <Grid>
                 <Field label={paymentSetup ? "Provider name" : "Connection name"} error={selectedFieldError("identity.connection_name")}><input value={selectedConnection.identity.connection_name} onChange={handleConnectionNameChange} placeholder={paymentSetup?.displayName || ""} className={inputClass} /></Field>
                 <Field label="Connection code" error={selectedFieldError("identity.connection_code")}><input value={selectedConnection.identity.connection_code} readOnly placeholder="auto-generated" className={`${inputClass} bg-slate-50 text-ink-600`} /></Field>
-                <Field label="Connection kind" error={selectedFieldError("identity.connection_kind")}><select value={selectedConnection.identity.connection_kind} onChange={(e) => updateSection("identity", { connection_kind: e.target.value })} className={inputClass}>{KIND_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>
+                <Field label="Connection kind" error={selectedFieldError("identity.connection_kind")}><select value={selectedConnection.identity.connection_kind} onChange={handleConnectionKindChange} className={inputClass}>{KIND_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>
                 <Field label="Direction" error={selectedFieldError("identity.direction")}>
                   {paymentSetup
                     ? <input readOnly value="outbound" className={`${inputClass} bg-slate-50 text-ink-600`} />
@@ -1296,7 +1336,7 @@ export default function AdminConnectionsPanelSafe() {
                   <Field label="Provider code"><input readOnly value={selectedConnection.routing.provider_code || paymentSetup.providerCode} className={`${inputClass} bg-slate-50 text-ink-600`} /></Field>
                   <Field label="Channel"><input readOnly value={selectedConnection.routing.channel || "payments"} className={`${inputClass} bg-slate-50 text-ink-600`} /></Field>
                   <Field label="Supported payment methods"><textarea readOnly value={selectedConnection.routing.supported_payment_methods_text || paymentSetup.supportedMethods.join("\n")} className={`${inputClass} min-h-[90px] bg-slate-50 text-ink-600`} /></Field>
-                  <Field label="Health status"><select value={selectedConnection.routing.health_status || "pending"} onChange={(e) => updateSection("routing", { health_status: e.target.value })} className={inputClass}><option value="pending">Pending</option><option value="healthy">Healthy</option><option value="unknown">Unknown</option><option value="unhealthy">Unhealthy</option><option value="failed">Failed</option><option value="disabled">Disabled</option></select></Field>
+                  <Field label="Health status"><input readOnly value={selectedConnection.routing.health_status || "pending"} className={`${inputClass} bg-slate-50 text-ink-600`} /></Field>
                 </Grid>
               ) : (
                 <Grid>
@@ -1364,6 +1404,9 @@ export default function AdminConnectionsPanelSafe() {
                       <StatusPill ok={selectedConnection.identity.is_enabled !== false}>Provider: {selectedConnection.identity.is_enabled !== false ? "enabled" : "disabled"}</StatusPill>
                       <StatusPill ok={["healthy", "configured", "ready"].includes(String(selectedConnection.routing.health_status || "").toLowerCase())}>Readiness: {selectedConnection.routing.health_status || "pending"}</StatusPill>
                     </div>
+                    <p className="mt-3 text-xs text-ink-500">
+                      Mode: {selectedConnection.routing.health_mode || selectedConnection.identity.environment || "not tested"} · Last successful test: {selectedConnection.routing.last_successful_test_at || "never"}
+                    </p>
                   </div>
                 ) : null}
                 <Grid>

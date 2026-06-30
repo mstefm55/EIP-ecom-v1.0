@@ -4,6 +4,7 @@ import { buildBootstrapPayload } from "../services/gateway/bootstrap.js";
 import { sha256Hex } from "../auth/crypto.js";
 import { hasPermission } from "../auth/perm.js";
 import { fetchWithTimeout, buildOutboundAuth, assertOutboundUrlAllowed } from "../services/gateway/outbound.js";
+import { persistConnectionTestHealth } from "../services/gateway/connectionHealth.js";
 import {
   extractProfiles,
   hasSecretConfigured,
@@ -833,8 +834,20 @@ export default async function gatewayRoutes(app) {
     if (!profile) return reply.code(404).send({ ok: false, error: "CONNECTION_NOT_FOUND" });
     profile = await hydrateConnectionProfileSecrets(app, app.db, tenantId, profile);
 
+    const recordHealth = async (ok, error = "") => maskSecrets(await persistConnectionTestHealth(
+      app.db,
+      tenantId,
+      connectionCode,
+      {
+        ok,
+        mode: profile.identity?.environment,
+        error
+      }
+    ));
+
     if (!profile.outbound?.base_url) {
-      return reply.code(400).send({ ok: false, error: "OUTBOUND_NOT_CONFIGURED" });
+      const connection = await recordHealth(false, "OUTBOUND_NOT_CONFIGURED");
+      return reply.code(400).send({ ok: false, error: "OUTBOUND_NOT_CONFIGURED", connection });
     }
 
     const base = profile.outbound.base_url.replace(/\/$/, "");
@@ -849,7 +862,8 @@ export default async function gatewayRoutes(app) {
       headers = outboundAuth.headers || {};
       authQuery = outboundAuth.query && typeof outboundAuth.query === "object" ? outboundAuth.query : {};
     } catch (err) {
-      return reply.code(400).send({ ok: false, error: err.message });
+      const connection = await recordHealth(false, err.message);
+      return reply.code(400).send({ ok: false, error: err.message, connection });
     }
 
     const providerCode = normalizeText(
@@ -858,10 +872,12 @@ export default async function gatewayRoutes(app) {
       profile.identity?.connection_kind
     ).toLowerCase().replace(/[-.\s]+/g, "_");
     if (providerCode === "paypal" && profile.outbound?.auth_mode === "oauth2_client_credentials") {
+      const connection = await recordHealth(true);
       return reply.send({
         ok: true,
         status: 200,
-        response: "PayPal OAuth token acquired successfully."
+        response: "PayPal OAuth token acquired successfully.",
+        connection
       });
     }
 
@@ -878,7 +894,8 @@ export default async function gatewayRoutes(app) {
       try {
         await assertOutboundUrlAllowed(testUrl, profile, { purpose: "gateway_outbound_test" });
       } catch (err) {
-        return reply.code(400).send({ ok: false, error: err.message });
+        const connection = await recordHealth(false, err.message);
+        return reply.code(400).send({ ok: false, error: err.message, connection });
       }
       const response = await fetchWithTimeout(testUrl, {
         method,
@@ -888,16 +905,21 @@ export default async function gatewayRoutes(app) {
       });
 
       const text = await response.text();
+      const connection = await recordHealth(response.ok, response.ok ? "" : `HTTP_${response.status}`);
       return reply.send({
         ok: response.ok,
         status: response.status,
-        response: text
+        response: text,
+        connection
       });
     } catch (err) {
+      const detail = err?.name === "AbortError" ? "TIMEOUT" : "NETWORK_ERROR";
+      const connection = await recordHealth(false, detail);
       return reply.code(502).send({
         ok: false,
         error: "OUTBOUND_TEST_FAILED",
-        detail: err?.name === "AbortError" ? "TIMEOUT" : "NETWORK_ERROR"
+        detail,
+        connection
       });
     }
   });

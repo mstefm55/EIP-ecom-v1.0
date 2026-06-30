@@ -40,7 +40,16 @@ const PAYMENT_CONNECTION_TYPES = {
     supported_payment_methods: ["PAYPAL"],
     required_secret_fields: ["outbound.auth.client_secret"],
     required_sandbox_fields: ["outbound.auth.client_id", "outbound.auth.client_secret"],
-    safe_public_metadata: ["provider_code", "environment", "supported_payment_methods", "health_status"],
+    safe_public_metadata: [
+      "provider_code",
+      "environment",
+      "supported_payment_methods",
+      "health_status",
+      "provider_available",
+      "health_mode",
+      "health_checked_at",
+      "last_successful_test_at"
+    ],
     webhook: {
       supported: true,
       verification_mode: "hmac_signature",
@@ -64,7 +73,11 @@ const PAYMENT_CONNECTION_TYPES = {
       "environment",
       "supported_payment_methods",
       "apple_pay_domain_status",
-      "health_status"
+      "health_status",
+      "provider_available",
+      "health_mode",
+      "health_checked_at",
+      "last_successful_test_at"
     ],
     webhook: {
       supported: true,
@@ -267,6 +280,10 @@ function normalizeProfile(raw = {}, fallbackId) {
     : ENVIRONMENTS.includes(raw.environment)
       ? raw.environment
       : "production";
+  const healthStatus = normalizeText(
+    routing.health_status || raw.health_status || paymentConnectionDefaultHealth
+  ).toLowerCase();
+  const healthIsAvailable = ["healthy", "configured", "ok", "ready"].includes(healthStatus);
 
   return {
     id: raw.id || fallbackId || crypto.randomUUID(),
@@ -352,7 +369,17 @@ function normalizeProfile(raw = {}, fallbackId) {
       channel: requestedChannel,
       protocol: normalizeText(routing.protocol || raw.protocol),
       provider_code: normalizeText(routing.provider_code || raw.provider_code),
-      health_status: normalizeText(routing.health_status || raw.health_status || paymentConnectionDefaultHealth).toLowerCase(),
+      health_status: healthStatus,
+      provider_available: normalizeBool(
+        routing.provider_available ?? raw.provider_available,
+        healthIsAvailable
+      ),
+      health_mode: normalizeText(routing.health_mode || raw.health_mode || environment).toLowerCase(),
+      health_checked_at: normalizeText(routing.health_checked_at || raw.health_checked_at),
+      last_successful_test_at: normalizeText(
+        routing.last_successful_test_at || raw.last_successful_test_at
+      ),
+      health_error: normalizeText(routing.health_error || raw.health_error),
       apple_pay_domain_status: normalizeText(
         routing.apple_pay_domain_status ||
           raw.apple_pay_domain_status ||

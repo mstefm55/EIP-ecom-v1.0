@@ -478,13 +478,7 @@ function profileIsEnabled(profile) {
 }
 
 function profileHealthStatus(profile) {
-  return normalizeText(
-    profile?.routing?.health_status ||
-      profile?.outbound?.health_status ||
-      profile?.identity?.health_status ||
-      profile?.audit?.health_status ||
-      "healthy"
-  ).toLowerCase();
+  return normalizeText(profile?.routing?.health_status || "pending").toLowerCase();
 }
 
 function profileHealthReason(profile) {
@@ -545,6 +539,9 @@ function providerAvailability({ profile, providerCode, method }) {
   if (credentialReason) return { available: false, status: credentialReason };
   const healthReason = profileHealthReason(profile);
   if (healthReason) return { available: false, status: healthReason };
+  if (profile?.routing?.provider_available === false) {
+    return { available: false, status: "provider_health_unknown" };
+  }
   if (method?.code === "google_pay" && profile?.public_storefront?.google_pay_enabled !== true) {
     return { available: false, status: "google_pay_not_enabled" };
   }
