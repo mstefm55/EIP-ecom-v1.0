@@ -20,6 +20,7 @@ import {
   validateProfiles
 } from "../src/services/gateway/connectionProfile.js";
 import { persistConnectionTestHealth } from "../src/services/gateway/connectionHealth.js";
+import { buildSuffixAwareCheckoutPath } from "../../../apps/samara-web/my-vite-react-app/src/services/publicCheckoutPath.js";
 
 const publicCommerceRoute = fs.readFileSync(
   new URL("../src/routes/public_commerce.js", import.meta.url),
@@ -833,7 +834,7 @@ test("payment metadata sanitizer strips raw payment credentials and keeps safe c
 test("payment routes and storefront integration expose governed checkout sessions without raw card collection", () => {
   assert.match(publicCommerceRoute, /"\/commerce\/:suffix\/checkout\/session"/);
   assert.match(publicCommerceRoute, /"\/checkout\/payment-methods"/);
-  assert.match(publicCommerceRoute, /"\/checkout\/payment-session"/);
+  assert.match(publicCommerceRoute, /"\/commerce\/:suffix\/checkout\/payment-session"/);
   assert.match(publicCommerceRoute, /"\/payments\/webhooks\/:provider"/);
   assert.match(publicCommerceRoute, /browser_amount_not_accepted/);
   assert.match(publicCommerceRoute, /pricing_snapshot/);
@@ -860,6 +861,29 @@ test("payment routes and storefront integration expose governed checkout session
   assert.match(samaraApp, /const DEFAULT_CHECKOUT_METHODS = \[\]/);
   assert.match(samaraApp, /item\.available !== false/);
   assert.doesNotMatch(samaraApp, /enabled_methods:\s*\["card"\]/);
+});
+
+test("Samara checkout builds suffix-aware payment endpoints without legacy suffix query calls", () => {
+  const endpoint = "https://eip-ecom-v1.up.railway.app/api/public/commerce/samara";
+  const paymentSession = buildSuffixAwareCheckoutPath(endpoint, "/checkout/payment-session");
+  const paymentMethods = buildSuffixAwareCheckoutPath(endpoint, "/checkout/payment-methods");
+
+  assert.equal(
+    paymentSession,
+    "https://eip-ecom-v1.up.railway.app/api/public/commerce/samara/checkout/payment-session"
+  );
+  assert.equal(
+    paymentMethods,
+    "https://eip-ecom-v1.up.railway.app/api/public/commerce/samara/checkout/payment-methods"
+  );
+  assert.doesNotMatch(paymentSession, /\/api\/public\/checkout\/payment-session\?suffix=/);
+  assert.doesNotMatch(paymentMethods, /\/api\/public\/checkout\/payment-methods\?suffix=/);
+  assert.throws(
+    () => buildSuffixAwareCheckoutPath("https://eip-ecom-v1.up.railway.app/api/public", "/checkout/payment-session"),
+    /CONNECTION_SUFFIX_REQUIRED/
+  );
+  assert.match(samaraApi, /buildSuffixAwareCheckoutPath/);
+  assert.doesNotMatch(samaraApi, /nextParams\.suffix|rootPath.*\/api\/public/);
 });
 
 test("admin connection UI exposes payment sandbox setup without raw secret display after save", () => {

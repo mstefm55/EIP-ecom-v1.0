@@ -115,6 +115,28 @@ test("public commerce rejects production connections without verification", asyn
   assert.equal(res.json().error, "VERIFICATION_REQUIRED");
 });
 
+test("suffix-aware payment session OPTIONS accepts Samara public checkout headers", async (t) => {
+  const app = await buildApp(baseProfile());
+  t.after(() => app.close());
+
+  const response = await app.inject({
+    method: "OPTIONS",
+    url: "/api/public/commerce/storefront/checkout/payment-session",
+    headers: {
+      origin: "https://store.test",
+      "access-control-request-method": "POST",
+      "access-control-request-headers": "content-type, x-api-key, x-event-id"
+    }
+  });
+
+  assert.equal(response.statusCode, 204);
+  assert.equal(response.headers["access-control-allow-origin"], "https://store.test");
+  assert.match(response.headers["access-control-allow-methods"], /POST/);
+  assert.match(response.headers["access-control-allow-headers"], /Content-Type/);
+  assert.match(response.headers["access-control-allow-headers"], /X-API-Key/);
+  assert.match(response.headers["access-control-allow-headers"], /X-Event-Id/);
+});
+
 test("public commerce requires production origin allowlists and rejects wildcard origins", async (t) => {
   const noOriginApp = await buildApp(baseProfile({ inbound: { origin_allowlist: [] } }));
   t.after(() => noOriginApp.close());

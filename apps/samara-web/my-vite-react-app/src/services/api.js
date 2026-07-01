@@ -1,6 +1,7 @@
 // src/services/api.js
 
 import { EIP_CONFIG } from "../config/eip";
+import { buildSuffixAwareCheckoutPath } from "./publicCheckoutPath";
 
 export async function callEndpoint(endpoint, options = {}) {
   const baseUrl = EIP_CONFIG.endpoint;
@@ -74,22 +75,7 @@ function buildPublicCommercePath(path, params) {
 }
 
 function buildPublicCheckoutPath(path, params = {}) {
-  const nextParams = { ...(params || {}) };
-  try {
-    const parsed = new URL(EIP_CONFIG.endpoint, typeof window !== "undefined" ? window.location.origin : "http://localhost");
-    const marker = "/api/public/commerce/";
-    const index = parsed.pathname.indexOf(marker);
-    if (index >= 0) {
-      const suffix = decodeURIComponent(parsed.pathname.slice(index + marker.length).split("/")[0] || "");
-      if (suffix && !nextParams.suffix) nextParams.suffix = suffix;
-      const rootPath = `${parsed.pathname.slice(0, index)}/api/public`;
-      const query = Object.keys(nextParams).length ? `?${new URLSearchParams(nextParams).toString()}` : "";
-      return `${parsed.origin}${rootPath}${path}${query}`;
-    }
-  } catch {
-    // Fall back to the configured commerce endpoint.
-  }
-  return buildPublicCommercePath(path, nextParams);
+  return buildSuffixAwareCheckoutPath(EIP_CONFIG.endpoint, path, params);
 }
 
 export async function fetchCatalog({ materialType, q, limit, offset } = {}) {

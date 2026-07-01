@@ -573,16 +573,30 @@ function signMediaAttrs(attrs, app, tenantId) {
   return { ...attrs, media };
 }
 
+const PUBLIC_CORS_HEADERS = [
+  "Content-Type",
+  "X-API-Key",
+  "Authorization",
+  "X-Event-Id",
+  "X-Member-Csrf"
+];
+
 function applyCors(reply, origin, requestHeaders) {
   if (!origin) return;
+  const allowedByName = new Map(PUBLIC_CORS_HEADERS.map((header) => [header.toLowerCase(), header]));
+  const requested = String(requestHeaders || "")
+    .split(",")
+    .map((header) => header.trim().toLowerCase())
+    .filter(Boolean);
+  const allowedHeaders = requested.length
+    ? requested.map((header) => allowedByName.get(header)).filter(Boolean)
+    : PUBLIC_CORS_HEADERS;
   reply.header("Access-Control-Allow-Origin", origin);
   reply.header("Vary", "Origin");
   reply.header("Access-Control-Allow-Credentials", "true");
-  reply.header(
-    "Access-Control-Allow-Headers",
-    requestHeaders || "Content-Type, X-API-Key, Authorization, X-Event-Id, X-Member-Csrf"
-  );
+  reply.header("Access-Control-Allow-Headers", allowedHeaders.join(", "));
   reply.header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+  reply.header("Access-Control-Max-Age", "600");
 }
 
 function connectionAllowsIp(profile, ip) {
@@ -2022,19 +2036,19 @@ export default async function publicCommerceRoutes(app) {
     return reply.send(storefrontLoaderScript());
   });
 
-  app.options("/commerce/*", async (req, reply) => {
+  app.options("/commerce/*", { config: { cors: false } }, async (req, reply) => {
     const origin = req.headers.origin;
     applyCors(reply, origin, req.headers["access-control-request-headers"]);
     return reply.code(204).send();
   });
 
-  app.options("/checkout/*", async (req, reply) => {
+  app.options("/checkout/*", { config: { cors: false } }, async (req, reply) => {
     const origin = req.headers.origin;
     applyCors(reply, origin, req.headers["access-control-request-headers"]);
     return reply.code(204).send();
   });
 
-  app.options("/payments/*", async (req, reply) => {
+  app.options("/payments/*", { config: { cors: false } }, async (req, reply) => {
     const origin = req.headers.origin;
     applyCors(reply, origin, req.headers["access-control-request-headers"]);
     return reply.code(204).send();
@@ -5218,69 +5232,77 @@ export default async function publicCommerceRoutes(app) {
     createCheckoutSession
   );
 
+  const createPublicPaymentSession = async (req, reply) => {
+    const access = await resolveConnection(app, req, reply, ["website_intake", "custom", "payments"]);
+    if (!access) return;
+
+    let body;
+    try {
+      body = parseJsonBody(req);
+    } catch {
+      return reply.code(400).send({ ok: false, error: "invalid_json" });
+    }
+
+    if (
+      Object.prototype.hasOwnProperty.call(body, "amount") ||
+      Object.prototype.hasOwnProperty.call(body, "total") ||
+      Object.prototype.hasOwnProperty.call(body, "payment_amount")
+    ) {
+      return reply.code(400).send({
+        ok: false,
+        error: "browser_amount_not_accepted",
+        reason: "server_amount_from_order_required"
+      });
+    }
+
+    const paymentSettings = await loadCommercePaymentSettings(app, access.tenant.id);
+    const profiles = extractProfiles(access.tenant.attrs || {});
+    const requestedMethod = normalizePaymentMethodCode(body.method || body.payment_method || "");
+    const methodContext = resolvePaymentMethodContext({
+      settings: paymentSettings,
+      profiles,
+      method: requestedMethod,
+      providerCode: body.provider_code || body.providerCode || body.provider
+    });
+    if (!methodContext.ok) {
+      const disabled = methodContext.error === "PAYMENT_METHOD_DISABLED";
+      const reason = disabled
+        ? "payment_method_disabled"
+        : methodContext.reason || "provider_not_configured";
+      return reply.code(disabled ? 403 : 409).send({
+        ok: false,
+        error: reason,
+        method: requestedMethod || null,
+        providerCode: methodContext.provider_code || null,
+        mode: methodContext.environment || null
+      });
+    }
+
+    const source = await loadOrderPaymentSource(app.db, access.tenant.id, body);
+    if (!source.ok) return reply.code(source.status || 409).send({ ok: false, error: source.error });
+
+    req.body = {
+      ...body,
+      order_id: source.order.id,
+      order_code: source.order.code,
+      amount: source.amount,
+      currency: source.currency,
+      method: methodContext.code
+    };
+
+    return createCheckoutSession(req, reply);
+  };
+
+  app.post(
+    "/commerce/:suffix/checkout/payment-session",
+    { config: { rateLimit: RATE_LIMIT, cors: false }, bodyLimit: MAX_BODY },
+    createPublicPaymentSession
+  );
+
   app.post(
     "/checkout/payment-session",
     { config: { rateLimit: RATE_LIMIT, cors: false }, bodyLimit: MAX_BODY },
-    async (req, reply) => {
-      const access = await resolveConnection(app, req, reply, ["website_intake", "custom", "payments"]);
-      if (!access) return;
-
-      let body;
-      try {
-        body = parseJsonBody(req);
-      } catch {
-        return reply.code(400).send({ ok: false, error: "invalid_json" });
-      }
-
-      if (
-        Object.prototype.hasOwnProperty.call(body, "amount") ||
-        Object.prototype.hasOwnProperty.call(body, "total") ||
-        Object.prototype.hasOwnProperty.call(body, "payment_amount")
-      ) {
-        return reply.code(400).send({
-          ok: false,
-          error: "browser_amount_not_accepted",
-          reason: "server_amount_from_order_required"
-        });
-      }
-
-      const paymentSettings = await loadCommercePaymentSettings(app, access.tenant.id);
-      const profiles = extractProfiles(access.tenant.attrs || {});
-      const requestedMethod = normalizePaymentMethodCode(body.method || body.payment_method || "");
-      const methodContext = resolvePaymentMethodContext({
-        settings: paymentSettings,
-        profiles,
-        method: requestedMethod,
-        providerCode: body.provider_code || body.providerCode || body.provider
-      });
-      if (!methodContext.ok) {
-        const disabled = methodContext.error === "PAYMENT_METHOD_DISABLED";
-        const reason = disabled
-          ? "payment_method_disabled"
-          : methodContext.reason || "provider_not_configured";
-        return reply.code(disabled ? 403 : 409).send({
-          ok: false,
-          error: reason,
-          method: requestedMethod || null,
-          providerCode: methodContext.provider_code || null,
-          mode: methodContext.environment || null
-        });
-      }
-
-      const source = await loadOrderPaymentSource(app.db, access.tenant.id, body);
-      if (!source.ok) return reply.code(source.status || 409).send({ ok: false, error: source.error });
-
-      req.body = {
-        ...body,
-        order_id: source.order.id,
-        order_code: source.order.code,
-        amount: source.amount,
-        currency: source.currency,
-        method: methodContext.code
-      };
-
-      return createCheckoutSession(req, reply);
-    }
+    createPublicPaymentSession
   );
 
   app.get(
