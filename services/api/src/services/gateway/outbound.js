@@ -178,6 +178,18 @@ function buildOutboundUrl(profile, endpoint) {
   return `${base}${prefix}${suffix}`.replace(/\/\/+/g, "/").replace(":/", "://");
 }
 
+function redactAuthQuery(rawUrl, authQuery = {}) {
+  try {
+    const url = new URL(rawUrl);
+    for (const key of Object.keys(authQuery || {})) {
+      if (url.searchParams.has(key)) url.searchParams.set(key, "[REDACTED]");
+    }
+    return url.toString();
+  } catch {
+    return "[REDACTED_URL]";
+  }
+}
+
 function oauthClientAuthenticationMethod(profile, auth = profile?.outbound?.auth || {}) {
   const configured = normalizeText(auth.client_auth_method).toLowerCase();
   if (["basic", "body"].includes(configured)) return configured;
@@ -410,7 +422,7 @@ async function executeGatewayOutboundRequest(client, ctx, request = {}) {
     status: response.status,
     headers: responseHeaders,
     text,
-    url: requestUrl,
+    url: redactAuthQuery(requestUrl, authQuery),
     method,
     connection_code: connectionCode || null,
     profile_id: profile?.id || null

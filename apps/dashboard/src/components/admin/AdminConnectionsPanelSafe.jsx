@@ -992,6 +992,30 @@ export default function AdminConnectionsPanelSafe() {
     }
   };
 
+  const handleClearConnectionSecret = async (secretKind, label) => {
+    const connectionCode = selectedConnection?.identity?.connection_code;
+    if (!selectedTenantId || !connectionCode || !secretKind) return;
+    const confirmed = await requestConfirm({
+      title: `Clear ${label || "secret"}`,
+      message: "Clear this stored secret? The connection may stop working immediately. Empty fields never clear secrets.",
+      confirmLabel: "Clear secret",
+      confirmTone: "danger"
+    });
+    if (!confirmed) return;
+    setError(null);
+    try {
+      const result = await apiFetch(
+        `/api/eip/gateway/connections/${selectedTenantId}/profile/${encodeURIComponent(connectionCode)}/secrets/revoke`,
+        { method: "POST", body: { secret_kind: secretKind } }
+      );
+      const list = Array.isArray(result.connections) ? result.connections.map(fromApiProfile) : [];
+      if (list.length) setConnections(list);
+      await refreshDetail({ clearRaw: true });
+    } catch (err) {
+      setError(friendlyError(err, "Failed to clear stored secret"));
+    }
+  };
+
   const handleCopyRawKey = async () => {
     if (!rawKey) return;
     try {
@@ -1253,6 +1277,7 @@ export default function AdminConnectionsPanelSafe() {
                       value={selectedConnection.verification.hmac_signature.secret}
                       stored={selectedConnection.verification.hmac_signature.secret_set}
                       onChange={(value) => updateNested("verification", "hmac_signature", { secret: value })}
+                      onClear={() => handleClearConnectionSecret("verification.hmac_signature.secret", "webhook signing secret")}
                     />
                     <Field label="Webhook signing status"><input readOnly value={hasStoredSecret(selectedConnection.verification.hmac_signature, "secret") ? "Stored securely" : "Missing"} className={`${inputClass} bg-slate-50 text-ink-600`} /></Field>
                     <Field label="Signature header"><input readOnly value={selectedConnection.verification.hmac_signature.header_name} className={`${inputClass} bg-slate-50 text-ink-600`} /></Field>
@@ -1266,14 +1291,14 @@ export default function AdminConnectionsPanelSafe() {
                     {selectedConnection.verification.mode === "api_key" ? (
                       <Grid>
                         <Field label="API key header name" error={selectedFieldError("verification.api_key.header_name")}><input value={selectedConnection.verification.api_key.header_name} onChange={(e) => updateNested("verification", "api_key", { header_name: e.target.value })} placeholder="X-API-Key" className={inputClass} /></Field>
-                        <SecretField label="API key secret" value={selectedConnection.verification.api_key.secret} stored={selectedConnection.verification.api_key.secret_set} onChange={(value) => updateNested("verification", "api_key", { secret: value })} error={selectedFieldError("verification.api_key.secret")} />
+                        <SecretField label="API key secret" value={selectedConnection.verification.api_key.secret} stored={selectedConnection.verification.api_key.secret_set} onChange={(value) => updateNested("verification", "api_key", { secret: value })} onClear={() => handleClearConnectionSecret("verification.api_key.secret", "API key secret")} error={selectedFieldError("verification.api_key.secret")} />
                       </Grid>
                     ) : null}
                     {selectedConnection.verification.mode === "hmac_signature" ? (
                       <Grid>
                         <Field label="Signature header"><input value={selectedConnection.verification.hmac_signature.header_name} onChange={(e) => updateNested("verification", "hmac_signature", { header_name: e.target.value })} className={inputClass} /></Field>
                         <Field label="Timestamp header"><input value={selectedConnection.verification.hmac_signature.timestamp_header} onChange={(e) => updateNested("verification", "hmac_signature", { timestamp_header: e.target.value })} className={inputClass} /></Field>
-                        <SecretField label="HMAC secret" value={selectedConnection.verification.hmac_signature.secret} stored={selectedConnection.verification.hmac_signature.secret_set} onChange={(value) => updateNested("verification", "hmac_signature", { secret: value })} />
+                        <SecretField label="HMAC secret" value={selectedConnection.verification.hmac_signature.secret} stored={selectedConnection.verification.hmac_signature.secret_set} onChange={(value) => updateNested("verification", "hmac_signature", { secret: value })} onClear={() => handleClearConnectionSecret("verification.hmac_signature.secret", "HMAC secret")} />
                       </Grid>
                     ) : null}
                     {selectedConnection.verification.mode === "oauth2_jwt" ? (
@@ -1283,7 +1308,7 @@ export default function AdminConnectionsPanelSafe() {
                         <Field label="Issuer"><input value={selectedConnection.verification.oauth2_jwt.issuer} onChange={(e) => updateNested("verification", "oauth2_jwt", { issuer: e.target.value })} className={inputClass} /></Field>
                         <Field label="Audience"><input value={selectedConnection.verification.oauth2_jwt.audience} onChange={(e) => updateNested("verification", "oauth2_jwt", { audience: e.target.value })} className={inputClass} /></Field>
                         <Field label="JWKS URL"><input value={selectedConnection.verification.oauth2_jwt.jwks_url} onChange={(e) => updateNested("verification", "oauth2_jwt", { jwks_url: e.target.value })} className={inputClass} /></Field>
-                        <SecretField label="Shared secret optional" value={selectedConnection.verification.oauth2_jwt.secret} stored={selectedConnection.verification.oauth2_jwt.secret_set} onChange={(value) => updateNested("verification", "oauth2_jwt", { secret: value })} />
+                        <SecretField label="Shared secret optional" value={selectedConnection.verification.oauth2_jwt.secret} stored={selectedConnection.verification.oauth2_jwt.secret_set} onChange={(value) => updateNested("verification", "oauth2_jwt", { secret: value })} onClear={() => handleClearConnectionSecret("verification.oauth2_jwt.secret", "JWT shared secret")} />
                       </Grid>
                     ) : null}
                   </>
@@ -1301,12 +1326,12 @@ export default function AdminConnectionsPanelSafe() {
                   {paymentSetup.providerCode === "paypal" ? (
                     <>
                       <Field label="Client ID reference / status" error={selectedFieldError("outbound.auth.client_id")}><input value={selectedConnection.outbound.auth.client_id} onChange={(event) => updateNested("outbound", "auth", { client_id: event.target.value })} placeholder="PayPal client ID reference" className={inputClass} /></Field>
-                      <SecretField label="Client secret reference / status" value={selectedConnection.outbound.auth.client_secret} stored={selectedConnection.outbound.auth.client_secret_set} onChange={(value) => updateNested("outbound", "auth", { client_secret: value })} error={selectedFieldError("outbound.auth.client_secret")} />
+                      <SecretField label="Client secret reference / status" value={selectedConnection.outbound.auth.client_secret} stored={selectedConnection.outbound.auth.client_secret_set} onChange={(value) => updateNested("outbound", "auth", { client_secret: value })} onClear={() => handleClearConnectionSecret("outbound.auth.client_secret", "client secret")} error={selectedFieldError("outbound.auth.client_secret")} />
                       <Field label="OAuth token URL"><input readOnly value={selectedConnection.outbound.auth.token_url} className={`${inputClass} bg-slate-50 text-ink-600`} /></Field>
                     </>
                   ) : (
                     <>
-                      <SecretField label="Secret key reference / status" value={selectedConnection.outbound.auth.secret} stored={selectedConnection.outbound.auth.secret_set} onChange={(value) => updateNested("outbound", "auth", { secret: value })} error={selectedFieldError("outbound.auth.secret")} />
+                      <SecretField label="Secret key reference / status" value={selectedConnection.outbound.auth.secret} stored={selectedConnection.outbound.auth.secret_set} onChange={(value) => updateNested("outbound", "auth", { secret: value })} onClear={() => handleClearConnectionSecret("outbound.auth.secret", "provider secret key")} error={selectedFieldError("outbound.auth.secret")} />
                       <Field label="Public key / safe reference"><input value={selectedConnection.outbound.auth.public_key_ref || ""} onChange={(event) => updateNested("outbound", "auth", { public_key_ref: event.target.value })} placeholder="Checkout.com public key reference" className={inputClass} /></Field>
                     </>
                   )}
@@ -1535,12 +1560,15 @@ function Field({ label, children, error = "" }) {
   );
 }
 
-function SecretField({ label, value, stored, onChange, error = "" }) {
+function SecretField({ label, value, stored, onChange, onClear, error = "" }) {
   return (
     <label className="text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink-400">
       <span className="mb-1 flex items-center justify-between gap-2">
         <span>{label}</span>
-        {stored ? <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[0.55rem] text-emerald-700"><ShieldCheck className="h-3 w-3" />Stored</span> : <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[0.55rem] text-amber-700">Not stored</span>}
+        <span className="flex items-center gap-2">
+          {stored && onClear ? <button type="button" onClick={onClear} className="text-[0.52rem] text-rose-600 underline">Clear</button> : null}
+          {stored ? <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[0.55rem] text-emerald-700"><ShieldCheck className="h-3 w-3" />Stored</span> : <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[0.55rem] text-amber-700">Not stored</span>}
+        </span>
       </span>
       <input
         type="password"

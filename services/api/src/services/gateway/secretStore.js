@@ -35,6 +35,24 @@ function getKeyId(source = {}) {
   return normalizeText(config.SECRET_ENCRYPTION_KEY_ID || process.env.SECRET_ENCRYPTION_KEY_ID || "default") || "default";
 }
 
+function getApiKeyPepper(source = {}) {
+  const config = resolveConfig(source);
+  const pepper = normalizeText(config.API_KEY_PEPPER || process.env.API_KEY_PEPPER);
+  if (!pepper) throw new Error("API_KEY_PEPPER_REQUIRED");
+  return pepper;
+}
+
+function isHashOnlySecretKind(kind) {
+  return normalizeText(kind) === "verification.api_key.secret";
+}
+
+function hashConnectionApiKey(source, plaintext) {
+  return crypto
+    .createHash("sha256")
+    .update(`${String(plaintext)}:${getApiKeyPepper(source)}`)
+    .digest("hex");
+}
+
 function refKeyName(key) {
   return `${key}_ref`;
 }
@@ -177,15 +195,27 @@ async function rotateConnectionSecret(source, client, opts) {
     throw new Error("CONNECTION_SECRET_INPUT_REQUIRED");
   }
 
+  const hashOnly = isHashOnlySecretKind(kind);
+  const fingerprint = hashOnly
+    ? hashConnectionApiKey(source, plaintext)
+    : fingerprintSecret(source, plaintext);
   const existing = await loadActiveSecret(client, tenantId, connectionCode, kind);
-  if (existing?.fingerprint === fingerprintSecret(source, plaintext)) {
+  if (existing?.fingerprint === fingerprint) {
     return existing;
   }
 
   const version = await nextSecretVersion(client, tenantId, connectionCode, kind);
   const aad = buildAad({ tenantId, connectionCode, kind, version });
-  const encrypted = encryptSecret(source, plaintext, aad);
-  const fingerprint = fingerprintSecret(source, plaintext);
+  const encrypted = hashOnly
+    ? {
+        algorithm: "sha256-peppered",
+        key_id: "api-key-pepper",
+        iv: "",
+        tag: "",
+        ciphertext: fingerprint,
+        aad
+      }
+    : encryptSecret(source, plaintext, aad);
 
   if (existing) {
     await client.query(
@@ -290,8 +320,20 @@ async function hydrateConnectionProfileSecrets(source, client, tenantId, profile
     if (!target || typeof target !== "object") continue;
     const row = byKind.get(spec.kind);
     if (!row) continue;
-    const plaintext = decryptSecret(source, row);
     applySecretReference(target, spec.key, row);
+    if (isHashOnlySecretKind(spec.kind)) {
+      if (row.algorithm === "sha256-peppered") {
+        target[`${spec.key}_hash`] = row.ciphertext;
+        target[`${spec.key}_hash_algorithm`] = row.algorithm;
+      } else {
+        const legacyPlaintext = decryptSecret(source, row);
+        target[`${spec.key}_hash`] = hashConnectionApiKey(source, legacyPlaintext);
+        target[`${spec.key}_hash_algorithm`] = "sha256-peppered";
+        target[`${spec.key}_migration_required`] = true;
+      }
+      continue;
+    }
+    const plaintext = decryptSecret(source, row);
     target[spec.key] = plaintext;
   }
 
@@ -303,6 +345,7 @@ async function resolveConnectionSecretValue(source, client, opts) {
   const connectionCode = normalizeText(opts?.connectionCode);
   const kind = normalizeText(opts?.kind);
   if (!tenantId || !connectionCode || !kind) return null;
+  if (isHashOnlySecretKind(kind)) return null;
 
   try {
     const row = await loadActiveSecret(client, tenantId, connectionCode, kind);
@@ -311,6 +354,48 @@ async function resolveConnectionSecretValue(source, client, opts) {
     if (error?.code === "42P01") return null;
     throw error;
   }
+}
+
+async function migrateLegacyConnectionApiKeyHash(source, client, tenantId, connectionCode, actorIdentityId = null) {
+  const kind = "verification.api_key.secret";
+  const existing = await loadActiveSecret(client, tenantId, connectionCode, kind);
+  if (!existing || existing.algorithm === "sha256-peppered") return existing;
+  const plaintext = decryptSecret(source, existing);
+  return rotateConnectionSecret(source, client, {
+    tenantId,
+    connectionCode,
+    kind,
+    plaintext,
+    actorIdentityId,
+    attrs: { ...(existing.attrs || {}), migrated_from_algorithm: existing.algorithm }
+  });
+}
+
+async function syncConnectionProfileSecretReferences(client, tenantId, profile) {
+  const output = JSON.parse(JSON.stringify(profile || {}));
+  const connectionCode = normalizeText(output?.identity?.connection_code);
+  if (!tenantId || !connectionCode) return output;
+  const r = await client.query(
+    `
+    SELECT *
+    FROM eip_core.connection_secret
+    WHERE tenant_id = $1::uuid
+      AND connection_code = $2
+      AND status = 'active'
+    `,
+    [tenantId, connectionCode]
+  );
+  const byKind = new Map((r.rows || []).map((row) => [row.secret_kind, row]));
+  for (const spec of SECRET_FIELD_SPECS) {
+    const target = getNested(output, spec.path);
+    const row = byKind.get(spec.kind);
+    if (!target || typeof target !== "object" || !row) continue;
+    applySecretReference(target, spec.key, row);
+    delete target[`${spec.key}_hash`];
+    delete target[`${spec.key}_hash_algorithm`];
+    delete target[`${spec.key}_migration_required`];
+  }
+  return output;
 }
 
 async function revokeConnectionSecrets(client, opts) {
@@ -361,8 +446,11 @@ export {
   decryptSecret,
   encryptSecret,
   hydrateConnectionProfileSecrets,
+  hashConnectionApiKey,
+  migrateLegacyConnectionApiKeyHash,
   revokeConnectionSecrets,
   resolveConnectionSecretValue,
   rotateConnectionSecret,
+  syncConnectionProfileSecretReferences,
   vaultConnectionProfileSecrets
 };

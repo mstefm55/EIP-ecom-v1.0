@@ -58,6 +58,7 @@ import { inspectUploadStorage } from "./services/assets/root.js";
 import { DEFAULT_MAX_UPLOAD_BYTES } from "./lib/uploadSecurity.js";
 import { syncAllTenantMarketplaceFx } from "./services/fx/marketFxSync.js";
 import { buildRenderedDomScannerDiagnostic } from "./services/storefront/renderedDomScanner.js";
+import { redactSecretText } from "./lib/redaction.js";
 
 const DEFAULT_BODY_LIMIT = 1024 * 1024; // 1 MiB
 const STATE_CHANGING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
@@ -81,7 +82,30 @@ const tenantCache = new LRUCache({
 });
 
 async function buildServer() {
-  const app = Fastify({ logger: true, bodyLimit: DEFAULT_BODY_LIMIT });
+  const app = Fastify({
+    logger: {
+      redact: {
+        paths: [
+          "req.headers.authorization",
+          "req.headers.cookie",
+          "req.headers.x-api-key",
+          "res.headers.set-cookie"
+        ],
+        censor: "[REDACTED]"
+      },
+      serializers: {
+        req(request) {
+          return {
+            method: request.method,
+            url: redactSecretText(request.url),
+            host: request.headers?.host,
+            remoteAddress: request.socket?.remoteAddress
+          };
+        }
+      }
+    },
+    bodyLimit: DEFAULT_BODY_LIMIT
+  });
 
   // ---- env (must be first) ----
   await app.register(env, {

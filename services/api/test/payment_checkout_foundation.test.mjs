@@ -133,6 +133,7 @@ test("payment readiness and public checkout config expose only secret-free provi
   assert.equal(readiness.methods.find((item) => item.code === "google_pay").available, true);
   assert.equal(readiness.methods.find((item) => item.code === "apple_pay").available, true);
   assert.equal(readiness.methods.find((item) => item.code === "manual_test").available, true);
+  assert.doesNotMatch(JSON.stringify(readiness), /do-not-leak|client_secret|api_key|password|bearer_token/i);
 
   const publicConfig = buildPublicCheckoutConfig({ settings, profiles });
   const serialized = JSON.stringify(publicConfig);

@@ -24,6 +24,7 @@ import { resolveEipSurfaceAccess } from "../lib/surfaceAccess.js";
 import { emitSecurityEvent } from "../lib/securityAudit.js";
 import { requirePrivilegedStepUp as evaluatePrivilegedStepUp } from "../auth/privilegedStepUp.js";
 import { buildRenderedDomScannerDiagnostic } from "../services/storefront/renderedDomScanner.js";
+import { redactSecretText } from "../lib/redaction.js";
 
 function normalizeText(value) {
   return String(value || "").trim();
@@ -31,6 +32,22 @@ function normalizeText(value) {
 
 function buildApiKey() {
   return crypto.randomBytes(32).toString("base64url");
+}
+
+function safeApiKeyRecord(row = {}) {
+  const attrs = row.attrs && typeof row.attrs === "object" ? row.attrs : {};
+  return {
+    id: row.id,
+    label: row.label || null,
+    is_active: row.is_active === true,
+    expires_at: row.expires_at || null,
+    created_at: row.created_at || null,
+    attrs: {
+      status: attrs.status || (row.is_active === true ? "active" : "revoked"),
+      fingerprint: attrs.fingerprint || null,
+      last_rotated_at: attrs.last_rotated_at || null
+    }
+  };
 }
 
 function connectionDiagnostic(profile, mappingProfile, scannerDiagnostic) {
@@ -356,9 +373,14 @@ export default async function gatewayRoutes(app) {
 
     return reply.send({
       ok: true,
-      tenant,
+      tenant: {
+        id: tenant.id,
+        code: tenant.code,
+        name: tenant.name,
+        is_active: tenant.is_active
+      },
       connections: connections.map(maskSecrets),
-      api_keys: keysRes.rows,
+      api_keys: keysRes.rows.map(safeApiKeyRecord),
       logs: logRes.rows,
       health: healthRes.rows[0] || {},
       storefront_diagnostics: {
@@ -414,6 +436,20 @@ export default async function gatewayRoutes(app) {
       if (errors.length) {
         await client.query("ROLLBACK");
         return reply.code(400).send({ ok: false, error: "VALIDATION_ERROR", details: errors });
+      }
+
+      const nextCodes = new Set(
+        normalizedConnections.map((profile) => normalizeText(profile?.identity?.connection_code)).filter(Boolean)
+      );
+      const removedConnectionCodes = existingProfiles
+        .map((profile) => normalizeText(profile?.identity?.connection_code))
+        .filter((code) => code && !nextCodes.has(code));
+      for (const removedConnectionCode of removedConnectionCodes) {
+        await revokeConnectionSecrets(client, {
+          tenantId,
+          connectionCode: removedConnectionCode,
+          actorIdentityId: s.session.identity_id
+        });
       }
 
       for (const profile of normalizedConnections) {
@@ -513,7 +549,8 @@ export default async function gatewayRoutes(app) {
           ip: req.ip,
           userAgent: req.headers["user-agent"] || null,
           metadata: {
-            rotated: submittedSecretUpdates
+            rotated: submittedSecretUpdates,
+            removed_connection_codes: removedConnectionCodes
           }
         });
       }
@@ -521,7 +558,7 @@ export default async function gatewayRoutes(app) {
       return reply.send({ ok: true, connections: updatedConnections.map(maskSecrets) });
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
-      app.log.error({ event: "connection_profile_save_failed", tenantId, error: error.message });
+      app.log.error({ event: "connection_profile_save_failed", tenantId, error: redactSecretText(error.message) });
       await emitSecurityEvent(app, "connection.profile_save_failed", {
         category: "connection",
         source: "gateway_admin",
@@ -533,7 +570,7 @@ export default async function gatewayRoutes(app) {
         reason: "CONNECTION_PROFILE_SAVE_FAILED",
         ip: req.ip,
         userAgent: req.headers["user-agent"] || null,
-        metadata: { error: error.message }
+        metadata: { error: redactSecretText(error.message) }
       });
       return reply.code(500).send({ ok: false, error: "CONNECTION_PROFILE_SAVE_FAILED" });
     } finally {
@@ -633,7 +670,7 @@ export default async function gatewayRoutes(app) {
       });
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
-      app.log.error({ event: "connection_secret_revoke_failed", tenantId, connectionCode, error: error.message });
+      app.log.error({ event: "connection_secret_revoke_failed", tenantId, connectionCode, error: redactSecretText(error.message) });
       await emitSecurityEvent(app, "connection.secret_revoke_failed", {
         category: "connection",
         source: "gateway_admin",
@@ -646,7 +683,7 @@ export default async function gatewayRoutes(app) {
         reason: "CONNECTION_SECRET_REVOKE_FAILED",
         ip: req.ip,
         userAgent: req.headers["user-agent"] || null,
-        metadata: { error: error.message }
+        metadata: { error: redactSecretText(error.message) }
       });
       return reply.code(500).send({ ok: false, error: "CONNECTION_SECRET_REVOKE_FAILED" });
     } finally {
@@ -733,7 +770,15 @@ export default async function gatewayRoutes(app) {
     if (profile.verification?.mode === "api_key") {
       const headerName = profile.verification.api_key?.header_name;
       if (!headerName) return reply.code(400).send({ ok: false, error: "API_KEY_HEADER_REQUIRED" });
-      headers[String(headerName)] = profile.verification.api_key?.secret || "";
+      const testApiKey = normalizeText(req.body?.test_api_key);
+      if (!testApiKey) {
+        return reply.code(400).send({
+          ok: false,
+          error: "TEST_API_KEY_REQUIRED",
+          detail: "Inbound API keys are hash-only and cannot be recovered for self-test."
+        });
+      }
+      headers[String(headerName)] = testApiKey;
     }
 
     let rawBody = "";
@@ -793,7 +838,7 @@ export default async function gatewayRoutes(app) {
       return reply.send({
         ok: response.ok,
         status: response.status,
-        response: text
+        response: redactSecretText(text)
       });
     } catch (err) {
       return reply.code(502).send({
@@ -909,7 +954,7 @@ export default async function gatewayRoutes(app) {
       return reply.send({
         ok: response.ok,
         status: response.status,
-        response: text,
+        response: redactSecretText(text),
         connection
       });
     } catch (err) {
@@ -1002,7 +1047,9 @@ export default async function gatewayRoutes(app) {
       }
     });
 
-    return reply.send({ ok: true, api_key: r.rows[0], raw_key: rawKey });
+    reply.header("Cache-Control", "no-store");
+    reply.header("Pragma", "no-cache");
+    return reply.send({ ok: true, api_key: safeApiKeyRecord(r.rows[0]), raw_key: rawKey });
   });
 
   app.post("/gateway/connections/:tenantId/api-keys/:keyId/revoke", async (req, reply) => {
@@ -1164,6 +1211,8 @@ export default async function gatewayRoutes(app) {
       }
     });
 
-    return reply.send({ ok: true, api_key: r.rows[0], raw_key: rawKey });
+    reply.header("Cache-Control", "no-store");
+    reply.header("Pragma", "no-cache");
+    return reply.send({ ok: true, api_key: safeApiKeyRecord(r.rows[0]), raw_key: rawKey });
   });
 }

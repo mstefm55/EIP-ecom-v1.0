@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { timingSafeEqual } from "../../auth/crypto.js";
+import { hashConnectionApiKey } from "./secretStore.js";
 
 const JWKS_CACHE = new Map();
 const JWKS_TTL_MS = 10 * 60 * 1000;
@@ -199,9 +200,21 @@ async function verifyConnectionRequest(req, profile, rawBody, opts = {}) {
   if (mode === "api_key") {
     const headerName = verification.api_key?.header_name;
     const provided = getHeader(req, headerName);
+    const expectedHash = normalizeText(verification.api_key?.secret_hash);
     const expected = normalizeText(verification.api_key?.secret);
-    if (!headerName || !expected) return { ok: false, error: "MISSING_API_KEY_CONFIG" };
-    if (!provided || !timingSafeEqual(provided, expected)) return { ok: false, error: "INVALID_API_KEY" };
+    if (!headerName || (!expectedHash && !expected)) return { ok: false, error: "MISSING_API_KEY_CONFIG" };
+    if (!provided) return { ok: false, error: "INVALID_API_KEY" };
+    if (expectedHash) {
+      let providedHash;
+      try {
+        providedHash = hashConnectionApiKey(opts.secretSource || {}, provided);
+      } catch {
+        return { ok: false, error: "MISSING_API_KEY_CONFIG" };
+      }
+      if (!timingSafeEqual(providedHash, expectedHash)) return { ok: false, error: "INVALID_API_KEY" };
+      return { ok: true };
+    }
+    if (!timingSafeEqual(provided, expected)) return { ok: false, error: "INVALID_API_KEY" };
     return { ok: true };
   }
 

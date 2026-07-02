@@ -31,6 +31,7 @@ import {
 import { enforceConnectionQuota } from "../lib/abuseQuota.js";
 import { resolveMarketplaceFxContext } from "../services/fx/marketFxSync.js";
 import { auditSecurityEvent } from "../lib/securityAudit.js";
+import { redactSecretText } from "../lib/redaction.js";
 import { normalizeProductSource, resolveProductDrivenRows } from "../lib/storefrontContentResolution.js";
 import {
   buildPublicCheckoutConfig,
@@ -2327,7 +2328,7 @@ export default async function publicCommerceRoutes(app) {
     try {
       profile = await hydrateConnectionProfileSecrets(appInstance, appInstance.db, tenant.id, profile);
     } catch (error) {
-      appInstance.log.error({ event: "commerce_secret_hydrate_failed", tenantId: tenant.id, connectionCode: profile.identity?.connection_code, error: error.message });
+      appInstance.log.error({ event: "commerce_secret_hydrate_failed", tenantId: tenant.id, connectionCode: profile.identity?.connection_code, error: redactSecretText(error.message) });
       auditSecurityEvent(appInstance, "commerce.secret_unavailable", {
         category: "public_commerce",
         source: "public_commerce.resolveConnection",
@@ -2339,13 +2340,13 @@ export default async function publicCommerceRoutes(app) {
         reason: "CONNECTION_SECRET_UNAVAILABLE",
         ip: req.ip,
         userAgent: req.headers["user-agent"] || null,
-        metadata: { error: error.message }
+        metadata: { error: redactSecretText(error.message) }
       });
       reply.code(500).send({ ok: false, error: "CONNECTION_SECRET_UNAVAILABLE" });
       return null;
     }
 
-    const verify = await verifyConnectionRequest(req, profile, rawBody);
+    const verify = await verifyConnectionRequest(req, profile, rawBody, { secretSource: appInstance });
     if (!verify.ok) {
       auditSecurityEvent(appInstance, "commerce.verification_failed", {
         category: "public_commerce",

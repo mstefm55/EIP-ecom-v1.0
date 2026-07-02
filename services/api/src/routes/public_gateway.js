@@ -10,6 +10,7 @@ import { hydrateConnectionProfileSecrets } from "../services/gateway/secretStore
 import { connectionAllowsOrigin, extractEventId, verifyConnectionRequest } from "../services/gateway/verification.js";
 import { emitSecurityEvent, redactSecurityDetails } from "../lib/securityAudit.js";
 import { enforceConnectionQuota } from "../lib/abuseQuota.js";
+import { redactSecretText } from "../lib/redaction.js";
 import { LRUCache } from "lru-cache";
 
 const INTAKE_RATE_LIMIT = { max: 30, timeWindow: "1 minute" };
@@ -424,18 +425,18 @@ async function handleInbound(app, req, reply, opts) {
   try {
     profile = await hydrateConnectionProfileSecrets(app, app.db, tenant.id, profile);
   } catch (error) {
-    app.log.error({ event: "gateway_secret_hydrate_failed", tenantId: tenant.id, connectionCode: profile.identity?.connection_code, error: error.message });
+    app.log.error({ event: "gateway_secret_hydrate_failed", tenantId: tenant.id, connectionCode: profile.identity?.connection_code, error: redactSecretText(error.message) });
     return denyGateway(app, reply, 500, "CONNECTION_SECRET_UNAVAILABLE", {
       eventType: "gateway.secret_unavailable",
       tenantId: tenant.id,
       connectionCode: profile.identity?.connection_code,
       suffix,
       ip: req.ip,
-      metadata: { error: error.message }
+      metadata: { error: redactSecretText(error.message) }
     });
   }
 
-  const verify = await verifyConnectionRequest(req, profile, rawBody);
+  const verify = await verifyConnectionRequest(req, profile, rawBody, { secretSource: app });
   if (!verify.ok) {
     return denyGateway(app, reply, 401, verify.error, {
       eventType: "gateway.verification_failed",

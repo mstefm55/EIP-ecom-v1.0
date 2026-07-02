@@ -116,6 +116,8 @@ test("gateway connection API keys can be created, rotated, and revoked without l
     payload: JSON.stringify({ label: "plug-play", set_primary: true })
   });
   assert.equal(created.statusCode, 200);
+  assert.equal(created.headers["cache-control"], "no-store");
+  assert.equal(created.headers.pragma, "no-cache");
   const createdBody = created.json();
   assert.equal(createdBody.ok, true);
   assert.equal(typeof createdBody.raw_key, "string");
@@ -131,6 +133,8 @@ test("gateway connection API keys can be created, rotated, and revoked without l
     payload: JSON.stringify({ label: "plug-play-rotated" })
   });
   assert.equal(rotated.statusCode, 200);
+  assert.equal(rotated.headers["cache-control"], "no-store");
+  assert.equal(rotated.headers.pragma, "no-cache");
   const rotatedBody = rotated.json();
   assert.equal(rotatedBody.ok, true);
   assert.equal(typeof rotatedBody.raw_key, "string");

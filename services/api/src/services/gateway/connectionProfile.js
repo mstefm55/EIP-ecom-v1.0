@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { isSensitiveFieldName, redactSecrets } from "../../lib/redaction.js";
 
 const DIRECTIONS = ["inbound", "outbound", "both"];
 const ENVIRONMENTS = ["sandbox", "production"];
@@ -126,6 +127,9 @@ const SECRET_FIELD_SPECS = [
   { kind: "outbound.auth.password", path: ["outbound", "auth"], key: "password" },
   { kind: "outbound.auth.client_secret", path: ["outbound", "auth"], key: "client_secret" }
 ];
+const MANAGED_SECRET_PATHS = new Set(
+  SECRET_FIELD_SPECS.map((spec) => [...spec.path, spec.key].join("."))
+);
 
 function normalizeText(value) {
   return String(value || "").trim();
@@ -442,12 +446,41 @@ function maskSecrets(profile) {
   for (const spec of SECRET_FIELD_SPECS) {
     const target = getNested(masked, spec.path);
     if (!target || typeof target !== "object") continue;
-    if (!hasSecretConfigured(target, spec.key)) continue;
-    target[spec.key] = null;
-    target[setKeyName(spec.key)] = true;
+    const configured = hasSecretConfigured(target, spec.key);
+    delete target[spec.key];
     delete target[refKeyName(spec.key)];
+    delete target[`${spec.key}_hash`];
+    delete target[`${spec.key}_hash_algorithm`];
+    delete target[`${spec.key}_migration_required`];
+    delete target[versionKeyName(spec.key)];
+    delete target[rotatedAtKeyName(spec.key)];
+    delete target[rotatedByKeyName(spec.key)];
+    delete target[statusKeyName(spec.key)];
+    target[setKeyName(spec.key)] = configured;
   }
-  return masked;
+  return redactSecrets(masked);
+}
+
+function findUnmanagedSecretPaths(value, path = [], output = []) {
+  if (!value || typeof value !== "object") return output;
+  for (const [key, item] of Object.entries(value)) {
+    const nextPath = [...path, key];
+    if (item && typeof item === "object") {
+      findUnmanagedSecretPaths(item, nextPath, output);
+      continue;
+    }
+    const pathText = nextPath.join(".");
+    if (
+      isSensitiveFieldName(key) &&
+      !MANAGED_SECRET_PATHS.has(pathText) &&
+      item !== undefined &&
+      item !== null &&
+      String(item).trim() !== ""
+    ) {
+      output.push(pathText);
+    }
+  }
+  return output;
 }
 
 function mergeSecrets(existing, incoming) {
@@ -712,6 +745,9 @@ function validateProfiles(profiles) {
   const errors = [];
   const codes = new Set();
   for (const profile of profiles) {
+    for (const path of findUnmanagedSecretPaths(profile)) {
+      errors.push(`${profile?.id || "connection"}: unmanaged credential field ${path} is not allowed; use a governed secret field`);
+    }
     errors.push(...validateProfile(profile));
     const code = profile?.identity?.connection_code;
     if (code) {
@@ -744,6 +780,7 @@ export {
   normalizeProfile,
   extractProfiles,
   maskSecrets,
+  findUnmanagedSecretPaths,
   mergeSecrets,
   validateProfiles,
   SECRET_FIELD_SPECS,

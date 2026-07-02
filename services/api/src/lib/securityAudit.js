@@ -1,6 +1,4 @@
-const MAX_STRING_LENGTH = 2048;
-const MAX_ARRAY_LENGTH = 100;
-const MAX_DEPTH = 8;
+import { redactSecrets } from "./redaction.js";
 
 const FIELD_MAP = {
   tenantId: "tenant_id",
@@ -25,35 +23,6 @@ const FIELD_MAP = {
   outcome: "outcome",
   source: "source"
 };
-
-const SAFE_SENSITIVE_LIKE_KEYS = new Set([
-  "secret_kind",
-  "secret_kinds",
-  "secret_status",
-  "secret_version",
-  "secret_versions"
-]);
-const SENSITIVE_KEY_TOKENS = [
-  "authorization",
-  "cookie",
-  "set_cookie",
-  "x_api_key",
-  "api_key",
-  "apikey",
-  "secret",
-  "token",
-  "password",
-  "credential",
-  "public_key",
-  "private_key",
-  "signature",
-  "csrf",
-  "sid",
-  "did",
-  "otp",
-  "totp",
-  "recovery"
-];
 
 function normalizeText(value) {
   return String(value || "").trim();
@@ -87,33 +56,12 @@ function inferCategory(eventType) {
   return "security";
 }
 
-function isSensitiveKey(key) {
-  const normalized = String(key || "").toLowerCase().replace(/[.-]/g, "_");
-  if (SAFE_SENSITIVE_LIKE_KEYS.has(normalized)) return false;
-  return SENSITIVE_KEY_TOKENS.some((token) => normalized === token || normalized.includes(token));
-}
-
 export function redactSecurityDetails(value, depth = 0) {
-  if (value === null || value === undefined) return value;
-  if (Buffer.isBuffer(value)) return `[BUFFER ${value.length} bytes]`;
-  if (depth > MAX_DEPTH) return "[TRUNCATED_DEPTH]";
-  if (typeof value === "string") {
-    return value.length > MAX_STRING_LENGTH
-      ? `${value.slice(0, MAX_STRING_LENGTH)}...[TRUNCATED]`
-      : value;
-  }
-  if (typeof value === "number" || typeof value === "boolean") return value;
-  if (Array.isArray(value)) {
-    return value.slice(0, MAX_ARRAY_LENGTH).map((item) => redactSecurityDetails(item, depth + 1));
-  }
-  if (typeof value === "object") {
-    const output = {};
-    for (const [key, item] of Object.entries(value)) {
-      output[key] = isSensitiveKey(key) ? "[REDACTED]" : redactSecurityDetails(item, depth + 1);
-    }
-    return output;
-  }
-  return String(value);
+  return redactSecrets(value, {
+    maxDepth: 8 - depth,
+    maxStringLength: 2048,
+    maxArrayLength: 100
+  });
 }
 
 export function buildSecurityEvent(eventType, details = {}) {
