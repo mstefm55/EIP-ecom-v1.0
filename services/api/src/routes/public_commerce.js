@@ -100,6 +100,45 @@ function normalizeText(value) {
   return String(value || "").trim();
 }
 
+function buildCheckoutProviderReturnUrls(req, paymentCode) {
+  const originValue = normalizeText(req?.headers?.origin);
+  if (!originValue) return { returnUrl: null, cancelUrl: null };
+  let origin;
+  try {
+    origin = new URL(originValue).origin;
+  } catch {
+    return { returnUrl: null, cancelUrl: null };
+  }
+
+  let current;
+  try {
+    current = new URL(normalizeText(req?.headers?.referer) || `${origin}/`);
+    if (current.origin !== origin) current = new URL(`${origin}/`);
+  } catch {
+    current = new URL(`${origin}/`);
+  }
+  for (const key of ["token", "PayerID", "eip_payment_status", "eip_payment_code"]) {
+    current.searchParams.delete(key);
+  }
+  current.hash = "";
+
+  const approved = new URL(current.toString());
+  approved.searchParams.set("eip_payment_status", "approved");
+  approved.searchParams.set("eip_payment_code", paymentCode);
+  const cancelled = new URL(current.toString());
+  cancelled.searchParams.set("eip_payment_status", "cancelled");
+  cancelled.searchParams.set("eip_payment_code", paymentCode);
+  return { returnUrl: approved.toString(), cancelUrl: cancelled.toString() };
+}
+
+function profileProviderCode(profile = {}) {
+  return normalizePaymentProviderCode(
+    profile?.routing?.provider_code ||
+      profile?.routing?.protocol ||
+      profile?.identity?.connection_kind
+  );
+}
+
 function parseScryptHash(value) {
   const parts = String(value || "").split("$");
   if (parts.length !== 6 || parts[0] !== "scrypt") return null;
@@ -5123,7 +5162,25 @@ export default async function publicCommerceRoutes(app) {
       return reply.code(409).send(out);
     }
 
+    let providerProfile = methodContext.profile || null;
+    if (providerProfile) {
+      try {
+        providerProfile = await hydrateConnectionProfileSecrets(app, app.db, access.tenant.id, providerProfile);
+      } catch (error) {
+        app.log.error({
+          event: "payment_provider_secret_hydrate_failed",
+          tenantId: access.tenant.id,
+          provider: methodContext.provider_code,
+          error: error.message
+        });
+        const out = { ok: false, error: "PAYMENT_PROVIDER_SECRET_UNAVAILABLE" };
+        await finalizeIdempotency(app.db, { tenantId: access.tenant.id, scope, key: eventId, response: out, status: "error" });
+        return reply.code(500).send(out);
+      }
+    }
+
     const paymentCode = buildCode("PAY");
+    const providerReturnUrls = buildCheckoutProviderReturnUrls(req, paymentCode);
     const providerResult = await adapter.createCheckoutSession({
       paymentCode,
       amount,
@@ -5131,7 +5188,8 @@ export default async function publicCommerceRoutes(app) {
       captureMode: paymentSettings.capture_mode,
       environment: methodContext.environment,
       method: methodContext.code,
-      connectionProfile: methodContext.profile || null,
+      connectionProfile: providerProfile,
+      ...providerReturnUrls,
       metadata: sanitizePaymentMetadata(body.metadata || {})
     });
     if (!providerResult.ok) {
@@ -5161,6 +5219,7 @@ export default async function publicCommerceRoutes(app) {
             currency,
             method: methodContext.code,
             provider: methodContext.provider_code,
+            provider_connection_code: methodContext.profile?.identity?.connection_code || null,
             environment: normalizePaymentEnvironment(methodContext.environment),
             capture_mode: paymentSettings.capture_mode,
             payment_status: providerSession.status || "created",
@@ -5350,9 +5409,40 @@ export default async function publicCommerceRoutes(app) {
       const attrs = payment.attrs && typeof payment.attrs === "object" ? payment.attrs : {};
       const adapter = getPaymentAdapter(attrs.provider);
       if (!adapter) return reply.code(409).send({ ok: false, error: "PAYMENT_ADAPTER_NOT_FOUND" });
+      const requestedProviderSessionId = normalizeText(body.provider_session_id || body.providerSessionId || body.token);
+      const storedProviderSessionId = normalizeText(attrs.provider_session_id);
+      if (requestedProviderSessionId && storedProviderSessionId && requestedProviderSessionId !== storedProviderSessionId) {
+        return reply.code(409).send({ ok: false, error: "PAYMENT_PROVIDER_SESSION_MISMATCH" });
+      }
+
+      const profiles = extractProfiles(access.tenant.attrs || {});
+      const configuredConnectionCode = normalizeText(attrs.provider_connection_code);
+      let providerProfile = profiles.find((profile) =>
+        configuredConnectionCode && normalizeText(profile?.identity?.connection_code) === configuredConnectionCode
+      );
+      if (!providerProfile) {
+        providerProfile = profiles.find((profile) => profileProviderCode(profile) === normalizePaymentProviderCode(attrs.provider));
+      }
+      if (providerProfile) {
+        try {
+          providerProfile = await hydrateConnectionProfileSecrets(app, app.db, access.tenant.id, providerProfile);
+        } catch (error) {
+          app.log.error({
+            event: "payment_provider_secret_hydrate_failed",
+            tenantId: access.tenant.id,
+            provider: attrs.provider,
+            error: error.message
+          });
+          return reply.code(500).send({ ok: false, error: "PAYMENT_PROVIDER_SECRET_UNAVAILABLE" });
+        }
+      }
       const providerResult = await adapter.confirmCheckoutSession({
         environment: normalizePaymentEnvironment(attrs.environment),
         status: attrs.payment_status,
+        captureMode: attrs.capture_mode,
+        paymentCode: payment.code,
+        providerSessionId: storedProviderSessionId,
+        connectionProfile: providerProfile,
         metadata: sanitizePaymentMetadata(body.metadata || {})
       });
       if (!providerResult.ok) return reply.code(409).send({ ok: false, error: providerResult.error });

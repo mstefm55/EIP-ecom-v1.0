@@ -26,6 +26,10 @@ const publicCommerceRoute = fs.readFileSync(
   new URL("../src/routes/public_commerce.js", import.meta.url),
   "utf8"
 );
+const paypalAdapterSource = fs.readFileSync(
+  new URL("../src/services/payments/paypalAdapter.js", import.meta.url),
+  "utf8"
+);
 const commerceOrdersRoute = fs.readFileSync(
   new URL("../src/routes/commerce_orders.js", import.meta.url),
   "utf8"
@@ -543,7 +547,7 @@ test("auto-matched enabled PayPal connections do not inherit synthetic disabled 
   assert.equal(paypal.available, true);
 });
 
-test("payment adapters fail closed for live placeholders and allow manual_test sandbox only", async () => {
+test("payment adapters fail closed when unconfigured and allow manual_test sandbox only", async () => {
   const manual = getPaymentAdapter("manual_test");
   const checkout = getPaymentAdapter("checkout_com");
   const paypal = getPaymentAdapter("paypal");
@@ -570,6 +574,130 @@ test("payment adapters fail closed for live placeholders and allow manual_test s
     ok: false,
     error: "provider_not_configured"
   });
+});
+
+test("PayPal adapter creates an approval session and captures it without exposing credentials", async (t) => {
+  const originalFetch = global.fetch;
+  const requests = [];
+  let rejectCreate = false;
+  global.fetch = async (url, options = {}) => {
+    requests.push({ url: String(url), options });
+    if (String(url).endsWith("/v1/oauth2/token")) {
+      return new Response(JSON.stringify({ access_token: "server-only-access-token" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+    if (String(url).endsWith("/v2/checkout/orders")) {
+      if (rejectCreate) {
+        return new Response(JSON.stringify({ details: [{ issue: "INSTRUMENT_DECLINED" }] }), {
+          status: 422,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+      return new Response(JSON.stringify({
+        id: "PAYPAL-ORDER-1",
+        status: "PAYER_ACTION_REQUIRED",
+        links: [{
+          rel: "payer-action",
+          href: "https://www.sandbox.paypal.com/checkoutnow?token=PAYPAL-ORDER-1",
+          method: "GET"
+        }]
+      }), { status: 201, headers: { "Content-Type": "application/json" } });
+    }
+    if (String(url).endsWith("/v2/checkout/orders/PAYPAL-ORDER-1/capture")) {
+      return new Response(JSON.stringify({
+        id: "PAYPAL-ORDER-1",
+        status: "COMPLETED",
+        purchase_units: [{ payments: { captures: [{ id: "PAYPAL-CAPTURE-1", status: "COMPLETED" }] } }]
+      }), { status: 201, headers: { "Content-Type": "application/json" } });
+    }
+    throw new Error(`Unexpected PayPal request: ${url}`);
+  };
+  t.after(() => {
+    global.fetch = originalFetch;
+  });
+
+  const profile = normalizeProfile({
+    id: "paypal-runtime",
+    identity: {
+      connection_name: "PayPal",
+      connection_code: "paypal-runtime",
+      connection_kind: "paypal",
+      direction: "outbound",
+      environment: "sandbox",
+      is_enabled: true
+    },
+    outbound: {
+      base_url: "https://203.0.113.10",
+      path_prefix: "/",
+      timeout_ms: 1000,
+      auth_mode: "oauth2_client_credentials",
+      auth: {
+        client_id: "paypal-client-id",
+        client_secret: "paypal-client-secret",
+        token_url: "https://203.0.113.10/v1/oauth2/token",
+        client_auth_method: "basic"
+      }
+    },
+    routing: {
+      channel: "payments",
+      provider_code: "paypal",
+      health_status: "healthy",
+      provider_available: true,
+      health_checked_at: "2026-07-02T08:00:00.000Z",
+      last_successful_test_at: "2026-07-02T08:00:00.000Z",
+      supported_payment_methods: ["PAYPAL"]
+    }
+  });
+  const paypal = getPaymentAdapter("paypal");
+  const created = await paypal.createCheckoutSession({
+    connectionProfile: profile,
+    environment: "sandbox",
+    paymentCode: "PAY-100",
+    amount: 19.5,
+    currency: "USD",
+    captureMode: "automatic",
+    returnUrl: "https://shop.example/?eip_payment_status=approved&eip_payment_code=PAY-100",
+    cancelUrl: "https://shop.example/?eip_payment_status=cancelled&eip_payment_code=PAY-100"
+  });
+  assert.equal(created.ok, true);
+  assert.equal(created.session.provider_session_id, "PAYPAL-ORDER-1");
+  assert.equal(created.session.client_action, "redirect");
+  assert.equal(created.session.redirect_url, "https://www.sandbox.paypal.com/checkoutnow?token=PAYPAL-ORDER-1");
+
+  const orderRequest = requests.find((request) => request.url.endsWith("/v2/checkout/orders"));
+  assert.equal(orderRequest.options.headers.Authorization, "Bearer server-only-access-token");
+  assert.equal(orderRequest.options.headers["PayPal-Request-Id"], "PAY-100");
+  assert.doesNotMatch(orderRequest.options.body, /paypal-client-secret|server-only-access-token/);
+  const orderBody = JSON.parse(orderRequest.options.body);
+  assert.equal(orderBody.intent, "CAPTURE");
+  assert.equal(orderBody.purchase_units[0].amount.value, "19.50");
+  assert.equal(orderBody.payment_source.paypal.experience_context.user_action, "PAY_NOW");
+
+  const confirmed = await paypal.confirmCheckoutSession({
+    connectionProfile: profile,
+    providerSessionId: "PAYPAL-ORDER-1",
+    paymentCode: "PAY-100",
+    captureMode: "automatic"
+  });
+  assert.equal(confirmed.ok, true);
+  assert.equal(confirmed.event.status, "paid");
+  assert.equal(confirmed.event.provider_event_id, "PAYPAL-CAPTURE-1");
+
+  rejectCreate = true;
+  const failed = await paypal.createCheckoutSession({
+    connectionProfile: profile,
+    environment: "sandbox",
+    paymentCode: "PAY-101",
+    amount: 10,
+    currency: "USD",
+    captureMode: "automatic",
+    returnUrl: "https://shop.example/return",
+    cancelUrl: "https://shop.example/cancel"
+  });
+  assert.deepEqual(failed, { ok: false, error: "PAYPAL_ORDER_CREATE_FAILED_422" });
+  assert.doesNotMatch(JSON.stringify(failed), /paypal-client-secret|INSTRUMENT_DECLINED/);
 });
 
 test("payment sandbox readiness distinguishes provider, credential, health, domain, and disabled states", () => {
@@ -841,6 +969,9 @@ test("payment routes and storefront integration expose governed checkout session
   assert.match(publicCommerceRoute, /buildPublicPaymentMethods/);
   assert.match(publicCommerceRoute, /"\/commerce\/:suffix\/checkout\/confirm"/);
   assert.match(publicCommerceRoute, /"\/commerce\/:suffix\/payments\/:provider\/webhook"/);
+  assert.match(publicCommerceRoute, /hydrateConnectionProfileSecrets\(app, app\.db, access\.tenant\.id, providerProfile\)/);
+  assert.match(publicCommerceRoute, /provider_connection_code/);
+  assert.match(publicCommerceRoute, /PAYMENT_PROVIDER_SESSION_MISMATCH/);
   assert.doesNotMatch(publicCommerceRoute, /normalizeProviderMode/);
   assert.match(commerceOrdersRoute, /"\/commerce\/payments"/);
   assert.match(commerceOrdersRoute, /ECOM_PAYMENT_CAPTURE/);
@@ -857,10 +988,17 @@ test("payment routes and storefront integration expose governed checkout session
   assert.match(samaraApp, /status_label/);
   assert.match(samaraApp, /readiness_label/);
   assert.match(samaraApp, /friendlyCheckoutError/);
+  assert.match(samaraApp, /trustedPaypalRedirectUrl/);
+  assert.match(samaraApp, /window\.location\.assign\(redirectUrl\)/);
+  assert.match(samaraApp, /eip_payment_status/);
+  assert.match(samaraApp, /provider_session_id: providerSessionId/);
   assert.match(samaraApp, /No raw card details are collected by EIP/);
   assert.match(samaraApp, /const DEFAULT_CHECKOUT_METHODS = \[\]/);
   assert.match(samaraApp, /item\.available !== false/);
   assert.doesNotMatch(samaraApp, /enabled_methods:\s*\["card"\]/);
+  assert.match(paypalAdapterSource, /\/v2\/checkout\/orders/);
+  assert.match(paypalAdapterSource, /PayPal-Request-Id/);
+  assert.doesNotMatch(paypalAdapterSource, /console\.log|client_secret\s*:/);
 });
 
 test("Samara checkout builds suffix-aware payment endpoints without legacy suffix query calls", () => {

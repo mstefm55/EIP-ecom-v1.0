@@ -364,6 +364,18 @@ function friendlyCheckoutError(error, fallback) {
   return message || fallback;
 }
 
+function trustedPaypalRedirectUrl(value) {
+  try {
+    const url = new URL(String(value || ""));
+    const hostname = url.hostname.toLowerCase();
+    return url.protocol === "https:" && (hostname === "paypal.com" || hostname.endsWith(".paypal.com"))
+      ? url.toString()
+      : "";
+  } catch {
+    return "";
+  }
+}
+
 function buildCheckoutFormDefaults(countryIso = DEFAULT_COUNTRY_ISO) {
   return {
     name: "",
@@ -5988,6 +6000,7 @@ export default function App() {
   const clientSource = EIP_CONFIG.clientSource;
   const externalRefPrefix = EIP_CONFIG.externalRefPrefix;
   const lastMemberLoginRef = useRef("");
+  const paypalReturnHandledRef = useRef(false);
   const favoritesStorageKey = useMemo(() => buildFavoritesStorageKey(memberUser), [memberUser]);
   const marketplaceOptions = useMemo(
     () => buildMarketplaceOptions(storefrontFx, countryOptions, languageOptions),
@@ -6068,6 +6081,66 @@ export default function App() {
         });
     }
   }, []);
+
+  useEffect(() => {
+    if (!plugReady || paypalReturnHandledRef.current || typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search || "");
+    const returnStatus = String(params.get("eip_payment_status") || "").toLowerCase();
+    const paymentCode = String(params.get("eip_payment_code") || "").trim();
+    if (!["approved", "cancelled"].includes(returnStatus) || !paymentCode) return;
+    paypalReturnHandledRef.current = true;
+
+    const providerSessionId = String(params.get("token") || "").trim();
+    const clean = new URL(window.location.href);
+    for (const key of ["token", "PayerID", "eip_payment_status", "eip_payment_code"]) {
+      clean.searchParams.delete(key);
+    }
+    window.history.replaceState({}, "", clean.toString());
+
+    if (returnStatus === "cancelled") {
+      setCheckoutStatus({
+        loading: false,
+        error: "PayPal checkout was cancelled.",
+        success: false,
+        orderCode: "",
+        paymentCode,
+      });
+      setCartOpen(true);
+      return;
+    }
+
+    setCheckoutStatus({ loading: true, error: "", success: false, orderCode: "", paymentCode });
+    confirmCheckoutSession({
+      payload: {
+        payment_code: paymentCode,
+        provider_session_id: providerSessionId || undefined,
+        metadata: { source: clientSource, return_flow: "paypal" },
+      },
+    })
+      .then((result) => {
+        const payment = result?.payment || {};
+        setCheckoutStatus({
+          loading: false,
+          error: "",
+          success: true,
+          orderCode: "",
+          paymentCode: payment?.code || paymentCode,
+        });
+        setInstantCheckoutItem(null);
+        setCartItems([]);
+        setCartOpen(false);
+      })
+      .catch((error) => {
+        setCheckoutStatus({
+          loading: false,
+          error: friendlyCheckoutError(error, "PayPal confirmation failed."),
+          success: false,
+          orderCode: "",
+          paymentCode,
+        });
+        setCartOpen(true);
+      });
+  }, [plugReady, clientSource]);
 
   const fetchHomeItems = useCallback(async () => {
     if (!plugReady) return;
@@ -7581,6 +7654,12 @@ export default function App() {
       });
       const payment = paymentResult?.payment || {};
       let finalPayment = payment;
+      if (payment?.client_action === "redirect") {
+        const redirectUrl = trustedPaypalRedirectUrl(payment?.redirect_url);
+        if (!redirectUrl) throw new Error("PayPal did not return a safe approval URL.");
+        window.location.assign(redirectUrl);
+        return;
+      }
       if (payment?.client_action === "manual_test_confirm") {
         const confirmResult = await confirmCheckoutSession({
           payload: {

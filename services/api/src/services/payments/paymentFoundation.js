@@ -1,4 +1,8 @@
 import crypto from "node:crypto";
+import {
+  confirmPaypalCheckoutSession,
+  createPaypalCheckoutSession
+} from "./paypalAdapter.js";
 
 const DEFAULT_PROVIDER_REGISTRY = [
   {
@@ -859,11 +863,13 @@ const ADAPTERS = {
   paypal: {
     code: "paypal",
     async createCheckoutSession(input = {}) {
-      return { ok: false, error: providerAdapterUnavailable(input, "paypal") };
+      const readinessError = providerAdapterUnavailable(input, "paypal");
+      if (readinessError !== "provider_adapter_unavailable") {
+        return { ok: false, error: readinessError };
+      }
+      return createPaypalCheckoutSession(input);
     },
-    async confirmCheckoutSession() {
-      return { ok: false, error: "PAYPAL_CONFIRMATION_NOT_CONFIGURED" };
-    },
+    confirmCheckoutSession: confirmPaypalCheckoutSession,
     async capturePayment() {
       return { ok: false, error: "PAYPAL_CAPTURE_NOT_CONFIGURED" };
     },
