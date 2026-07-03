@@ -48,6 +48,10 @@ import dropSideC from "./assets/hero/pexels-alipazani-12513869.jpg";
 import communityImg from "./assets/notebook_spread_real_01.png";
 import searchIcon from "./assets/magnifying-glass-thin.svg";
 import globeIcon from "./assets/globe.svg";
+import paypalPaymentLogo from "./assets/fontawesome-free-6.6.0-web/svgs/brands/paypal.svg";
+import googlePayPaymentLogo from "./assets/fontawesome-free-6.6.0-web/svgs/brands/google-pay.svg";
+import applePayPaymentLogo from "./assets/fontawesome-free-6.6.0-web/svgs/brands/apple-pay.svg";
+import cardPaymentLogo from "./assets/fontawesome-free-6.6.0-web/svgs/regular/credit-card.svg";
 
 import pattern1 from "./assets/hero/slide3.jpg";
 import pattern2 from "./assets/hero/slide2.jpg";
@@ -392,6 +396,34 @@ function openPaypalCheckoutTab() {
     // The reserved tab can still be navigated if its placeholder cannot be styled.
   }
   return checkoutTab;
+}
+
+const PAYMENT_METHOD_LOGOS = Object.freeze({
+  card: cardPaymentLogo,
+  paypal: paypalPaymentLogo,
+  google_pay: googlePayPaymentLogo,
+  apple_pay: applePayPaymentLogo,
+});
+
+function PaymentMethodLogo({ methodCode, label }) {
+  const normalized = normalizePaymentMethodCode(methodCode);
+  const logo = PAYMENT_METHOD_LOGOS[normalized];
+  if (logo) {
+    return <img className="payment-method-logo" src={logo} alt="" aria-hidden="true" />;
+  }
+  const initials = String(label || normalized || "Pay")
+    .split(/\s+/)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+  return <span className="payment-method-logo-fallback" aria-hidden="true">{initials || "P"}</span>;
+}
+
+function paymentMethodBrandClass(methodCode) {
+  const normalized = normalizePaymentMethodCode(methodCode);
+  if (["card", "paypal", "google_pay", "apple_pay"].includes(normalized)) return normalized.replace(/_/g, "-");
+  return "provider";
 }
 
 function buildCheckoutFormDefaults(countryIso = DEFAULT_COUNTRY_ISO) {
@@ -5579,15 +5611,17 @@ function CartModal({
     ? paymentMethods
     : DEFAULT_CHECKOUT_METHODS
   );
-  const selectedPaymentMethod = normalizePaymentMethodCode(
-    form.payment_method || paymentMethodOptions[0]?.code || ""
+  const enabledPaymentMethodOptions = paymentMethodOptions.filter(
+    (item) => item.enabled !== false && item.available !== false
   );
-  const selectedPaymentProvider = String(form.payment_provider || paymentMethodOptions[0]?.provider_code || "").trim().toLowerCase();
-  const selectedPaymentOption = paymentMethodOptions.find(
+  const selectedPaymentMethod = normalizePaymentMethodCode(
+    form.payment_method || enabledPaymentMethodOptions[0]?.code || ""
+  );
+  const selectedPaymentProvider = String(form.payment_provider || enabledPaymentMethodOptions[0]?.provider_code || "").trim().toLowerCase();
+  const selectedPaymentOption = enabledPaymentMethodOptions.find(
     (item) => normalizePaymentMethodCode(item.code) === selectedPaymentMethod &&
       (!selectedPaymentProvider || String(item.provider_code || "").trim().toLowerCase() === selectedPaymentProvider)
   );
-  const paymentOptionValue = (item) => `${item?.provider_code || "provider"}::${normalizePaymentMethodCode(item?.code)}`;
   const paymentMethodLabel = (code) => {
     const normalized = normalizePaymentMethodCode(code);
     if (normalized === "paypal") return resolveCopy(t, "cart.paymentMethodPaypal", "PayPal");
@@ -5595,12 +5629,6 @@ function CartModal({
     if (normalized === "apple_pay") return resolveCopy(t, "cart.paymentMethodApplePay", "Apple Pay");
     if (normalized === "manual_test") return resolveCopy(t, "cart.paymentMethodManualTest", "Sandbox manual test");
     return resolveCopy(t, "cart.paymentMethodCard", "Credit card");
-  };
-  const paymentReasonLabel = (methodOrReason) => {
-    if (methodOrReason && typeof methodOrReason === "object") {
-      return methodOrReason.status_label || methodOrReason.readiness_label || humanizePaymentReason(methodOrReason.reason || methodOrReason.status);
-    }
-    return humanizePaymentReason(methodOrReason);
   };
   const paymentModeLabel = (value) => {
     const normalized = String(value || "").trim().toLowerCase();
@@ -5813,44 +5841,43 @@ function CartModal({
 
               <div className="cart-checkout-block">
                 <p className="cart-checkout-title">{resolveCopy(t, "cart.paymentTitle", "Payment")}</p>
-                <label>
-                  {resolveCopy(t, "cart.paymentMethod", "Payment method")}
-                  <select
-                    value={selectedPaymentOption ? paymentOptionValue(selectedPaymentOption) : ""}
-                    onChange={(event) => {
-                      const option = paymentMethodOptions.find((item) => paymentOptionValue(item) === event.target.value);
-                      onFormChange("payment_method", option?.code || "");
-                      onFormChange("payment_provider", option?.provider_code || "");
-                    }}
-                  >
-                    {paymentMethodOptions.map((item) => (
-                      <option
-                        key={`${item.provider_code || "provider"}-${item.code}`}
-                        value={paymentOptionValue(item)}
-                        disabled={item.enabled === false || item.available === false}
-                      >
-                        {item.label || paymentMethodLabel(item.code)}
-                        {item.mode ? ` - ${paymentModeLabel(item.mode)}` : ""}
-                        {item.reason ? ` (${paymentReasonLabel(item)})` : ""}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                {selectedPaymentOption ? (
-                  <p className="modal-alert">
-                    {selectedPaymentOption.label || paymentMethodLabel(selectedPaymentOption.code)} via{" "}
-                    {selectedPaymentOption.provider_label || String(selectedPaymentOption.provider_code || "").replace(/_/g, " ") || "payment provider"} -{" "}
-                    {paymentModeLabel(selectedPaymentOption.mode)}
-                    {selectedPaymentOption.available === false || selectedPaymentOption.reason
-                      ? ` - ${paymentReasonLabel(selectedPaymentOption)}`
-                      : " - available"}
-                  </p>
-                ) : null}
-                {selectedPaymentOption?.reason ? (
-                  <p className="modal-alert error">
-                    {paymentMethodLabel(selectedPaymentOption.code)}: {paymentReasonLabel(selectedPaymentOption)}
-                  </p>
-                ) : null}
+                <fieldset className="payment-method-picker">
+                  <legend>{resolveCopy(t, "cart.paymentMethod", "Payment method")}</legend>
+                  {enabledPaymentMethodOptions.length ? (
+                    <div className="payment-method-buttons" role="group" aria-label={resolveCopy(t, "cart.paymentMethod", "Payment method")}>
+                      {enabledPaymentMethodOptions.map((item) => {
+                        const methodCode = normalizePaymentMethodCode(item.code);
+                        const providerCode = String(item.provider_code || "").trim().toLowerCase();
+                        const selected = selectedPaymentOption === item;
+                        const label = item.label || paymentMethodLabel(methodCode);
+                        return (
+                          <button
+                            type="button"
+                            key={`${providerCode || "provider"}-${methodCode}`}
+                            className={`payment-method-button payment-method-${paymentMethodBrandClass(methodCode)}${selected ? " selected" : ""}`}
+                            aria-pressed={selected}
+                            onClick={() => {
+                              onFormChange("payment_method", methodCode);
+                              onFormChange("payment_provider", providerCode);
+                            }}
+                          >
+                            <PaymentMethodLogo methodCode={methodCode} label={label} />
+                            <span className="payment-method-button-copy">
+                              <strong>{label}</strong>
+                              <small>
+                                {item.provider_label || providerCode.replace(/_/g, " ") || label}
+                                {item.mode ? ` · ${paymentModeLabel(item.mode)}` : ""}
+                              </small>
+                            </span>
+                            <span className="payment-method-selected-mark" aria-hidden="true">✓</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="modal-alert error">No payment method is currently available.</p>
+                  )}
+                </fieldset>
                 <p className="modal-alert">
                   {resolveCopy(
                     t,

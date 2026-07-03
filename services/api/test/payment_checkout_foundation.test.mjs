@@ -58,6 +58,10 @@ const samaraApp = fs.readFileSync(
   new URL("../../../apps/samara-web/my-vite-react-app/src/App.jsx", import.meta.url),
   "utf8"
 );
+const samaraCss = fs.readFileSync(
+  new URL("../../../apps/samara-web/my-vite-react-app/src/App.css", import.meta.url),
+  "utf8"
+);
 const dashboardSettings = fs.readFileSync(
   new URL("../../../apps/dashboard/src/components/ecom/EcomCommerceSettingsPanel.jsx", import.meta.url),
   "utf8"
@@ -993,6 +997,17 @@ test("payment routes and storefront integration expose governed checkout session
   assert.match(samaraApp, /checkoutTab\.opener = null/);
   assert.match(samaraApp, /providerCheckoutWindow\.location\.replace\(redirectUrl\)/);
   assert.match(samaraApp, /PayPal checkout opened in a new tab/);
+  assert.match(samaraApp, /className="payment-method-buttons"/);
+  assert.match(samaraApp, /item\.enabled !== false && item\.available !== false/);
+  assert.match(samaraCss, /\.payment-method-paypal/);
+  assert.match(samaraCss, /\.payment-method-card/);
+  assert.match(samaraCss, /\.payment-method-google-pay/);
+  assert.match(samaraCss, /\.payment-method-apple-pay/);
+  assert.match(samaraApp, /paypalPaymentLogo/);
+  assert.match(samaraApp, /googlePayPaymentLogo/);
+  assert.match(samaraApp, /applePayPaymentLogo/);
+  assert.match(samaraApp, /cardPaymentLogo/);
+  assert.doesNotMatch(samaraApp, /paymentOptionValue/);
   assert.ok(
     samaraApp.indexOf("const providerCheckoutWindow = usesPaypal ? openPaypalCheckoutTab() : null") <
       samaraApp.indexOf("const result = await createOrder({ payload })"),
