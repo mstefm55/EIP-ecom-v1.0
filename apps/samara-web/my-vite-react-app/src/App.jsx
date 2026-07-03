@@ -376,6 +376,24 @@ function trustedPaypalRedirectUrl(value) {
   }
 }
 
+function openPaypalCheckoutTab() {
+  if (typeof window === "undefined") return null;
+  const checkoutTab = window.open("about:blank", "_blank");
+  if (!checkoutTab) return null;
+  try {
+    checkoutTab.opener = null;
+    checkoutTab.document.title = "Preparing PayPal checkout";
+    checkoutTab.document.body.textContent = "";
+    const message = checkoutTab.document.createElement("p");
+    message.textContent = "Preparing PayPal checkout... Please keep this tab open.";
+    message.style.cssText = "font-family:system-ui,sans-serif;padding:2rem;color:#2f261f";
+    checkoutTab.document.body.appendChild(message);
+  } catch {
+    // The reserved tab can still be navigated if its placeholder cannot be styled.
+  }
+  return checkoutTab;
+}
+
 function buildCheckoutFormDefaults(countryIso = DEFAULT_COUNTRY_ISO) {
   return {
     name: "",
@@ -5842,6 +5860,7 @@ function CartModal({
                 </p>
               </div>
               {status?.error ? <p className="modal-alert error">{status.error}</p> : null}
+              {status?.notice ? <p className="modal-alert">{status.notice}</p> : null}
               {status?.success ? (
                 <p className="modal-alert success">
                   {formatCopy(t("cart.success"), {
@@ -5863,7 +5882,7 @@ function CartModal({
                   <UiIcon name="close" />
                   {t("cart.close")}
                 </button>
-                <button type="submit" className="btn" disabled={status?.loading || !hasItems || mixedCurrency}>
+                <button type="submit" className="btn" disabled={status?.loading || status?.awaitingProvider || !hasItems || mixedCurrency}>
                   <UiIcon name="checkout" />
                   {status?.loading ? t("cart.checkingOut") : t("cart.checkout")}
                 </button>
@@ -7546,6 +7565,20 @@ export default function App() {
         return;
       }
     }
+    const usesPaypal = selectedMethod === "paypal" ||
+      String(selectedPaymentOption.provider_code || "").trim().toLowerCase() === "paypal";
+    const providerCheckoutWindow = usesPaypal ? openPaypalCheckoutTab() : null;
+    if (usesPaypal && !providerCheckoutWindow) {
+      setCheckoutStatus({
+        loading: false,
+        error: "Allow pop-ups for this site, then try PayPal checkout again.",
+        success: false,
+        orderCode: "",
+        paymentCode: "",
+      });
+      return;
+    }
+
     setCheckoutStatus({ loading: true, error: "", success: false, orderCode: "", paymentCode: "" });
     try {
       const currency = currencies[0] || "USD";
@@ -7657,7 +7690,20 @@ export default function App() {
       if (payment?.client_action === "redirect") {
         const redirectUrl = trustedPaypalRedirectUrl(payment?.redirect_url);
         if (!redirectUrl) throw new Error("PayPal did not return a safe approval URL.");
-        window.location.assign(redirectUrl);
+        if (providerCheckoutWindow && !providerCheckoutWindow.closed) {
+          providerCheckoutWindow.location.replace(redirectUrl);
+          setCheckoutStatus({
+            loading: false,
+            error: "",
+            notice: "PayPal checkout opened in a new tab. Complete payment there.",
+            awaitingProvider: true,
+            success: false,
+            orderCode,
+            paymentCode: payment?.code || "",
+          });
+        } else {
+          window.location.assign(redirectUrl);
+        }
         return;
       }
       if (payment?.client_action === "manual_test_confirm") {
@@ -7697,6 +7743,7 @@ export default function App() {
       const defaultCountry = countryOptions[0]?.iso || DEFAULT_COUNTRY_ISO;
       setCheckoutForm(buildCheckoutFormDefaults(defaultCountry));
     } catch (err) {
+      if (providerCheckoutWindow && !providerCheckoutWindow.closed) providerCheckoutWindow.close();
       setCheckoutStatus({
         loading: false,
         error: friendlyCheckoutError(err, t("errors.paymentFailed")),

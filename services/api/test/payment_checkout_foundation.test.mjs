@@ -989,6 +989,15 @@ test("payment routes and storefront integration expose governed checkout session
   assert.match(samaraApp, /readiness_label/);
   assert.match(samaraApp, /friendlyCheckoutError/);
   assert.match(samaraApp, /trustedPaypalRedirectUrl/);
+  assert.match(samaraApp, /window\.open\("about:blank", "_blank"\)/);
+  assert.match(samaraApp, /checkoutTab\.opener = null/);
+  assert.match(samaraApp, /providerCheckoutWindow\.location\.replace\(redirectUrl\)/);
+  assert.match(samaraApp, /PayPal checkout opened in a new tab/);
+  assert.ok(
+    samaraApp.indexOf("const providerCheckoutWindow = usesPaypal ? openPaypalCheckoutTab() : null") <
+      samaraApp.indexOf("const result = await createOrder({ payload })"),
+    "PayPal tab must be reserved before asynchronous order creation"
+  );
   assert.match(samaraApp, /window\.location\.assign\(redirectUrl\)/);
   assert.match(samaraApp, /eip_payment_status/);
   assert.match(samaraApp, /provider_session_id: providerSessionId/);
