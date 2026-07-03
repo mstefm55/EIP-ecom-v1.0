@@ -302,16 +302,20 @@ function normalizeCheckoutConfig(input) {
   for (const item of sourceMethods) {
     if (!item || typeof item !== "object") continue;
     const code = normalizePaymentMethodCode(item.code || item.methodCode || item.method || item.id);
-    if (!code || seen.has(code)) continue;
-    seen.add(code);
     const fallback = defaultsByCode.get(code) || {};
+    const providerCode = String(
+      item.provider_code || item.providerCode || fallback.provider_code || ""
+    ).trim().toLowerCase();
+    const optionKey = `${providerCode || "unassigned"}::${code}`;
+    if (!code || seen.has(optionKey)) continue;
+    seen.add(optionKey);
     methods.push({
       code,
       label: String(item.label || fallback.label || code.toUpperCase()).trim(),
       enabled: item.enabled !== false,
       available: item.available !== false,
       reason: item.reason || null,
-      provider_code: item.provider_code || item.providerCode || fallback.provider_code || null,
+      provider_code: providerCode || null,
       provider_label: item.provider_label || item.providerLabel || fallback.provider_label || null,
       provider_priority: Number(item.provider_priority ?? item.providerPriority ?? fallback.provider_priority ?? 0),
       priority: Number(item.priority ?? fallback.priority ?? 0),
@@ -5596,6 +5600,7 @@ function CartModal({
   onClear,
   form,
   onFormChange,
+  onPaymentSelect,
   onSubmit,
   status,
   countryOptions = DEFAULT_COUNTRY_OPTIONS,
@@ -5614,13 +5619,11 @@ function CartModal({
   const enabledPaymentMethodOptions = paymentMethodOptions.filter(
     (item) => item.enabled !== false && item.available !== false
   );
-  const selectedPaymentMethod = normalizePaymentMethodCode(
-    form.payment_method || enabledPaymentMethodOptions[0]?.code || ""
-  );
-  const selectedPaymentProvider = String(form.payment_provider || enabledPaymentMethodOptions[0]?.provider_code || "").trim().toLowerCase();
+  const selectedPaymentMethod = normalizePaymentMethodCode(form.payment_method);
+  const selectedPaymentProvider = String(form.payment_provider || "").trim().toLowerCase();
   const selectedPaymentOption = enabledPaymentMethodOptions.find(
     (item) => normalizePaymentMethodCode(item.code) === selectedPaymentMethod &&
-      (!selectedPaymentProvider || String(item.provider_code || "").trim().toLowerCase() === selectedPaymentProvider)
+      String(item.provider_code || "").trim().toLowerCase() === selectedPaymentProvider
   );
   const paymentMethodLabel = (code) => {
     const normalized = normalizePaymentMethodCode(code);
@@ -5855,11 +5858,9 @@ function CartModal({
                             type="button"
                             key={`${providerCode || "provider"}-${methodCode}`}
                             className={`payment-method-button payment-method-${paymentMethodBrandClass(methodCode)}${selected ? " selected" : ""}`}
+                            aria-label={`${label} via ${item.provider_label || providerCode.replace(/_/g, " ") || label}`}
                             aria-pressed={selected}
-                            onClick={() => {
-                              onFormChange("payment_method", methodCode);
-                              onFormChange("payment_provider", providerCode);
-                            }}
+                            onClick={() => onPaymentSelect(methodCode, providerCode)}
                           >
                             <PaymentMethodLogo methodCode={methodCode} label={label} />
                             <span className="payment-method-button-copy">
@@ -6644,7 +6645,7 @@ export default function App() {
           const currentProvider = String(prev.payment_provider || "").trim().toLowerCase();
           const currentOption = normalized.payment.methods.find((item) =>
             normalizePaymentMethodCode(item.code) === currentMethod &&
-            (!currentProvider || String(item.provider_code || "").trim().toLowerCase() === currentProvider) &&
+            currentProvider && String(item.provider_code || "").trim().toLowerCase() === currentProvider &&
             item.enabled !== false && item.available !== false
           );
           if (currentOption) return prev;
@@ -7473,6 +7474,14 @@ export default function App() {
     });
   };
 
+  const handleCheckoutPaymentSelect = (methodCode, providerCode) => {
+    setCheckoutForm((prev) => ({
+      ...prev,
+      payment_method: normalizePaymentMethodCode(methodCode),
+      payment_provider: String(providerCode || "").trim().toLowerCase(),
+    }));
+  };
+
   const handleCheckoutSubmit = async (event) => {
     event.preventDefault();
     if (!plugReady) {
@@ -7511,10 +7520,12 @@ export default function App() {
     }
     const selectedMethod = normalizePaymentMethodCode(checkoutForm.payment_method);
     const selectedProvider = String(checkoutForm.payment_provider || "").trim().toLowerCase();
-    const selectedPaymentOption = checkoutPaymentMethods.find((item) =>
-      normalizePaymentMethodCode(item.code) === selectedMethod &&
-      (!selectedProvider || String(item.provider_code || "").trim().toLowerCase() === selectedProvider)
-    );
+    const selectedPaymentOption = selectedProvider
+      ? checkoutPaymentMethods.find((item) =>
+          normalizePaymentMethodCode(item.code) === selectedMethod &&
+          String(item.provider_code || "").trim().toLowerCase() === selectedProvider
+        )
+      : null;
     if (
       !selectedMethod ||
       !selectedPaymentOption ||
@@ -7768,7 +7779,14 @@ export default function App() {
       }
       setCartOpen(false);
       const defaultCountry = countryOptions[0]?.iso || DEFAULT_COUNTRY_ISO;
-      setCheckoutForm(buildCheckoutFormDefaults(defaultCountry));
+      const defaultPaymentOption = checkoutPaymentMethods.find(
+        (item) => item.enabled !== false && item.available !== false
+      );
+      setCheckoutForm({
+        ...buildCheckoutFormDefaults(defaultCountry),
+        payment_method: defaultPaymentOption?.code || "",
+        payment_provider: defaultPaymentOption?.provider_code || "",
+      });
     } catch (err) {
       if (providerCheckoutWindow && !providerCheckoutWindow.closed) providerCheckoutWindow.close();
       setCheckoutStatus({
@@ -8325,6 +8343,7 @@ export default function App() {
         onClear={handleCartClear}
         form={checkoutForm}
         onFormChange={handleCheckoutFormChange}
+        onPaymentSelect={handleCheckoutPaymentSelect}
         onSubmit={handleCheckoutSubmit}
         status={checkoutStatus}
         countryOptions={countryOptions}

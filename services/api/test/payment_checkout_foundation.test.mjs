@@ -999,6 +999,11 @@ test("payment routes and storefront integration expose governed checkout session
   assert.match(samaraApp, /PayPal checkout opened in a new tab/);
   assert.match(samaraApp, /className="payment-method-buttons"/);
   assert.match(samaraApp, /item\.enabled !== false && item\.available !== false/);
+  assert.match(samaraApp, /const optionKey = `\$\{providerCode \|\| "unassigned"\}::\$\{code\}`/);
+  assert.match(samaraApp, /onPaymentSelect\(methodCode, providerCode\)/);
+  assert.match(samaraApp, /const handleCheckoutPaymentSelect = \(methodCode, providerCode\)/);
+  assert.match(samaraApp, /const selectedPaymentOption = selectedProvider\s*\?/);
+  assert.doesNotMatch(samaraApp, /!selectedProvider \|\| String\(item\.provider_code/);
   assert.match(samaraCss, /\.payment-method-paypal/);
   assert.match(samaraCss, /\.payment-method-card/);
   assert.match(samaraCss, /\.payment-method-google-pay/);
