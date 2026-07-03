@@ -43,6 +43,12 @@ import {
   resolvePaymentMethodContext,
   sanitizePaymentMetadata
 } from "../services/payments/paymentFoundation.js";
+import {
+  isVerifiedPaidStatus,
+  orderLifecycleForPayment,
+  paymentLifecycleState,
+  transitionPaymentLifecycle
+} from "../services/payments/paymentLifecycle.js";
 
 const RATE_LIMIT = { max: 120, timeWindow: "1 minute" };
 const MAX_BODY = 512 * 1024;
@@ -645,7 +651,9 @@ function connectionAllowsIp(profile, ip) {
 }
 
 function requiresInbound(profile) {
-  return profile?.identity?.direction === "inbound" || profile?.identity?.direction === "both";
+  return profile?.identity?.direction === "inbound" ||
+    profile?.identity?.direction === "both" ||
+    profile?.inbound?.webhook_enabled === true;
 }
 
 function isSandboxConnection(profile) {
@@ -919,18 +927,26 @@ async function loadCommercePaymentSettings(app, tenantId) {
 
 function toPublicPaymentSession(row = {}) {
   const attrs = row.attrs && typeof row.attrs === "object" ? row.attrs : {};
+  const status = attrs.payment_status || attrs.workflow?.stage || row.status;
   return {
     id: row.id,
     code: row.code,
-    status: attrs.payment_status || attrs.workflow?.stage || row.status,
+    status,
+    lifecycle_state: paymentLifecycleState(status),
     method: attrs.method || null,
     provider: attrs.provider || null,
     environment: attrs.environment || null,
     amount: attrs.amount ?? null,
     currency: attrs.currency || null,
     provider_session_id: attrs.provider_session_id || null,
-    redirect_url: attrs.redirect_url || null,
-    client_action: attrs.client_action || null,
+    order_id: attrs.order_id || null,
+    order_code: attrs.order_code || null,
+    redirect_url: isVerifiedPaidStatus(status) ? null : attrs.redirect_url || null,
+    client_action: isVerifiedPaidStatus(status) ? null : attrs.client_action || null,
+    refund_status: attrs.refund_status || null,
+    refunded_amount: attrs.refunded_amount ?? null,
+    safe_reason: attrs.safe_reason || null,
+    verified_at: attrs.verified_at || null,
     created_at: row.created_at,
     updated_at: row.updated_at
   };
@@ -982,6 +998,171 @@ async function writePublicPaymentRecords(client, opts) {
       `crm.payment.${opts.paymentCode}.${opts.eventType}`
     ]
   );
+}
+
+async function loadOrderLifecycleSummary(client, tenantId, orderId, orderCode) {
+  if (!orderId && !orderCode) return null;
+  const r = await client.query(
+    `
+    SELECT id, code, status, attrs, created_at, updated_at
+    FROM eip_core.service_object
+    WHERE tenant_id=$1
+      AND object_type='sales_order'
+      AND (id::text=$2 OR code=$3)
+    LIMIT 1
+    `,
+    [tenantId, normalizeText(orderId), normalizeText(orderCode)]
+  );
+  const row = r.rows[0];
+  if (!row) return null;
+  const attrs = row.attrs && typeof row.attrs === "object" ? row.attrs : {};
+  return {
+    id: row.id,
+    code: row.code,
+    status: attrs.order_status || row.status,
+    payment_status: attrs.payment_status || null,
+    created_at: row.created_at,
+    updated_at: row.updated_at
+  };
+}
+
+async function applyVerifiedPaymentLifecycle(client, {
+  tenantId,
+  payment,
+  event,
+  source,
+  connectionCode,
+  metadata
+}) {
+  const attrs = payment.attrs && typeof payment.attrs === "object" ? payment.attrs : {};
+  const transition = transitionPaymentLifecycle({
+    currentStatus: attrs.payment_status || payment.status,
+    currentRefundedAmount: attrs.refunded_amount,
+    paymentAmount: attrs.amount,
+    event
+  });
+  const providerEventId = normalizeText(event?.provider_event_id);
+  const providerPaymentId = normalizeText(event?.provider_payment_id);
+  const verifiedAt = transition.verified_paid
+    ? normalizeText(event?.verified_at) || new Date().toISOString()
+    : normalizeText(attrs.verified_at) || null;
+  await client.query(
+    `
+    UPDATE eip_core.service_object
+    SET status=$3,
+        attrs=COALESCE(attrs, '{}'::jsonb) || jsonb_build_object(
+          'payment_status', $3::text,
+          'provider_event_id', COALESCE(NULLIF($4::text, ''), attrs->>'provider_event_id'),
+          'provider_payment_id', COALESCE(NULLIF($5::text, ''), attrs->>'provider_payment_id'),
+          'verified_at', $6::text,
+          'refund_status', $7::text,
+          'refunded_amount', $8::numeric,
+          'safe_reason', $9::text,
+          'client_action', CASE WHEN $3 IN ('authorized','paid','failed','cancelled','refund_pending','partially_refunded','refunded','refund_failed') THEN NULL ELSE attrs->'client_action' END
+        ),
+        updated_at=now()
+    WHERE tenant_id=$1 AND id=$2 AND object_type='payment'
+    `,
+    [
+      tenantId,
+      payment.id,
+      transition.payment_status,
+      providerEventId,
+      providerPaymentId,
+      verifiedAt,
+      transition.refund_status,
+      transition.refunded_amount,
+      normalizeText(event?.safe_reason) || null
+    ]
+  );
+
+  const order = await loadOrderLifecycleSummary(client, tenantId, attrs.order_id, attrs.order_code);
+  let nextOrderStatus = order?.status || null;
+  if (order) {
+    nextOrderStatus = orderLifecycleForPayment({
+      currentOrderStatus: order.status,
+      paymentStatus: transition.payment_status
+    });
+    await client.query(
+      `
+      UPDATE eip_core.service_object
+      SET status=$3,
+          attrs=COALESCE(attrs, '{}'::jsonb) || jsonb_build_object(
+            'order_status', $3::text,
+            'payment_status', $4::text,
+            'payment_id', $5::text,
+            'payment_code', $6::text,
+            'paid_at', CASE WHEN $4 IN ('paid','partially_refunded','refunded') THEN COALESCE(attrs->>'paid_at', $7::text) ELSE attrs->>'paid_at' END,
+            'refund_status', $8::text
+          ),
+          updated_at=now()
+      WHERE tenant_id=$1 AND id=$2 AND object_type='sales_order'
+      `,
+      [
+        tenantId,
+        order.id,
+        nextOrderStatus,
+        transition.payment_status,
+        payment.id,
+        payment.code,
+        verifiedAt,
+        transition.refund_status
+      ]
+    );
+  }
+
+  await writePublicPaymentRecords(client, {
+    tenantId,
+    paymentId: payment.id,
+    paymentCode: payment.code,
+    orderId: attrs.order_id,
+    orderCode: attrs.order_code,
+    provider: attrs.provider,
+    method: attrs.method,
+    environment: attrs.environment,
+    amount: attrs.amount,
+    currency: attrs.currency,
+    status: transition.payment_status,
+    eventType: event?.event_type || "payment_status_updated",
+    source,
+    connectionCode,
+    metadata: {
+      ...(metadata || {}),
+      provider_event_id: providerEventId || null,
+      refund_amount: event?.refund_amount ?? null,
+      order_status: nextOrderStatus
+    }
+  });
+  return { transition, order_status: nextOrderStatus };
+}
+
+async function loadPaymentForProviderEvent(client, tenantId, provider, event = {}) {
+  const r = await client.query(
+    `
+    SELECT id, code, status, attrs, created_at, updated_at
+    FROM eip_core.service_object
+    WHERE tenant_id=$1
+      AND object_type='payment'
+      AND attrs->>'provider'=$2
+      AND (
+        (NULLIF($3::text, '') IS NOT NULL AND attrs->>'provider_session_id'=$3) OR
+        (NULLIF($4::text, '') IS NOT NULL AND attrs->>'provider_payment_id'=$4) OR
+        (NULLIF($4::text, '') IS NOT NULL AND attrs->>'provider_event_id'=$4) OR
+        (NULLIF($5::text, '') IS NOT NULL AND code=$5)
+      )
+    ORDER BY created_at DESC
+    LIMIT 1
+    FOR UPDATE
+    `,
+    [
+      tenantId,
+      provider,
+      normalizeText(event.provider_session_id),
+      normalizeText(event.provider_payment_id),
+      normalizeText(event.payment_code)
+    ]
+  );
+  return r.rows[0] || null;
 }
 
 async function loadCommerceTranslationSettings(app, tenantId) {
@@ -2093,7 +2274,8 @@ export default async function publicCommerceRoutes(app) {
     return reply.code(204).send();
   });
 
-  async function resolveConnection(appInstance, req, reply, allowedChannels) {
+  async function resolveConnection(appInstance, req, reply, allowedChannels, options = {}) {
+    const paymentWebhook = options.paymentWebhook === true;
     if (hasQueryApiKey(req)) {
       auditSecurityEvent(appInstance, "commerce.query_api_key_rejected", {
         category: "public_commerce",
@@ -2232,7 +2414,7 @@ export default async function publicCommerceRoutes(app) {
       }
     }
 
-    const policy = validateProductionConnectionPolicy(profile);
+    const policy = paymentWebhook ? { ok: true } : validateProductionConnectionPolicy(profile);
     if (!policy.ok) {
       auditSecurityEvent(appInstance, "commerce.production_policy_rejected", {
         category: "public_commerce",
@@ -2255,7 +2437,7 @@ export default async function publicCommerceRoutes(app) {
     }
 
     const origin = req.headers.origin;
-    if (!connectionAllowsOrigin(profile, origin)) {
+    if (!paymentWebhook && !connectionAllowsOrigin(profile, origin)) {
       auditSecurityEvent(appInstance, "commerce.origin_rejected", {
         category: "public_commerce",
         source: "public_commerce.resolveConnection",
@@ -2345,7 +2527,9 @@ export default async function publicCommerceRoutes(app) {
       return null;
     }
 
-    const verify = await verifyConnectionRequest(req, profile, rawBody);
+    const verify = paymentWebhook
+      ? { ok: true }
+      : await verifyConnectionRequest(req, profile, rawBody);
     if (!verify.ok) {
       auditSecurityEvent(appInstance, "commerce.verification_failed", {
         category: "public_commerce",
@@ -4827,6 +5011,10 @@ export default async function publicCommerceRoutes(app) {
               buyerAgentSpec.attrs.phone ||
               buyerAgentSpec.attrs.external_ref;
 
+            const checkoutPaymentMethod = normalizePaymentMethodCode(
+              body.metadata?.checkout?.payment_method || body.payment_method
+            );
+            const initialOrderStatus = checkoutPaymentMethod ? "pending_payment" : "new";
             const orderAttrs = {
               channel,
               currency,
@@ -4840,7 +5028,9 @@ export default async function publicCommerceRoutes(app) {
               pricing_snapshot: quote,
               member_identity_id: memberProfile?.identity_id || null,
               external_ref: normalizeText(body.external_ref || ""),
-              metadata: body.metadata || {}
+              metadata: body.metadata || {},
+              order_status: initialOrderStatus,
+              payment_status: checkoutPaymentMethod ? "pending" : null
             };
 
             const links = quote.lines.map((line) => ({
@@ -4864,7 +5054,7 @@ export default async function publicCommerceRoutes(app) {
               requireBinding,
               serviceObject: {
                 object_type: "sales_order",
-                status: "new",
+                status: initialOrderStatus,
                 code: orderCode,
                 title: `Order ${orderCode}`,
                 attrs: orderAttrs,
@@ -5364,16 +5554,37 @@ export default async function publicCommerceRoutes(app) {
     createPublicPaymentSession
   );
 
+  const getCheckoutSessionStatus = async (req, reply) => {
+    const access = await resolveConnection(app, req, reply, ["payments", "custom", "website_intake"]);
+    if (!access) return;
+    const payment = await loadPaymentSession(app.db, access.tenant.id, normalizeText(req.params.id));
+    if (!payment) return reply.code(404).send({ ok: false, error: "PAYMENT_NOT_FOUND" });
+    const attrs = payment.attrs && typeof payment.attrs === "object" ? payment.attrs : {};
+    const order = await loadOrderLifecycleSummary(
+      app.db,
+      access.tenant.id,
+      attrs.order_id,
+      attrs.order_code
+    );
+    reply.header("Cache-Control", "no-store");
+    return reply.send({
+      ok: true,
+      payment: toPublicPaymentSession(payment),
+      order,
+      status: paymentLifecycleState(attrs.payment_status || payment.status)
+    });
+  };
+
+  app.get(
+    "/commerce/:suffix/checkout/payment-session/:id",
+    { config: { rateLimit: RATE_LIMIT, cors: false } },
+    getCheckoutSessionStatus
+  );
+
   app.get(
     "/commerce/:suffix/checkout/session/:id",
     { config: { rateLimit: RATE_LIMIT, cors: false } },
-    async (req, reply) => {
-      const access = await resolveConnection(app, req, reply, ["payments", "custom", "website_intake"]);
-      if (!access) return;
-      const payment = await loadPaymentSession(app.db, access.tenant.id, normalizeText(req.params.id));
-      if (!payment) return reply.code(404).send({ ok: false, error: "PAYMENT_NOT_FOUND" });
-      return reply.send({ ok: true, payment: toPublicPaymentSession(payment) });
-    }
+    getCheckoutSessionStatus
   );
 
   app.post(
@@ -5407,6 +5618,18 @@ export default async function publicCommerceRoutes(app) {
       const payment = await loadPaymentSession(app.db, access.tenant.id, paymentRef);
       if (!payment) return reply.code(404).send({ ok: false, error: "PAYMENT_NOT_FOUND" });
       const attrs = payment.attrs && typeof payment.attrs === "object" ? payment.attrs : {};
+      const existingStatus = normalizeText(attrs.payment_status || payment.status).toLowerCase();
+      if (isVerifiedPaidStatus(existingStatus) || (existingStatus === "authorized" && attrs.capture_mode === "manual")) {
+        const order = await loadOrderLifecycleSummary(app.db, access.tenant.id, attrs.order_id, attrs.order_code);
+        const response = {
+          ok: true,
+          already_completed: true,
+          payment: toPublicPaymentSession(payment),
+          order
+        };
+        await finalizeIdempotency(app.db, { tenantId: access.tenant.id, scope, key: eventId, response, status: "ok" });
+        return reply.send(response);
+      }
       const adapter = getPaymentAdapter(attrs.provider);
       if (!adapter) return reply.code(409).send({ ok: false, error: "PAYMENT_ADAPTER_NOT_FOUND" });
       const requestedProviderSessionId = normalizeText(body.provider_session_id || body.providerSessionId || body.token);
@@ -5445,65 +5668,49 @@ export default async function publicCommerceRoutes(app) {
         connectionProfile: providerProfile,
         metadata: sanitizePaymentMetadata(body.metadata || {})
       });
-      if (!providerResult.ok) return reply.code(409).send({ ok: false, error: providerResult.error });
+      if (!providerResult.ok) {
+        const failureClient = await app.db.connect();
+        try {
+          await failureClient.query("BEGIN");
+          await applyVerifiedPaymentLifecycle(failureClient, {
+            tenantId: access.tenant.id,
+            payment,
+            event: {
+              provider_code: attrs.provider,
+              provider_session_id: storedProviderSessionId,
+              provider_event_id: eventId,
+              event_type: "payment_failed",
+              status: "failed",
+              safe_reason: providerResult.error
+            },
+            source: "public_checkout_confirm",
+            connectionCode: access.profile.identity?.connection_code,
+            metadata: body.metadata || {}
+          });
+          await failureClient.query("COMMIT");
+        } catch {
+          await failureClient.query("ROLLBACK");
+        } finally {
+          failureClient.release();
+        }
+        const out = { ok: false, error: providerResult.error };
+        await finalizeIdempotency(app.db, { tenantId: access.tenant.id, scope, key: eventId, response: out, status: "error" });
+        return reply.code(409).send(out);
+      }
 
       const captureMode = attrs.capture_mode === "manual" ? "manual" : "automatic";
+      const paymentStatus = captureMode === "automatic" ? "paid" : "authorized";
       const client = await app.db.connect();
       try {
         await client.query("BEGIN");
-        const process = await ensureProcessInstanceForObject(client, app, {
+        await applyVerifiedPaymentLifecycle(client, {
           tenantId: access.tenant.id,
-          objectType: "payment",
-          serviceObjectId: payment.id,
-          requireBinding: true
-        });
-        if (!process.ok || !process.instance) throw new Error(process.error || "PROCESS_INSTANCE_REQUIRED");
-        const authorize = await app.coreProcess.advanceInstance(client, {
-          tenantId: access.tenant.id,
-          instanceId: process.instance.id,
-          action: "PAYMENT_AUTHORIZE",
-          payload: { provider_event_id: providerResult.event?.provider_event_id || null },
-          idempotencyKey: `${eventId}:authorize`
-        });
-        if (!authorize.ok) throw new Error(authorize.error);
-
-        let paymentStatus = "authorized";
-        if (captureMode === "automatic") {
-          const capture = await app.coreProcess.advanceInstance(client, {
-            tenantId: access.tenant.id,
-            instanceId: process.instance.id,
-            action: "PAYMENT_CAPTURE",
-            payload: { provider_event_id: providerResult.event?.provider_event_id || null },
-            idempotencyKey: `${eventId}:capture`
-          });
-          if (!capture.ok) throw new Error(capture.error);
-          paymentStatus = "paid";
-        }
-        await client.query(
-          `
-          UPDATE eip_core.service_object
-          SET attrs = COALESCE(attrs, '{}'::jsonb) || jsonb_build_object(
-                'payment_status', $3::text,
-                'provider_event_id', $4::text
-              ),
-              updated_at = now()
-          WHERE tenant_id=$1 AND id=$2 AND object_type='payment'
-          `,
-          [access.tenant.id, payment.id, paymentStatus, providerResult.event?.provider_event_id || null]
-        );
-        await writePublicPaymentRecords(client, {
-          tenantId: access.tenant.id,
-          paymentId: payment.id,
-          paymentCode: payment.code,
-          orderId: attrs.order_id,
-          orderCode: attrs.order_code,
-          provider: attrs.provider,
-          method: attrs.method,
-          environment: attrs.environment,
-          amount: attrs.amount,
-          currency: attrs.currency,
-          status: paymentStatus,
-          eventType: paymentStatus === "paid" ? "payment_paid" : "payment_authorized",
+          payment,
+          event: {
+            ...(providerResult.event || {}),
+            event_type: paymentStatus === "paid" ? "payment_paid" : "payment_authorized",
+            status: paymentStatus
+          },
           source: "public_checkout_confirm",
           connectionCode: access.profile.identity?.connection_code,
           metadata: body.metadata || {}
@@ -5518,8 +5725,116 @@ export default async function publicCommerceRoutes(app) {
         client.release();
       }
 
+      const processClient = await app.db.connect();
+      try {
+        await processClient.query("BEGIN");
+        const process = await ensureProcessInstanceForObject(processClient, app, {
+          tenantId: access.tenant.id,
+          objectType: "payment",
+          serviceObjectId: payment.id,
+          requireBinding: true
+        });
+        if (!process.ok || !process.instance) throw new Error(process.error || "PROCESS_INSTANCE_REQUIRED");
+        const authorize = await app.coreProcess.advanceInstance(processClient, {
+          tenantId: access.tenant.id,
+          instanceId: process.instance.id,
+          action: "PAYMENT_AUTHORIZE",
+          payload: { provider_event_id: providerResult.event?.provider_event_id || null },
+          idempotencyKey: `${eventId}:authorize`
+        });
+        if (!authorize.ok) throw new Error(authorize.error);
+        if (captureMode === "automatic") {
+          const capture = await app.coreProcess.advanceInstance(processClient, {
+            tenantId: access.tenant.id,
+            instanceId: process.instance.id,
+            action: "PAYMENT_CAPTURE",
+            payload: { provider_event_id: providerResult.event?.provider_event_id || null },
+            idempotencyKey: `${eventId}:capture`
+          });
+          if (!capture.ok) throw new Error(capture.error);
+        }
+        await processClient.query("COMMIT");
+      } catch (error) {
+        await processClient.query("ROLLBACK");
+        app.log.warn({
+          event: "payment_process_sync_deferred",
+          tenantId: access.tenant.id,
+          paymentCode: payment.code,
+          error: error.message
+        });
+      } finally {
+        processClient.release();
+      }
+
       const updated = await loadPaymentSession(app.db, access.tenant.id, payment.id);
-      const response = { ok: true, payment: toPublicPaymentSession(updated) };
+      const updatedAttrs = updated?.attrs && typeof updated.attrs === "object" ? updated.attrs : {};
+      const order = await loadOrderLifecycleSummary(app.db, access.tenant.id, updatedAttrs.order_id, updatedAttrs.order_code);
+      const response = { ok: true, payment: toPublicPaymentSession(updated), order };
+      await finalizeIdempotency(app.db, { tenantId: access.tenant.id, scope, key: eventId, response, status: "ok" });
+      return reply.send(response);
+    }
+  );
+
+  app.post(
+    "/commerce/:suffix/checkout/payment-session/:id/cancel",
+    { config: { rateLimit: RATE_LIMIT, cors: false }, bodyLimit: MAX_BODY },
+    async (req, reply) => {
+      const access = await resolveConnection(app, req, reply, ["payments", "custom", "website_intake"]);
+      if (!access) return;
+      let body = {};
+      try {
+        body = parseJsonBody(req);
+      } catch {
+        return reply.code(400).send({ ok: false, error: "INVALID_JSON" });
+      }
+      const paymentRef = normalizeText(req.params.id);
+      const eventId = commerceIdempotencyKey(req, body, access.profile);
+      if (!eventId) return reply.code(400).send({ ok: false, error: "IDEMPOTENCY_REQUIRED" });
+      const scope = `commerce.payment.cancel.${access.profile.identity?.connection_code}`;
+      const rawBody = Buffer.isBuffer(req.rawBody) ? req.rawBody : Buffer.from(req.rawBody || "");
+      const idem = await ensureIdempotency(app.db, {
+        tenantId: access.tenant.id,
+        scope,
+        key: eventId,
+        requestHash: buildRequestHash(rawBody)
+      });
+      if (!idem.ok) return reply.code(409).send({ ok: false, error: idem.error });
+      if (idem.replay) return reply.send(idem.response || { ok: true, replay: true });
+      const payment = await loadPaymentSession(app.db, access.tenant.id, paymentRef);
+      if (!payment) return reply.code(404).send({ ok: false, error: "PAYMENT_NOT_FOUND" });
+      const attrs = payment.attrs && typeof payment.attrs === "object" ? payment.attrs : {};
+      if (isVerifiedPaidStatus(attrs.payment_status || payment.status)) {
+        return reply.code(409).send({ ok: false, error: "PAYMENT_ALREADY_COMPLETED" });
+      }
+      const client = await app.db.connect();
+      try {
+        await client.query("BEGIN");
+        await applyVerifiedPaymentLifecycle(client, {
+          tenantId: access.tenant.id,
+          payment,
+          event: {
+            provider_code: attrs.provider,
+            provider_session_id: attrs.provider_session_id,
+            provider_event_id: eventId,
+            event_type: "payment_cancelled",
+            status: "cancelled",
+            safe_reason: "customer_cancelled"
+          },
+          source: "public_checkout_cancel",
+          connectionCode: access.profile.identity?.connection_code,
+          metadata: { return_flow: body.return_flow || "paypal" }
+        });
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({ ok: false, error: "PAYMENT_CANCEL_FAILED" });
+      } finally {
+        client.release();
+      }
+      const updated = await loadPaymentSession(app.db, access.tenant.id, payment.id);
+      const updatedAttrs = updated?.attrs && typeof updated.attrs === "object" ? updated.attrs : {};
+      const order = await loadOrderLifecycleSummary(app.db, access.tenant.id, updatedAttrs.order_id, updatedAttrs.order_code);
+      const response = { ok: true, payment: toPublicPaymentSession(updated), order };
       await finalizeIdempotency(app.db, { tenantId: access.tenant.id, scope, key: eventId, response, status: "ok" });
       return reply.send(response);
     }
@@ -5540,8 +5855,11 @@ export default async function publicCommerceRoutes(app) {
   }
 
   const handlePaymentWebhook = async (req, reply, allowedChannels = ["payments", "custom"]) => {
-    const access = await resolveConnection(app, req, reply, allowedChannels);
+    const access = await resolveConnection(app, req, reply, allowedChannels, { paymentWebhook: true });
     if (!access) return;
+    if (access.profile?.inbound?.webhook_enabled !== true) {
+      return reply.code(404).send({ ok: false, error: "PAYMENT_WEBHOOK_DISABLED" });
+    }
     const provider = normalizePaymentProviderCode(req.params.provider);
     const adapter = getPaymentAdapter(provider);
     const registeredProvider = normalizePaymentProviderCode(
@@ -5622,25 +5940,55 @@ export default async function publicCommerceRoutes(app) {
     }
 
     const event = normalized.event || {};
-    const out = { ok: true, accepted: true, event_id: event.provider_event_id || eventId };
-    await app.db.query(
-      `
-      INSERT INTO eip_core.info_record (tenant_id, record_type, title, payload)
-      VALUES ($1, 'ECOM_PAYMENT_WEBHOOK', $2, $3::jsonb)
-      `,
-      [
-        access.tenant.id,
-        `payment.webhook.${provider}.${event.provider_event_id || eventId}`,
-        JSON.stringify(sanitizePaymentMetadata({
-          provider,
-          event_id: event.provider_event_id || eventId,
-          event_type: event.event_type || "payment_webhook",
-          status: event.status || null,
-          connection_code: access.profile.identity?.connection_code,
-          payload: event
-        }))
-      ]
-    );
+    const client = await app.db.connect();
+    let payment = null;
+    try {
+      await client.query("BEGIN");
+      payment = await loadPaymentForProviderEvent(client, access.tenant.id, provider, event);
+      if (payment) {
+        await applyVerifiedPaymentLifecycle(client, {
+          tenantId: access.tenant.id,
+          payment,
+          event,
+          source: "provider_webhook",
+          connectionCode: access.profile.identity?.connection_code,
+          metadata: { webhook_event_id: event.provider_event_id || eventId }
+        });
+      }
+      await client.query(
+        `
+        INSERT INTO eip_core.info_record (tenant_id, record_type, title, payload)
+        VALUES ($1, 'ECOM_PAYMENT_WEBHOOK', $2, $3::jsonb)
+        `,
+        [
+          access.tenant.id,
+          `payment.webhook.${provider}.${event.provider_event_id || eventId}`,
+          JSON.stringify(sanitizePaymentMetadata({
+            provider,
+            event_id: event.provider_event_id || eventId,
+            event_type: event.event_type || "payment_webhook",
+            status: event.status || null,
+            matched_payment: payment?.code || null,
+            connection_code: access.profile.identity?.connection_code,
+            payload: event
+          }))
+        ]
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      const out = { ok: false, error: "PAYMENT_WEBHOOK_APPLY_FAILED" };
+      await finalizeIdempotency(app.db, { tenantId: access.tenant.id, scope, key: eventId, response: out, status: "error" });
+      return reply.code(409).send(out);
+    } finally {
+      client.release();
+    }
+    const out = {
+      ok: true,
+      accepted: true,
+      matched: Boolean(payment),
+      event_id: event.provider_event_id || eventId
+    };
     await finalizeIdempotency(app.db, { tenantId: access.tenant.id, scope, key: eventId, response: out, status: "ok" });
     return reply.send(out);
   };

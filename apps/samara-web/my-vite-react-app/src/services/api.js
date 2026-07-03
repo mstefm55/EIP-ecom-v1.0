@@ -232,7 +232,17 @@ export async function createCheckoutSession({ payload } = {}) {
 
 export async function fetchCheckoutSession({ paymentId } = {}) {
   if (!paymentId) throw new Error("Payment reference required.");
-  return callEndpoint(buildPublicCommercePath(`/checkout/session/${encodeURIComponent(paymentId)}`));
+  return callEndpoint(buildPublicCheckoutPath(`/checkout/payment-session/${encodeURIComponent(paymentId)}`));
+}
+
+export async function cancelCheckoutSession({ paymentId, payload } = {}) {
+  if (!paymentId) throw new Error("Payment reference required.");
+  const eventIdHeader = EIP_CONFIG.eventIdHeader || "X-Event-Id";
+  return callEndpoint(buildPublicCheckoutPath(`/checkout/payment-session/${encodeURIComponent(paymentId)}/cancel`), {
+    method: "POST",
+    headers: { [eventIdHeader]: buildEventId("payment-cancel") },
+    body: payload || {},
+  });
 }
 
 export async function confirmCheckoutSession({ payload } = {}) {

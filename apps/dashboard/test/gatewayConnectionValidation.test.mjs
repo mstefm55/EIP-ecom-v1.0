@@ -45,6 +45,16 @@ test("payment webhook setup requires an inbound suffix only after webhook is exp
   assert.deepEqual(errors.map((error) => error.path), ["inbound.inbound_path_suffix"]);
 });
 
+test("enabled PayPal webhook requires its PayPal webhook ID", () => {
+  const paypal = paymentProfile("paypal");
+  paypal.inbound.webhook_enabled = true;
+  paypal.inbound.inbound_path_suffix = "paypal-webhook";
+
+  const errors = validateGatewayConnection(paypal);
+  assert.deepEqual(errors.map((error) => error.path), ["verification.hmac_signature.webhook_id_ref"]);
+  assert.equal(errors[0].label, "PayPal webhook ID");
+});
+
 test("stored webhook credentials do not implicitly enable payment inbound validation", () => {
   const paypal = paymentProfile("paypal");
   paypal.verification.hmac_signature.webhook_id_ref = "legacy-webhook-reference";

@@ -522,6 +522,13 @@ function validatePaymentProfile(profile, paymentType, errors, id) {
     if (suffix && !/^[a-z0-9][a-z0-9-_]{2,64}$/i.test(suffix)) {
       errors.push(`${id}: inbound_path_suffix must be URL-safe (3-65 chars)`);
     }
+    if (paymentType.provider_code === "paypal") {
+      const webhookId = normalizeText(
+        profile?.verification?.hmac_signature?.webhook_id ||
+        profile?.verification?.hmac_signature?.webhook_id_ref
+      );
+      if (!webhookId) errors.push(`${id}: PayPal webhook_id_ref required when payment webhook is configured`);
+    }
   }
   return errors;
 }

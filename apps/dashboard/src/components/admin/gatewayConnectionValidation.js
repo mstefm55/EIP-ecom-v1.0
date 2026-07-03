@@ -86,6 +86,13 @@ function validatePaymentProfile(profile, rules, errors) {
   if (isPaymentWebhookEnabled(profile) && !text(profile?.inbound?.inbound_path_suffix)) {
     addError(errors, profile, "inbound.inbound_path_suffix", "Inbound path suffix", "inbound");
   }
+  if (
+    isPaymentWebhookEnabled(profile) &&
+    rules.displayName === "PayPal" &&
+    !text(profile?.verification?.hmac_signature?.webhook_id_ref)
+  ) {
+    addError(errors, profile, "verification.hmac_signature.webhook_id_ref", "PayPal webhook ID", "verification");
+  }
 }
 
 export function validateGatewayConnection(profile) {
@@ -151,6 +158,7 @@ const SERVER_DETAIL_FIELDS = [
   [/\bdirection\b/i, "identity.direction", "Direction", "identity"],
   [/frontend_url/i, "identity.frontend_url", "Frontend URL", "identity"],
   [/inbound_path_suffix/i, "inbound.inbound_path_suffix", "Inbound path suffix", "inbound"],
+  [/webhook_id_ref|webhook ID/i, "verification.hmac_signature.webhook_id_ref", "PayPal webhook ID", "verification"],
   [/origin_allowlist/i, "inbound.origin_allowlist_text", "Origin allowlist", "inbound"],
   [/outbound base_url/i, "outbound.base_url", "Outbound base URL", "outbound"],
   [/outbound path_prefix/i, "outbound.path_prefix", "Outbound path prefix", "outbound"],

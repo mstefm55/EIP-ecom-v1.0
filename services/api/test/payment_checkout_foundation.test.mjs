@@ -20,6 +20,11 @@ import {
   validateProfiles
 } from "../src/services/gateway/connectionProfile.js";
 import { persistConnectionTestHealth } from "../src/services/gateway/connectionHealth.js";
+import {
+  orderLifecycleForPayment,
+  paymentLifecycleState,
+  transitionPaymentLifecycle
+} from "../src/services/payments/paymentLifecycle.js";
 import { buildSuffixAwareCheckoutPath } from "../../../apps/samara-web/my-vite-react-app/src/services/publicCheckoutPath.js";
 
 const publicCommerceRoute = fs.readFileSync(
@@ -48,6 +53,10 @@ const settingsOwnershipMigration = fs.readFileSync(
 );
 const paymentConnectionsMigration = fs.readFileSync(
   new URL("../db/migrations/0131_payment_connections_v1.sql", import.meta.url),
+  "utf8"
+);
+const paypalLifecycleMigration = fs.readFileSync(
+  new URL("../db/migrations/0133_paypal_checkout_lifecycle_v1.sql", import.meta.url),
   "utf8"
 );
 const samaraApi = fs.readFileSync(
@@ -281,6 +290,11 @@ test("payment profiles do not require inbound suffix or webhook fields until web
   paypal.inbound.webhook_enabled = true;
   paypal.verification.hmac_signature.webhook_id_ref = "paypal-webhook-reference";
   assert.match(validateProfiles([paypal]).join("\n"), /inbound_path_suffix required when payment webhook is configured/);
+  paypal.inbound.inbound_path_suffix = "paypal-webhook";
+  paypal.verification.hmac_signature.webhook_id_ref = "";
+  assert.match(validateProfiles([paypal]).join("\n"), /PayPal webhook_id_ref required/);
+  paypal.verification.hmac_signature.webhook_id_ref = "paypal-webhook-reference";
+  assert.deepEqual(validateProfiles([paypal]), []);
 });
 
 test("gateway connection profile metadata supports PayPal and Checkout.com without changing Website profiles", () => {
@@ -584,6 +598,7 @@ test("PayPal adapter creates an approval session and captures it without exposin
   const originalFetch = global.fetch;
   const requests = [];
   let rejectCreate = false;
+  let captureVerified = true;
   global.fetch = async (url, options = {}) => {
     requests.push({ url: String(url), options });
     if (String(url).endsWith("/v1/oauth2/token")) {
@@ -612,9 +627,15 @@ test("PayPal adapter creates an approval session and captures it without exposin
     if (String(url).endsWith("/v2/checkout/orders/PAYPAL-ORDER-1/capture")) {
       return new Response(JSON.stringify({
         id: "PAYPAL-ORDER-1",
-        status: "COMPLETED",
-        purchase_units: [{ payments: { captures: [{ id: "PAYPAL-CAPTURE-1", status: "COMPLETED" }] } }]
+        status: captureVerified ? "COMPLETED" : "APPROVED",
+        purchase_units: [{ payments: { captures: [{ id: "PAYPAL-CAPTURE-1", status: captureVerified ? "COMPLETED" : "PENDING" }] } }]
       }), { status: 201, headers: { "Content-Type": "application/json" } });
+    }
+    if (String(url).endsWith("/v1/notifications/verify-webhook-signature")) {
+      return new Response(JSON.stringify({ verification_status: "SUCCESS" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
     }
     throw new Error(`Unexpected PayPal request: ${url}`);
   };
@@ -652,7 +673,8 @@ test("PayPal adapter creates an approval session and captures it without exposin
       health_checked_at: "2026-07-02T08:00:00.000Z",
       last_successful_test_at: "2026-07-02T08:00:00.000Z",
       supported_payment_methods: ["PAYPAL"]
-    }
+    },
+    verification: { hmac_signature: { webhook_id_ref: "PAYPAL-WEBHOOK-1" } }
   });
   const paypal = getPaymentAdapter("paypal");
   const created = await paypal.createCheckoutSession({
@@ -688,6 +710,46 @@ test("PayPal adapter creates an approval session and captures it without exposin
   assert.equal(confirmed.ok, true);
   assert.equal(confirmed.event.status, "paid");
   assert.equal(confirmed.event.provider_event_id, "PAYPAL-CAPTURE-1");
+  assert.equal(confirmed.event.provider_payment_id, "PAYPAL-CAPTURE-1");
+
+  captureVerified = false;
+  const unverifiedCapture = await paypal.confirmCheckoutSession({
+    connectionProfile: profile,
+    providerSessionId: "PAYPAL-ORDER-1",
+    paymentCode: "PAY-100-RETRY",
+    captureMode: "automatic"
+  });
+  assert.deepEqual(unverifiedCapture, { ok: false, error: "PAYPAL_CAPTURE_NOT_VERIFIED" });
+  captureVerified = true;
+
+  const verifiedWebhook = await paypal.verifyWebhookSignature({
+    connectionProfile: profile,
+    headers: {
+      "paypal-transmission-id": "WH-TRANSMISSION-1",
+      "paypal-transmission-time": "2026-07-04T08:00:00Z",
+      "paypal-cert-url": "https://api.paypal.com/cert.pem",
+      "paypal-auth-algo": "SHA256withRSA",
+      "paypal-transmission-sig": "signature"
+    },
+    body: { id: "WH-EVENT-1", event_type: "PAYMENT.CAPTURE.COMPLETED" }
+  });
+  assert.deepEqual(verifiedWebhook, { ok: true });
+
+  const refundWebhook = await paypal.normalizeWebhookEvent({
+    body: {
+      id: "WH-REFUND-1",
+      event_type: "PAYMENT.CAPTURE.REFUNDED",
+      resource: {
+        id: "REFUND-1",
+        amount: { value: "5.00", currency_code: "USD" },
+        supplementary_data: { related_ids: { capture_id: "PAYPAL-CAPTURE-1" } }
+      }
+    }
+  });
+  assert.equal(refundWebhook.ok, true);
+  assert.equal(refundWebhook.event.event_type, "payment_refunded");
+  assert.equal(refundWebhook.event.provider_payment_id, "PAYPAL-CAPTURE-1");
+  assert.equal(refundWebhook.event.refund_amount, 5);
 
   rejectCreate = true;
   const failed = await paypal.createCheckoutSession({
@@ -941,8 +1003,52 @@ test("payment sandbox session and webhook foundations fail closed without truste
   });
   assert.deepEqual(await paypal.verifyWebhookSignature({ connectionProfile: profiles[0] }), {
     ok: false,
-    error: "webhook_signing_secret_missing"
+    error: "PAYPAL_WEBHOOK_ID_REQUIRED"
   });
+});
+
+test("verified payment lifecycle never confirms an order from browser approval alone", () => {
+  const approved = transitionPaymentLifecycle({
+    currentStatus: "created",
+    paymentAmount: 20,
+    event: { event_type: "payment_approved", status: "approved" }
+  });
+  assert.equal(approved.payment_status, "pending");
+  assert.equal(approved.verified_paid, false);
+  assert.equal(orderLifecycleForPayment({ currentOrderStatus: "pending_payment", paymentStatus: approved.payment_status }), "pending_payment");
+
+  const captured = transitionPaymentLifecycle({
+    currentStatus: approved.payment_status,
+    paymentAmount: 20,
+    event: { event_type: "payment_paid", status: "paid", provider_event_id: "CAPTURE-1" }
+  });
+  assert.equal(captured.payment_status, "paid");
+  assert.equal(captured.verified_paid, true);
+  assert.equal(orderLifecycleForPayment({ currentOrderStatus: "pending_payment", paymentStatus: captured.payment_status }), "confirmed");
+  assert.equal(paymentLifecycleState(captured.payment_status), "PAID");
+
+  const cancelled = transitionPaymentLifecycle({
+    currentStatus: "pending",
+    event: { event_type: "payment_cancelled", status: "cancelled" }
+  });
+  assert.equal(cancelled.payment_status, "cancelled");
+  assert.equal(orderLifecycleForPayment({ currentOrderStatus: "pending_payment", paymentStatus: cancelled.payment_status }), "pending_payment");
+
+  const partial = transitionPaymentLifecycle({
+    currentStatus: "paid",
+    paymentAmount: 20,
+    event: { event_type: "payment_refunded", refund_amount: 5 }
+  });
+  assert.equal(partial.payment_status, "partially_refunded");
+  const refunded = transitionPaymentLifecycle({
+    currentStatus: partial.payment_status,
+    currentRefundedAmount: partial.refunded_amount,
+    paymentAmount: 20,
+    event: { event_type: "payment_refunded", refund_amount: 15 }
+  });
+  assert.equal(refunded.payment_status, "refunded");
+  assert.equal(transitionPaymentLifecycle({ currentStatus: "paid", event: { event_type: "refund_pending" } }).payment_status, "refund_pending");
+  assert.equal(transitionPaymentLifecycle({ currentStatus: "paid", event: { event_type: "refund_failed" } }).payment_status, "refund_failed");
 });
 
 test("payment metadata sanitizer strips raw payment credentials and keeps safe card display data", () => {
@@ -981,7 +1087,7 @@ test("payment routes and storefront integration expose governed checkout session
   assert.match(commerceOrdersRoute, /ECOM_PAYMENT_CAPTURE/);
   assert.match(commerceOrdersRoute, /CRM_PAYMENT_SIGNAL/);
 
-  assert.match(samaraApi, /\/checkout\/session/);
+  assert.match(samaraApi, /\/checkout\/payment-session/);
   assert.match(samaraApi, /fetchPaymentMethods/);
   assert.match(samaraApi, /\/checkout\/payment-methods/);
   assert.match(samaraApi, /\/checkout\/payment-session/);
@@ -997,6 +1103,17 @@ test("payment routes and storefront integration expose governed checkout session
   assert.match(samaraApp, /checkoutTab\.opener = null/);
   assert.match(samaraApp, /providerCheckoutWindow\.location\.replace\(redirectUrl\)/);
   assert.match(samaraApp, /PayPal checkout opened in a new tab/);
+  assert.match(samaraApp, /Payment opened in PayPal\. Waiting for confirmation/);
+  assert.match(samaraApp, /checkPaymentLifecycle/);
+  assert.match(samaraApp, /autoPollingStopped/);
+  assert.match(publicCommerceRoute, /applyVerifiedPaymentLifecycle/);
+  assert.match(publicCommerceRoute, /initialOrderStatus = checkoutPaymentMethod \? "pending_payment" : "new"/);
+  assert.match(publicCommerceRoute, /PAYMENT_WEBHOOK_DISABLED/);
+  assert.match(publicCommerceRoute, /matched: Boolean\(payment\)/);
+  const webhookStart = publicCommerceRoute.indexOf("const handlePaymentWebhook");
+  const webhookReplay = publicCommerceRoute.indexOf("if (idem.replay)", webhookStart);
+  const webhookApply = publicCommerceRoute.indexOf("loadPaymentForProviderEvent", webhookStart);
+  assert.ok(webhookReplay > webhookStart && webhookReplay < webhookApply, "duplicate webhook replay must short-circuit before lifecycle updates");
   assert.match(samaraApp, /className="payment-method-buttons"/);
   assert.match(samaraApp, /item\.enabled !== false && item\.available !== false/);
   assert.match(samaraApp, /const optionKey = `\$\{providerCode \|\| "unassigned"\}::\$\{code\}`/);
@@ -1034,6 +1151,7 @@ test("Samara checkout builds suffix-aware payment endpoints without legacy suffi
   const endpoint = "https://eip-ecom-v1.up.railway.app/api/public/commerce/samara";
   const paymentSession = buildSuffixAwareCheckoutPath(endpoint, "/checkout/payment-session");
   const paymentMethods = buildSuffixAwareCheckoutPath(endpoint, "/checkout/payment-methods");
+  const paymentStatus = buildSuffixAwareCheckoutPath(endpoint, "/checkout/payment-session/PAY-100");
 
   assert.equal(
     paymentSession,
@@ -1042,6 +1160,10 @@ test("Samara checkout builds suffix-aware payment endpoints without legacy suffi
   assert.equal(
     paymentMethods,
     "https://eip-ecom-v1.up.railway.app/api/public/commerce/samara/checkout/payment-methods"
+  );
+  assert.equal(
+    paymentStatus,
+    "https://eip-ecom-v1.up.railway.app/api/public/commerce/samara/checkout/payment-session/PAY-100"
   );
   assert.doesNotMatch(paymentSession, /\/api\/public\/checkout\/payment-session\?suffix=/);
   assert.doesNotMatch(paymentMethods, /\/api\/public\/checkout\/payment-methods\?suffix=/);
@@ -1087,6 +1209,15 @@ test("payment governance migration is additive and keeps future clones on role/t
   assert.match(migration, /PAYMENT_FAILED_FOLLOW_UP/);
   assert.match(migration, /MANUAL_PAYMENT_REVIEW/);
   assert.match(migration, /"payments":true/);
+});
+
+test("PayPal lifecycle migration registers pending, confirmed, and refund states", () => {
+  assert.match(paypalLifecycleMigration, /pending_payment/);
+  assert.match(paypalLifecycleMigration, /confirmed/);
+  assert.match(paypalLifecycleMigration, /refund_pending/);
+  assert.match(paypalLifecycleMigration, /partially_refunded/);
+  assert.match(paypalLifecycleMigration, /refund_failed/);
+  assert.match(paypalLifecycleMigration, /BEGIN;[\s\S]*COMMIT;/);
 });
 
 test("dashboard payment settings no longer render raw provider credential fields", () => {

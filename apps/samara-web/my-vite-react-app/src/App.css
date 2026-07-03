@@ -2825,6 +2825,56 @@ a:focus-visible {
   color: #fff;
 }
 
+.payment-lifecycle-modal {
+  width: min(560px, 94vw);
+}
+
+.payment-lifecycle-state {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  padding: 18px;
+  border: 1px solid rgba(140, 109, 85, 0.24);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.payment-lifecycle-state h3 {
+  margin: 3px 0 8px;
+  font-size: 1.25rem;
+}
+
+.payment-lifecycle-state p {
+  margin: 4px 0;
+  line-height: 1.45;
+}
+
+.payment-lifecycle-mark {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: #fff4d6;
+  color: #7a5610;
+  font-size: 1.4rem;
+  font-weight: 800;
+}
+
+.payment-lifecycle-state.paid .payment-lifecycle-mark,
+.payment-lifecycle-state.partially_refunded .payment-lifecycle-mark,
+.payment-lifecycle-state.refunded .payment-lifecycle-mark {
+  background: #e5f6ed;
+  color: #237a4b;
+}
+
+.payment-lifecycle-state.cancelled .payment-lifecycle-mark,
+.payment-lifecycle-state.failed .payment-lifecycle-mark {
+  background: #fdebec;
+  color: #a23742;
+}
+
 .payment-method-button.selected {
   border-color: #5c7cfa;
 }

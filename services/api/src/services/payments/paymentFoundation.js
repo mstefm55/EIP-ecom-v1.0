@@ -1,7 +1,9 @@
 import crypto from "node:crypto";
 import {
   confirmPaypalCheckoutSession,
-  createPaypalCheckoutSession
+  createPaypalCheckoutSession,
+  normalizePaypalWebhookEvent,
+  verifyPaypalWebhookSignature
 } from "./paypalAdapter.js";
 
 const DEFAULT_PROVIDER_REGISTRY = [
@@ -876,12 +878,8 @@ const ADAPTERS = {
     async cancelPayment() {
       return { ok: false, error: "PAYPAL_CANCEL_NOT_CONFIGURED" };
     },
-    async verifyWebhookSignature(input = {}) {
-      return { ok: false, error: webhookVerificationUnavailable(input) };
-    },
-    async normalizeWebhookEvent() {
-      return { ok: false, error: "PAYPAL_WEBHOOK_NOT_CONFIGURED" };
-    },
+    verifyWebhookSignature: verifyPaypalWebhookSignature,
+    normalizeWebhookEvent: normalizePaypalWebhookEvent,
     async getPaymentStatus() {
       return { ok: false, error: "PAYPAL_STATUS_NOT_CONFIGURED" };
     }

@@ -5,6 +5,7 @@ import { getCountryCallingCode } from "libphonenumber-js";
 
 import {
   createBlogPost,
+  cancelCheckoutSession,
   deleteBlogPost,
   createCheckoutSession,
   confirmCheckoutSession,
@@ -13,6 +14,7 @@ import {
   createSubscriber,
   fetchBlogPosts,
   fetchCheckoutConfig,
+  fetchCheckoutSession,
   fetchPaymentMethods,
   fetchMemberHistory,
   fetchMemberMe,
@@ -5601,6 +5603,7 @@ function CartModal({
   form,
   onFormChange,
   onPaymentSelect,
+  onCheckPaymentStatus,
   onSubmit,
   status,
   countryOptions = DEFAULT_COUNTRY_OPTIONS,
@@ -5902,6 +5905,12 @@ function CartModal({
                 </p>
               ) : null}
               <div className="modal-actions">
+                {status?.awaitingProvider ? (
+                  <button type="button" className="btn ghost" onClick={onCheckPaymentStatus} disabled={status?.checkingStatus}>
+                    <UiIcon name="checkout" />
+                    {status?.checkingStatus ? "Checking..." : "Check payment status"}
+                  </button>
+                ) : null}
                 <button type="button" className="btn ghost" onClick={onClear} disabled={!hasItems}>
                   <UiIcon name="trash" />
                   {t("cart.clear")}
@@ -5919,6 +5928,52 @@ function CartModal({
           </div>
         </>
       )}
+    </ModalShell>
+  );
+}
+
+function PaymentLifecycleModal({ state, onCheck, onReturnToCart, onClose }) {
+  const lifecycle = String(state?.lifecycle || "pending").toLowerCase();
+  const pending = lifecycle === "pending";
+  const success = ["paid", "partially_refunded", "refunded"].includes(lifecycle);
+  const cancelled = lifecycle === "cancelled";
+  const title = success
+    ? "Payment confirmed"
+    : cancelled
+      ? "Payment cancelled"
+      : lifecycle === "failed"
+        ? "Payment failed"
+        : "Waiting for PayPal";
+  return (
+    <ModalShell open={Boolean(state?.open)} onClose={onClose} panelClassName="payment-lifecycle-modal">
+      <div className={`payment-lifecycle-state ${lifecycle}`}>
+        <div className="payment-lifecycle-mark" aria-hidden="true">{success ? "✓" : cancelled || lifecycle === "failed" ? "×" : "…"}</div>
+        <div>
+          <p className="cart-checkout-title">PayPal checkout</p>
+          <h3>{title}</h3>
+          <p>{state?.message || "Payment opened in PayPal. Waiting for confirmation…"}</p>
+          {state?.orderCode ? <p><strong>Order:</strong> {state.orderCode}</p> : null}
+          {state?.paymentCode ? <p><strong>Payment:</strong> {state.paymentCode}</p> : null}
+        </div>
+      </div>
+      <div className="modal-actions">
+        {pending ? (
+          <button type="button" className="btn" onClick={onCheck} disabled={state?.checking}>
+            <UiIcon name="checkout" />
+            {state?.checking ? "Checking..." : "Check status"}
+          </button>
+        ) : null}
+        {cancelled || lifecycle === "failed" ? (
+          <button type="button" className="btn" onClick={onReturnToCart}>
+            <UiIcon name="cart" />
+            Return to cart
+          </button>
+        ) : null}
+        <button type="button" className="btn ghost" onClick={onClose}>
+          <UiIcon name="close" />
+          Close
+        </button>
+      </div>
     </ModalShell>
   );
 }
@@ -6004,6 +6059,14 @@ export default function App() {
     success: false,
     orderCode: "",
     paymentCode: "",
+  });
+  const [paymentLifecycleView, setPaymentLifecycleView] = useState({
+    open: false,
+    lifecycle: "pending",
+    message: "",
+    paymentCode: "",
+    orderCode: "",
+    checking: false,
   });
   const [productDetail, setProductDetail] = useState(null);
   const [productDetailLoading, setProductDetailLoading] = useState(false);
@@ -6129,6 +6192,74 @@ export default function App() {
     }
   }, []);
 
+  const presentPaymentLifecycle = useCallback((result, { openPending = false } = {}) => {
+    const payment = result?.payment || {};
+    const order = result?.order || {};
+    const lifecycle = String(payment.lifecycle_state || result?.status || payment.status || "pending").toLowerCase();
+    const paymentCode = String(payment.code || "").trim();
+    const orderCode = String(order.code || payment.order_code || "").trim();
+    const success = ["paid", "partially_refunded", "refunded"].includes(lifecycle);
+    const cancelled = lifecycle === "cancelled";
+    const failed = lifecycle === "failed";
+    const message = success
+      ? result?.already_completed
+        ? "This PayPal payment was already verified. Your order is confirmed."
+        : "PayPal payment was verified by EIP. Your order is confirmed."
+      : cancelled
+        ? "PayPal checkout was cancelled. No payment was recorded."
+        : failed
+          ? "PayPal could not complete this payment."
+          : "Payment opened in PayPal. Waiting for confirmation…";
+
+    setCheckoutStatus((previous) => ({
+      ...previous,
+      loading: false,
+      checkingStatus: false,
+      awaitingProvider: !success && !cancelled && !failed,
+      error: cancelled || failed ? message : "",
+      notice: success ? "" : message,
+      success,
+      orderCode,
+      paymentCode: paymentCode || previous.paymentCode,
+    }));
+    if (success || cancelled || failed || openPending) {
+      setPaymentLifecycleView({
+        open: true,
+        lifecycle,
+        message,
+        paymentCode,
+        orderCode,
+        checking: false,
+      });
+    }
+    if (success) {
+      setInstantCheckoutItem(null);
+      setCartItems([]);
+      setCartOpen(false);
+    }
+    return lifecycle;
+  }, []);
+
+  const checkPaymentLifecycle = useCallback(async (paymentCode, { openPending = false, background = false } = {}) => {
+    const reference = String(paymentCode || "").trim();
+    if (!reference) return "missing";
+    if (!background) {
+      setCheckoutStatus((previous) => ({ ...previous, checkingStatus: true }));
+      setPaymentLifecycleView((previous) => ({ ...previous, checking: true }));
+    }
+    try {
+      const result = await fetchCheckoutSession({ paymentId: reference });
+      return presentPaymentLifecycle(result, { openPending });
+    } catch (error) {
+      const message = friendlyCheckoutError(error, "Unable to check payment status.");
+      if (!background) {
+        setCheckoutStatus((previous) => ({ ...previous, checkingStatus: false, error: message }));
+        setPaymentLifecycleView((previous) => ({ ...previous, checking: false, message }));
+      }
+      return "error";
+    }
+  }, [presentPaymentLifecycle]);
+
   useEffect(() => {
     if (!plugReady || paypalReturnHandledRef.current || typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search || "");
@@ -6143,51 +6274,76 @@ export default function App() {
       clean.searchParams.delete(key);
     }
     window.history.replaceState({}, "", clean.toString());
+    setPaymentLifecycleView({
+      open: true,
+      lifecycle: "pending",
+      message: returnStatus === "cancelled" ? "Recording PayPal cancellation…" : "Verifying PayPal payment with EIP…",
+      paymentCode,
+      orderCode: "",
+      checking: true,
+    });
 
-    if (returnStatus === "cancelled") {
-      setCheckoutStatus({
-        loading: false,
-        error: "PayPal checkout was cancelled.",
-        success: false,
-        orderCode: "",
-        paymentCode,
-      });
-      setCartOpen(true);
-      return;
-    }
-
-    setCheckoutStatus({ loading: true, error: "", success: false, orderCode: "", paymentCode });
-    confirmCheckoutSession({
-      payload: {
-        payment_code: paymentCode,
-        provider_session_id: providerSessionId || undefined,
-        metadata: { source: clientSource, return_flow: "paypal" },
-      },
-    })
-      .then((result) => {
-        const payment = result?.payment || {};
-        setCheckoutStatus({
-          loading: false,
-          error: "",
-          success: true,
-          orderCode: "",
-          paymentCode: payment?.code || paymentCode,
+    const operation = returnStatus === "cancelled"
+      ? cancelCheckoutSession({
+          paymentId: paymentCode,
+          payload: { return_flow: "paypal" },
+        })
+      : confirmCheckoutSession({
+          payload: {
+            payment_code: paymentCode,
+            provider_session_id: providerSessionId || undefined,
+            metadata: { source: clientSource, return_flow: "paypal" },
+          },
         });
-        setInstantCheckoutItem(null);
-        setCartItems([]);
-        setCartOpen(false);
-      })
+
+    operation
+      .then((result) => presentPaymentLifecycle(result, { openPending: true }))
       .catch((error) => {
+        const message = friendlyCheckoutError(error, "PayPal confirmation failed.");
         setCheckoutStatus({
           loading: false,
-          error: friendlyCheckoutError(error, "PayPal confirmation failed."),
+          error: message,
           success: false,
           orderCode: "",
           paymentCode,
         });
-        setCartOpen(true);
+        setPaymentLifecycleView({
+          open: true,
+          lifecycle: "failed",
+          message,
+          paymentCode,
+          orderCode: "",
+          checking: false,
+        });
       });
-  }, [plugReady, clientSource]);
+  }, [plugReady, clientSource, presentPaymentLifecycle]);
+
+  useEffect(() => {
+    const paymentCode = String(checkoutStatus.paymentCode || "").trim();
+    if (!plugReady || !checkoutStatus.awaitingProvider || checkoutStatus.autoPollingStopped || !paymentCode) return;
+    let active = true;
+    let attempts = 0;
+    const poll = async () => {
+      if (!active) return;
+      attempts += 1;
+      const lifecycle = await checkPaymentLifecycle(paymentCode, { background: true });
+      if (!active || ["paid", "partially_refunded", "refunded", "cancelled", "failed"].includes(lifecycle)) return;
+      if (attempts >= 40) {
+        setCheckoutStatus((previous) => ({
+          ...previous,
+          autoPollingStopped: true,
+          notice: "Payment is still pending. Use Check payment status after completing PayPal checkout.",
+        }));
+      }
+    };
+    const first = window.setTimeout(poll, 1500);
+    const interval = window.setInterval(poll, 3000);
+    return () => {
+      active = false;
+      window.clearTimeout(first);
+      window.clearInterval(interval);
+    };
+  }, [plugReady, checkoutStatus.awaitingProvider, checkoutStatus.autoPollingStopped, checkoutStatus.paymentCode, checkPaymentLifecycle]);
 
   const fetchHomeItems = useCallback(async () => {
     if (!plugReady) return;
@@ -7617,7 +7773,8 @@ export default function App() {
       return;
     }
 
-    setCheckoutStatus({ loading: true, error: "", success: false, orderCode: "", paymentCode: "" });
+    setPaymentLifecycleView((previous) => ({ ...previous, open: false }));
+    setCheckoutStatus({ loading: true, error: "", success: false, orderCode: "", paymentCode: "", awaitingProvider: false, autoPollingStopped: false });
     try {
       const currency = currencies[0] || "USD";
       const deliveryCountry =
@@ -7735,6 +7892,7 @@ export default function App() {
             error: "",
             notice: "PayPal checkout opened in a new tab. Complete payment there.",
             awaitingProvider: true,
+            autoPollingStopped: false,
             success: false,
             orderCode,
             paymentCode: payment?.code || "",
@@ -8344,11 +8502,21 @@ export default function App() {
         form={checkoutForm}
         onFormChange={handleCheckoutFormChange}
         onPaymentSelect={handleCheckoutPaymentSelect}
+        onCheckPaymentStatus={() => checkPaymentLifecycle(checkoutStatus.paymentCode)}
         onSubmit={handleCheckoutSubmit}
         status={checkoutStatus}
         countryOptions={countryOptions}
         paymentMethods={checkoutPaymentMethods}
         t={t}
+      />
+      <PaymentLifecycleModal
+        state={paymentLifecycleView}
+        onCheck={() => checkPaymentLifecycle(paymentLifecycleView.paymentCode, { openPending: true })}
+        onReturnToCart={() => {
+          setPaymentLifecycleView((previous) => ({ ...previous, open: false }));
+          setCartOpen(true);
+        }}
+        onClose={() => setPaymentLifecycleView((previous) => ({ ...previous, open: false }))}
       />
       <LearningIntakeModal
         open={learningIntakeOpen}

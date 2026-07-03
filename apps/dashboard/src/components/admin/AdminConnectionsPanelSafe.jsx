@@ -586,12 +586,17 @@ export default function AdminConnectionsPanelSafe() {
   const selectedTenant = items.find((item) => item.id === selectedTenantId) || detail?.tenant || null;
   const selectedConnection = connections.find((item) => item.id === selectedConnectionId) || connections[0] || null;
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
+  const selectedPaymentProvider = PAYMENT_PROVIDER_SETUP[selectedConnection?.identity?.connection_kind]?.providerCode || "";
   const inboundUrls = selectedConnection?.inbound?.inbound_path_suffix
-    ? {
-        storefront: `${apiBaseUrl}/api/public/commerce/${selectedConnection.inbound.inbound_path_suffix}`,
-        public: `${apiBaseUrl}/api/public/gateway/intake/${selectedConnection.inbound.inbound_path_suffix}`,
-        edi: `${apiBaseUrl}/api/edi/gateway/webhook/${selectedConnection.inbound.inbound_path_suffix}`
-      }
+    ? selectedPaymentProvider
+      ? {
+          webhook: `${apiBaseUrl}/api/public/commerce/${selectedConnection.inbound.inbound_path_suffix}/payments/${selectedPaymentProvider}/webhook`
+        }
+      : {
+          storefront: `${apiBaseUrl}/api/public/commerce/${selectedConnection.inbound.inbound_path_suffix}`,
+          public: `${apiBaseUrl}/api/public/gateway/intake/${selectedConnection.inbound.inbound_path_suffix}`,
+          edi: `${apiBaseUrl}/api/edi/gateway/webhook/${selectedConnection.inbound.inbound_path_suffix}`
+        }
     : null;
   const selectedFieldError = (path) => (
     selectedConnection ? fieldErrors[`${selectedConnection.id}:${path}`] || "" : ""
@@ -1246,15 +1251,21 @@ export default function AdminConnectionsPanelSafe() {
                       Enable inbound webhook
                     </label>
                     {paymentSetup.providerCode === "paypal" ? (
-                      <Field label="Webhook ID / reference"><input value={selectedConnection.verification.hmac_signature.webhook_id_ref || ""} onChange={(event) => updateNested("verification", "hmac_signature", { webhook_id_ref: event.target.value })} placeholder="PayPal webhook ID reference" className={inputClass} /></Field>
+                      <Field label="PayPal webhook ID" error={selectedFieldError("verification.hmac_signature.webhook_id_ref")}><input value={selectedConnection.verification.hmac_signature.webhook_id_ref || ""} onChange={(event) => updateNested("verification", "hmac_signature", { webhook_id_ref: event.target.value })} placeholder="PayPal webhook ID" className={inputClass} /></Field>
                     ) : null}
-                    <SecretField
-                      label="Webhook signing secret reference"
-                      value={selectedConnection.verification.hmac_signature.secret}
-                      stored={selectedConnection.verification.hmac_signature.secret_set}
-                      onChange={(value) => updateNested("verification", "hmac_signature", { secret: value })}
-                    />
-                    <Field label="Webhook signing status"><input readOnly value={hasStoredSecret(selectedConnection.verification.hmac_signature, "secret") ? "Stored securely" : "Missing"} className={`${inputClass} bg-slate-50 text-ink-600`} /></Field>
+                    {paymentSetup.providerCode === "paypal" ? (
+                      <Field label="Webhook verification"><input readOnly value="Verified server-side with PayPal API" className={`${inputClass} bg-slate-50 text-ink-600`} /></Field>
+                    ) : (
+                      <>
+                        <SecretField
+                          label="Webhook signing secret reference"
+                          value={selectedConnection.verification.hmac_signature.secret}
+                          stored={selectedConnection.verification.hmac_signature.secret_set}
+                          onChange={(value) => updateNested("verification", "hmac_signature", { secret: value })}
+                        />
+                        <Field label="Webhook signing status"><input readOnly value={hasStoredSecret(selectedConnection.verification.hmac_signature, "secret") ? "Stored securely" : "Missing"} className={`${inputClass} bg-slate-50 text-ink-600`} /></Field>
+                      </>
+                    )}
                     <Field label="Signature header"><input readOnly value={selectedConnection.verification.hmac_signature.header_name} className={`${inputClass} bg-slate-50 text-ink-600`} /></Field>
                   </Grid>
                 ) : (
