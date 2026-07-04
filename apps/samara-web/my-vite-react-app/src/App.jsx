@@ -6302,7 +6302,8 @@ export default function App() {
       });
     }
     if (success) {
-      const purchasedItems = checkoutItems.map((item) => ({
+      const purchasedItemsSource = instantCheckoutItem ? [instantCheckoutItem] : cartItems;
+      const purchasedItems = purchasedItemsSource.map((item) => ({
         id: item.id || null,
         code: item.code || "",
         title: item.title || item.code || "Item",
@@ -6324,7 +6325,7 @@ export default function App() {
       }
     }
     return lifecycle;
-  }, [checkoutItems]);
+  }, [cartItems, instantCheckoutItem]);
 
   const checkPaymentLifecycle = useCallback(async (paymentCode, { openPending = false, background = false, popupReturn = false } = {}) => {
     const reference = String(paymentCode || "").trim();

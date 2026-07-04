@@ -1115,6 +1115,8 @@ test("payment routes and storefront integration expose governed checkout session
   assert.match(samaraApp, /Thank you for your purchase!/);
   assert.match(samaraApp, /Your order has been successfully received\./);
   assert.match(samaraApp, /setActivePage\("order-confirmation"\)/);
+  assert.doesNotMatch(samaraApp, /presentPaymentLifecycle[\s\S]*?\}, \[checkoutItems\]\)/);
+  assert.match(samaraApp, /const purchasedItemsSource = instantCheckoutItem \? \[instantCheckoutItem\] : cartItems/);
   assert.doesNotMatch(samaraApp, /Payment verified by EIP|verified by EIP/i);
   assert.match(samaraApp, /checkPaymentLifecycle/);
   assert.match(samaraApp, /autoPollingStopped/);
