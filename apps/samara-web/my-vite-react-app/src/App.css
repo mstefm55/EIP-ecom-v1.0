@@ -2875,6 +2875,107 @@ a:focus-visible {
   color: #a23742;
 }
 
+.order-confirmation-page {
+  min-height: 70vh;
+  padding: clamp(42px, 8vw, 96px) 20px;
+  display: grid;
+  place-items: start center;
+  background: radial-gradient(circle at top, rgba(255, 244, 214, 0.75), transparent 48%);
+}
+
+.order-confirmation-card {
+  width: min(720px, 100%);
+  padding: clamp(28px, 6vw, 56px);
+  border: 1px solid rgba(140, 109, 85, 0.24);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 18px 55px rgba(58, 45, 35, 0.12);
+  text-align: center;
+}
+
+.order-confirmation-mark {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 18px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: #e5f6ed;
+  color: #237a4b;
+  font-size: 1.8rem;
+  font-weight: 800;
+}
+
+.order-confirmation-eyebrow {
+  margin: 0 0 9px;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+.order-confirmation-card h1 {
+  margin: 0 0 14px;
+  font-size: clamp(2rem, 5vw, 3.2rem);
+}
+
+.order-confirmation-thanks {
+  margin: 0 0 6px;
+  font-size: 1.12rem;
+  font-weight: 700;
+}
+
+.order-confirmation-details {
+  margin: 28px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+
+.order-confirmation-details div {
+  padding: 12px 2px;
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.order-confirmation-details div + div {
+  border-top: 1px solid rgba(140, 109, 85, 0.14);
+}
+
+.order-confirmation-details dt {
+  color: var(--muted);
+}
+
+.order-confirmation-details dd {
+  margin: 0;
+  font-weight: 700;
+  text-align: right;
+}
+
+.order-confirmation-items {
+  margin: 0 0 28px;
+  text-align: left;
+}
+
+.order-confirmation-items h2 {
+  margin: 0 0 10px;
+  font-size: 1rem;
+}
+
+.order-confirmation-item {
+  padding: 9px 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid rgba(140, 109, 85, 0.14);
+}
+
+.order-confirmation-card > .btn {
+  margin: 0 auto;
+}
+
 .payment-method-button.selected {
   border-color: #5c7cfa;
 }
