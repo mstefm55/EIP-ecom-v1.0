@@ -15,7 +15,7 @@ SELECT
   "type": "UserShell",
   "props": {
     "brand": "EIP Core",
-    "nav": ["Dashboard", "Product Studio", "Content Studio", "Content Studio Enhanced", "Orders & Payments", "Inventory", "Procurement", "Entities", "Policies & Conditions", "Tasks", "Reports", "Settings"],
+    "nav": ["Dashboard", "Product Studio", "Content Studio", "Content Studio Enhanced", "Orders & Payments", "Inventory", "Procurement", "Entities", "Policies & Conditions", "Tasks", "Reports", "Security", "Settings"],
     "menu": [
       { "code": "dashboard", "label": "Dashboard", "icon": "LayoutGrid" },
       { "code": "catalog", "label": "Product Studio", "icon": "Package" },
@@ -29,6 +29,7 @@ SELECT
       { "code": "crm", "label": "CRM", "icon": "Users", "module": "crm" },
       { "code": "tasks", "label": "Tasks", "icon": "Activity" },
       { "code": "reports", "label": "Reports", "icon": "BarChart3" },
+      { "code": "security", "label": "Security", "icon": "Shield" },
       { "code": "settings", "label": "Settings", "icon": "Settings" }
     ],
     "helper": "Workspace overview, catalog operations, and tenant tasks."
@@ -498,6 +499,17 @@ SELECT
             "title": "Reports",
             "subtitle": "Download activity reports and exports here."
           }
+        }
+      ]
+    },
+    {
+      "id": "user-security-panel",
+      "type": "UserPanel",
+      "props": { "tab": "security" },
+      "children": [
+        {
+          "id": "user-security",
+          "type": "UserSecurityPanel"
         }
       ]
     },
