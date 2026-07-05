@@ -232,7 +232,7 @@ export const dashboardSurface = {
       children: [
         {
           id: "content-enhanced-workspace",
-          type: "EcomProductWorkspace",
+          type: "ContentStudioEnhanced",
           props: {
             mode: "content-studio-enhanced",
           },

@@ -224,6 +224,8 @@ export default function ImageAssetStudioModal({
   recommendedSize = null,
   presetProfiles = null,
   defaultProfileId = "",
+  applyLabel = "Apply edit",
+  workingLabel = "Processing...",
   onCancel = () => {},
   onApply = () => {},
 }) {
@@ -271,6 +273,7 @@ export default function ImageAssetStudioModal({
   const [cropStageSize, setCropStageSize] = useState({ width: 360, height: 220 });
 
   const displaySource = sourceObjectUrl || sourceUrl || "";
+  const useAnonymousSource = !sourceObjectUrl && /^https?:/i.test(String(sourceUrl || ""));
   const sourceName = sourceFile?.name || "image";
 
   const profileOptions = useMemo(() => {
@@ -848,6 +851,7 @@ export default function ImageAssetStudioModal({
                 <img
                   ref={imgRef}
                   src={displaySource}
+                  crossOrigin={useAnonymousSource ? "anonymous" : undefined}
                   alt="Editable source"
                   style={previewImageStyle}
                   onLoad={(event) => {
@@ -857,6 +861,10 @@ export default function ImageAssetStudioModal({
                     setImageReady(nextWidth > 0 && nextHeight > 0);
                     setSourceCrop({ ...INITIAL_SOURCE_CROP });
                     setCropDragging(false);
+                  }}
+                  onError={() => {
+                    setImageReady(false);
+                    setProcessingError("The image editor could not load this image. Replace it with a local image and try again.");
                   }}
                   draggable={false}
                 />
@@ -907,6 +915,7 @@ export default function ImageAssetStudioModal({
                 <div ref={cropStageRef} className="image-studio-crop-stage">
                   <img
                     src={displaySource}
+                    crossOrigin={useAnonymousSource ? "anonymous" : undefined}
                     alt="Crop source"
                     className="image-studio-crop-image"
                     style={{
@@ -1129,7 +1138,7 @@ export default function ImageAssetStudioModal({
               Cancel
             </button>
             <button type="button" onClick={handleApply} disabled={working || !imageReady}>
-              {working ? "Processing..." : "Apply edit"}
+              {working ? workingLabel : applyLabel}
             </button>
           </div>
         </footer>

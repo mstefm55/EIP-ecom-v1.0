@@ -14,6 +14,10 @@ const dashboardSeed = fs.readFileSync(
   path.join(apiRoot, "db", "seed", "ui_surface_dashboard.sql"),
   "utf8"
 );
+const builderMigration = fs.readFileSync(
+  path.join(apiRoot, "db", "migrations", "0135_content_studio_template_builder_surface.sql"),
+  "utf8"
+);
 
 test("governed dashboard surface exposes enhanced Content Studio without replacing legacy studio", () => {
   for (const source of [migration, dashboardSeed]) {
@@ -33,4 +37,12 @@ test("migration patches every active published dashboard surface idempotently", 
   assert.match(migration, /entry->>'code' <> 'content-enhanced'/);
   assert.match(migration, /entry->>'id' <> 'user-content-enhanced-panel'/);
   assert.match(migration, /content_studio_legacy_preserved/);
+});
+
+test("template builder migration switches only the enhanced workspace component", () => {
+  assert.match(builderMigration, /user-content-enhanced-panel/);
+  assert.match(builderMigration, /content-enhanced-workspace/);
+  assert.match(builderMigration, /ContentStudioEnhanced/);
+  assert.match(builderMigration, /content_studio_template_builder_v1/);
+  assert.doesNotMatch(builderMigration, /user-content-panel' THEN/);
 });

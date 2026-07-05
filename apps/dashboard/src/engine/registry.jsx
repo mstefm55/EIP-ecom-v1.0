@@ -38,6 +38,7 @@ import TenantAdminAccessPanel from "../components/user/TenantAdminAccessPanel";
 import UserSecurityPanel from "../components/user/UserSecurityPanel";
 import UserPlaceholderPanel from "../components/user/UserPlaceholderPanel";
 import EcomProductWorkspace from "../components/ecom/EcomProductWorkspace";
+import ContentStudioEnhanced from "../components/ecom/ContentStudioEnhanced";
 import EcomOrderManagementPanel from "../components/ecom/EcomOrderManagementPanel";
 import EcomCommerceSettingsPanel from "../components/ecom/EcomCommerceSettingsPanel";
 import EcomCommerceLifecyclePanel from "../components/ecom/EcomCommerceLifecyclePanel";
@@ -82,6 +83,7 @@ export const registry = {
   UserSecurityPanel,
   UserPlaceholderPanel,
   EcomProductWorkspace,
+  ContentStudioEnhanced,
   EcomOrderManagementPanel,
   EcomCommerceSettingsPanel,
   EcomCommerceLifecyclePanel,
