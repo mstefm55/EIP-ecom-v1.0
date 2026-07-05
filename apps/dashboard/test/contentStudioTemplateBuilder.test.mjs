@@ -6,9 +6,12 @@ import { fileURLToPath } from "node:url";
 import {
   addButton,
   addChild,
+  buildScannerTree,
   createSectionFromTemplate,
   deleteButton,
   deleteChild,
+  duplicateChild,
+  normalizeScannerZones,
   previewKind,
   reorderChild,
   moveChildTo,
@@ -36,7 +39,7 @@ test("exact builder exposes top bar, three panels, scanner, templates, preview, 
   for (const label of [
     "Content Studio Enhanced",
     "PAGE STRUCTURE",
-    "ELEMENT SCANNER & MAPPING",
+    "RENDERED DOM SCANNER",
     "LIVE PREVIEW",
     "SECTION INSPECTOR",
     "SECTION TEMPLATE LIBRARY",
@@ -48,6 +51,8 @@ test("exact builder exposes top bar, three panels, scanner, templates, preview, 
   assert.match(source, /cse-left/);
   assert.match(source, /cse-center/);
   assert.match(source, /cse-right/);
+  assert.match(source, /scan_mode: "rendered"/);
+  assert.match(source, /MAP RENDERED COMPONENT/);
 });
 
 test("section template parent owns repeatable child order", () => {
@@ -68,6 +73,25 @@ test("section template parent owns repeatable child order", () => {
   assert.match(source, /draggable/);
   assert.match(source, /beginPreviewInteraction\("move"/);
   assert.match(source, /beginPreviewInteraction\("resize"/);
+  section = duplicateChild(section, section.children[0].sectionId);
+  assert.equal(section.children.length, 3);
+});
+
+test("rendered scanner candidates normalize into a real parent child tree", () => {
+  const zones = normalizeScannerZones({
+    mapping_profile: {
+      candidate_zones: [
+        { candidate_id: "root", label: "Product page", suggested_slot: "products.page", suggested_renderer: "product_detail", selector: "main", dom_order: 1, node_kind: "section", source: "rendered_dom_scan" },
+        { candidate_id: "gallery", parent_candidate_id: "root", label: "Gallery", suggested_slot: "products.gallery", suggested_renderer: "media_gallery", selector: ".gallery", dom_depth: 1, dom_order: 2, node_kind: "gallery", image_count: 4, source: "rendered_dom_scan" },
+        { candidate_id: "image", parent_candidate_id: "gallery", label: "Image", suggested_slot: "products.image", suggested_renderer: "media_gallery", selector: ".gallery img", dom_depth: 2, dom_order: 3, node_kind: "image", source: "rendered_dom_scan" }
+      ]
+    }
+  });
+  const tree = buildScannerTree(zones);
+  assert.equal(tree.length, 1);
+  assert.equal(tree[0].children[0].id, "gallery");
+  assert.equal(tree[0].children[0].children[0].id, "image");
+  assert.equal(tree[0].children[0].counts.images, 4);
 });
 
 test("a slide supports five repeatable buttons and deletion", () => {
@@ -111,6 +135,8 @@ test("image editor is explicit before upload and loading clears in finally", () 
   assert.match(source, /ImageAssetStudioModal/);
   assert.match(source, /applyLabel="Apply & Upload"/);
   assert.match(source, /onApply=\{uploadEditedImage\}/);
+  assert.match(source, /width: Number\(result\?\.width/);
+  assert.match(source, /height: Number\(result\?\.height/);
   assert.match(source, /uploadEditedImage[\s\S]*?finally\s*\{[\s\S]*?setUploading\(false\)/);
   assert.match(source, /URL\.createObjectURL\(file\)/);
 });

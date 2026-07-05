@@ -12,8 +12,8 @@ The enhanced surface reuses the existing one-to-one storefront slot mapping: one
 
 The exact builder layout has:
 
-1. Left: page structure, parent/child section tree, section actions, and scanner/mapping results.
-2. Center: selected component preview with selection outline, handles, toolbar, responsive viewport controls, child thumbnails, and the template quick-add library.
+1. Left: page structure, parent/child section tree, section actions, and the rendered-DOM scanner/mapping tree.
+2. Center: the currently selected rendered DOM target or selected editable template preview, with selection outline, contextual toolbar, responsive viewport controls, child thumbnails, and the template quick-add library.
 3. Right: section inspector with Content, Data Binding, Media, Display, and Advanced tabs.
 
 The top builder bar provides the site selector, connection status, preview, save-draft, and governed publish actions.
@@ -28,7 +28,7 @@ Templates create layout metadata shells. They do not copy website CSS or product
 
 Enhanced metadata is stored under `attrs.content_studio_enhanced` while the serializer also writes compatible flat `slides` and CTA fields for existing renderers. Legacy flat content is normalized into the parent/child model when opened.
 
-Repeatable children support add, delete, and reorder. Child types include slides, cards, images, questions, testimonials, products/collections, and generic blocks. Unknown future component types render a safe placeholder.
+Repeatable children support add, duplicate, delete, drag reorder, and directional reorder. Child types include slides, cards, images, questions, testimonials, products/collections, and generic blocks. Unknown future component types render a safe placeholder.
 
 Buttons are an unrestricted repeatable list. Each button stores label, URL, style, optional icon, and new-tab behavior. The first button is mirrored into legacy CTA fields for backward compatibility; additional buttons remain in enhanced metadata and the `buttons` array.
 
@@ -73,14 +73,33 @@ The runtime contract remains metadata-driven:
 
 The storefront renderer resolves static content, Product Studio data, media URLs, links, and labels while retaining the website-owned component shell.
 
-## Scanner and mapping flow
+## Rendered DOM scanner and mapping flow
 
-The enhanced left panel calls the existing structure connection, structure scan, and mapping contracts. Results show type and mapped/unmapped state. Selecting a result reuses an existing matching content slot or creates a draft component shell with the scanned selector and slot. Rescans do not delete Content Studio records or Product Studio bindings.
+Enhanced Studio explicitly requests `scan_mode=rendered`. The API launches the isolated Chromium adapter, waits for the connected JavaScript application to render, sanitizes the DOM snapshot, and derives stable candidates from the actual parent/child structure. It detects containers, header/navigation/footer, sections, sliders/slides, product grids/cards, galleries/images, text, buttons/button groups, forms, video, repeaters, and generic cards.
+
+Each candidate retains a stable DOM signature, safe selector, parent candidate, DOM depth/order, detected kind, static/dynamic mode, visibility, safe text sample, and aggregate image/link/button/repeater counts. The left panel renders these relationships as a nested tree and distinguishes mapped, unmapped, ignored, hidden, broken/review-needed, static, and dynamic states.
+
+The mapping flow is:
+
+1. Scan the rendered page.
+2. Select a detected DOM node and view the connected site in the live preview.
+3. Choose **Map** or **Edit Mapping**.
+4. Confirm the element, choose a template, map detected fields, and choose a data source.
+5. Review and save the governed mapping against its rescan-safe identity.
+6. Edit the created section and save its draft.
+
+Ignore decisions and approved mappings survive rescans. Sensitive account, authentication, checkout, and payment forms cannot be approved for content pushing.
+
+## Dynamic preview and guided workflow
+
+Selecting a scanned node switches the center canvas to the real connected storefront and passes the stable selector through preview query metadata. Selecting a mapped or template node switches to a contextual preview. Hero slides, product layouts, galleries, FAQs, features/testimonials, video, text/CTA/newsletter, unknown components, and repeatable button groups no longer fall through to a fixed Hero Slider preview.
+
+Template-owned layouts disable arbitrary drag/resize and explain why. Custom governed shells may use free positioning controls. Toolbar actions for move, duplicate, delete, lock, hide, settings, reset, and open storefront are functional. The integrated help panel guides users through connect, rendered scan, map, edit/bind, preview, and publish. Template cards show their purpose and Static, Product Studio, or Mixed data support.
 
 ## Current limitations
 
-- The center canvas is a metadata-driven component preview. The connected frontend remains the final source of truth for its exact production CSS and responsive behavior.
-- Freeform drag coordinates and arbitrary pixel resizing are represented by selection handles/tooling but are not persisted until a connected renderer exposes a governed positioning contract.
+- Cross-origin storefronts cannot be directly restyled by the dashboard iframe. The stable selector is passed as `eip_selector`; connected storefronts may consume it for an exact in-page outline.
+- Freeform drag coordinates and pixel resizing are restricted to custom governed shells. Template-owned layout remains controlled by the storefront renderer.
 - Custom/Future API is a metadata placeholder; runtime adapter execution is deferred.
 - Section order is stored in enhanced metadata; storefront-wide cross-slot ordering requires renderer support.
 

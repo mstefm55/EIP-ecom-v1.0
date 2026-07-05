@@ -6,6 +6,7 @@ import {
   ArrowUp,
   ChevronDown,
   ChevronRight,
+  CheckCircle2,
   Code2,
   Copy,
   Eye,
@@ -18,6 +19,7 @@ import {
   Loader2,
   Lock,
   Monitor,
+  MousePointer2,
   MoreHorizontal,
   Plus,
   RefreshCw,
@@ -40,15 +42,19 @@ import {
   SECTION_TEMPLATES,
   addButton,
   addChild,
+  buildScannerTree,
   createSectionFromTemplate,
   deleteButton,
   deleteChild,
+  duplicateChild,
+  normalizeScannerZones,
   normalizeLegacySection,
   moveChildTo,
   previewKind,
   reorderChild,
   sanitizeBindingReference,
-  serializeEnhancedSection
+  serializeEnhancedSection,
+  templateIdForRenderer
 } from "./contentStudioEnhancedModel";
 import "./ContentStudioEnhanced.css";
 
@@ -72,28 +78,15 @@ function messageFor(error, fallback) {
   if (code === "FILE_TOO_LARGE") return payload.message || "The selected image is too large.";
   if (code === "REQUEST_TIMEOUT") return "The upload took too long and was stopped. Please try again.";
   if (code === "UPLOAD_SCAN_PENDING") return "The image is waiting for scanner approval. Please try again shortly.";
+  if (code === "UPLOAD_STORAGE_UNAVAILABLE" || code === "UPLOAD_STORAGE_WRITE_FAILED") return "Media storage is temporarily unavailable. The previous image was kept.";
+  if (code === "RENDERED_DOM_BROWSER_NOT_FOUND" || code === "RENDERED_DOM_ADAPTER_NOT_INSTALLED") return "Rendered scanning is not available on the API service. Verify the Chromium scanner deployment.";
+  if (code === "RENDERED_DOM_TIMEOUT" || code === "STRUCTURE_SCAN_TIMEOUT") return "The rendered page took too long to scan. Check the connected URL and try again.";
+  if (code === "RENDERED_DOM_SCANNER_DISABLED") return "Rendered DOM scanning is disabled for this environment.";
   return error?.userMessage || payload.message || error?.message || fallback;
 }
 
 function replaceAt(items, id, updater, key = "sectionId") {
   return items.map((item) => (item?.[key] === id ? updater(item) : item));
-}
-
-function normalizeScannerZones(structure) {
-  const zones = Array.isArray(structure?.zones) ? structure.zones : [];
-  const candidates = Array.isArray(structure?.mapping_profile?.candidates)
-    ? structure.mapping_profile.candidates
-    : [];
-  const source = zones.length ? zones : candidates;
-  return source.map((zone, index) => ({
-    id: String(zone.candidate_id || zone.id || zone.tag || `zone-${index + 1}`),
-    label: String(zone.label || zone.tag || `Scanned element ${index + 1}`),
-    tag: String(zone.suggested_slot || zone.tag || ""),
-    selector: String(zone.selector || ""),
-    type: String(zone.suggested_renderer || zone.renderer_type || "unknown"),
-    status: String(zone.mapping_status || "unmapped"),
-    page: String(zone.page || "home")
-  }));
 }
 
 function childLabel(section) {
@@ -136,7 +129,39 @@ function Field({ label, value, onChange, type = "text", options, placeholder, ro
   );
 }
 
-export default function ContentStudioEnhanced() {
+function scannerStatus(zone) {
+  if (zone.visibility === "hidden") return "hidden";
+  if (zone.status === "approved") return "mapped";
+  if (zone.status === "ignored") return "ignored";
+  if (zone.status === "needs_review") return "broken";
+  return "unmapped";
+}
+
+function ScannerTreeNode({ node, selectedId, onView, onMap, onIgnore }) {
+  const status = scannerStatus(node);
+  return (
+    <div className="cse-dom-node" style={{ "--dom-depth": node.depth }}>
+      <div className={`cse-dom-row ${selectedId === node.id ? "active" : ""}`}>
+        <button type="button" className="cse-dom-view" onClick={() => onView(node)} title="View detected element in preview">
+          {node.children.length ? <ChevronDown /> : <Code2 />}
+          <span><strong>{node.label}</strong><small>{node.nodeKind} · {node.selector || node.tag}</small></span>
+        </button>
+        <div className="cse-dom-badges">
+          <em className={status}>{status}</em>
+          <em className={node.contentMode}>{node.contentMode}</em>
+        </div>
+        <div className="cse-dom-actions">
+          <button type="button" onClick={() => onMap(node)} disabled={!node.pushAllowed}>{node.status === "approved" ? "Edit Mapping" : "Map"}</button>
+          <button type="button" onClick={() => onView(node)}>View</button>
+          <button type="button" onClick={() => onIgnore(node)}>{node.status === "ignored" ? "Ignored" : "Ignore"}</button>
+        </div>
+      </div>
+      {node.children.length ? <div className="cse-dom-children">{node.children.map((child) => <ScannerTreeNode key={child.id} node={child} selectedId={selectedId} onView={onView} onMap={onMap} onIgnore={onIgnore} />)}</div> : null}
+    </div>
+  );
+}
+
+export default function ContentStudioEnhanced({ ctx }) {
   const [connections, setConnections] = useState([]);
   const [connectionCode, setConnectionCode] = useState("");
   const [sections, setSections] = useState([]);
@@ -154,17 +179,26 @@ export default function ContentStudioEnhanced() {
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [scanning, setScanning] = useState(false);
+  const [mappingSaving, setMappingSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [notice, setNotice] = useState({ tone: "", message: "" });
-  const [autoDetect, setAutoDetect] = useState(true);
+  const [selectedZoneId, setSelectedZoneId] = useState("");
+  const [mappingWizard, setMappingWizard] = useState({ open: false, step: 1, zoneId: "", templateId: "custom", slot: "", dataSource: "static", fieldMappings: {} });
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const [editor, setEditor] = useState({ open: false, file: null, sourceUrl: "", childId: "", previousImage: "" });
   const fileInputRef = useRef(null);
   const previewObjectUrlRef = useRef("");
   const previewInteractionRef = useRef(null);
 
   const scannerZones = useMemo(() => normalizeScannerZones(structure), [structure]);
+  const scannerTree = useMemo(() => buildScannerTree(scannerZones.filter((zone) => zone.page === page)), [page, scannerZones]);
+  const selectedScannerZone = useMemo(
+    () => scannerZones.find((zone) => zone.id === selectedZoneId) || null,
+    [scannerZones, selectedZoneId]
+  );
   const selectedSection = useMemo(
-    () => sections.find((section) => section.componentId === selectedSectionId) || sections[0] || null,
+    () => selectedSectionId === "__none__" ? null : sections.find((section) => section.componentId === selectedSectionId) || sections[0] || null,
     [sections, selectedSectionId]
   );
   const selectedChild = useMemo(
@@ -178,6 +212,17 @@ export default function ContentStudioEnhanced() {
     [connectionCode, connections]
   );
   const frontendUrl = String(selectedConnection?.frontend_url || selectedConnection?.base_url || PREVIEW_BASE_URL || "").replace(/\/$/, "");
+  const renderedPreviewUrl = useMemo(() => {
+    if (!selectedScannerZone || !frontendUrl) return "";
+    try {
+      const url = new URL(frontendUrl, window.location.origin);
+      url.searchParams.set("eip_content_preview", "1");
+      url.searchParams.set("eip_selector", selectedScannerZone.selector || "body");
+      return url.toString();
+    } catch {
+      return frontendUrl;
+    }
+  }, [frontendUrl, selectedScannerZone]);
 
   const updateSection = (sectionId, updater) => {
     setSections((current) => replaceAt(current, sectionId, updater, "componentId"));
@@ -227,6 +272,7 @@ export default function ContentStudioEnhanced() {
   }, []);
 
   function selectSection(section, child = null) {
+    setSelectedZoneId("");
     setSelectedSectionId(section.componentId);
     setSelectedChildId(child?.sectionId || section.children?.[0]?.sectionId || "");
     setExpanded((current) => new Set([...current, section.componentId]));
@@ -234,10 +280,12 @@ export default function ContentStudioEnhanced() {
 
   function addTemplate(templateId) {
     const section = createSectionFromTemplate(templateId, sections.length);
+    section.slot = `${page}.${templateId}_${sections.length + 1}`;
     setSections((current) => [...current, section]);
     setSelectedSectionId(section.componentId);
     setSelectedChildId(section.children[0]?.sectionId || "");
     setExpanded((current) => new Set([...current, section.componentId]));
+    setSelectedZoneId("");
     setTemplateOpen(false);
     setNotice({ tone: "success", message: `${section.label} added as a draft section.` });
   }
@@ -329,16 +377,59 @@ export default function ContentStudioEnhanced() {
     selectSection(copy);
   }
 
+  function deleteSelectedSection() {
+    if (!selectedSection) return;
+    const remaining = sections.filter((section) => section.componentId !== selectedSection.componentId);
+    setSections(remaining);
+    setSelectedSectionId(remaining[0]?.componentId || "");
+    setSelectedChildId(remaining[0]?.children?.[0]?.sectionId || "");
+  }
+
+  function selectPreviewSibling(direction) {
+    if (!selectedSection?.children?.length || !selectedChild) return;
+    const index = selectedSection.children.findIndex((child) => child.sectionId === selectedChild.sectionId);
+    const delta = direction === "previous" ? -1 : 1;
+    const nextIndex = (index + delta + selectedSection.children.length) % selectedSection.children.length;
+    setSelectedChildId(selectedSection.children[nextIndex].sectionId);
+  }
+
+  function resetPreviewLayout() {
+    if (!selectedSection || !selectedChild) return;
+    updateSelectedChild((child) => ({
+      ...child,
+      display: { ...child.display, offsetX: 0, offsetY: 0, widthPercent: 100, heightPx: 330 }
+    }));
+    setNotice({ tone: "success", message: "Preview position and size reset." });
+  }
+
+  function viewScannerZone(zone) {
+    setSelectedZoneId(zone.id);
+    const mapped = sections.find((section) => section.selector === zone.selector || section.slot === zone.tag);
+    if (mapped) {
+      setSelectedSectionId(mapped.componentId);
+      setSelectedChildId(mapped.children?.[0]?.sectionId || "");
+      setExpanded((current) => new Set([...current, mapped.componentId]));
+    }
+    setNotice({ tone: "success", message: `Showing rendered DOM target: ${zone.selector || zone.tag}.` });
+  }
+
   async function scanElements() {
+    const allowedModes = Array.isArray(selectedConnection?.allowed_scan_modes) ? selectedConnection.allowed_scan_modes : [];
+    if (allowedModes.length && !allowedModes.includes("rendered")) {
+      setNotice({ tone: "error", message: "Rendered DOM scanning is not enabled for this Gateway Connection Profile. Enable the rendered scan mode, then retry." });
+      return;
+    }
     setScanning(true);
     setNotice({ tone: "", message: "" });
     try {
       const result = await apiFetch("/api/eip/ecom/storefront/structure/scan", {
         method: "POST",
-        body: { ...(connectionCode ? { connection_code: connectionCode } : {}), scan_mode: autoDetect ? "auto" : "tagged" }
+        body: { ...(connectionCode ? { connection_code: connectionCode } : {}), scan_mode: "rendered" }
       });
       setStructure(result?.item || null);
-      setNotice({ tone: "success", message: `Scan complete: ${Number(result?.item?.usable_candidate_count || 0)} usable elements.` });
+      const candidates = normalizeScannerZones(result?.item || null);
+      setSelectedZoneId(candidates[0]?.id || "");
+      setNotice({ tone: "success", message: `Rendered DOM scan complete: ${candidates.length} detected elements.` });
     } catch (error) {
       setNotice({ tone: "error", message: messageFor(error, "Element scan failed.") });
     } finally {
@@ -346,20 +437,89 @@ export default function ContentStudioEnhanced() {
     }
   }
 
-  function mapScannerZone(zone) {
-    const existing = sections.find((section) => section.slot === zone.tag);
-    if (existing) {
-      selectSection(existing);
-      return;
+  function openMappingWizard(zone) {
+    const existing = sections.find((section) => section.selector === zone.selector || section.slot === zone.tag);
+    const templateId = existing
+      ? templateIdForRenderer(existing.componentType)
+      : templateIdForRenderer(zone.type);
+    setSelectedZoneId(zone.id);
+    setMappingWizard({
+      open: true,
+      step: 1,
+      zoneId: zone.id,
+      templateId,
+      slot: existing?.slot || zone.tag || `custom.${zone.nodeKind}`,
+      dataSource: existing?.children?.[0]?.dataBinding?.source
+        || (["product_grid", "product_carousel", "product_detail"].includes(zone.type) ? "product_studio" : "static"),
+      fieldMappings: { ...(existing?.children?.[0]?.dataBinding?.fieldMappings || {}) }
+    });
+  }
+
+  async function ignoreScannerZone(zone) {
+    if (zone.status === "ignored") return;
+    try {
+      const result = await apiFetch(`/api/eip/ecom/storefront/structure/mappings/${encodeURIComponent(zone.id)}`, {
+        method: "PUT",
+        body: { mapping_status: "ignored", suggested_slot: zone.tag, suggested_renderer: zone.type, selector: zone.selector }
+      });
+      setStructure(result?.item || structure);
+      if (selectedZoneId === zone.id) setSelectedZoneId("");
+      setNotice({ tone: "success", message: `${zone.label} ignored. A later rescan will preserve this decision.` });
+    } catch (error) {
+      setNotice({ tone: "error", message: messageFor(error, "Could not ignore the detected element.") });
     }
-    const template = SECTION_TEMPLATES.find((entry) => entry.type === zone.type) || SECTION_TEMPLATES.at(-1);
-    const section = createSectionFromTemplate(template.id, sections.length);
-    section.slot = zone.tag || section.slot;
-    section.label = zone.label;
-    section.selector = zone.selector;
-    section.mappingStatus = "mapped";
-    setSections((current) => [...current, section]);
-    selectSection(section);
+  }
+
+  async function saveMapping() {
+    const zone = scannerZones.find((item) => item.id === mappingWizard.zoneId);
+    const template = SECTION_TEMPLATES.find((item) => item.id === mappingWizard.templateId);
+    if (!zone || !template) return;
+    setMappingSaving(true);
+    try {
+      const renderer = template.type;
+      const result = await apiFetch(`/api/eip/ecom/storefront/structure/mappings/${encodeURIComponent(zone.id)}`, {
+        method: "PUT",
+        body: {
+          mapping_status: "approved",
+          suggested_slot: mappingWizard.slot,
+          suggested_renderer: renderer,
+          selector: zone.selector
+        }
+      });
+      const existing = sections.find((section) => section.selector === zone.selector || section.slot === zone.tag || section.slot === mappingWizard.slot);
+      const section = existing || createSectionFromTemplate(template.id, sections.length);
+      const mappedSection = {
+        ...section,
+        componentType: template.type,
+        label: zone.label || template.label,
+        slot: mappingWizard.slot,
+        selector: zone.selector,
+        mappingStatus: "approved",
+        source: mappingWizard.dataSource === "product_studio" ? "Product Studio" : "Static",
+        children: (section.children?.length ? section.children : createSectionFromTemplate(template.id, 0).children).map((child, index) => ({
+          ...child,
+          label: index === 0 && zone.nodeKind ? zone.label : child.label,
+          content: {
+            ...child.content,
+            title: child.content?.title === "New section" && zone.textSample ? zone.textSample.slice(0, 80) : child.content?.title
+          },
+          dataBinding: sanitizeBindingReference({ ...child.dataBinding, source: mappingWizard.dataSource, fieldMappings: mappingWizard.fieldMappings })
+        }))
+      };
+      setStructure(result?.item || structure);
+      setSections((current) => existing
+        ? current.map((item) => item.componentId === existing.componentId ? mappedSection : item)
+        : [...current, mappedSection]);
+      setSelectedSectionId(mappedSection.componentId);
+      setSelectedChildId(mappedSection.children?.[0]?.sectionId || "");
+      setExpanded((current) => new Set([...current, mappedSection.componentId]));
+      setMappingWizard((current) => ({ ...current, open: false }));
+      setNotice({ tone: "success", message: `${zone.label} mapped to ${template.label}.` });
+    } catch (error) {
+      setNotice({ tone: "error", message: messageFor(error, "Mapping could not be saved.") });
+    } finally {
+      setMappingSaving(false);
+    }
   }
 
   async function saveDraft({ quiet = false } = {}) {
@@ -478,6 +638,9 @@ export default function ContentStudioEnhanced() {
               ...child.media,
               image: storedUrl,
               assetId: payload.asset.id || payload.asset.name || "",
+              width: Number(result?.width || 0),
+              height: Number(result?.height || 0),
+              mimeType: String(result?.mime_type || file.type || ""),
               uploadPending: false
             }
           }))
@@ -506,7 +669,8 @@ export default function ContentStudioEnhanced() {
 
   const visibleSections = sections.filter((section) => {
     const haystack = `${section.label} ${section.slot} ${section.componentType}`.toLowerCase();
-    return haystack.includes(search.trim().toLowerCase());
+    const sectionPage = String(section.slot || "").split(".")[0] || "home";
+    return (sectionPage === page || sectionPage === "custom") && haystack.includes(search.trim().toLowerCase());
   });
   const previewChild = selectedChild || selectedSection?.children?.[0] || null;
   const previewImage = assetUrl(previewChild?.media?.image);
@@ -515,6 +679,12 @@ export default function ContentStudioEnhanced() {
   const filteredTemplates = SECTION_TEMPLATES.filter(
     (template) => templateCategory === "All" || template.category === templateCategory || (templateCategory === "Popular" && ["hero", "hero_slider", "product_grid", "cta"].includes(template.id))
   );
+  const mappingZone = scannerZones.find((zone) => zone.id === mappingWizard.zoneId) || null;
+  const mappingTemplate = SECTION_TEMPLATES.find((template) => template.id === mappingWizard.templateId) || SECTION_TEMPLATES.at(-1);
+  const canFreePosition = selectedSection?.componentType === "custom" && selectedSection?.locked !== true;
+  const supportsMedia = ["hero", "hero_slider", "banner", "text_image", "media_gallery", "video_section", "product_detail", "custom"].includes(selectedSection?.componentType);
+  const isProductTemplate = ["product_grid", "product_carousel", "product_detail"].includes(selectedSection?.componentType);
+  const supportsButtons = !["media_gallery", "faq", "testimonial_grid", "feature_block", "product_grid", "product_carousel"].includes(selectedSection?.componentType);
 
   return (
     <div className="cse-root">
@@ -535,8 +705,11 @@ export default function ContentStudioEnhanced() {
           <button type="button" onClick={() => window.open(`${frontendUrl}/?content_preview=1`, "_blank", "noopener,noreferrer")}><Eye /> Preview</button>
           <button type="button" onClick={() => saveDraft()} disabled={saving || !selectedSection}>{saving ? <Loader2 className="spin" /> : <Save />} Save Draft</button>
           <button type="button" className="primary" onClick={publish} disabled={publishing || !selectedSection}>{publishing ? <Loader2 className="spin" /> : <UploadCloud />} Publish <ChevronDown /></button>
-          <button type="button" className="icon"><MoreHorizontal /></button>
-          <button type="button" className="icon"><HelpCircle /></button>
+          <div className="cse-more-wrap">
+            <button type="button" className="icon" onClick={() => setMoreOpen((value) => !value)} aria-label="More actions"><MoreHorizontal /></button>
+            {moreOpen ? <div className="cse-more-menu"><button type="button" onClick={() => { setMoreOpen(false); void scanElements(); }}><RefreshCw /> Scan rendered DOM</button><button type="button" onClick={() => { setMoreOpen(false); setInspectorTab("Advanced"); }}><Code2 /> Component metadata</button></div> : null}
+          </div>
+          <button type="button" className="icon" onClick={() => setHelpOpen(true)} aria-label="Open workflow help"><HelpCircle /></button>
         </div>
       </header>
 
@@ -568,9 +741,12 @@ export default function ContentStudioEnhanced() {
                   {isExpanded ? (
                     <div className="cse-tree-children">
                       {(section.children || []).map((child) => (
-                        <button type="button" key={child.sectionId} className={selectedChild?.sectionId === child.sectionId && active ? "active" : ""} onClick={() => selectSection(section, child)}>
-                          <GripVertical /><ImageIcon /><span>{child.label}</span>{child.visible !== false ? <i /> : <EyeOff />}
-                        </button>
+                        <div key={child.sectionId} className="cse-tree-child-group">
+                          <button type="button" className={selectedChild?.sectionId === child.sectionId && active ? "active" : ""} onClick={() => selectSection(section, child)}>
+                            <GripVertical /><ImageIcon /><span>{child.label}</span>{child.visible !== false ? <i /> : <EyeOff />}
+                          </button>
+                          {(child.content?.buttons || []).length ? <div className="cse-tree-buttons"><button type="button" onClick={() => { selectSection(section, child); setInspectorTab("Content"); }}><Link2 /><span>Button group ({child.content.buttons.length})</span><i /></button></div> : null}
+                        </div>
                       ))}
                       <button type="button" className="add-child" onClick={() => { selectSection(section); const next = addChild(section); updateSection(section.componentId, () => next); setSelectedChildId(next.children.at(-1)?.sectionId || ""); }}><Plus /> Add {childLabel(section)}</button>
                     </div>
@@ -583,20 +759,15 @@ export default function ContentStudioEnhanced() {
           <div className="cse-actions-box">
             <strong>ACTIONS</strong><span>Reorder or manage selected section</span>
             <div><button type="button" onClick={() => moveSection("up")}><ArrowUp /> Move Up</button><button type="button" onClick={() => moveSection("down")}><ArrowDown /> Move Down</button></div>
-            <div><button type="button" onClick={duplicateSection}><Copy /> Duplicate</button><button type="button" onClick={() => updateSection(selectedSection.componentId, (section) => ({ ...section, visible: !section.visible }))}>{selectedSection?.visible === false ? <Eye /> : <EyeOff />} Hide / Show</button></div>
-            <button type="button" className="danger" onClick={() => { if (!selectedSection) return; setSections((current) => current.filter((section) => section.componentId !== selectedSection.componentId)); setSelectedSectionId(""); }}><Trash2 /> Delete</button>
+            <div><button type="button" onClick={duplicateSection} disabled={!selectedSection}><Copy /> Duplicate</button><button type="button" disabled={!selectedSection} onClick={() => selectedSection && updateSection(selectedSection.componentId, (section) => ({ ...section, visible: !section.visible }))}>{selectedSection?.visible === false ? <Eye /> : <EyeOff />} Hide / Show</button></div>
+            <button type="button" className="danger" disabled={!selectedSection} onClick={deleteSelectedSection}><Trash2 /> Delete</button>
           </div>
 
           <div className="cse-scanner">
-            <div className="cse-scanner-head"><div><strong>ELEMENT SCANNER & MAPPING</strong><span>{scannerZones.length ? `Scan complete · ${scannerZones.length} elements` : "Ready to scan connected site"}</span></div><button type="button" onClick={scanElements} disabled={scanning}>{scanning ? <Loader2 className="spin" /> : <RefreshCw />} Rescan</button></div>
-            <Toggle label="Auto-detect" checked={autoDetect} onChange={setAutoDetect} />
-            <div className="cse-scan-results">
-              {scannerZones.slice(0, 12).map((zone) => (
-                <button type="button" key={zone.id} onClick={() => mapScannerZone(zone)}>
-                  <span><Code2 /><strong>{zone.label}</strong><small>{zone.type}</small></span>
-                  <em className={zone.status === "approved" || zone.status === "mapped" ? "mapped" : "unmapped"}>{zone.status}</em>
-                </button>
-              ))}
+            <div className="cse-scanner-head"><div><strong>RENDERED DOM SCANNER</strong><span>{scannerZones.length ? `Rendered scan · ${scannerZones.length} elements` : "Connect a site, then scan its rendered page"}</span></div><button type="button" onClick={scanElements} disabled={scanning || !connectionCode}>{scanning ? <Loader2 className="spin" /> : <RefreshCw />} {scannerZones.length ? "Rescan" : "Scan"}</button></div>
+            {structure?.rendered_dom_available === true ? <p className="cse-scan-source"><CheckCircle2 /> Chromium rendered DOM · {structure?.scan_source || "rendered_dom_scan"}</p> : null}
+            <div className="cse-dom-tree">
+              {scannerTree.length ? scannerTree.map((node) => <ScannerTreeNode key={node.id} node={node} selectedId={selectedZoneId} onView={viewScannerZone} onMap={openMappingWizard} onIgnore={ignoreScannerZone} />) : <div className="cse-empty"><ScanSearch /> No rendered DOM scan yet.</div>}
             </div>
           </div>
         </aside>
@@ -609,12 +780,17 @@ export default function ContentStudioEnhanced() {
               <button className={viewport === "tablet" ? "active" : ""} onClick={() => setViewport("tablet")}><Tablet /></button>
               <button className={viewport === "mobile" ? "active" : ""} onClick={() => setViewport("mobile")}><Smartphone /></button>
             </div>
-            <div><button type="button"><RotateCcw /></button><button type="button"><ArrowRight /></button><button type="button"><Code2 /></button></div>
+            <div><button type="button" onClick={resetPreviewLayout} disabled={!selectedChild} title="Reset preview position and size"><RotateCcw /></button><button type="button" onClick={() => window.open(frontendUrl, "_blank", "noopener,noreferrer")} disabled={!frontendUrl} title="Open connected storefront"><ArrowRight /></button><button type="button" onClick={() => setInspectorTab("Advanced")} disabled={!selectedSection} title="Open component metadata"><Code2 /></button></div>
           </div>
           <div className={`cse-preview-frame ${viewportClass}`}>
             <div className="cse-site-shell">
               <div className="cse-site-nav"><strong>SAMARA</strong><nav><span>Patterns</span><span>Courses</span><span>Blog</span><span>Reviews</span><span>Contacts</span></nav><div><ScanSearch /><HeartIcon /><span>EN</span></div></div>
-              {!selectedSection ? <div className="cse-preview-empty">Select or add a section to begin.</div> : (
+              {selectedScannerZone ? (
+                <div className="cse-rendered-preview">
+                  <div className="cse-rendered-target"><span>Rendered DOM</span><strong>{selectedScannerZone.label}</strong><code>{selectedScannerZone.selector || selectedScannerZone.tag}</code><small>{selectedScannerZone.nodeKind} · {selectedScannerZone.contentMode} · {selectedScannerZone.bounds.width || "?"}×{selectedScannerZone.bounds.height || "?"}</small></div>
+                  {renderedPreviewUrl ? <iframe key={`${selectedScannerZone.id}:${renderedPreviewUrl}`} src={renderedPreviewUrl} title={`Rendered preview of ${selectedScannerZone.label}`} sandbox="allow-scripts allow-same-origin allow-forms allow-popups" /> : <div className="cse-preview-empty">The connected storefront URL is unavailable.</div>}
+                </div>
+              ) : !selectedSection ? <div className="cse-preview-empty">Select a detected DOM node or add a section to begin.</div> : (
                 <section
                   className={`cse-selected-preview kind-${kind} ${selectedSection.visible === false ? "is-hidden" : ""}`}
                   style={{
@@ -627,29 +803,38 @@ export default function ContentStudioEnhanced() {
                   onPointerCancel={endPreviewInteraction}
                 >
                   <span className="cse-selection-label">{selectedSection.label}</span>
-                  <div className="cse-element-toolbar"><button className="drag-handle" onPointerDown={(event) => beginPreviewInteraction("move", event)} title="Drag element"><GripVertical /></button><button onClick={() => moveSection("up")}><ArrowUp /></button><button onClick={() => moveSection("down")}><ArrowDown /></button><button onClick={duplicateSection}><Copy /></button><button onClick={() => updateSection(selectedSection.componentId, (section) => ({ ...section, locked: !section.locked }))}>{selectedSection.locked ? <Lock /> : <Unlock />}</button><button onClick={() => updateSection(selectedSection.componentId, (section) => ({ ...section, visible: !section.visible }))}><Eye /></button><button onClick={() => setInspectorTab("Advanced")}><Settings2 /></button></div>
-                  {kind === "product_grid" || kind === "product_carousel" ? (
+                  <div className="cse-element-toolbar"><button className="drag-handle" disabled={!canFreePosition} onPointerDown={(event) => beginPreviewInteraction("move", event)} title={canFreePosition ? "Drag element" : "This section follows template layout."}><GripVertical /></button><button onClick={() => moveSection("up")} title="Move section up"><ArrowUp /></button><button onClick={() => moveSection("down")} title="Move section down"><ArrowDown /></button><button onClick={duplicateSection} title="Duplicate section"><Copy /></button><button onClick={() => updateSection(selectedSection.componentId, (section) => ({ ...section, locked: !section.locked }))} title={selectedSection.locked ? "Unlock" : "Lock"}>{selectedSection.locked ? <Lock /> : <Unlock />}</button><button onClick={() => updateSection(selectedSection.componentId, (section) => ({ ...section, visible: !section.visible }))} title="Hide or show"><Eye /></button><button onClick={() => setInspectorTab("Advanced")} title="Settings"><Settings2 /></button><button onClick={deleteSelectedSection} title="Delete section"><Trash2 /></button></div>
+                  {kind === "product_grid" || kind === "product_carousel" || kind === "product_detail" ? (
                     <div className="cse-product-preview"><div><small>PRODUCT STUDIO</small><h2>{previewChild?.content?.title || selectedSection.label}</h2><p>Live products resolve from the saved collection reference.</p></div><div className="cse-product-cards">{[1, 2, 3, 4].map((item) => <article key={item}><ImageIcon /><strong>Product {item}</strong><span>Dynamic price</span></article>)}</div></div>
+                  ) : kind === "media_gallery" ? (
+                    <div className="cse-gallery-preview">{selectedSection.children.map((child) => <figure key={child.sectionId}>{child.media?.image ? <img src={assetUrl(child.media.image)} alt={child.media?.alt || child.label} /> : <ImageIcon />}<figcaption>{child.media?.caption || child.content?.title || child.label}</figcaption></figure>)}</div>
+                  ) : kind === "faq" ? (
+                    <div className="cse-list-preview"><small>FAQ</small><h2>{selectedSection.label}</h2>{selectedSection.children.map((child) => <details key={child.sectionId} open={child.sectionId === selectedChild?.sectionId}><summary>{child.content?.title || child.label}</summary><p>{child.content?.body || child.content?.subtitle || "Add an answer in the inspector."}</p></details>)}</div>
+                  ) : kind === "testimonial_grid" || kind === "feature_block" ? (
+                    <div className="cse-card-preview"><h2>{selectedSection.label}</h2><div>{selectedSection.children.map((child) => <article key={child.sectionId}><Sparkles /><strong>{child.content?.title || child.label}</strong><p>{child.content?.body || child.content?.subtitle || "Add content in the inspector."}</p></article>)}</div></div>
+                  ) : kind === "video_section" ? (
+                    <div className="cse-video-preview"><div><span>▶</span></div><h2>{previewChild?.content?.title || selectedSection.label}</h2><p>{previewChild?.content?.body || "Add the video details and supporting content."}</p></div>
+                  ) : ["rich_text_block", "cta_block", "newsletter_form", "banner", "text_image"].includes(kind) ? (
+                    <div className="cse-copy-preview"><small>{previewChild?.content?.eyebrow || selectedSection.label}</small><h2>{previewChild?.content?.title || selectedSection.label}</h2><p>{previewChild?.content?.body || previewChild?.content?.subtitle || "Add content in the inspector."}</p><div className="cse-preview-buttons">{(previewChild?.content?.buttons || []).map((button) => <span key={button.id} className={button.style}>{button.label || "Button"}</span>)}</div></div>
                   ) : kind === "unknown" ? (
                     <div className="cse-unknown"><Code2 /><strong>Safe preview unavailable</strong><span>Unknown component type: {selectedSection.componentType}</span></div>
                   ) : (
                     <div className="cse-hero-preview" style={{ backgroundColor: previewChild?.media?.backgroundColor || "#c8b7a5" }}>
                       {previewImage ? <img src={previewImage} alt={previewChild?.media?.alt || previewChild?.content?.title || "Section media"} /> : null}
                       <div className="cse-hero-overlay" style={{ opacity: Math.max(.2, Number(previewChild?.display?.overlay || 55) / 100) }} />
-                      <button type="button" className="cse-arrow left"><ArrowLeft /></button><button type="button" className="cse-arrow right"><ArrowRight /></button>
+                      {selectedSection.children.length > 1 ? <><button type="button" className="cse-arrow left" onClick={() => selectPreviewSibling("previous")}><ArrowLeft /></button><button type="button" className="cse-arrow right" onClick={() => selectPreviewSibling("next")}><ArrowRight /></button></> : null}
                       <div className="cse-hero-copy"><small>{previewChild?.content?.eyebrow || "SECTION EYEBROW"}</small><h1>{previewChild?.content?.title || selectedSection.label}</h1><p>{previewChild?.content?.subtitle || previewChild?.content?.body || "Add section copy in the inspector."}</p><div className="cse-preview-buttons">{(previewChild?.content?.buttons || []).map((button) => <span key={button.id} className={button.style}>{button.label || "Button"}</span>)}</div></div>
                     </div>
                   )}
-                  <i className="resize nw" onPointerDown={(event) => beginPreviewInteraction("resize", event)} /><i className="resize ne" onPointerDown={(event) => beginPreviewInteraction("resize", event)} /><i className="resize sw" onPointerDown={(event) => beginPreviewInteraction("resize", event)} /><i className="resize se" onPointerDown={(event) => beginPreviewInteraction("resize", event)} />
+                  {canFreePosition ? <><i className="resize nw" onPointerDown={(event) => beginPreviewInteraction("resize", event)} /><i className="resize ne" onPointerDown={(event) => beginPreviewInteraction("resize", event)} /><i className="resize sw" onPointerDown={(event) => beginPreviewInteraction("resize", event)} /><i className="resize se" onPointerDown={(event) => beginPreviewInteraction("resize", event)} /></> : <span className="cse-layout-note">This section follows template layout.</span>}
                 </section>
               )}
-              <div className="cse-benefits"><span><Sparkles /><b>Premium Quality</b><small>Carefully crafted content</small></span><span><UploadCloud /><b>Instant Download</b><small>Start creating right away</small></span><span><Layers3 /><b>Step-by-Step Guides</b><small>Easy to follow instructions</small></span></div>
             </div>
           </div>
 
-          {selectedSection?.children?.length ? (
+          {!selectedScannerZone && selectedSection?.children?.length ? (
             <div className="cse-child-manager">
-              <div className="cse-child-manager-head"><strong>{childLabel(selectedSection).toUpperCase()} MANAGEMENT: {selectedSection.label}</strong><span>{selectedSection.children.length} items</span><Toggle label="Autoplay" checked={selectedSection.componentType === "hero_slider"} onChange={() => {}} /></div>
+              <div className="cse-child-manager-head"><strong>{childLabel(selectedSection).toUpperCase()} MANAGEMENT: {selectedSection.label}</strong><span>{selectedSection.children.length} items</span>{["hero_slider", "product_carousel"].includes(selectedSection.componentType) ? <Toggle label="Autoplay" checked={selectedSection.autoplay === true} onChange={(value) => updateSection(selectedSection.componentId, (section) => ({ ...section, autoplay: value }))} /> : null}</div>
               <div className="cse-child-cards">
                 {selectedSection.children.map((child, index) => (
                   <button type="button" draggable key={child.sectionId} className={selectedChild?.sectionId === child.sectionId ? "active" : ""} onClick={() => setSelectedChildId(child.sectionId)} onDragStart={(event) => event.dataTransfer.setData("text/plain", child.sectionId)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const draggedId = event.dataTransfer.getData("text/plain"); updateSection(selectedSection.componentId, (section) => moveChildTo(section, draggedId, child.sectionId)); }}>
@@ -662,25 +847,26 @@ export default function ContentStudioEnhanced() {
           ) : null}
 
           <div className="cse-template-strip">
-            <div><strong>COMPONENT LIBRARY</strong><span>Drag or add to page</span></div>
+            <div><strong>COMPONENT LIBRARY</strong><span>Click a template to add it</span></div>
             {SECTION_TEMPLATES.slice(0, 10).map((template) => <button key={template.id} type="button" onClick={() => addTemplate(template.id)}><ImageIcon />{template.label}</button>)}
             <button type="button" className="view-all" onClick={() => setTemplateOpen(true)}>View all components <ArrowRight /></button>
           </div>
         </main>
 
         <aside className="cse-right">
-          <div className="cse-inspector-head"><div><strong>SECTION INSPECTOR</strong><span>Selected: {selectedSection?.label || "None"} {selectedChild ? `› ${selectedChild.label}` : ""}</span></div><button type="button"><X /></button></div>
-          <div className="cse-inspector-tabs">{INSPECTOR_TABS.map((tab) => <button type="button" key={tab} className={inspectorTab === tab ? "active" : ""} onClick={() => setInspectorTab(tab)}>{tab}</button>)}</div>
+          <div className="cse-inspector-head"><div><strong>{selectedScannerZone ? "DOM INSPECTOR" : "SECTION INSPECTOR"}</strong><span>Selected: {selectedScannerZone?.label || selectedSection?.label || "None"} {!selectedScannerZone && selectedChild ? `› ${selectedChild.label}` : ""}</span></div><button type="button" onClick={() => { setSelectedZoneId(""); setSelectedSectionId("__none__"); setSelectedChildId(""); }} title="Clear selection"><X /></button></div>
+          {!selectedScannerZone ? <div className="cse-inspector-tabs">{INSPECTOR_TABS.map((tab) => <button type="button" key={tab} className={inspectorTab === tab ? "active" : ""} onClick={() => setInspectorTab(tab)}>{tab}</button>)}</div> : null}
           <div className="cse-inspector-body">
-            {!selectedSection || !selectedChild ? <div className="cse-empty">Select a child section to edit.</div> : null}
-            {selectedChild && inspectorTab === "Content" ? (
+            {selectedScannerZone ? <div className="cse-dom-inspector"><h4>DETECTED RENDERED ELEMENT</h4><strong>{selectedScannerZone.label}</strong><code>{selectedScannerZone.selector || selectedScannerZone.tag}</code><div><span>{selectedScannerZone.nodeKind}</span><span>{selectedScannerZone.contentMode}</span><span>{scannerStatus(selectedScannerZone)}</span></div><p>{selectedScannerZone.textSample || "No safe text sample was retained."}</p><dl><dt>Images</dt><dd>{selectedScannerZone.counts.images}</dd><dt>Buttons</dt><dd>{selectedScannerZone.counts.buttons}</dd><dt>Repeated items</dt><dd>{selectedScannerZone.counts.repeated}</dd></dl><button type="button" className="primary" onClick={() => openMappingWizard(selectedScannerZone)} disabled={!selectedScannerZone.pushAllowed}>{selectedScannerZone.status === "approved" ? "Edit Mapping" : "Map Component"}</button><button type="button" onClick={() => ignoreScannerZone(selectedScannerZone)}>Ignore / Hide</button></div> : null}
+            {!selectedScannerZone && (!selectedSection || !selectedChild) ? <div className="cse-empty">Select a child section to edit.</div> : null}
+            {!selectedScannerZone && selectedChild && inspectorTab === "Content" ? (
               <>
                 <h4>{selectedChild.sectionType.toUpperCase()} SETTINGS</h4>
                 <Field label="Title" value={selectedChild.content?.title} onChange={(value) => updateSelectedChild((child) => ({ ...child, content: { ...child.content, title: value } }))} />
-                <Field label="Subtitle" value={selectedChild.content?.subtitle} onChange={(value) => updateSelectedChild((child) => ({ ...child, content: { ...child.content, subtitle: value } }))} />
-                <Field label="Eyebrow / Small Title" value={selectedChild.content?.eyebrow} onChange={(value) => updateSelectedChild((child) => ({ ...child, content: { ...child.content, eyebrow: value } }))} />
+                <Field label={selectedSection.componentType === "faq" ? "Short answer" : "Subtitle"} value={selectedChild.content?.subtitle} onChange={(value) => updateSelectedChild((child) => ({ ...child, content: { ...child.content, subtitle: value } }))} />
+                {["hero", "hero_slider", "banner", "cta_block"].includes(selectedSection.componentType) ? <Field label="Eyebrow / Small Title" value={selectedChild.content?.eyebrow} onChange={(value) => updateSelectedChild((child) => ({ ...child, content: { ...child.content, eyebrow: value } }))} /> : null}
                 <Field label="Body / Rich text" type="textarea" rows={5} value={selectedChild.content?.body} onChange={(value) => updateSelectedChild((child) => ({ ...child, content: { ...child.content, body: value } }))} />
-                <div className="cse-repeatable-head"><h4>BUTTONS</h4><button type="button" onClick={() => updateSelectedChild(addButton)}><Plus /> Add Button</button></div>
+                {supportsButtons ? <><div className="cse-repeatable-head"><h4>BUTTONS</h4><button type="button" onClick={() => updateSelectedChild(addButton)}><Plus /> Add Button</button></div>
                 <div className="cse-buttons-list">
                   {(selectedChild.content?.buttons || []).map((button, index) => (
                     <div className="cse-button-card" key={button.id}>
@@ -690,11 +876,11 @@ export default function ContentStudioEnhanced() {
                       <Toggle label="Open in new tab" checked={button.newTab === true} onChange={(value) => updateSelectedChild((child) => ({ ...child, content: { ...child.content, buttons: replaceAt(child.content.buttons, button.id, (item) => ({ ...item, newTab: value }), "id") } }))} />
                     </div>
                   ))}
-                </div>
+                </div></> : null}
               </>
             ) : null}
 
-            {selectedChild && inspectorTab === "Data Binding" ? (
+            {!selectedScannerZone && selectedChild && inspectorTab === "Data Binding" ? (
               <>
                 <h4>DATA SOURCE</h4>
                 <Field label="Source" type="select" value={selectedChild.dataBinding?.source || "static"} options={[{ value: "static", label: "Static Content" }, { value: "product_studio", label: "Product Studio" }, { value: "category_data", label: "Category Data" }, { value: "custom_api", label: "Custom / Future API" }]} onChange={(value) => updateSelectedChild((child) => ({ ...child, dataBinding: sanitizeBindingReference({ ...child.dataBinding, source: value }) }))} />
@@ -705,12 +891,15 @@ export default function ContentStudioEnhanced() {
                 <h4>FIELD MAPPING</h4>
                 {["Image", "Eyebrow", "Title", "Description", "Price", "Button label"].map((field) => <Field key={field} label={field} value={selectedChild.dataBinding?.fieldMappings?.[field] || ""} placeholder={`${field.toLowerCase()} field path`} onChange={(value) => updateSelectedChild((child) => ({ ...child, dataBinding: { ...child.dataBinding, fieldMappings: { ...child.dataBinding.fieldMappings, [field]: value } } }))} />)}
                 <p className="cse-help"><Link2 /> Only references and field mappings are stored. Product records remain in Product Studio.</p>
+                {isProductTemplate ? <button type="button" className="cse-product-link" onClick={() => ctx?.user?.setActiveTab?.("catalog")}><ArrowRight /> View in Product Studio</button> : null}
               </>
             ) : null}
 
-            {selectedChild && inspectorTab === "Media" ? (
+            {!selectedScannerZone && selectedChild && inspectorTab === "Media" ? (
               <>
                 <h4>BACKGROUND MEDIA</h4>
+                {!supportsMedia ? <p className="cse-help"><ImageIcon /> This template does not use section media. Choose a media-capable template to upload an image.</p> : null}
+                {supportsMedia ? <>
                 <div className="cse-media-card">
                   <div>{selectedChild.media?.image ? <img src={assetUrl(selectedChild.media.image)} alt="" /> : <ImageIcon />}</div>
                   <section><strong>{selectedChild.media?.assetId || "No stored image"}</strong><span>{selectedChild.media?.image || "Choose an image to edit and upload"}</span><div><button type="button" className="primary" onClick={selectedChild.media?.image ? editCurrentImage : openFilePicker}><ImageIcon /> {selectedChild.media?.image ? "Edit Image" : "Choose Image"}</button><button type="button" onClick={openFilePicker}><UploadCloud /> Replace</button><button type="button" onClick={() => updateSelectedChild((child) => ({ ...child, media: { ...child.media, image: "", assetId: "" } }))}><Trash2 /></button></div></section>
@@ -720,10 +909,11 @@ export default function ContentStudioEnhanced() {
                 <Field label="Alt text" value={selectedChild.media?.alt || ""} onChange={(value) => updateSelectedChild((child) => ({ ...child, media: { ...child.media, alt: value } }))} />
                 <Field label="Caption" value={selectedChild.media?.caption || ""} onChange={(value) => updateSelectedChild((child) => ({ ...child, media: { ...child.media, caption: value } }))} />
                 <Field label="Background color" type="color" value={selectedChild.media?.backgroundColor || "#f4f1eb"} onChange={(value) => updateSelectedChild((child) => ({ ...child, media: { ...child.media, backgroundColor: value } }))} />
+                </> : null}
               </>
             ) : null}
 
-            {selectedChild && inspectorTab === "Display" ? (
+            {!selectedScannerZone && selectedChild && inspectorTab === "Display" ? (
               <>
                 <h4>DISPLAY</h4>
                 <Toggle label="Visible" checked={selectedChild.visible !== false} onChange={(value) => updateSelectedChild((child) => ({ ...child, visible: value }))} />
@@ -733,10 +923,11 @@ export default function ContentStudioEnhanced() {
                 <Field label="Style variant" value={selectedChild.display?.styleVariant || "default"} onChange={(value) => updateSelectedChild((child) => ({ ...child, display: { ...child.display, styleVariant: value } }))} />
                 <Field label="Layout variant" value={selectedChild.display?.layoutVariant || "default"} onChange={(value) => updateSelectedChild((child) => ({ ...child, display: { ...child.display, layoutVariant: value } }))} />
                 <Field label="Spacing" type="select" value={selectedChild.display?.spacing || "comfortable"} options={[{ value: "compact", label: "Compact" }, { value: "comfortable", label: "Comfortable" }, { value: "spacious", label: "Spacious" }]} onChange={(value) => updateSelectedChild((child) => ({ ...child, display: { ...child.display, spacing: value } }))} />
+                {!canFreePosition ? <p className="cse-help"><Lock /> This section follows template layout. Free drag and resize are disabled.</p> : null}
               </>
             ) : null}
 
-            {selectedChild && inspectorTab === "Advanced" ? (
+            {!selectedScannerZone && selectedChild && inspectorTab === "Advanced" ? (
               <>
                 <h4>COMPONENT METADATA</h4>
                 <Field label="Component ID" value={selectedSection.componentId} onChange={(value) => updateSection(selectedSection.componentId, (section) => ({ ...section, componentId: value }))} />
@@ -746,7 +937,7 @@ export default function ContentStudioEnhanced() {
               </>
             ) : null}
           </div>
-          {selectedChild ? <div className="cse-inspector-footer"><button type="button" onClick={() => updateSection(selectedSection.componentId, (section) => reorderChild(section, selectedChild.sectionId, "up"))}><ArrowUp /> Move</button><button type="button" onClick={() => updateSection(selectedSection.componentId, (section) => reorderChild(section, selectedChild.sectionId, "down"))}><ArrowDown /> Move</button><button type="button" className="danger" onClick={removeSelectedChild}><Trash2 /> Delete child</button></div> : null}
+          {!selectedScannerZone && selectedChild ? <div className="cse-inspector-footer"><button type="button" onClick={() => updateSection(selectedSection.componentId, (section) => reorderChild(section, selectedChild.sectionId, "up"))}><ArrowUp /> Move</button><button type="button" onClick={() => updateSection(selectedSection.componentId, (section) => reorderChild(section, selectedChild.sectionId, "down"))}><ArrowDown /> Move</button><button type="button" onClick={() => { const next = duplicateChild(selectedSection, selectedChild.sectionId); updateSection(selectedSection.componentId, () => next); setSelectedChildId(next.children.find((child) => child.label === `${selectedChild.label} Copy`)?.sectionId || selectedChild.sectionId); }}><Copy /> Duplicate</button><button type="button" className="danger" onClick={removeSelectedChild}><Trash2 /> Delete child</button></div> : null}
         </aside>
       </div>
 
@@ -755,10 +946,29 @@ export default function ContentStudioEnhanced() {
           <div className="cse-template-modal">
             <div className="cse-modal-head"><div><strong>SECTION TEMPLATE LIBRARY</strong><span>Add a layout shell; content and repeatable children remain editable.</span></div><button type="button" onClick={() => setTemplateOpen(false)}><X /></button></div>
             <div className="cse-template-tabs">{SECTION_TEMPLATE_CATEGORIES.map((category) => <button type="button" key={category} className={templateCategory === category ? "active" : ""} onClick={() => setTemplateCategory(category)}>{category}</button>)}</div>
-            <div className="cse-template-grid">{filteredTemplates.map((template) => <button type="button" key={template.id} onClick={() => addTemplate(template.id)}><div><ImageIcon /><Plus /></div><strong>{template.label}</strong><span>{template.category}</span></button>)}</div>
+            <div className="cse-template-grid">{filteredTemplates.map((template) => <button type="button" key={template.id} onClick={() => addTemplate(template.id)}><div className={`template-${template.id}`}><ImageIcon /><Plus /></div><strong>{template.label}</strong><span>{template.description}</span><em>{template.dataSupport}</em></button>)}</div>
           </div>
         </div>
       ) : null}
+
+      {mappingWizard.open && mappingZone ? (
+        <div className="cse-modal-backdrop">
+          <div className="cse-mapping-modal">
+            <div className="cse-modal-head"><div><strong>MAP RENDERED COMPONENT</strong><span>{mappingZone.label} · {mappingZone.selector}</span></div><button type="button" onClick={() => setMappingWizard((current) => ({ ...current, open: false }))}><X /></button></div>
+            <div className="cse-wizard-steps">{["Element", "Template", "Fields", "Data", "Review"].map((label, index) => <span key={label} className={mappingWizard.step >= index + 1 ? "active" : ""}><b>{index + 1}</b>{label}</span>)}</div>
+            <div className="cse-wizard-body">
+              {mappingWizard.step === 1 ? <div className="cse-wizard-card"><Code2 /><h3>{mappingZone.label}</h3><code>{mappingZone.selector}</code><p>{mappingZone.textSample || "Rendered element selected. No safe text sample was retained."}</p><div><span>{mappingZone.nodeKind}</span><span>{mappingZone.contentMode}</span><span>{mappingZone.bounds.width || "?"} × {mappingZone.bounds.height || "?"}</span></div></div> : null}
+              {mappingWizard.step === 2 ? <div><h3>Choose section template</h3><div className="cse-wizard-templates">{SECTION_TEMPLATES.map((template) => <button type="button" key={template.id} className={mappingWizard.templateId === template.id ? "active" : ""} onClick={() => setMappingWizard((current) => ({ ...current, templateId: template.id, dataSource: template.dataSupport === "Product Studio" ? "product_studio" : current.dataSource }))}><ImageIcon /><strong>{template.label}</strong><span>{template.dataSupport}</span></button>)}</div></div> : null}
+              {mappingWizard.step === 3 ? <div><h3>Confirm and map detected fields</h3><div className="cse-detected-fields"><span><ImageIcon /> Images <b>{mappingZone.counts.images}</b></span><span><Link2 /> Links <b>{mappingZone.counts.links}</b></span><span><MousePointer2 /> Buttons <b>{mappingZone.counts.buttons}</b></span><span><Layers3 /> Repeated items <b>{mappingZone.counts.repeated}</b></span></div><Field label="Content slot" value={mappingWizard.slot} onChange={(value) => setMappingWizard((current) => ({ ...current, slot: value }))} /><div className="two"><Field label="Title field / selector" value={mappingWizard.fieldMappings.title || ""} placeholder="h1 or title" onChange={(value) => setMappingWizard((current) => ({ ...current, fieldMappings: { ...current.fieldMappings, title: value } }))} /><Field label="Image field / selector" value={mappingWizard.fieldMappings.image || ""} placeholder="img or images[0].url" onChange={(value) => setMappingWizard((current) => ({ ...current, fieldMappings: { ...current.fieldMappings, image: value } }))} /></div><Field label="Description field / selector" value={mappingWizard.fieldMappings.description || ""} placeholder="p or description" onChange={(value) => setMappingWizard((current) => ({ ...current, fieldMappings: { ...current.fieldMappings, description: value } }))} /></div> : null}
+              {mappingWizard.step === 4 ? <div><h3>Choose data source</h3><Field label="Data source" type="select" value={mappingWizard.dataSource} options={[{ value: "static", label: "Static Content" }, { value: "product_studio", label: "Product Studio" }, { value: "category_data", label: "Category Data" }, { value: "custom_api", label: "Custom / Future API" }]} onChange={(value) => setMappingWizard((current) => ({ ...current, dataSource: value }))} /><p className="cse-help"><Link2 /> Only binding references are saved. Product records are never copied into Content Studio.</p></div> : null}
+              {mappingWizard.step === 5 ? <div className="cse-wizard-review"><CheckCircle2 /><h3>Ready to save mapping</h3><dl><dt>DOM element</dt><dd>{mappingZone.selector}</dd><dt>Template</dt><dd>{mappingTemplate.label}</dd><dt>Slot</dt><dd>{mappingWizard.slot}</dd><dt>Data</dt><dd>{mappingWizard.dataSource}</dd></dl></div> : null}
+            </div>
+            <div className="cse-wizard-actions"><button type="button" onClick={() => setMappingWizard((current) => ({ ...current, step: Math.max(1, current.step - 1) }))} disabled={mappingWizard.step === 1}>Back</button>{mappingWizard.step < 5 ? <button type="button" className="primary" onClick={() => setMappingWizard((current) => ({ ...current, step: Math.min(5, current.step + 1) }))}>Continue</button> : <button type="button" className="primary" onClick={saveMapping} disabled={mappingSaving || !mappingWizard.slot.trim()}>{mappingSaving ? <Loader2 className="spin" /> : <CheckCircle2 />} Save Mapping</button>}</div>
+          </div>
+        </div>
+      ) : null}
+
+      {helpOpen ? <div className="cse-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setHelpOpen(false); }}><div className="cse-help-modal"><div className="cse-modal-head"><div><strong>CONTENT STUDIO WORKFLOW</strong><span>From connected website to published content.</span></div><button type="button" onClick={() => setHelpOpen(false)}><X /></button></div><ol><li><b>1</b><span><strong>Connect website</strong>Choose a Gateway Connection Profile with storefront scanning enabled.</span></li><li><b>2</b><span><strong>Scan rendered page</strong>Chromium loads the live app and detects its real DOM tree.</span></li><li><b>3</b><span><strong>Map components</strong>Select a detected element, choose its template, and save the mapping.</span></li><li><b>4</b><span><strong>Edit or bind data</strong>Enter static content or reference Product Studio records.</span></li><li><b>5</b><span><strong>Preview</strong>Review the selected rendered element or editable template at each viewport.</span></li><li><b>6</b><span><strong>Publish</strong>Save the draft, approve it, and publish when ready.</span></li></ol><button type="button" className="primary" onClick={() => { setHelpOpen(false); if (!scannerZones.length) void scanElements(); }}>Start with rendered scan</button></div></div> : null}
 
       <ImageAssetStudioModal
         open={editor.open}

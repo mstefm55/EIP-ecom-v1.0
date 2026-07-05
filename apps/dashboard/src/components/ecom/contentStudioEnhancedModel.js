@@ -11,22 +11,22 @@ export const SECTION_TEMPLATE_CATEGORIES = [
 ];
 
 export const SECTION_TEMPLATES = [
-  { id: "hero", label: "Hero", type: "hero", category: "Popular", childType: "slide", childLabel: "Slide" },
-  { id: "hero_slider", label: "Hero Slider", type: "hero_slider", category: "Popular", childType: "slide", childLabel: "Slide" },
-  { id: "banner", label: "Banner", type: "banner", category: "Content", childType: "banner", childLabel: "Banner" },
-  { id: "text_block", label: "Text Block", type: "rich_text_block", category: "Content", childType: "block", childLabel: "Block" },
-  { id: "text_image", label: "Text + Image", type: "text_image", category: "Content", childType: "block", childLabel: "Block" },
-  { id: "product_grid", label: "Product Grid", type: "product_grid", category: "E-commerce", childType: "product_collection", childLabel: "Collection" },
-  { id: "product_carousel", label: "Product Carousel", type: "product_carousel", category: "E-commerce", childType: "product_collection", childLabel: "Collection" },
-  { id: "product_detail", label: "Product Detail Block", type: "product_detail", category: "E-commerce", childType: "product", childLabel: "Product" },
-  { id: "image_gallery", label: "Image Gallery", type: "media_gallery", category: "Media", childType: "image", childLabel: "Image" },
-  { id: "video", label: "Video Section", type: "video_section", category: "Media", childType: "video", childLabel: "Video" },
-  { id: "testimonials", label: "Testimonials", type: "testimonial_grid", category: "Engagement", childType: "testimonial", childLabel: "Testimonial" },
-  { id: "benefits", label: "Benefits", type: "feature_block", category: "Popular", childType: "benefit", childLabel: "Benefit" },
-  { id: "faq", label: "FAQ", type: "faq", category: "Engagement", childType: "question", childLabel: "Question" },
-  { id: "newsletter", label: "Newsletter", type: "newsletter_form", category: "Engagement", childType: "form", childLabel: "Form" },
-  { id: "cta", label: "CTA", type: "cta_block", category: "Popular", childType: "cta", childLabel: "CTA" },
-  { id: "custom", label: "Custom Section", type: "custom", category: "Custom", childType: "block", childLabel: "Block" }
+  { id: "hero", label: "Hero", type: "hero", category: "Popular", childType: "slide", childLabel: "Slide", dataSupport: "Mixed", description: "Lead message, media, and actions." },
+  { id: "hero_slider", label: "Hero Slider", type: "hero_slider", category: "Popular", childType: "slide", childLabel: "Slide", dataSupport: "Mixed", description: "Repeatable hero slides with media." },
+  { id: "banner", label: "Banner", type: "banner", category: "Content", childType: "banner", childLabel: "Banner", dataSupport: "Static", description: "Compact promotional message." },
+  { id: "text_block", label: "Text Block", type: "rich_text_block", category: "Content", childType: "block", childLabel: "Block", dataSupport: "Static", description: "Structured editorial copy." },
+  { id: "text_image", label: "Text + Image", type: "text_image", category: "Content", childType: "block", childLabel: "Block", dataSupport: "Mixed", description: "Editorial media and copy split." },
+  { id: "product_grid", label: "Product Grid", type: "product_grid", category: "E-commerce", childType: "product_collection", childLabel: "Collection", dataSupport: "Product Studio", description: "Responsive product card grid." },
+  { id: "product_carousel", label: "Product Carousel", type: "product_carousel", category: "E-commerce", childType: "product_collection", childLabel: "Collection", dataSupport: "Product Studio", description: "Scrollable product collection." },
+  { id: "product_detail", label: "Product Detail Block", type: "product_detail", category: "E-commerce", childType: "product", childLabel: "Product", dataSupport: "Product Studio", description: "Current or selected product details." },
+  { id: "image_gallery", label: "Image Gallery", type: "media_gallery", category: "Media", childType: "image", childLabel: "Image", dataSupport: "Static", description: "Repeatable edited image collection." },
+  { id: "video", label: "Video Section", type: "video_section", category: "Media", childType: "video", childLabel: "Video", dataSupport: "Mixed", description: "Video and supporting content." },
+  { id: "testimonials", label: "Testimonials", type: "testimonial_grid", category: "Engagement", childType: "testimonial", childLabel: "Testimonial", dataSupport: "Mixed", description: "Repeatable social proof cards." },
+  { id: "benefits", label: "Benefits", type: "feature_block", category: "Popular", childType: "benefit", childLabel: "Benefit", dataSupport: "Static", description: "Feature or benefit cards." },
+  { id: "faq", label: "FAQ", type: "faq", category: "Engagement", childType: "question", childLabel: "Question", dataSupport: "Mixed", description: "Repeatable questions and answers." },
+  { id: "newsletter", label: "Newsletter", type: "newsletter_form", category: "Engagement", childType: "form", childLabel: "Form", dataSupport: "Static", description: "Email signup call-to-action." },
+  { id: "cta", label: "CTA", type: "cta_block", category: "Popular", childType: "cta", childLabel: "CTA", dataSupport: "Static", description: "Focused message and button group." },
+  { id: "custom", label: "Custom Section", type: "custom", category: "Custom", childType: "block", childLabel: "Block", dataSupport: "Mixed", description: "Flexible mapped component shell." }
 ];
 
 export function createButton(index = 0) {
@@ -98,6 +98,7 @@ export function createSectionFromTemplate(templateId, index = 0) {
     mappingStatus: "draft",
     visible: true,
     locked: false,
+    autoplay: template.type === "hero_slider" || template.type === "product_carousel",
     order: (index + 1) * 10,
     children: [child],
     publishStatus: "draft",
@@ -116,6 +117,33 @@ export function addChild(section) {
 
 export function deleteChild(section, childId) {
   return { ...section, children: (section.children || []).filter((child) => child.sectionId !== childId) };
+}
+
+export function duplicateChild(section, childId) {
+  const children = [...(section.children || [])];
+  const index = children.findIndex((child) => child.sectionId === childId);
+  if (index < 0) return section;
+  const source = children[index];
+  const copy = {
+    ...source,
+    sectionId: uid(source.sectionType || "item"),
+    label: `${source.label || "Item"} Copy`,
+    content: {
+      ...source.content,
+      buttons: (source.content?.buttons || []).map((button, buttonIndex) => ({
+        ...button,
+        id: uid(`button-${buttonIndex + 1}`)
+      }))
+    },
+    media: { ...source.media },
+    dataBinding: sanitizeBindingReference(source.dataBinding),
+    display: { ...source.display }
+  };
+  children.splice(index + 1, 0, copy);
+  return {
+    ...section,
+    children: children.map((child, childIndex) => ({ ...child, order: (childIndex + 1) * 10 }))
+  };
 }
 
 export function reorderChild(section, childId, direction) {
@@ -173,6 +201,74 @@ export function sanitizeBindingReference(binding = {}) {
       ? { ...binding.fieldMappings }
       : {}
   };
+}
+
+export function templateIdForRenderer(renderer = "") {
+  const normalized = String(renderer || "").trim().toLowerCase();
+  const aliases = {
+    navigation: "custom",
+    footer_block: "custom",
+    editorial_card_grid: "text_image",
+    testimonial_grid: "testimonials",
+    feature_block: "benefits",
+    media_gallery: "image_gallery",
+    rich_text_block: "text_block",
+    newsletter_form: "newsletter",
+    cta_block: "cta"
+  };
+  return SECTION_TEMPLATES.find((template) => template.type === normalized)?.id
+    || aliases[normalized]
+    || "custom";
+}
+
+export function normalizeScannerZones(structure) {
+  const candidates = Array.isArray(structure?.mapping_profile?.candidate_zones)
+    ? structure.mapping_profile.candidate_zones
+    : Array.isArray(structure?.mapping_profile?.candidates)
+      ? structure.mapping_profile.candidates
+      : [];
+  const zones = Array.isArray(structure?.zones) ? structure.zones : [];
+  const source = candidates.length ? candidates : zones;
+  return source.map((zone, index) => ({
+    id: String(zone.candidate_id || zone.id || zone.tag || `zone-${index + 1}`),
+    parentId: zone.parent_candidate_id ? String(zone.parent_candidate_id) : null,
+    depth: Math.max(0, Number(zone.dom_depth || 0)),
+    order: Math.max(0, Number(zone.dom_order ?? index)),
+    label: String(zone.label || zone.text_sample || zone.suggested_slot || zone.tag || `Scanned element ${index + 1}`),
+    page: String(zone.page || zone.suggested_slot?.split?.(".")?.[0] || zone.tag?.split?.(".")?.[0] || "home"),
+    tag: String(zone.suggested_slot || zone.tag || ""),
+    selector: String(zone.selector || ""),
+    type: String(zone.suggested_renderer || zone.renderer_type || "unknown"),
+    nodeKind: String(zone.node_kind || "section"),
+    status: String(zone.mapping_status || "proposed"),
+    contentMode: String(zone.content_mode || (Number(zone.repeated_item_count || 0) > 1 ? "dynamic" : "static")),
+    visibility: String(zone.visibility || "visible"),
+    source: String(zone.source || structure?.scan_source || ""),
+    pushAllowed: zone.push_allowed !== false,
+    textSample: String(zone.text_sample || ""),
+    counts: {
+      images: Number(zone.image_count || 0),
+      links: Number(zone.link_count || 0),
+      buttons: Number(zone.button_count || 0),
+      repeated: Number(zone.repeated_item_count || 0)
+    },
+    bounds: zone.bounds && typeof zone.bounds === "object" ? { ...zone.bounds } : { width: 0, height: 0 }
+  })).sort((a, b) => a.order - b.order);
+}
+
+export function buildScannerTree(zones = []) {
+  const nodes = new Map(zones.map((zone) => [zone.id, { ...zone, children: [] }]));
+  const roots = [];
+  for (const zone of zones) {
+    const node = nodes.get(zone.id);
+    const parent = zone.parentId ? nodes.get(zone.parentId) : null;
+    if (parent && parent.id !== node.id) parent.children.push(node);
+    else roots.push(node);
+  }
+  const sort = (items) => items
+    .sort((a, b) => a.order - b.order)
+    .map((item) => ({ ...item, children: sort(item.children) }));
+  return sort(roots);
 }
 
 function legacyProductSource(binding) {

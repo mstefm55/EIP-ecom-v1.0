@@ -16,9 +16,14 @@ const VOID_TAGS = new Set([
   "track",
   "wbr"
 ]);
-const CANDIDATE_TAGS = new Set(["header", "nav", "main", "section", "article", "aside", "footer", "form", "div"]);
+const CANDIDATE_TAGS = new Set([
+  "header", "nav", "main", "section", "article", "aside", "footer", "form", "div",
+  "ul", "ol", "li", "picture", "img", "video", "button", "a", "h1", "h2", "h3", "p"
+]);
 const SAFE_RENDERERS = new Set([
+  "hero",
   "hero_slider",
+  "banner",
   "product_carousel",
   "editorial_card_grid",
   "rich_text_block",
@@ -28,6 +33,11 @@ const SAFE_RENDERERS = new Set([
   "navigation",
   "footer_block",
   "media_gallery",
+  "video_section",
+  "product_detail",
+  "text_image",
+  "faq",
+  "custom",
   "testimonial_grid",
   "feature_block",
   "unknown"
@@ -194,6 +204,50 @@ function buildSelector(node) {
   return `${node.tag}:nth-of-type(${nthOfType(node)})`;
 }
 
+function inferNodeKind(node) {
+  const attrs = node.attrs || {};
+  const metrics = node.metrics || {};
+  const hint = [node.tag, attrs.id, attrs.class, attrs.role, attrs["aria-label"], metrics.text]
+    .map(normalizeText)
+    .join(" ")
+    .toLowerCase();
+  if (node.tag === "header") return "header";
+  if (node.tag === "nav") return "navigation";
+  if (node.tag === "footer") return "footer";
+  if (node.tag === "video") return "video";
+  if (node.tag === "img" || node.tag === "picture") return "image";
+  if (node.tag === "button" || (node.tag === "a" && /\b(button|btn|cta)\b/.test(hint))) return "button";
+  if (["h1", "h2", "h3", "p"].includes(node.tag)) return "text_block";
+  if (/\b(slide|swiper-slide|carousel-item)\b/.test(hint)) return "slide";
+  if (/\b(product-card|product-tile|catalog-card|pattern-card)\b/.test(hint)) return "product_card";
+  if (/\b(card|tile)\b/.test(hint)) return "card";
+  if (/\b(gallery|lookbook|media-grid|image-grid)\b/.test(hint)) return "gallery";
+  if (/\b(carousel|slider|swiper|coverflow)\b/.test(hint)) return "slider";
+  if (node.tag === "form") return "form";
+  if (["ul", "ol"].includes(node.tag) || metrics.repeated_item_count >= 2) return "repeater";
+  if (metrics.button_count >= 2 && metrics.link_count >= 1) return "button_group";
+  if (["main", "section", "article", "aside"].includes(node.tag)) return "section";
+  return "container";
+}
+
+function candidateLabel(node, nodeKind, fallback) {
+  const attrs = node.attrs || {};
+  const explicit = safeSample(attrs["aria-label"] || attrs.id || "", 70);
+  if (explicit) return explicit.replace(/[-_]+/g, " ");
+  const classLabel = nodeClasses(node)[0];
+  if (classLabel) return classLabel.replace(/[-_]+/g, " ");
+  const sample = safeSample(node.metrics?.text || "", 54);
+  if (sample) return sample;
+  const labels = {
+    header: "Header", navigation: "Navigation", footer: "Footer", image: "Image",
+    video: "Video", button: "Button", text_block: "Text block", slide: "Slide",
+    product_card: "Product card", card: "Card", gallery: "Gallery", slider: "Slider",
+    form: "Form", repeater: "Repeater / list", button_group: "Button group",
+    section: "Section", container: "Container"
+  };
+  return labels[nodeKind] || fallback || "Detected element";
+}
+
 function inferPage(node) {
   let current = node;
   while (current) {
@@ -221,7 +275,14 @@ function inferKind(node) {
     metrics.text
   ].map(normalizeText).join(" ").toLowerCase();
   const hasForm = metrics.form_count > 0 || metrics.input_count > 0;
+  const nodeKind = inferNodeKind(node);
   if (hasForm && SENSITIVE_ZONE.test(hint)) return { renderer: "unknown", suffix: "sensitive_form", score: 0.2, reason: "sensitive form detected", pushAllowed: false };
+  if (nodeKind === "video") return { renderer: "video_section", suffix: "video", score: 0.82, reason: "video element" };
+  if (nodeKind === "image") return { renderer: "media_gallery", suffix: "image", score: 0.58, reason: "image element" };
+  if (nodeKind === "button") return { renderer: "cta_block", suffix: "button", score: 0.62, reason: "interactive button" };
+  if (nodeKind === "text_block") return { renderer: "rich_text_block", suffix: "text", score: 0.52, reason: "text element" };
+  if (nodeKind === "slide") return { renderer: "hero_slider", suffix: "slide", score: 0.72, reason: "slider child" };
+  if (nodeKind === "product_card") return { renderer: "product_detail", suffix: "product_card", score: 0.74, reason: "product card marker" };
   if (node.tag === "header" || /\b(site-header|page-header|masthead)\b/.test(hint)) return { renderer: "navigation", suffix: "header", score: 0.84, reason: "header semantics" };
   if (node.tag === "nav" || /\b(nav|navigation|menu)\b/.test(hint)) return { renderer: "navigation", suffix: "navigation", score: 0.86, reason: "navigation semantics" };
   if (node.tag === "footer" || /\bfooter\b/.test(hint)) return { renderer: "footer_block", suffix: "footer", score: 0.88, reason: "footer semantics" };
@@ -250,15 +311,20 @@ function inferKind(node) {
 function shouldProposeNode(node) {
   if (!CANDIDATE_TAGS.has(node.tag)) return false;
   const metrics = node.metrics || {};
-  if (["header", "nav", "main", "section", "article", "footer", "form"].includes(node.tag)) return true;
   const hint = `${normalizeText(node.attrs?.id)} ${normalizeText(node.attrs?.class)} ${normalizeText(node.attrs?.role)}`;
+  if (["header", "nav", "main", "section", "article", "footer", "form"].includes(node.tag)) return true;
+  if (["img", "picture", "video", "button"].includes(node.tag)) return true;
+  if (node.tag === "a") return /\b(button|btn|cta)\b/i.test(hint) || normalizeText(node.attrs?.role).toLowerCase() === "button";
+  if (["h1", "h2", "h3", "p"].includes(node.tag)) return Boolean(safeSample(metrics.text, 8));
+  if (["ul", "ol", "li"].includes(node.tag)) return metrics.repeated_item_count >= 2 || Boolean(hint);
   return Boolean(hint || metrics.repeated_item_count >= 2 || metrics.image_count > 0 || metrics.button_count > 0 || metrics.form_count > 0);
 }
 
-function toGenericCandidate(node) {
+function toGenericCandidate(node, context = {}) {
   const metrics = node.metrics || {};
   const page = inferPage(node);
   const kind = inferKind(node);
+  const nodeKind = inferNodeKind(node);
   const explicitSlot = normalizeSlot(node.attrs?.["data-eip-parent"]);
   const suggestedSlot = explicitSlot || `${page}.${kind.suffix}`;
   const selector = buildSelector(node);
@@ -280,6 +346,11 @@ function toGenericCandidate(node) {
   const domSignature = hashText(signatureSeed);
   return {
     candidate_id: `zone-${domSignature.slice(0, 12)}`,
+    parent_candidate_id: context.parentCandidateId || null,
+    dom_depth: Math.max(0, Number(context.depth || 0)),
+    dom_order: Math.max(0, Number(context.order || node.index || 0)),
+    node_kind: nodeKind,
+    label: candidateLabel(node, nodeKind, kind.suffix),
     page,
     suggested_slot: normalizeSlot(suggestedSlot) || "home.content",
     suggested_renderer: normalizeRenderer(kind.renderer),
@@ -294,15 +365,24 @@ function toGenericCandidate(node) {
     confidence_reasons: reasons,
     mapping_status: confidence >= 0.45 ? "proposed" : "needs_review",
     source: "generic_scan",
+    content_mode: metrics.repeated_item_count >= 2 || ["slider", "repeater", "product_card"].includes(nodeKind)
+      ? "dynamic"
+      : "static",
+    visibility: normalizeText(node.attrs?.["data-eip-scan-visibility"] || "visible") === "hidden" ? "hidden" : "visible",
+    bounds: {
+      width: Math.max(0, Number(node.attrs?.["data-eip-scan-width"] || 0)),
+      height: Math.max(0, Number(node.attrs?.["data-eip-scan-height"] || 0))
+    },
     push_allowed: kind.pushAllowed !== false
   };
 }
 
 function dedupeCandidates(candidates) {
+  const allById = new Map((candidates || []).map((candidate) => [candidate.candidate_id, candidate]));
   const bySignature = new Map();
   for (const candidate of candidates || []) {
     if (!candidate?.candidate_id || !candidate?.suggested_slot) continue;
-    const key = SINGLETON_SLOT_RENDERERS.has(candidate.suggested_renderer)
+    const key = SINGLETON_SLOT_RENDERERS.has(candidate.suggested_renderer) && !["slide", "image", "button", "text_block", "card", "product_card"].includes(candidate.node_kind)
       ? `${candidate.suggested_slot}|${candidate.suggested_renderer}`
       : `${candidate.dom_signature}|${candidate.suggested_slot}`;
     const existing = bySignature.get(key);
@@ -310,22 +390,43 @@ function dedupeCandidates(candidates) {
       bySignature.set(key, candidate);
     }
   }
-  return Array.from(bySignature.values())
-    .sort((a, b) => Number(b.confidence || 0) - Number(a.confidence || 0))
-    .slice(0, 80);
+  const selected = Array.from(bySignature.values())
+    .sort((a, b) => Number(a.dom_order || 0) - Number(b.dom_order || 0))
+    .slice(0, 120);
+  const selectedIds = new Set(selected.map((candidate) => candidate.candidate_id));
+  return selected.map((candidate) => {
+    let parentId = candidate.parent_candidate_id || null;
+    while (parentId && !selectedIds.has(parentId)) {
+      parentId = allById.get(parentId)?.parent_candidate_id || null;
+    }
+    return { ...candidate, parent_candidate_id: parentId };
+  });
 }
 
 function scanGenericStorefrontHtml(html) {
   const root = parseStaticHtml(html);
   analyzeNode(root);
-  const queue = [...root.children];
+  const queue = root.children.map((node) => ({ node, parentCandidateId: null, depth: 0 }));
   const candidates = [];
   while (queue.length) {
-    const node = queue.shift();
+    const current = queue.shift();
+    const node = current?.node;
     if (!node) continue;
-    queue.push(...(node.children || []));
-    if (!shouldProposeNode(node)) continue;
-    candidates.push(toGenericCandidate(node));
+    let parentCandidateId = current.parentCandidateId;
+    if (shouldProposeNode(node)) {
+      const candidate = toGenericCandidate(node, {
+        parentCandidateId,
+        depth: current.depth,
+        order: node.index
+      });
+      candidates.push(candidate);
+      parentCandidateId = candidate.candidate_id;
+    }
+    queue.push(...(node.children || []).map((child) => ({
+      node: child,
+      parentCandidateId,
+      depth: current.depth + 1
+    })));
   }
   if (!candidates.length) {
     const signature = hashText("body|fallback");
@@ -345,6 +446,14 @@ function scanGenericStorefrontHtml(html) {
       confidence_reasons: ["static page fallback candidate"],
       mapping_status: "needs_review",
       source: "generic_scan",
+      parent_candidate_id: null,
+      dom_depth: 0,
+      dom_order: 0,
+      node_kind: "container",
+      label: "Page content",
+      content_mode: "static",
+      visibility: "visible",
+      bounds: { width: 0, height: 0 },
       push_allowed: true
     });
   }
@@ -377,6 +486,11 @@ function taggedZoneToCandidate(zone = {}) {
           : configuredRenderer;
   return {
     candidate_id: `tag-${signature.slice(0, 12)}`,
+    parent_candidate_id: null,
+    dom_depth: 0,
+    dom_order: 0,
+    node_kind: "section",
+    label: normalizeText(zone.label || tag),
     page: normalizeSlot(zone.page || tag.split(".")[0] || "home") || "home",
     suggested_slot: tag,
     suggested_renderer: normalizeRenderer(renderer, "rich_text_block"),
@@ -391,6 +505,9 @@ function taggedZoneToCandidate(zone = {}) {
     confidence_reasons: ["explicit data-eip-parent or manifest mapping"],
     mapping_status: "approved",
     source: "tagged_scan",
+    content_mode: Number(zone.occurrences || 1) > 1 ? "dynamic" : "static",
+    visibility: "visible",
+    bounds: { width: 0, height: 0 },
     push_allowed: true
   };
 }
@@ -435,6 +552,13 @@ function mappingProfileZones(mappingProfile = {}) {
       renderer_type: normalizeRenderer(candidate.suggested_renderer, "rich_text_block"),
       occurrences: Math.max(1, Number(candidate.repeated_item_count || 1)),
       candidate_id: candidate.candidate_id,
+      parent_candidate_id: candidate.parent_candidate_id || null,
+      dom_depth: Math.max(0, Number(candidate.dom_depth || 0)),
+      dom_order: Math.max(0, Number(candidate.dom_order || 0)),
+      node_kind: normalizeText(candidate.node_kind || "section"),
+      content_mode: normalizeText(candidate.content_mode || "static"),
+      visibility: normalizeText(candidate.visibility || "visible"),
+      bounds: candidate.bounds && typeof candidate.bounds === "object" ? candidate.bounds : { width: 0, height: 0 },
       selector: candidate.selector,
       dom_signature: candidate.dom_signature,
       text_sample: candidate.text_sample,

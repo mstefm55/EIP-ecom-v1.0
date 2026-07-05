@@ -51,6 +51,27 @@ test("generic scan collapses nested singleton slot proposals into a lean mapping
   assert.equal(candidates.filter((item) => item.suggested_slot === "home.hero").length, 1);
 });
 
+test("rendered DOM candidates preserve detected parent child hierarchy and element kinds", () => {
+  const candidates = scanGenericStorefrontHtml(`
+    <main data-eip-scan-visibility="visible" data-eip-scan-width="1200" data-eip-scan-height="900">
+      <section class="product-gallery">
+        <div class="slider-track">
+          <article class="slide"><img><h2>Front view</h2><button>Choose</button></article>
+          <article class="slide"><img><h2>Back view</h2><button>Choose</button></article>
+        </div>
+      </section>
+    </main>
+  `);
+  const byId = new Map(candidates.map((candidate) => [candidate.candidate_id, candidate]));
+  const child = candidates.find((candidate) => candidate.parent_candidate_id);
+  assert.ok(child);
+  assert.ok(byId.has(child.parent_candidate_id));
+  assert.equal(candidates.some((candidate) => candidate.node_kind === "slide"), true);
+  assert.equal(candidates.some((candidate) => candidate.node_kind === "image"), true);
+  assert.equal(candidates.some((candidate) => candidate.node_kind === "button"), true);
+  assert.equal(candidates[0].bounds.width, 1200);
+});
+
 test("client-rendered shells are identified when static HTML has no usable DOM zones", () => {
   const html = '<div id="root"></div><script type="module" src="/assets/index.js"></script>';
   const candidates = scanGenericStorefrontHtml(html);

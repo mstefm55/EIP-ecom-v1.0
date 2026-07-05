@@ -241,6 +241,18 @@ async function renderStorefrontDom({
     const html = await page.evaluate((maxChars) => {
       const root = document.documentElement?.cloneNode(true);
       if (!root) return "";
+      const sourceNodes = Array.from(document.documentElement?.querySelectorAll("*") || []);
+      const clonedNodes = Array.from(root.querySelectorAll("*"));
+      sourceNodes.forEach((source, index) => {
+        const clone = clonedNodes[index];
+        if (!clone) return;
+        const style = window.getComputedStyle(source);
+        const rect = source.getBoundingClientRect();
+        const hidden = style.display === "none" || style.visibility === "hidden" || Number(style.opacity || 1) === 0 || rect.width <= 0 || rect.height <= 0;
+        clone.setAttribute("data-eip-scan-visibility", hidden ? "hidden" : "visible");
+        clone.setAttribute("data-eip-scan-width", String(Math.max(0, Math.round(rect.width))));
+        clone.setAttribute("data-eip-scan-height", String(Math.max(0, Math.round(rect.height))));
+      });
       root
         .querySelectorAll("script,style,noscript,template,iframe,object,embed,svg,canvas")
         .forEach((node) => node.remove());
