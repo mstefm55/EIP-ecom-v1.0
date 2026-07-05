@@ -4,7 +4,7 @@
 
 The original **Content Studio** remains available at its existing dashboard surface and continues to use its existing routes, records, publishing actions, scanner, and mapping metadata. **Content Studio Enhanced** is a separate beta/preview surface and is opt-in.
 
-No database migration is required.
+Migration `0134_content_studio_enhanced_surface.sql` adds the opt-in menu and panel to existing governed dashboard surface metadata. It does not change Content Studio content records or schemas.
 
 ## V1 model
 
