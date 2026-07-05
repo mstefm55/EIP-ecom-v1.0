@@ -17,7 +17,7 @@ test("automatic renderer mapping ignores unapproved scanner proposals", () => {
   );
 });
 
-test("Content Studio uses the same Image Studio preparation and asset upload pipeline", async () => {
+test("shared workspace uploader supports Image Studio preparation and asset upload", async () => {
   const file = { name: "hero.png", type: "image/png" };
   const editedFile = { name: "hero-edited.webp", type: "image/webp" };
   let editorCalls = 0;
@@ -46,6 +46,47 @@ test("Content Studio uses the same Image Studio preparation and asset upload pip
   assert.equal(uploadedFile, editedFile);
   assert.equal(preparedPreview, "blob:hero");
   assert.equal(editorCalls, 1);
+});
+
+test("Content Studio starts the shared upload without waiting on the optional image editor", async () => {
+  const file = { name: "hero.png", type: "image/png" };
+  let uploadedFile = null;
+  let editorCalls = 0;
+
+  const result = await Promise.race([
+    uploadWorkspaceImageAsset({
+      file,
+      contentStudioOnly: true,
+      openImageStudio: async () => {
+        editorCalls += 1;
+        return new Promise(() => {});
+      },
+      uploadAsset: async (selectedFile) => {
+        uploadedFile = selectedFile;
+        return { url: "/assets/hero.png" };
+      }
+    }),
+    new Promise((_, reject) => setTimeout(() => reject(new Error("CONTENT_UPLOAD_STALLED")), 100))
+  ]);
+
+  assert.equal(editorCalls, 0);
+  assert.equal(uploadedFile, file);
+  assert.equal(result.asset.url, "/assets/hero.png");
+});
+
+test("Content Studio upload failures reject so UI finally handlers can clear loading state", async () => {
+  await assert.rejects(
+    uploadWorkspaceImageAsset({
+      file: { name: "bad.png", type: "image/png" },
+      contentStudioOnly: true,
+      uploadAsset: async () => {
+        const error = new Error("The selected file is invalid.");
+        error.code = "INVALID_IMAGE";
+        throw error;
+      }
+    }),
+    (error) => error.code === "INVALID_IMAGE"
+  );
 });
 
 test("Product Studio retains the existing Image Studio preparation flow", async () => {

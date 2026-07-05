@@ -1515,7 +1515,8 @@ function buildProductFocusItems(products = [], rules = DEFAULT_PRODUCT_STUDIO_UI
 }
 
 export default function EcomProductWorkspace({ node }) {
-  const contentStudioOnly = node?.props?.mode === "content-studio";
+  const contentStudioEnhanced = node?.props?.mode === "content-studio-enhanced";
+  const contentStudioOnly = node?.props?.mode === "content-studio" || contentStudioEnhanced;
   const productStudioUi = useMemo(
     () => resolveProductStudioUi(node?.props?.productStudio),
     [node?.props?.productStudio]
@@ -3459,6 +3460,7 @@ export default function EcomProductWorkspace({ node }) {
     try {
       const uploaded = await uploadWorkspaceImageAsset({
         file,
+        contentStudioOnly,
         openImageStudio: openImageStudioForFile,
         imageStudioOptions: {
           title: "Edit article image",
@@ -3621,6 +3623,7 @@ export default function EcomProductWorkspace({ node }) {
     try {
       const uploaded = await uploadWorkspaceImageAsset({
         file,
+        contentStudioOnly,
         openImageStudio: openImageStudioForFile,
         imageStudioOptions: {
           title: storefrontMode === "cards" ? "Edit card image" : "Edit hero image",
@@ -5986,6 +5989,15 @@ export default function EcomProductWorkspace({ node }) {
   );
 
   const activeSectionMeta = sectionItems.find((item) => item.id === activeSection) || sectionItems[0];
+  const enhancedPreviewSlide = Array.isArray(storefrontDraft?.slides)
+    ? storefrontDraft.slides[0] || null
+    : null;
+  const enhancedPreviewImage = resolveAssetUrl(
+    enhancedPreviewSlide?.upload_preview_url || enhancedPreviewSlide?.image || ""
+  );
+  const enhancedSourceLabel = storefrontProductDriven
+    ? (Array.isArray(storefrontDraft?.slides) && storefrontDraft.slides.length ? "Mixed" : "Product Studio")
+    : "Static";
 
   if (contentStudioOnly) {
     return (
@@ -5993,9 +6005,20 @@ export default function EcomProductWorkspace({ node }) {
         <div className="glass-panel flex flex-wrap items-center justify-between gap-4 border border-ink-100/60 bg-white/70 p-5">
           <div>
             <p className="text-[0.6rem] font-semibold uppercase tracking-[0.3em] text-ink-400">E-commerce</p>
-            <h2 className="text-lg font-semibold text-ink-900">Content Studio</h2>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-lg font-semibold text-ink-900">
+                {contentStudioEnhanced ? "Content Studio Enhanced" : "Content Studio"}
+              </h2>
+              {contentStudioEnhanced ? (
+                <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[0.55rem] font-semibold uppercase tracking-[0.2em] text-violet-700">
+                  Beta preview
+                </span>
+              ) : null}
+            </div>
             <p className="mt-1 text-[0.85rem] text-ink-500">
-              Manage storefront and non-product page content independently from the product catalog.
+              {contentStudioEnhanced
+                ? "Map one component to one content object, bind Product Studio data, and preview media without changing the website shell."
+                : "Manage storefront and non-product page content independently from the product catalog."}
             </p>
           </div>
         <button
@@ -6080,7 +6103,11 @@ export default function EcomProductWorkspace({ node }) {
         </div>
 
         {contentStudioTab === "blocks" || contentStudioTab.startsWith("cat:") ? (
-        <div className="grid gap-4 lg:grid-cols-[minmax(280px,30%)_minmax(0,1fr)]">
+        <div className={`grid gap-4 ${
+          contentStudioEnhanced
+            ? "xl:grid-cols-[minmax(250px,24%)_minmax(320px,1fr)_minmax(360px,34%)]"
+            : "lg:grid-cols-[minmax(280px,30%)_minmax(0,1fr)]"
+        }`}>
           <aside className="glass-panel flex h-[calc(100vh-4.4rem)] min-h-[75rem] flex-col border border-ink-100/60 bg-white/70 p-4">
             <div className="flex items-center justify-between gap-2">
               <p className="text-[0.6rem] font-semibold uppercase tracking-[0.3em] text-ink-400">Content library</p>
@@ -6372,12 +6399,72 @@ export default function EcomProductWorkspace({ node }) {
             ) : null}
           </aside>
 
+          {contentStudioEnhanced ? (
+            <section className="glass-panel h-fit border border-ink-100/60 bg-white/70 p-4 xl:sticky xl:top-4">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <p className="text-[0.55rem] font-semibold uppercase tracking-[0.24em] text-ink-400">
+                    Component preview
+                  </p>
+                  <p className="mt-1 text-sm font-semibold text-ink-800">
+                    {storefrontDraft?.slot || "Select a mapped component"}
+                  </p>
+                </div>
+                <span className="rounded-full border border-ink-100/70 bg-white px-2 py-1 text-[0.52rem] font-semibold uppercase tracking-[0.18em] text-ink-600">
+                  {enhancedSourceLabel}
+                </span>
+              </div>
+              <div className="mt-4 overflow-hidden rounded-2xl border border-ink-100/70 bg-ink-900">
+                <div className="relative aspect-[16/10] min-h-[18rem]">
+                  {enhancedPreviewImage ? (
+                    <img
+                      src={enhancedPreviewImage}
+                      alt={enhancedPreviewSlide?.title || storefrontDraft?.title || "Component preview"}
+                      className={`h-full w-full ${enhancedPreviewSlide?.fit === "contain" ? "object-contain" : "object-cover"}`}
+                      style={{
+                        objectPosition: `${clampPercent(enhancedPreviewSlide?.focus_x, 50)}% ${clampPercent(enhancedPreviewSlide?.focus_y, 50)}%`
+                      }}
+                    />
+                  ) : (
+                    <div className="flex h-full items-center justify-center px-8 text-center text-xs text-white/55">
+                      Upload media to preview it immediately. The storefront component shell remains owned by the connected website.
+                    </div>
+                  )}
+                  <div
+                    className="absolute inset-0 flex items-end bg-gradient-to-t from-black/80 via-black/20 to-transparent p-5"
+                    style={{ opacity: Math.max(0.35, clampPercent(enhancedPreviewSlide?.overlay_strength, 78) / 100) }}
+                  >
+                    <div className="text-white">
+                      <p className="text-[0.55rem] font-semibold uppercase tracking-[0.25em] text-white/70">
+                        {enhancedPreviewSlide?.eyebrow || storefrontDraft?.slot || "Mapped component"}
+                      </p>
+                      <h3 className="mt-2 text-xl font-semibold">
+                        {enhancedPreviewSlide?.title || storefrontDraft?.title || "Component title"}
+                      </h3>
+                      {enhancedPreviewSlide?.body ? (
+                        <p className="mt-2 line-clamp-3 text-xs text-white/80">{enhancedPreviewSlide.body}</p>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-[0.58rem] text-ink-500">
+                <span>Component type</span>
+                <strong className="text-right text-ink-700">{storefrontEffectiveRenderer || "unmapped"}</strong>
+                <span>Connection</span>
+                <strong className="truncate text-right text-ink-700">{selectedStorefrontConnectionCode || "not selected"}</strong>
+                <span>Publish status</span>
+                <strong className="text-right text-ink-700">{storefrontStage || "draft"}</strong>
+              </div>
+            </section>
+          ) : null}
+
           <section className="space-y-4">
             <div className="glass-panel border border-ink-100/60 bg-white/70 p-5">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
                   <p className="text-[0.6rem] font-semibold uppercase tracking-[0.3em] text-ink-400">
-                    Selected content
+                    {contentStudioEnhanced ? "Component inspector" : "Selected content"}
                   </p>
                   <h3 className="text-[1rem] font-semibold text-ink-900">
                     {storefrontDraft?.title || "Select content"}
@@ -6457,7 +6544,7 @@ export default function EcomProductWorkspace({ node }) {
 
             <div className="glass-panel border border-ink-100/60 bg-white/70 p-5">
               <SectionPanel
-                title={`Edit ${storefrontDraft.slot || "home.hero"} (${storefrontMode === "cards" ? "cards" : "hero"})`}
+                title={`${contentStudioEnhanced ? "Content · Data Binding · Media · Publish — " : "Edit "}${storefrontDraft.slot || "home.hero"} (${storefrontMode === "cards" ? "cards" : "hero"})`}
                 icon={LayoutTemplate}
               >
                 {storefrontEditor}

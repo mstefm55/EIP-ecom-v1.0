@@ -14,11 +14,12 @@ export const dashboardSurface = {
     type: "UserShell",
     props: {
       brand: "EIP Core",
-      nav: ["Dashboard", "Product Studio", "Content Studio", "Orders & Payments", "Inventory", "Procurement", "Entities", "Policies & Conditions", "Tasks", "Reports", "Security", "Settings"],
+      nav: ["Dashboard", "Product Studio", "Content Studio", "Content Studio Enhanced", "Orders & Payments", "Inventory", "Procurement", "Entities", "Policies & Conditions", "Tasks", "Reports", "Security", "Settings"],
       menu: [
         { code: "dashboard", label: "Dashboard", icon: "LayoutGrid" },
         { code: "catalog", label: "Product Studio", icon: "Package" },
         { code: "content", label: "Content Studio", icon: "LayoutTemplate" },
+        { code: "content-enhanced", label: "Content Studio Enhanced", icon: "LayoutTemplate", badge: "Beta" },
         { code: "commerce", label: "Orders & Payments", icon: "CreditCard" },
         { code: "inventory", label: "Inventory", icon: "Package", module: "inventory" },
         { code: "procurement", label: "Procurement", icon: "ShoppingCart", module: "procurement" },
@@ -220,6 +221,20 @@ export const dashboardSurface = {
                 createContent: "Create content",
               },
             },
+          },
+        },
+      ],
+    },
+    {
+      id: "user-content-enhanced-panel",
+      type: "UserPanel",
+      props: { tab: "content-enhanced" },
+      children: [
+        {
+          id: "content-enhanced-workspace",
+          type: "EcomProductWorkspace",
+          props: {
+            mode: "content-studio-enhanced",
           },
         },
       ],

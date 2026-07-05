@@ -5,6 +5,7 @@ export function approvedStorefrontRendererForZone(zone) {
 
 export async function uploadWorkspaceImageAsset({
   file,
+  contentStudioOnly = false,
   openImageStudio,
   imageStudioOptions = {},
   uploadAsset,
@@ -13,7 +14,11 @@ export async function uploadWorkspaceImageAsset({
 } = {}) {
   if (!file) return null;
 
-  const prepared = typeof openImageStudio === "function"
+  // Content Studio already exposes component-level fit, focal point, and
+  // overlay controls. Do not hold its upload behind the optional Image Studio
+  // modal: in the hosted app that promise can remain pending before any HTTP
+  // request is issued. Product Studio continues to use Image Studio.
+  const prepared = !contentStudioOnly && typeof openImageStudio === "function"
     ? await openImageStudio(file, imageStudioOptions)
     : file;
   if (!prepared) return null;
