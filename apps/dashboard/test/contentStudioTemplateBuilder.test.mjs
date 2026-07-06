@@ -24,6 +24,15 @@ const source = fs.readFileSync(
   path.join(dashboardRoot, "src", "components", "ecom", "ContentStudioEnhanced.jsx"),
   "utf8"
 );
+const studioCss = fs.readFileSync(
+  path.join(dashboardRoot, "src", "components", "ecom", "ContentStudioEnhanced.css"),
+  "utf8"
+);
+const imageStudioCss = fs.readFileSync(
+  path.join(dashboardRoot, "src", "components", "shared", "ImageAssetStudioModal.css"),
+  "utf8"
+);
+const globalCss = fs.readFileSync(path.join(dashboardRoot, "src", "index.css"), "utf8");
 const surface = fs.readFileSync(
   path.join(dashboardRoot, "src", "engine", "surfaces", "dashboard.js"),
   "utf8"
@@ -33,6 +42,21 @@ test("legacy and enhanced Content Studio surfaces remain parallel", () => {
   assert.match(surface, /mode:\s*"content-studio"/);
   assert.match(surface, /type:\s*"ContentStudioEnhanced"/);
   assert.match(surface, /content-enhanced-workspace/);
+});
+
+test("enhanced studio and photo toolkit share the EIP V1 artwork palette", () => {
+  for (const token of [
+    "--eip-v1-navy-950",
+    "--eip-v1-primary-600",
+    "--eip-v1-teal",
+    "--eip-v1-gold",
+    "--eip-v1-canvas",
+    "--eip-v1-editorial-ivory"
+  ]) assert.match(globalCss, new RegExp(token));
+  assert.match(studioCss, /EIP V1 artwork harmonisation/);
+  assert.match(studioCss, /var\(--eip-v1-primary-600\)/);
+  assert.match(imageStudioCss, /EIP V1 artwork palette/);
+  assert.match(imageStudioCss, /var\(--eip-v1-teal\)/);
 });
 
 test("exact builder exposes top bar, three panels, scanner, templates, preview, and inspector tabs", () => {

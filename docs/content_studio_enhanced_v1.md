@@ -18,6 +18,10 @@ The exact builder layout has:
 
 The top builder bar provides the site selector, connection status, preview, save-draft, and governed publish actions.
 
+## EIP V1 artwork palette
+
+Enhanced Studio and the shared Photo Toolkit use the EIP V1 artwork tokens defined in dashboard global CSS. Enterprise chrome uses deep navy, steel blue, cool lavender-blue surfaces, teal for connected/success actions, warm gold for the EIP identity accent, and red only for errors or destructive actions. Warm ivory is reserved for storefront/editorial preview content, keeping creative material distinct from operational controls. These tokens are reusable by future EIP workspace upgrades.
+
 ## Section template library
 
 The Add action opens a categorized library: All, Popular, E-commerce, Content, Engagement, Media, and Custom. V1 templates include Hero, Hero Slider, Banner, Text Block, Text + Image, Product Grid, Product Carousel, Product Detail, Image Gallery, Video, Testimonials, Benefits, FAQ, Newsletter, CTA, and Custom Section.
