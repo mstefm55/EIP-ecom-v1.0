@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { ChevronDown, LogOut, ShieldCheck, UserCircle2 } from "lucide-react";
+import { ChevronDown, LogOut, UserCircle2 } from "lucide-react";
+import EipMark from "../brand/EipMark";
 import { apiFetch } from "../../services/apiClient";
 import { useIdleLogout } from "../../hooks/useIdleLogout";
+import { useUiVersion } from "../../hooks/useUiVersion";
 import SidebarNav from "../engine/SidebarNav";
 
 function normalizeModules(values) {
@@ -24,6 +26,7 @@ export default function UserShell({ node, children, ctx }) {
   const [activeModules, setActiveModules] = useState(null);
   const contentOffset = collapsed ? "6.5rem" : "17rem";
   const headerHeight = "5.75rem";
+  const { uiVersion, toggleUiVersion } = useUiVersion();
 
   const resolvedMenu = Array.isArray(menu) && menu.length ? menu : nav;
   const menuItems = (Array.isArray(resolvedMenu) ? resolvedMenu : []).map((item) => {
@@ -109,7 +112,10 @@ export default function UserShell({ node, children, ctx }) {
   useIdleLogout({ idleMinutes, enabled: true, onTimeout: handleSignOut, onActivityPing: keepSessionAlive });
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-mist-50 text-ink-900">
+    <div
+      className={`${uiVersion === "v1" ? "eip-v1-shell" : "eip-classic-shell"} eip-user-shell relative min-h-screen overflow-x-clip bg-mist-50 text-ink-900`}
+      style={{ "--eip-shell-header-offset": `calc(${headerHeight} + 0.75rem)` }}
+    >
       <div className="pointer-events-none absolute inset-0 bg-auth-aurora opacity-70" />
       <div className="pointer-events-none absolute -left-32 top-24 h-80 w-80 rounded-full bg-brand-200/40 blur-[120px]" />
       <div className="pointer-events-none absolute -right-40 bottom-10 h-96 w-96 rounded-full bg-cyan-200/50 blur-[140px]" />
@@ -129,7 +135,7 @@ export default function UserShell({ node, children, ctx }) {
                       }
                     />
                   ) : (
-                    <ShieldCheck className="h-5 w-5" />
+                    <EipMark className="h-6 w-6" title="EIP" />
                   )}
                 </div>
                 <div>
@@ -140,7 +146,17 @@ export default function UserShell({ node, children, ctx }) {
                 </div>
               </div>
 
-          <div className="relative">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={toggleUiVersion}
+              className="rounded-full border border-white/60 bg-white/80 px-3 py-2 text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-ink-600"
+              aria-pressed={uiVersion === "v1"}
+              title="Switch between the EIP V1 beta presentation and the unchanged classic presentation"
+            >
+              {uiVersion === "v1" ? "EIP V1 Beta" : "Classic UI"}
+            </button>
+            <div className="relative">
             <button
               type="button"
               onClick={() => setProfileOpen((prev) => !prev)}
@@ -194,6 +210,7 @@ export default function UserShell({ node, children, ctx }) {
                 </div>
               </div>
             ) : null}
+            </div>
           </div>
         </div>
       </header>

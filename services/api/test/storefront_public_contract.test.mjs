@@ -151,6 +151,18 @@ test("loader uses approved manifest reads and safe DOM construction only", () =>
   assert.doesNotMatch(loader, /fetch\([^)]*\{[^}]*method:\s*["']POST/i);
 });
 
+test("loader highlights the exact Content Studio selector without blocking late DOM rendering", () => {
+  const loader = storefrontLoaderScript();
+  assert.match(loader, /eip_content_preview/);
+  assert.match(loader, /eip_selector/);
+  assert.match(loader, /data-eip-preview-highlight/);
+  assert.match(loader, /MutationObserver/);
+  assert.match(loader, /setTimeout\(\(\) => observer\.disconnect\(\), 8000\)/);
+  assert.match(loader, /scrollIntoView/);
+  assert.match(loader, /eip-content-preview-select/);
+  assert.match(loader, /postMessage/);
+});
+
 test("public commerce exposes approved mapping, content, catalog, and loader contracts", () => {
   assert.match(publicCommerceRoute, /"\/commerce-loader\/v1\.js"/);
   assert.match(publicCommerceRoute, /"\/commerce\/:suffix\/storefront\/manifest"/);

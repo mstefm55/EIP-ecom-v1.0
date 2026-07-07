@@ -36,6 +36,7 @@ import {
   X
 } from "lucide-react";
 import { apiFetch } from "../../services/apiClient";
+import EipMark from "../brand/EipMark";
 import ImageAssetStudioModal from "../shared/ImageAssetStudioModal";
 import {
   SECTION_TEMPLATE_CATEGORIES,
@@ -62,7 +63,14 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000
 const PREVIEW_BASE_URL = import.meta.env.VITE_ECOM_PREVIEW_BASE_URL || "http://localhost:5174";
 const UPLOAD_TIMEOUT_MS = 120000;
 
-const INSPECTOR_TABS = ["Content", "Data Binding", "Media", "Display", "Advanced"];
+const INSPECTOR_TABS = ["Quick Edit", "Content", "Data Binding", "Media", "Display", "Advanced"];
+const WORKFLOW_STEPS = ["Analyze Page", "Review Sections", "Map", "Edit", "Preview", "Publish"];
+const CONTENT_SOURCE_OPTIONS = [
+  { value: "static", label: "Manual Content" },
+  { value: "product_studio", label: "Product Studio" },
+  { value: "category_data", label: "Category Data" },
+  { value: "custom_api", label: "Future API" }
+];
 
 function assetUrl(value) {
   const url = String(value || "").trim();
@@ -129,31 +137,53 @@ function Field({ label, value, onChange, type = "text", options, placeholder, ro
   );
 }
 
-function scannerStatus(zone) {
-  if (zone.visibility === "hidden") return "hidden";
-  if (zone.status === "approved") return "mapped";
-  if (zone.status === "ignored") return "ignored";
-  if (zone.status === "needs_review") return "broken";
-  return "unmapped";
+function scannerState(zone) {
+  if (zone.visibility === "hidden" || zone.status === "ignored") return { code: "hidden", label: "Hidden" };
+  if (zone.status === "approved") return { code: "ready", label: "Ready" };
+  if (zone.status === "broken") return { code: "broken", label: "Broken" };
+  if (zone.status === "needs_review") return { code: "review", label: "Needs Review" };
+  return { code: "unmapped", label: "Needs Mapping" };
+}
+
+function reorderButton(child, buttonId, direction) {
+  const buttons = [...(child?.content?.buttons || [])];
+  const index = buttons.findIndex((button) => button.id === buttonId);
+  const target = direction === "up" ? index - 1 : index + 1;
+  if (index < 0 || target < 0 || target >= buttons.length) return child;
+  [buttons[index], buttons[target]] = [buttons[target], buttons[index]];
+  return { ...child, content: { ...child.content, buttons } };
+}
+
+function sectionState(section) {
+  if (section?.visible === false) return { code: "hidden", label: "Hidden" };
+  if (section?.mappingStatus === "broken") return { code: "broken", label: "Broken" };
+  if (["approved", "mapped"].includes(section?.mappingStatus)) return { code: "ready", label: "Ready" };
+  return { code: "review", label: "Needs Review" };
+}
+
+function defaultInspectorTab(section) {
+  if (["product_grid", "product_carousel", "product_detail"].includes(section?.componentType)) return "Data Binding";
+  if (section?.componentType === "media_gallery") return "Media";
+  return "Quick Edit";
 }
 
 function ScannerTreeNode({ node, selectedId, onView, onMap, onIgnore }) {
-  const status = scannerStatus(node);
+  const state = scannerState(node);
   return (
     <div className="cse-dom-node" style={{ "--dom-depth": node.depth }}>
       <div className={`cse-dom-row ${selectedId === node.id ? "active" : ""}`}>
         <button type="button" className="cse-dom-view" onClick={() => onView(node)} title="View detected element in preview">
           {node.children.length ? <ChevronDown /> : <Code2 />}
-          <span><strong>{node.label}</strong><small>{node.nodeKind} · {node.selector || node.tag}</small></span>
+          <span><strong>{node.label}</strong><small>{node.nodeKind} section</small></span>
         </button>
         <div className="cse-dom-badges">
-          <em className={status}>{status}</em>
+          <em className={state.code}>{state.label}</em>
           <em className={node.contentMode}>{node.contentMode}</em>
         </div>
         <div className="cse-dom-actions">
-          <button type="button" onClick={() => onMap(node)} disabled={!node.pushAllowed}>{node.status === "approved" ? "Edit Mapping" : "Map"}</button>
-          <button type="button" onClick={() => onView(node)}>View</button>
-          <button type="button" onClick={() => onIgnore(node)}>{node.status === "ignored" ? "Ignored" : "Ignore"}</button>
+          <button type="button" onClick={() => onMap(node)} disabled={!node.pushAllowed} title={node.pushAllowed ? "Choose the section type, fields, and content source" : "Mapping is disabled by this connection profile"}>{node.status === "approved" ? "Edit Mapping" : "Map This Section"}</button>
+          <button type="button" onClick={() => onView(node)} title="Highlight this section in the live preview">View</button>
+          <button type="button" onClick={() => onIgnore(node)} disabled={node.status === "ignored"} title={node.status === "ignored" ? "This section is already hidden" : "Hide this section from the editable structure"}>{node.status === "ignored" ? "Hidden" : "Hide"}</button>
         </div>
       </div>
       {node.children.length ? <div className="cse-dom-children">{node.children.map((child) => <ScannerTreeNode key={child.id} node={child} selectedId={selectedId} onView={onView} onMap={onMap} onIgnore={onIgnore} />)}</div> : null}
@@ -172,7 +202,7 @@ export default function ContentStudioEnhanced({ ctx }) {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState("home");
   const [viewport, setViewport] = useState("desktop");
-  const [inspectorTab, setInspectorTab] = useState("Content");
+  const [inspectorTab, setInspectorTab] = useState("Quick Edit");
   const [templateOpen, setTemplateOpen] = useState(false);
   const [templateCategory, setTemplateCategory] = useState("All");
   const [loading, setLoading] = useState(true);
@@ -223,6 +253,28 @@ export default function ContentStudioEnhanced({ ctx }) {
       return frontendUrl;
     }
   }, [frontendUrl, selectedScannerZone]);
+
+  useEffect(() => {
+    if (!frontendUrl) return undefined;
+    let expectedOrigin = "";
+    try { expectedOrigin = new URL(frontendUrl, window.location.origin).origin; } catch { return undefined; }
+    const handlePreviewSelection = (event) => {
+      if (event.origin !== expectedOrigin || event.data?.type !== "eip-content-preview-select") return;
+      const selector = String(event.data?.selector || "").trim();
+      const zone = scannerZones.find((item) => item.selector === selector);
+      if (!zone) return;
+      setSelectedZoneId(zone.id);
+      const mapped = sections.find((section) => section.selector === selector);
+      if (mapped) {
+        setSelectedSectionId(mapped.componentId);
+        setSelectedChildId(mapped.children?.[0]?.sectionId || "");
+        setExpanded((current) => new Set([...current, mapped.componentId]));
+        setInspectorTab(defaultInspectorTab(mapped));
+      }
+    };
+    window.addEventListener("message", handlePreviewSelection);
+    return () => window.removeEventListener("message", handlePreviewSelection);
+  }, [frontendUrl, scannerZones, sections]);
 
   const updateSection = (sectionId, updater) => {
     setSections((current) => replaceAt(current, sectionId, updater, "componentId"));
@@ -276,6 +328,16 @@ export default function ContentStudioEnhanced({ ctx }) {
     setSelectedSectionId(section.componentId);
     setSelectedChildId(child?.sectionId || section.children?.[0]?.sectionId || "");
     setExpanded((current) => new Set([...current, section.componentId]));
+    setInspectorTab(defaultInspectorTab(section));
+  }
+
+  function selectPreviewElement(child, tab = "Quick Edit") {
+    if (!selectedSection || !child) return;
+    setSelectedZoneId("");
+    setSelectedSectionId(selectedSection.componentId);
+    setSelectedChildId(child.sectionId);
+    setExpanded((current) => new Set([...current, selectedSection.componentId]));
+    setInspectorTab(tab);
   }
 
   function addTemplate(templateId) {
@@ -435,6 +497,25 @@ export default function ContentStudioEnhanced({ ctx }) {
     } finally {
       setScanning(false);
     }
+  }
+
+  function reviewUnmapped() {
+    const zone = scannerZones.find((item) => !["approved", "ignored"].includes(item.status));
+    if (!zone) {
+      setNotice({ tone: "success", message: "All detected sections have a mapping decision." });
+      return;
+    }
+    viewScannerZone(zone);
+    setNotice({ tone: "success", message: `${zone.label} needs a mapping decision.` });
+  }
+
+  function acceptSuggestedMapping() {
+    const zone = scannerZones.find((item) => item.pushAllowed && !["approved", "ignored"].includes(item.status));
+    if (!zone) {
+      setNotice({ tone: "success", message: "No suggested mapping is waiting for confirmation." });
+      return;
+    }
+    openMappingWizard(zone);
   }
 
   function openMappingWizard(zone) {
@@ -685,11 +766,15 @@ export default function ContentStudioEnhanced({ ctx }) {
   const supportsMedia = ["hero", "hero_slider", "banner", "text_image", "media_gallery", "video_section", "product_detail", "custom"].includes(selectedSection?.componentType);
   const isProductTemplate = ["product_grid", "product_carousel", "product_detail"].includes(selectedSection?.componentType);
   const supportsButtons = !["media_gallery", "faq", "testimonial_grid", "feature_block", "product_grid", "product_carousel"].includes(selectedSection?.componentType);
+  const selectedSectionIndex = selectedSection ? sections.findIndex((section) => section.componentId === selectedSection.componentId) : -1;
+  const selectedChildIndex = selectedSection && selectedChild ? selectedSection.children.findIndex((child) => child.sectionId === selectedChild.sectionId) : -1;
+  const unresolvedZones = scannerZones.filter((zone) => !["approved", "ignored"].includes(zone.status));
+  const workflowStep = !structure || scanning ? 1 : unresolvedZones.length ? (selectedScannerZone ? 3 : 2) : selectedSection ? 4 : 2;
 
   return (
     <div className="cse-root">
       <header className="cse-topbar">
-        <div className="cse-brand"><Sparkles /><strong>EIP</strong><span>Content Studio Enhanced</span></div>
+        <div className="cse-brand"><EipMark title="EIP" /><strong>EIP</strong><span>Content Studio Enhanced</span></div>
         <div className="cse-site-select">
           <span>Site:</span>
           <select value={connectionCode} onChange={(event) => setConnectionCode(event.target.value)}>
@@ -702,9 +787,9 @@ export default function ContentStudioEnhanced({ ctx }) {
           <span className={`cse-connected ${connections.length ? "is-connected" : ""}`}>{connections.length ? "Connected" : "Disconnected"}</span>
         </div>
         <div className="cse-top-actions">
-          <button type="button" onClick={() => window.open(`${frontendUrl}/?content_preview=1`, "_blank", "noopener,noreferrer")}><Eye /> Preview</button>
-          <button type="button" onClick={() => saveDraft()} disabled={saving || !selectedSection}>{saving ? <Loader2 className="spin" /> : <Save />} Save Draft</button>
-          <button type="button" className="primary" onClick={publish} disabled={publishing || !selectedSection}>{publishing ? <Loader2 className="spin" /> : <UploadCloud />} Publish <ChevronDown /></button>
+          <button type="button" onClick={() => window.open(`${frontendUrl}/?content_preview=1`, "_blank", "noopener,noreferrer")} disabled={!frontendUrl} title={frontendUrl ? "Open the connected storefront preview" : "Choose a connected site first"}><Eye /> Preview</button>
+          <button type="button" onClick={() => saveDraft()} disabled={saving || !selectedSection} title={!selectedSection ? "Select a section before saving" : saving ? "Saving draft" : "Save current changes as a draft"}>{saving ? <Loader2 className="spin" /> : <Save />} Save Draft</button>
+          <button type="button" className="primary" onClick={publish} disabled={publishing || !selectedSection} title={!selectedSection ? "Select a section before publishing" : publishing ? "Publishing" : "Save and publish the selected content"}>{publishing ? <Loader2 className="spin" /> : <UploadCloud />} Publish <ChevronDown /></button>
           <div className="cse-more-wrap">
             <button type="button" className="icon" onClick={() => setMoreOpen((value) => !value)} aria-label="More actions"><MoreHorizontal /></button>
             {moreOpen ? <div className="cse-more-menu"><button type="button" onClick={() => { setMoreOpen(false); void scanElements(); }}><RefreshCw /> Scan rendered DOM</button><button type="button" onClick={() => { setMoreOpen(false); setInspectorTab("Advanced"); }}><Code2 /> Component metadata</button></div> : null}
@@ -715,9 +800,14 @@ export default function ContentStudioEnhanced({ ctx }) {
 
       {notice.message ? <div className={`cse-notice ${notice.tone}`}>{notice.message}<button type="button" onClick={() => setNotice({ tone: "", message: "" })}><X /></button></div> : null}
 
+      <div className="cse-workflow-strip" aria-label="Content Studio workflow">
+        {WORKFLOW_STEPS.map((step, index) => <span key={step} className={workflowStep === index + 1 ? "active" : workflowStep > index + 1 ? "complete" : ""}><b>{index + 1}</b>{step}</span>)}
+      </div>
+
       <div className="cse-workspace">
         <aside className="cse-left">
-          <div className="cse-panel-head"><strong>PAGE STRUCTURE</strong><button type="button" onClick={() => setTemplateOpen(true)}><Plus /> Add</button></div>
+          <div className="cse-panel-head"><div><strong>PAGE STRUCTURE</strong><span>Generated from last scan</span></div><button type="button" onClick={() => setTemplateOpen(true)} title="Add a new section that does not exist on the scanned page"><Plus /> Add</button></div>
+          <p className="cse-panel-help">Detected sections from the live page. Select a section to edit or map it.</p>
           <Field label="Page" value={page} onChange={setPage} type="select" options={[
             { value: "home", label: "Homepage" }, { value: "patterns", label: "Product page" }, { value: "pages", label: "Pages" }, { value: "blog", label: "Blog" }
           ]} />
@@ -729,6 +819,7 @@ export default function ContentStudioEnhanced({ ctx }) {
             {visibleSections.map((section) => {
               const isExpanded = expanded.has(section.componentId);
               const active = selectedSection?.componentId === section.componentId;
+              const state = sectionState(section);
               return (
                 <div key={section.componentId} className="cse-tree-group">
                   <button type="button" className={`cse-tree-parent ${active ? "active" : ""}`} onClick={() => selectSection(section)}>
@@ -736,7 +827,7 @@ export default function ContentStudioEnhanced({ ctx }) {
                       {isExpanded ? <ChevronDown /> : <ChevronRight />}
                     </span>
                     <ImageIcon /> <strong>{section.label}</strong>
-                    <em className={section.source === "Product Studio" ? "linked" : "static"}>{section.source === "Product Studio" ? "Linked" : "Static"}</em>
+                    <span className="cse-tree-state"><em className={state.code}>{state.label}</em><em className={section.source === "Product Studio" ? "linked" : "static"}>{section.source === "Product Studio" ? "Product Studio" : "Manual"}</em></span>
                   </button>
                   {isExpanded ? (
                     <div className="cse-tree-children">
@@ -758,13 +849,14 @@ export default function ContentStudioEnhanced({ ctx }) {
 
           <div className="cse-actions-box">
             <strong>ACTIONS</strong><span>Reorder or manage selected section</span>
-            <div><button type="button" onClick={() => moveSection("up")}><ArrowUp /> Move Up</button><button type="button" onClick={() => moveSection("down")}><ArrowDown /> Move Down</button></div>
-            <div><button type="button" onClick={duplicateSection} disabled={!selectedSection}><Copy /> Duplicate</button><button type="button" disabled={!selectedSection} onClick={() => selectedSection && updateSection(selectedSection.componentId, (section) => ({ ...section, visible: !section.visible }))}>{selectedSection?.visible === false ? <Eye /> : <EyeOff />} Hide / Show</button></div>
-            <button type="button" className="danger" disabled={!selectedSection} onClick={deleteSelectedSection}><Trash2 /> Delete</button>
+            <div><button type="button" onClick={() => moveSection("up")} disabled={selectedSectionIndex <= 0} title={selectedSectionIndex <= 0 ? "This section is already first" : "Move section up"}><ArrowUp /> Move Up</button><button type="button" onClick={() => moveSection("down")} disabled={selectedSectionIndex < 0 || selectedSectionIndex === sections.length - 1} title={selectedSectionIndex < 0 ? "Select a section first" : selectedSectionIndex === sections.length - 1 ? "This section is already last" : "Move section down"}><ArrowDown /> Move Down</button></div>
+            <div><button type="button" onClick={duplicateSection} disabled={!selectedSection} title={selectedSection ? "Duplicate selected section" : "Select a section first"}><Copy /> Duplicate</button><button type="button" disabled={!selectedSection} title={selectedSection ? "Change section visibility" : "Select a section first"} onClick={() => selectedSection && updateSection(selectedSection.componentId, (section) => ({ ...section, visible: !section.visible }))}>{selectedSection?.visible === false ? <Eye /> : <EyeOff />} Hide / Show</button></div>
+            <button type="button" className="danger" disabled={!selectedSection} title={selectedSection ? "Delete selected section" : "Select a section first"} onClick={deleteSelectedSection}><Trash2 /> Delete</button>
           </div>
 
           <div className="cse-scanner">
-            <div className="cse-scanner-head"><div><strong>RENDERED DOM SCANNER</strong><span>{scannerZones.length ? `Rendered scan · ${scannerZones.length} elements` : "Connect a site, then scan its rendered page"}</span></div><button type="button" onClick={scanElements} disabled={scanning || !connectionCode}>{scanning ? <Loader2 className="spin" /> : <RefreshCw />} {scannerZones.length ? "Rescan" : "Scan"}</button></div>
+            <div className="cse-scanner-head"><div><strong>PAGE ANALYSIS</strong><span>{scannerZones.length ? `${scannerZones.length} detected sections · ${unresolvedZones.length} need review` : "Connect a site, then analyze its live page"}</span></div><button type="button" onClick={scanElements} disabled={scanning || !connectionCode} title={!connectionCode ? "Choose a connected site first" : scannerZones.length ? "Refresh Page Structure from the rendered page" : "Generate Page Structure from the rendered page"}>{scanning ? <Loader2 className="spin" /> : <RefreshCw />} {scannerZones.length ? "Rescan" : "Analyze Page"}</button></div>
+            {scannerZones.length ? <div className="cse-analysis-actions"><button type="button" onClick={acceptSuggestedMapping} disabled={!unresolvedZones.length} title={!unresolvedZones.length ? "All detected sections have a mapping decision" : "Review and confirm the next suggested mapping"}><CheckCircle2 /> Accept Suggested Mapping</button><button type="button" onClick={reviewUnmapped} disabled={!unresolvedZones.length} title={!unresolvedZones.length ? "No unmapped sections remain" : "Select the next section that needs review"}><Eye /> Review Unmapped</button></div> : null}
             {structure?.rendered_dom_available === true ? <p className="cse-scan-source"><CheckCircle2 /> Chromium rendered DOM · {structure?.scan_source || "rendered_dom_scan"}</p> : null}
             <div className="cse-dom-tree">
               {scannerTree.length ? scannerTree.map((node) => <ScannerTreeNode key={node.id} node={node} selectedId={selectedZoneId} onView={viewScannerZone} onMap={openMappingWizard} onIgnore={ignoreScannerZone} />) : <div className="cse-empty"><ScanSearch /> No rendered DOM scan yet.</div>}
@@ -774,7 +866,7 @@ export default function ContentStudioEnhanced({ ctx }) {
 
         <main className="cse-center">
           <div className="cse-preview-head">
-            <strong>LIVE PREVIEW</strong>
+            <div className="cse-preview-title"><strong>LIVE PREVIEW</strong><span>Click any highlighted area to edit it.</span></div>
             <div className="cse-viewports">
               <button className={viewport === "desktop" ? "active" : ""} onClick={() => setViewport("desktop")}><Monitor /></button>
               <button className={viewport === "tablet" ? "active" : ""} onClick={() => setViewport("tablet")}><Tablet /></button>
@@ -787,7 +879,7 @@ export default function ContentStudioEnhanced({ ctx }) {
               <div className="cse-site-nav"><strong>SAMARA</strong><nav><span>Patterns</span><span>Courses</span><span>Blog</span><span>Reviews</span><span>Contacts</span></nav><div><ScanSearch /><HeartIcon /><span>EN</span></div></div>
               {selectedScannerZone ? (
                 <div className="cse-rendered-preview">
-                  <div className="cse-rendered-target"><span>Rendered DOM</span><strong>{selectedScannerZone.label}</strong><code>{selectedScannerZone.selector || selectedScannerZone.tag}</code><small>{selectedScannerZone.nodeKind} · {selectedScannerZone.contentMode} · {selectedScannerZone.bounds.width || "?"}×{selectedScannerZone.bounds.height || "?"}</small></div>
+                  <div className="cse-rendered-target"><span>Detected Section</span><strong>{selectedScannerZone.label}</strong><small>{scannerState(selectedScannerZone).label} · {selectedScannerZone.nodeKind} · {selectedScannerZone.contentMode}</small></div>
                   {renderedPreviewUrl ? <iframe key={`${selectedScannerZone.id}:${renderedPreviewUrl}`} src={renderedPreviewUrl} title={`Rendered preview of ${selectedScannerZone.label}`} sandbox="allow-scripts allow-same-origin allow-forms allow-popups" /> : <div className="cse-preview-empty">The connected storefront URL is unavailable.</div>}
                 </div>
               ) : !selectedSection ? <div className="cse-preview-empty">Select a detected DOM node or add a section to begin.</div> : (
@@ -801,29 +893,30 @@ export default function ContentStudioEnhanced({ ctx }) {
                   onPointerMove={updatePreviewInteraction}
                   onPointerUp={endPreviewInteraction}
                   onPointerCancel={endPreviewInteraction}
+                  onClick={(event) => { if (event.target === event.currentTarget) selectPreviewElement(previewChild); }}
                 >
                   <span className="cse-selection-label">{selectedSection.label}</span>
-                  <div className="cse-element-toolbar"><button className="drag-handle" disabled={!canFreePosition} onPointerDown={(event) => beginPreviewInteraction("move", event)} title={canFreePosition ? "Drag element" : "This section follows template layout."}><GripVertical /></button><button onClick={() => moveSection("up")} title="Move section up"><ArrowUp /></button><button onClick={() => moveSection("down")} title="Move section down"><ArrowDown /></button><button onClick={duplicateSection} title="Duplicate section"><Copy /></button><button onClick={() => updateSection(selectedSection.componentId, (section) => ({ ...section, locked: !section.locked }))} title={selectedSection.locked ? "Unlock" : "Lock"}>{selectedSection.locked ? <Lock /> : <Unlock />}</button><button onClick={() => updateSection(selectedSection.componentId, (section) => ({ ...section, visible: !section.visible }))} title="Hide or show"><Eye /></button><button onClick={() => setInspectorTab("Advanced")} title="Settings"><Settings2 /></button><button onClick={deleteSelectedSection} title="Delete section"><Trash2 /></button></div>
+                  <div className="cse-element-toolbar"><button className="drag-handle" disabled={!canFreePosition} onPointerDown={(event) => beginPreviewInteraction("move", event)} title={canFreePosition ? "Drag element" : "This section follows template layout."}><GripVertical /></button><button onClick={() => moveSection("up")} disabled={selectedSectionIndex <= 0} title={selectedSectionIndex <= 0 ? "This section is already first" : "Move section up"}><ArrowUp /></button><button onClick={() => moveSection("down")} disabled={selectedSectionIndex === sections.length - 1} title={selectedSectionIndex === sections.length - 1 ? "This section is already last" : "Move section down"}><ArrowDown /></button><button onClick={duplicateSection} title="Duplicate section"><Copy /></button><button onClick={() => updateSection(selectedSection.componentId, (section) => ({ ...section, locked: !section.locked }))} title={selectedSection.locked ? "Unlock" : "Lock"}>{selectedSection.locked ? <Lock /> : <Unlock />}</button><button onClick={() => updateSection(selectedSection.componentId, (section) => ({ ...section, visible: !section.visible }))} title="Hide or show"><Eye /></button><button onClick={() => setInspectorTab("Advanced")} title="Settings"><Settings2 /></button><button onClick={deleteSelectedSection} title="Delete section"><Trash2 /></button></div>
                   {kind === "product_grid" || kind === "product_carousel" || kind === "product_detail" ? (
-                    <div className="cse-product-preview"><div><small>PRODUCT STUDIO</small><h2>{previewChild?.content?.title || selectedSection.label}</h2><p>Live products resolve from the saved collection reference.</p></div><div className="cse-product-cards">{[1, 2, 3, 4].map((item) => <article key={item}><ImageIcon /><strong>Product {item}</strong><span>Dynamic price</span></article>)}</div></div>
+                    <div className="cse-product-preview" onClick={() => selectPreviewElement(previewChild, "Data Binding")}><div><small>PRODUCT STUDIO</small><h2>{previewChild?.content?.title || selectedSection.label}</h2><p>Live products resolve from the saved collection reference.</p></div><div className="cse-product-cards">{[1, 2, 3, 4].map((item) => <article key={item}><ImageIcon /><strong>Product {item}</strong><span>Dynamic price</span></article>)}</div></div>
                   ) : kind === "media_gallery" ? (
-                    <div className="cse-gallery-preview">{selectedSection.children.map((child) => <figure key={child.sectionId}>{child.media?.image ? <img src={assetUrl(child.media.image)} alt={child.media?.alt || child.label} /> : <ImageIcon />}<figcaption>{child.media?.caption || child.content?.title || child.label}</figcaption></figure>)}</div>
+                    <div className="cse-gallery-preview">{selectedSection.children.map((child) => <figure key={child.sectionId} className={child.sectionId === selectedChild?.sectionId ? "cse-preview-child-active" : ""} onClick={() => selectPreviewElement(child, "Media")}>{child.media?.image ? <img src={assetUrl(child.media.image)} alt={child.media?.alt || child.label} /> : <ImageIcon />}<figcaption>{child.media?.caption || child.content?.title || child.label}</figcaption></figure>)}</div>
                   ) : kind === "faq" ? (
-                    <div className="cse-list-preview"><small>FAQ</small><h2>{selectedSection.label}</h2>{selectedSection.children.map((child) => <details key={child.sectionId} open={child.sectionId === selectedChild?.sectionId}><summary>{child.content?.title || child.label}</summary><p>{child.content?.body || child.content?.subtitle || "Add an answer in the inspector."}</p></details>)}</div>
+                    <div className="cse-list-preview"><small>FAQ</small><h2>{selectedSection.label}</h2>{selectedSection.children.map((child) => <details key={child.sectionId} className={child.sectionId === selectedChild?.sectionId ? "cse-preview-child-active" : ""} open={child.sectionId === selectedChild?.sectionId} onClick={() => selectPreviewElement(child, "Quick Edit")}><summary>{child.content?.title || child.label}</summary><p>{child.content?.body || child.content?.subtitle || "Add an answer in the inspector."}</p></details>)}</div>
                   ) : kind === "testimonial_grid" || kind === "feature_block" ? (
-                    <div className="cse-card-preview"><h2>{selectedSection.label}</h2><div>{selectedSection.children.map((child) => <article key={child.sectionId}><Sparkles /><strong>{child.content?.title || child.label}</strong><p>{child.content?.body || child.content?.subtitle || "Add content in the inspector."}</p></article>)}</div></div>
+                    <div className="cse-card-preview"><h2>{selectedSection.label}</h2><div>{selectedSection.children.map((child) => <article key={child.sectionId} className={child.sectionId === selectedChild?.sectionId ? "cse-preview-child-active" : ""} onClick={() => selectPreviewElement(child, "Quick Edit")}><Sparkles /><strong>{child.content?.title || child.label}</strong><p>{child.content?.body || child.content?.subtitle || "Add content in the inspector."}</p></article>)}</div></div>
                   ) : kind === "video_section" ? (
-                    <div className="cse-video-preview"><div><span>▶</span></div><h2>{previewChild?.content?.title || selectedSection.label}</h2><p>{previewChild?.content?.body || "Add the video details and supporting content."}</p></div>
+                    <div className="cse-video-preview" onClick={() => selectPreviewElement(previewChild, "Media")}><div><span>▶</span></div><h2>{previewChild?.content?.title || selectedSection.label}</h2><p>{previewChild?.content?.body || "Add the video details and supporting content."}</p></div>
                   ) : ["rich_text_block", "cta_block", "newsletter_form", "banner", "text_image"].includes(kind) ? (
-                    <div className="cse-copy-preview"><small>{previewChild?.content?.eyebrow || selectedSection.label}</small><h2>{previewChild?.content?.title || selectedSection.label}</h2><p>{previewChild?.content?.body || previewChild?.content?.subtitle || "Add content in the inspector."}</p><div className="cse-preview-buttons">{(previewChild?.content?.buttons || []).map((button) => <span key={button.id} className={button.style}>{button.label || "Button"}</span>)}</div></div>
+                    <div className="cse-copy-preview" onClick={() => selectPreviewElement(previewChild, "Quick Edit")}><small>{previewChild?.content?.eyebrow || selectedSection.label}</small><h2>{previewChild?.content?.title || selectedSection.label}</h2><p>{previewChild?.content?.body || previewChild?.content?.subtitle || "Add content in the inspector."}</p><div className="cse-preview-buttons">{(previewChild?.content?.buttons || []).map((button) => <span key={button.id} className={button.style} onClick={(event) => { event.stopPropagation(); selectPreviewElement(previewChild, "Content"); }}>{button.label || "Button"}</span>)}</div></div>
                   ) : kind === "unknown" ? (
                     <div className="cse-unknown"><Code2 /><strong>Safe preview unavailable</strong><span>Unknown component type: {selectedSection.componentType}</span></div>
                   ) : (
                     <div className="cse-hero-preview" style={{ backgroundColor: previewChild?.media?.backgroundColor || "#c8b7a5" }}>
-                      {previewImage ? <img src={previewImage} alt={previewChild?.media?.alt || previewChild?.content?.title || "Section media"} /> : null}
+                      {previewImage ? <img src={previewImage} alt={previewChild?.media?.alt || previewChild?.content?.title || "Section media"} onClick={() => selectPreviewElement(previewChild, "Media")} /> : null}
                       <div className="cse-hero-overlay" style={{ opacity: Math.max(.2, Number(previewChild?.display?.overlay || 55) / 100) }} />
                       {selectedSection.children.length > 1 ? <><button type="button" className="cse-arrow left" onClick={() => selectPreviewSibling("previous")}><ArrowLeft /></button><button type="button" className="cse-arrow right" onClick={() => selectPreviewSibling("next")}><ArrowRight /></button></> : null}
-                      <div className="cse-hero-copy"><small>{previewChild?.content?.eyebrow || "SECTION EYEBROW"}</small><h1>{previewChild?.content?.title || selectedSection.label}</h1><p>{previewChild?.content?.subtitle || previewChild?.content?.body || "Add section copy in the inspector."}</p><div className="cse-preview-buttons">{(previewChild?.content?.buttons || []).map((button) => <span key={button.id} className={button.style}>{button.label || "Button"}</span>)}</div></div>
+                      <div className="cse-hero-copy" onClick={() => selectPreviewElement(previewChild, "Quick Edit")}><small>{previewChild?.content?.eyebrow || "SECTION EYEBROW"}</small><h1>{previewChild?.content?.title || selectedSection.label}</h1><p>{previewChild?.content?.subtitle || previewChild?.content?.body || "Add section copy in the inspector."}</p><div className="cse-preview-buttons">{(previewChild?.content?.buttons || []).map((button) => <span key={button.id} className={button.style} onClick={(event) => { event.stopPropagation(); selectPreviewElement(previewChild, "Content"); }}>{button.label || "Button"}</span>)}</div></div>
                     </div>
                   )}
                   {canFreePosition ? <><i className="resize nw" onPointerDown={(event) => beginPreviewInteraction("resize", event)} /><i className="resize ne" onPointerDown={(event) => beginPreviewInteraction("resize", event)} /><i className="resize sw" onPointerDown={(event) => beginPreviewInteraction("resize", event)} /><i className="resize se" onPointerDown={(event) => beginPreviewInteraction("resize", event)} /></> : <span className="cse-layout-note">This section follows template layout.</span>}
@@ -847,18 +940,32 @@ export default function ContentStudioEnhanced({ ctx }) {
           ) : null}
 
           <div className="cse-template-strip">
-            <div><strong>COMPONENT LIBRARY</strong><span>Click a template to add it</span></div>
+            <div><strong>COMPONENT LIBRARY</strong><span>Use templates to add a section that does not exist on the scanned page.</span></div>
             {SECTION_TEMPLATES.slice(0, 10).map((template) => <button key={template.id} type="button" onClick={() => addTemplate(template.id)}><ImageIcon />{template.label}</button>)}
             <button type="button" className="view-all" onClick={() => setTemplateOpen(true)}>View all components <ArrowRight /></button>
           </div>
         </main>
 
         <aside className="cse-right">
-          <div className="cse-inspector-head"><div><strong>{selectedScannerZone ? "DOM INSPECTOR" : "SECTION INSPECTOR"}</strong><span>Selected: {selectedScannerZone?.label || selectedSection?.label || "None"} {!selectedScannerZone && selectedChild ? `› ${selectedChild.label}` : ""}</span></div><button type="button" onClick={() => { setSelectedZoneId(""); setSelectedSectionId("__none__"); setSelectedChildId(""); }} title="Clear selection"><X /></button></div>
+          <div className="cse-inspector-head"><div><strong>{selectedScannerZone ? "MAPPING STATUS" : "SECTION INSPECTOR"}</strong><span>Selected: {selectedScannerZone?.label || selectedSection?.label || "None"} {!selectedScannerZone && selectedChild ? `› ${selectedChild.label}` : ""}</span><small>Edit the selected section. Advanced settings are optional.</small></div><button type="button" onClick={() => { setSelectedZoneId(""); setSelectedSectionId("__none__"); setSelectedChildId(""); }} title="Clear selection"><X /></button></div>
           {!selectedScannerZone ? <div className="cse-inspector-tabs">{INSPECTOR_TABS.map((tab) => <button type="button" key={tab} className={inspectorTab === tab ? "active" : ""} onClick={() => setInspectorTab(tab)}>{tab}</button>)}</div> : null}
           <div className="cse-inspector-body">
-            {selectedScannerZone ? <div className="cse-dom-inspector"><h4>DETECTED RENDERED ELEMENT</h4><strong>{selectedScannerZone.label}</strong><code>{selectedScannerZone.selector || selectedScannerZone.tag}</code><div><span>{selectedScannerZone.nodeKind}</span><span>{selectedScannerZone.contentMode}</span><span>{scannerStatus(selectedScannerZone)}</span></div><p>{selectedScannerZone.textSample || "No safe text sample was retained."}</p><dl><dt>Images</dt><dd>{selectedScannerZone.counts.images}</dd><dt>Buttons</dt><dd>{selectedScannerZone.counts.buttons}</dd><dt>Repeated items</dt><dd>{selectedScannerZone.counts.repeated}</dd></dl><button type="button" className="primary" onClick={() => openMappingWizard(selectedScannerZone)} disabled={!selectedScannerZone.pushAllowed}>{selectedScannerZone.status === "approved" ? "Edit Mapping" : "Map Component"}</button><button type="button" onClick={() => ignoreScannerZone(selectedScannerZone)}>Ignore / Hide</button></div> : null}
+            {selectedScannerZone ? <div className="cse-dom-inspector"><h4>DETECTED SECTION</h4><strong>{selectedScannerZone.label}</strong><div><span>{selectedScannerZone.nodeKind}</span><span>{selectedScannerZone.contentMode}</span><span className={scannerState(selectedScannerZone).code}>{scannerState(selectedScannerZone).label}</span></div>{selectedScannerZone.status !== "approved" ? <p className="cse-unmapped-message">This section was detected but not yet mapped.</p> : <p>This section is mapped and ready to edit.</p>}<dl><dt>Images</dt><dd>{selectedScannerZone.counts.images}</dd><dt>Buttons</dt><dd>{selectedScannerZone.counts.buttons}</dd><dt>Repeated items</dt><dd>{selectedScannerZone.counts.repeated}</dd></dl><button type="button" className="primary" onClick={() => openMappingWizard(selectedScannerZone)} disabled={!selectedScannerZone.pushAllowed} title={selectedScannerZone.pushAllowed ? "Open the guided mapping flow" : "Mapping is disabled by this connection profile"}>{selectedScannerZone.status === "approved" ? "Edit Mapping" : "Map This Section"}</button><button type="button" onClick={() => ignoreScannerZone(selectedScannerZone)} disabled={selectedScannerZone.status === "ignored"} title={selectedScannerZone.status === "ignored" ? "This section is already hidden" : "Hide this section from Page Structure"}>Hide Section</button><details className="cse-technical-details"><summary>Advanced technical details</summary><code>{selectedScannerZone.selector || selectedScannerZone.tag}</code><p>{selectedScannerZone.textSample || "No safe text sample was retained."}</p><small>Scanner confidence: {selectedScannerZone.confidence || "not reported"}</small></details></div> : null}
+            {!selectedScannerZone && selectedChild ? <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={handleFileSelected} /> : null}
             {!selectedScannerZone && (!selectedSection || !selectedChild) ? <div className="cse-empty">Select a child section to edit.</div> : null}
+            {!selectedScannerZone && selectedChild && inspectorTab === "Quick Edit" ? (
+              <>
+                <h4>QUICK EDIT</h4>
+                <p className="cse-inspector-tip">The most common fields for this {childLabel(selectedSection).toLowerCase()}.</p>
+                <Field label="Title" value={selectedChild.content?.title} onChange={(value) => updateSelectedChild((child) => ({ ...child, content: { ...child.content, title: value } }))} />
+                <Field label={selectedSection.componentType === "faq" ? "Answer" : "Subtitle"} value={selectedSection.componentType === "faq" ? selectedChild.content?.body : selectedChild.content?.subtitle} onChange={(value) => updateSelectedChild((child) => ({ ...child, content: { ...child.content, [selectedSection.componentType === "faq" ? "body" : "subtitle"]: value } }))} />
+                {supportsMedia ? <div className="cse-quick-action"><ImageIcon /><span><strong>{selectedChild.media?.image ? "Image ready" : "No image selected"}</strong><small>Open the EIP photo toolkit to crop, resize, or replace it.</small></span><button type="button" onClick={selectedChild.media?.image ? editCurrentImage : openFilePicker}>{selectedChild.media?.image ? "Edit Image" : "Choose Image"}</button></div> : null}
+                {isProductTemplate ? <div className="cse-quick-action"><Link2 /><span><strong>Product Studio source</strong><small>Products stay linked and are not copied.</small></span><button type="button" onClick={() => setInspectorTab("Data Binding")}>Configure</button></div> : null}
+                {supportsButtons ? <div className="cse-quick-action"><MousePointer2 /><span><strong>{selectedChild.content?.buttons?.length || 0} buttons</strong><small>Edit labels, links, styles, and order.</small></span><button type="button" onClick={() => setInspectorTab("Content")}>Edit Buttons</button></div> : null}
+                <Toggle label="Visible" checked={selectedChild.visible !== false} onChange={(value) => updateSelectedChild((child) => ({ ...child, visible: value }))} />
+                <button type="button" className="cse-save-changes" onClick={() => saveDraft()} disabled={saving} title={saving ? "Saving changes" : "Save changes to this section"}>{saving ? <Loader2 className="spin" /> : <Save />} Save Changes</button>
+              </>
+            ) : null}
             {!selectedScannerZone && selectedChild && inspectorTab === "Content" ? (
               <>
                 <h4>{selectedChild.sectionType.toUpperCase()} SETTINGS</h4>
@@ -870,7 +977,7 @@ export default function ContentStudioEnhanced({ ctx }) {
                 <div className="cse-buttons-list">
                   {(selectedChild.content?.buttons || []).map((button, index) => (
                     <div className="cse-button-card" key={button.id}>
-                      <div><GripVertical /><strong>Button {index + 1}</strong><button type="button" onClick={() => updateSelectedChild((child) => deleteButton(child, button.id))}><Trash2 /></button></div>
+                      <div><strong>Button {index + 1}</strong><button type="button" onClick={() => updateSelectedChild((child) => reorderButton(child, button.id, "up"))} disabled={index === 0} title={index === 0 ? "This button is already first" : "Move button up"}><ArrowUp /></button><button type="button" onClick={() => updateSelectedChild((child) => reorderButton(child, button.id, "down"))} disabled={index === (selectedChild.content?.buttons || []).length - 1} title={index === (selectedChild.content?.buttons || []).length - 1 ? "This button is already last" : "Move button down"}><ArrowDown /></button><button type="button" onClick={() => updateSelectedChild((child) => deleteButton(child, button.id))} title="Delete this button"><Trash2 /></button></div>
                       <div className="two"><Field label="Label" value={button.label} onChange={(value) => updateSelectedChild((child) => ({ ...child, content: { ...child.content, buttons: replaceAt(child.content.buttons, button.id, (item) => ({ ...item, label: value }), "id") } }))} /><Field label="Link" value={button.url} onChange={(value) => updateSelectedChild((child) => ({ ...child, content: { ...child.content, buttons: replaceAt(child.content.buttons, button.id, (item) => ({ ...item, url: value }), "id") } }))} /></div>
                       <div className="two"><Field label="Style" type="select" value={button.style} options={[{ value: "primary", label: "Primary" }, { value: "secondary", label: "Secondary" }, { value: "link", label: "Text link" }]} onChange={(value) => updateSelectedChild((child) => ({ ...child, content: { ...child.content, buttons: replaceAt(child.content.buttons, button.id, (item) => ({ ...item, style: value }), "id") } }))} /><Field label="Icon (optional)" value={button.icon} onChange={(value) => updateSelectedChild((child) => ({ ...child, content: { ...child.content, buttons: replaceAt(child.content.buttons, button.id, (item) => ({ ...item, icon: value }), "id") } }))} /></div>
                       <Toggle label="Open in new tab" checked={button.newTab === true} onChange={(value) => updateSelectedChild((child) => ({ ...child, content: { ...child.content, buttons: replaceAt(child.content.buttons, button.id, (item) => ({ ...item, newTab: value }), "id") } }))} />
@@ -882,16 +989,18 @@ export default function ContentStudioEnhanced({ ctx }) {
 
             {!selectedScannerZone && selectedChild && inspectorTab === "Data Binding" ? (
               <>
-                <h4>DATA SOURCE</h4>
-                <Field label="Source" type="select" value={selectedChild.dataBinding?.source || "static"} options={[{ value: "static", label: "Static Content" }, { value: "product_studio", label: "Product Studio" }, { value: "category_data", label: "Category Data" }, { value: "custom_api", label: "Custom / Future API" }]} onChange={(value) => updateSelectedChild((child) => ({ ...child, dataBinding: sanitizeBindingReference({ ...child.dataBinding, source: value }) }))} />
+                <h4>CONTENT SOURCE</h4>
+                <Field label="Content Source" type="select" value={selectedChild.dataBinding?.source || "static"} options={CONTENT_SOURCE_OPTIONS} onChange={(value) => updateSelectedChild((child) => ({ ...child, dataBinding: sanitizeBindingReference({ ...child.dataBinding, source: value }) }))} />
+                {selectedChild.dataBinding?.source === "product_studio" ? <p className="cse-help"><Link2 /> This section will display Product Studio data. Product data is not copied.</p> : null}
+                {(selectedChild.dataBinding?.source || "static") !== "static" ? <>
                 <Field label="Entity" type="select" value={selectedChild.dataBinding?.entity || ""} options={[{ value: "", label: "Select entity" }, { value: "product_current", label: "Product current" }, { value: "product_selected", label: "Product selected" }, { value: "products_collection", label: "Products collection" }, { value: "category", label: "Category" }, { value: "reviews", label: "Reviews" }]} onChange={(value) => updateSelectedChild((child) => ({ ...child, dataBinding: { ...child.dataBinding, entity: value } }))} />
                 <Field label="Reference / slug / ID" value={selectedChild.dataBinding?.reference || ""} placeholder="Product or collection reference" onChange={(value) => updateSelectedChild((child) => ({ ...child, dataBinding: { ...child.dataBinding, reference: value } }))} />
                 <Field label="Filter" value={selectedChild.dataBinding?.filter || ""} placeholder="featured=true, category=..." onChange={(value) => updateSelectedChild((child) => ({ ...child, dataBinding: { ...child.dataBinding, filter: value } }))} />
                 <div className="two"><Field label="Sort" value={selectedChild.dataBinding?.sort || ""} onChange={(value) => updateSelectedChild((child) => ({ ...child, dataBinding: { ...child.dataBinding, sort: value } }))} /><Field label="Limit" type="number" value={selectedChild.dataBinding?.limit || 8} onChange={(value) => updateSelectedChild((child) => ({ ...child, dataBinding: { ...child.dataBinding, limit: Number(value) } }))} /></div>
                 <h4>FIELD MAPPING</h4>
                 {["Image", "Eyebrow", "Title", "Description", "Price", "Button label"].map((field) => <Field key={field} label={field} value={selectedChild.dataBinding?.fieldMappings?.[field] || ""} placeholder={`${field.toLowerCase()} field path`} onChange={(value) => updateSelectedChild((child) => ({ ...child, dataBinding: { ...child.dataBinding, fieldMappings: { ...child.dataBinding.fieldMappings, [field]: value } } }))} />)}
-                <p className="cse-help"><Link2 /> Only references and field mappings are stored. Product records remain in Product Studio.</p>
-                {isProductTemplate ? <button type="button" className="cse-product-link" onClick={() => ctx?.user?.setActiveTab?.("catalog")}><ArrowRight /> View in Product Studio</button> : null}
+                </> : <p className="cse-help"><CheckCircle2 /> Manual Content uses the fields in Quick Edit and Content. No external binding is required.</p>}
+                {isProductTemplate || selectedChild.dataBinding?.source === "product_studio" ? <button type="button" className="cse-product-link" onClick={() => ctx?.user?.setActiveTab?.("catalog")}><ArrowRight /> View Source in Product Studio</button> : null}
               </>
             ) : null}
 
@@ -905,7 +1014,6 @@ export default function ContentStudioEnhanced({ ctx }) {
                   <section><strong>{selectedChild.media?.assetId || "No stored image"}</strong><span>{selectedChild.media?.image || "Choose an image to edit and upload"}</span><div><button type="button" className="primary" onClick={selectedChild.media?.image ? editCurrentImage : openFilePicker}><ImageIcon /> {selectedChild.media?.image ? "Edit Image" : "Choose Image"}</button><button type="button" onClick={openFilePicker}><UploadCloud /> Replace</button><button type="button" onClick={() => updateSelectedChild((child) => ({ ...child, media: { ...child.media, image: "", assetId: "" } }))}><Trash2 /></button></div></section>
                 </div>
                 {uploading ? <p className="cse-uploading"><Loader2 className="spin" /> Uploading edited image…</p> : null}
-                <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={handleFileSelected} />
                 <Field label="Alt text" value={selectedChild.media?.alt || ""} onChange={(value) => updateSelectedChild((child) => ({ ...child, media: { ...child.media, alt: value } }))} />
                 <Field label="Caption" value={selectedChild.media?.caption || ""} onChange={(value) => updateSelectedChild((child) => ({ ...child, media: { ...child.media, caption: value } }))} />
                 <Field label="Background color" type="color" value={selectedChild.media?.backgroundColor || "#f4f1eb"} onChange={(value) => updateSelectedChild((child) => ({ ...child, media: { ...child.media, backgroundColor: value } }))} />
@@ -918,7 +1026,7 @@ export default function ContentStudioEnhanced({ ctx }) {
                 <h4>DISPLAY</h4>
                 <Toggle label="Visible" checked={selectedChild.visible !== false} onChange={(value) => updateSelectedChild((child) => ({ ...child, visible: value }))} />
                 <Field label="Section height" value={selectedChild.display?.height || "auto"} onChange={(value) => updateSelectedChild((child) => ({ ...child, display: { ...child.display, height: value } }))} />
-                <Field label="Overlay %" type="number" value={selectedChild.display?.overlay || 55} onChange={(value) => updateSelectedChild((child) => ({ ...child, display: { ...child.display, overlay: Number(value) } }))} />
+                {["hero", "hero_slider", "banner"].includes(selectedSection.componentType) ? <><Field label="Overlay %" type="number" value={selectedChild.display?.overlay || 55} onChange={(value) => updateSelectedChild((child) => ({ ...child, display: { ...child.display, overlay: Number(value) } }))} /><Field label="Content alignment" type="select" value={selectedChild.display?.alignment || "left"} options={[{ value: "left", label: "Left" }, { value: "center", label: "Center" }, { value: "right", label: "Right" }]} onChange={(value) => updateSelectedChild((child) => ({ ...child, display: { ...child.display, alignment: value } }))} /></> : null}
                 <Field label="Background color" type="color" value={selectedChild.display?.backgroundColor || "#ffffff"} onChange={(value) => updateSelectedChild((child) => ({ ...child, display: { ...child.display, backgroundColor: value } }))} />
                 <Field label="Style variant" value={selectedChild.display?.styleVariant || "default"} onChange={(value) => updateSelectedChild((child) => ({ ...child, display: { ...child.display, styleVariant: value } }))} />
                 <Field label="Layout variant" value={selectedChild.display?.layoutVariant || "default"} onChange={(value) => updateSelectedChild((child) => ({ ...child, display: { ...child.display, layoutVariant: value } }))} />
@@ -937,7 +1045,7 @@ export default function ContentStudioEnhanced({ ctx }) {
               </>
             ) : null}
           </div>
-          {!selectedScannerZone && selectedChild ? <div className="cse-inspector-footer"><button type="button" onClick={() => updateSection(selectedSection.componentId, (section) => reorderChild(section, selectedChild.sectionId, "up"))}><ArrowUp /> Move</button><button type="button" onClick={() => updateSection(selectedSection.componentId, (section) => reorderChild(section, selectedChild.sectionId, "down"))}><ArrowDown /> Move</button><button type="button" onClick={() => { const next = duplicateChild(selectedSection, selectedChild.sectionId); updateSection(selectedSection.componentId, () => next); setSelectedChildId(next.children.find((child) => child.label === `${selectedChild.label} Copy`)?.sectionId || selectedChild.sectionId); }}><Copy /> Duplicate</button><button type="button" className="danger" onClick={removeSelectedChild}><Trash2 /> Delete child</button></div> : null}
+          {!selectedScannerZone && selectedChild ? <div className="cse-inspector-footer"><button type="button" onClick={() => updateSection(selectedSection.componentId, (section) => reorderChild(section, selectedChild.sectionId, "up"))} disabled={selectedChildIndex <= 0} title={selectedChildIndex <= 0 ? `This ${childLabel(selectedSection).toLowerCase()} is already first` : `Move ${childLabel(selectedSection).toLowerCase()} up`}><ArrowUp /> Move</button><button type="button" onClick={() => updateSection(selectedSection.componentId, (section) => reorderChild(section, selectedChild.sectionId, "down"))} disabled={selectedChildIndex === selectedSection.children.length - 1} title={selectedChildIndex === selectedSection.children.length - 1 ? `This ${childLabel(selectedSection).toLowerCase()} is already last` : `Move ${childLabel(selectedSection).toLowerCase()} down`}><ArrowDown /> Move</button><button type="button" onClick={() => { const next = duplicateChild(selectedSection, selectedChild.sectionId); updateSection(selectedSection.componentId, () => next); setSelectedChildId(next.children.find((child) => child.label === `${selectedChild.label} Copy`)?.sectionId || selectedChild.sectionId); }} title={`Duplicate selected ${childLabel(selectedSection).toLowerCase()}`}><Copy /> Duplicate</button><button type="button" className="danger" onClick={removeSelectedChild} title={`Delete selected ${childLabel(selectedSection).toLowerCase()}`}><Trash2 /> Delete child</button></div> : null}
         </aside>
       </div>
 
@@ -954,21 +1062,20 @@ export default function ContentStudioEnhanced({ ctx }) {
       {mappingWizard.open && mappingZone ? (
         <div className="cse-modal-backdrop">
           <div className="cse-mapping-modal">
-            <div className="cse-modal-head"><div><strong>MAP RENDERED COMPONENT</strong><span>{mappingZone.label} · {mappingZone.selector}</span></div><button type="button" onClick={() => setMappingWizard((current) => ({ ...current, open: false }))}><X /></button></div>
-            <div className="cse-wizard-steps">{["Element", "Template", "Fields", "Data", "Review"].map((label, index) => <span key={label} className={mappingWizard.step >= index + 1 ? "active" : ""}><b>{index + 1}</b>{label}</span>)}</div>
+            <div className="cse-modal-head"><div><strong>MAP THIS SECTION</strong><span>{mappingZone.label} · guided mapping</span></div><button type="button" onClick={() => setMappingWizard((current) => ({ ...current, open: false }))} title="Close mapping"><X /></button></div>
+            <div className="cse-wizard-steps">{["Choose Section Type", "Confirm Fields", "Content Source", "Save Mapping"].map((label, index) => <span key={label} className={mappingWizard.step >= index + 1 ? "active" : ""}><b>{index + 1}</b>{label}</span>)}</div>
             <div className="cse-wizard-body">
-              {mappingWizard.step === 1 ? <div className="cse-wizard-card"><Code2 /><h3>{mappingZone.label}</h3><code>{mappingZone.selector}</code><p>{mappingZone.textSample || "Rendered element selected. No safe text sample was retained."}</p><div><span>{mappingZone.nodeKind}</span><span>{mappingZone.contentMode}</span><span>{mappingZone.bounds.width || "?"} × {mappingZone.bounds.height || "?"}</span></div></div> : null}
-              {mappingWizard.step === 2 ? <div><h3>Choose section template</h3><div className="cse-wizard-templates">{SECTION_TEMPLATES.map((template) => <button type="button" key={template.id} className={mappingWizard.templateId === template.id ? "active" : ""} onClick={() => setMappingWizard((current) => ({ ...current, templateId: template.id, dataSource: template.dataSupport === "Product Studio" ? "product_studio" : current.dataSource }))}><ImageIcon /><strong>{template.label}</strong><span>{template.dataSupport}</span></button>)}</div></div> : null}
-              {mappingWizard.step === 3 ? <div><h3>Confirm and map detected fields</h3><div className="cse-detected-fields"><span><ImageIcon /> Images <b>{mappingZone.counts.images}</b></span><span><Link2 /> Links <b>{mappingZone.counts.links}</b></span><span><MousePointer2 /> Buttons <b>{mappingZone.counts.buttons}</b></span><span><Layers3 /> Repeated items <b>{mappingZone.counts.repeated}</b></span></div><Field label="Content slot" value={mappingWizard.slot} onChange={(value) => setMappingWizard((current) => ({ ...current, slot: value }))} /><div className="two"><Field label="Title field / selector" value={mappingWizard.fieldMappings.title || ""} placeholder="h1 or title" onChange={(value) => setMappingWizard((current) => ({ ...current, fieldMappings: { ...current.fieldMappings, title: value } }))} /><Field label="Image field / selector" value={mappingWizard.fieldMappings.image || ""} placeholder="img or images[0].url" onChange={(value) => setMappingWizard((current) => ({ ...current, fieldMappings: { ...current.fieldMappings, image: value } }))} /></div><Field label="Description field / selector" value={mappingWizard.fieldMappings.description || ""} placeholder="p or description" onChange={(value) => setMappingWizard((current) => ({ ...current, fieldMappings: { ...current.fieldMappings, description: value } }))} /></div> : null}
-              {mappingWizard.step === 4 ? <div><h3>Choose data source</h3><Field label="Data source" type="select" value={mappingWizard.dataSource} options={[{ value: "static", label: "Static Content" }, { value: "product_studio", label: "Product Studio" }, { value: "category_data", label: "Category Data" }, { value: "custom_api", label: "Custom / Future API" }]} onChange={(value) => setMappingWizard((current) => ({ ...current, dataSource: value }))} /><p className="cse-help"><Link2 /> Only binding references are saved. Product records are never copied into Content Studio.</p></div> : null}
-              {mappingWizard.step === 5 ? <div className="cse-wizard-review"><CheckCircle2 /><h3>Ready to save mapping</h3><dl><dt>DOM element</dt><dd>{mappingZone.selector}</dd><dt>Template</dt><dd>{mappingTemplate.label}</dd><dt>Slot</dt><dd>{mappingWizard.slot}</dd><dt>Data</dt><dd>{mappingWizard.dataSource}</dd></dl></div> : null}
+              {mappingWizard.step === 1 ? <div><h3>Choose what this section is</h3><p className="cse-wizard-intro">We detected “{mappingZone.label}”. Choose the template that best matches what the customer sees.</p><div className="cse-wizard-templates">{SECTION_TEMPLATES.map((template) => <button type="button" key={template.id} className={mappingWizard.templateId === template.id ? "active" : ""} onClick={() => setMappingWizard((current) => ({ ...current, templateId: template.id, dataSource: template.dataSupport === "Product Studio" ? "product_studio" : current.dataSource }))}><ImageIcon /><strong>{template.label}</strong><span>{template.description}</span></button>)}</div><details className="cse-technical-details"><summary>Advanced detected details</summary><code>{mappingZone.selector}</code><p>{mappingZone.nodeKind} · {mappingZone.contentMode}</p></details></div> : null}
+              {mappingWizard.step === 2 ? <div><h3>Confirm detected fields</h3><div className="cse-detected-fields"><span><ImageIcon /> Images <b>{mappingZone.counts.images}</b></span><span><Link2 /> Links <b>{mappingZone.counts.links}</b></span><span><MousePointer2 /> Buttons <b>{mappingZone.counts.buttons}</b></span><span><Layers3 /> Repeated items <b>{mappingZone.counts.repeated}</b></span></div><Field label="Content slot" value={mappingWizard.slot} onChange={(value) => setMappingWizard((current) => ({ ...current, slot: value }))} /><div className="two"><Field label="Title field" value={mappingWizard.fieldMappings.title || ""} placeholder="Detected title" onChange={(value) => setMappingWizard((current) => ({ ...current, fieldMappings: { ...current.fieldMappings, title: value } }))} /><Field label="Image field" value={mappingWizard.fieldMappings.image || ""} placeholder="Detected image" onChange={(value) => setMappingWizard((current) => ({ ...current, fieldMappings: { ...current.fieldMappings, image: value } }))} /></div><Field label="Description field" value={mappingWizard.fieldMappings.description || ""} placeholder="Detected description" onChange={(value) => setMappingWizard((current) => ({ ...current, fieldMappings: { ...current.fieldMappings, description: value } }))} /></div> : null}
+              {mappingWizard.step === 3 ? <div><h3>Choose Content Source</h3><Field label="Content Source" type="select" value={mappingWizard.dataSource} options={CONTENT_SOURCE_OPTIONS} onChange={(value) => setMappingWizard((current) => ({ ...current, dataSource: value }))} />{mappingWizard.dataSource === "product_studio" ? <p className="cse-help"><Link2 /> This section will display Product Studio data. Product data is not copied.</p> : <p className="cse-help"><CheckCircle2 /> Choose Manual Content for text and media managed directly in Content Studio.</p>}</div> : null}
+              {mappingWizard.step === 4 ? <div className="cse-wizard-review"><CheckCircle2 /><h3>Ready to save mapping</h3><dl><dt>Detected section</dt><dd>{mappingZone.label}</dd><dt>Section type</dt><dd>{mappingTemplate.label}</dd><dt>Content slot</dt><dd>{mappingWizard.slot}</dd><dt>Content Source</dt><dd>{CONTENT_SOURCE_OPTIONS.find((option) => option.value === mappingWizard.dataSource)?.label || "Manual Content"}</dd></dl></div> : null}
             </div>
-            <div className="cse-wizard-actions"><button type="button" onClick={() => setMappingWizard((current) => ({ ...current, step: Math.max(1, current.step - 1) }))} disabled={mappingWizard.step === 1}>Back</button>{mappingWizard.step < 5 ? <button type="button" className="primary" onClick={() => setMappingWizard((current) => ({ ...current, step: Math.min(5, current.step + 1) }))}>Continue</button> : <button type="button" className="primary" onClick={saveMapping} disabled={mappingSaving || !mappingWizard.slot.trim()}>{mappingSaving ? <Loader2 className="spin" /> : <CheckCircle2 />} Save Mapping</button>}</div>
+            <div className="cse-wizard-actions"><button type="button" onClick={() => setMappingWizard((current) => ({ ...current, step: Math.max(1, current.step - 1) }))} disabled={mappingWizard.step === 1} title={mappingWizard.step === 1 ? "You are at the first step" : "Return to the previous mapping step"}>Back</button>{mappingWizard.step < 4 ? <button type="button" className="primary" onClick={() => setMappingWizard((current) => ({ ...current, step: Math.min(4, current.step + 1) }))}>Continue</button> : <button type="button" className="primary" onClick={saveMapping} disabled={mappingSaving || !mappingWizard.slot.trim()} title={!mappingWizard.slot.trim() ? "Enter a Content slot before saving" : "Save this mapping"}>{mappingSaving ? <Loader2 className="spin" /> : <CheckCircle2 />} Save Mapping</button>}</div>
           </div>
         </div>
       ) : null}
 
-      {helpOpen ? <div className="cse-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setHelpOpen(false); }}><div className="cse-help-modal"><div className="cse-modal-head"><div><strong>CONTENT STUDIO WORKFLOW</strong><span>From connected website to published content.</span></div><button type="button" onClick={() => setHelpOpen(false)}><X /></button></div><ol><li><b>1</b><span><strong>Connect website</strong>Choose a Gateway Connection Profile with storefront scanning enabled.</span></li><li><b>2</b><span><strong>Scan rendered page</strong>Chromium loads the live app and detects its real DOM tree.</span></li><li><b>3</b><span><strong>Map components</strong>Select a detected element, choose its template, and save the mapping.</span></li><li><b>4</b><span><strong>Edit or bind data</strong>Enter static content or reference Product Studio records.</span></li><li><b>5</b><span><strong>Preview</strong>Review the selected rendered element or editable template at each viewport.</span></li><li><b>6</b><span><strong>Publish</strong>Save the draft, approve it, and publish when ready.</span></li></ol><button type="button" className="primary" onClick={() => { setHelpOpen(false); if (!scannerZones.length) void scanElements(); }}>Start with rendered scan</button></div></div> : null}
+      {helpOpen ? <div className="cse-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setHelpOpen(false); }}><div className="cse-help-modal"><div className="cse-modal-head"><div><strong>CONTENT STUDIO HELP</strong><span>A short guide from live page to published content.</span></div><button type="button" onClick={() => setHelpOpen(false)} title="Close help"><X /></button></div><ol><li><b>1</b><span><strong>What is Page Structure?</strong>It is the editable list generated when Analyze Page reads the live storefront.</span></li><li><b>2</b><span><strong>What is Mapping?</strong>Mapping tells EIP what a detected section is and which fields it contains.</span></li><li><b>3</b><span><strong>What is Product Studio Binding?</strong>It links a section to current Product Studio data without copying product records.</span></li><li><b>4</b><span><strong>How do I publish?</strong>Review highlighted sections, save changes, preview the page, then select Publish.</span></li></ol><button type="button" className="primary" onClick={() => { setHelpOpen(false); if (!scannerZones.length) void scanElements(); }}>Analyze Page</button></div></div> : null}
 
       <ImageAssetStudioModal
         open={editor.open}

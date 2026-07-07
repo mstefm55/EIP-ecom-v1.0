@@ -6263,6 +6263,56 @@ export default function App() {
     }
   }, []);
 
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof document === "undefined") return undefined;
+    const params = new URLSearchParams(window.location.search || "");
+    if (params.get("eip_content_preview") !== "1") return undefined;
+    const selector = String(params.get("eip_selector") || "").trim();
+    if (!selector || selector.length > 500) return undefined;
+
+    let highlighted = null;
+    let observer = null;
+    let stopTimer = null;
+    let clickHandler = null;
+    const clearHighlight = () => {
+      if (!highlighted) return;
+      if (clickHandler) highlighted.removeEventListener("click", clickHandler, true);
+      highlighted.removeAttribute("data-eip-preview-highlight");
+      highlighted = null;
+      clickHandler = null;
+    };
+    const highlight = () => {
+      let target = null;
+      try {
+        target = document.querySelector(selector);
+      } catch {
+        return false;
+      }
+      if (!target) return false;
+      clearHighlight();
+      highlighted = target;
+      target.setAttribute("data-eip-preview-highlight", "Selected in Content Studio");
+      clickHandler = () => {
+        if (window.parent !== window) window.parent.postMessage({ type: "eip-content-preview-select", selector }, "*");
+      };
+      target.addEventListener("click", clickHandler, true);
+      target.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+      observer?.disconnect();
+      return true;
+    };
+
+    if (!highlight()) {
+      observer = new MutationObserver(() => highlight());
+      observer.observe(document.documentElement, { childList: true, subtree: true });
+      stopTimer = window.setTimeout(() => observer?.disconnect(), 8000);
+    }
+    return () => {
+      observer?.disconnect();
+      if (stopTimer) window.clearTimeout(stopTimer);
+      clearHighlight();
+    };
+  }, []);
+
   const presentPaymentLifecycle = useCallback((result, { openPending = false, popupReturn = false } = {}) => {
     const payment = result?.payment || {};
     const order = result?.order || {};

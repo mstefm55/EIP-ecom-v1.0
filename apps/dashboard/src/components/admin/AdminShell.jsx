@@ -21,6 +21,8 @@ import {
   Image,
   Pencil,
 } from "lucide-react";
+import EipMark from "../brand/EipMark";
+import { useUiVersion } from "../../hooks/useUiVersion";
 import { apiFetch } from "../../services/apiClient";
 import { runAction } from "../../engine/actions";
 import { useIdleLogout } from "../../hooks/useIdleLogout";
@@ -83,6 +85,7 @@ export default function AdminShell({ node, children, ctx }) {
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileNotice, setProfileNotice] = useState(null);
   const [profileError, setProfileError] = useState(null);
+  const { uiVersion, toggleUiVersion } = useUiVersion();
   const { status: stepUpStatus, requestOtp, verifyOtp, loading: stepUpLoading } = useAuthApi();
 
   const activeTab = ctx?.admin?.activeTab || "tenant-requests";
@@ -299,7 +302,7 @@ export default function AdminShell({ node, children, ctx }) {
   }, []);
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-mist-50 text-ink-900">
+    <div className={`${uiVersion === "v1" ? "eip-v1-shell" : "eip-classic-shell"} eip-admin-shell relative min-h-screen overflow-hidden bg-mist-50 text-ink-900`}>
       <div className="pointer-events-none absolute inset-0 bg-auth-aurora opacity-70" />
       <div className="pointer-events-none absolute -left-32 top-24 h-80 w-80 rounded-full bg-brand-200/40 blur-[120px]" />
       <div className="pointer-events-none absolute -right-40 bottom-10 h-96 w-96 rounded-full bg-cyan-200/50 blur-[140px]" />
@@ -321,7 +324,7 @@ export default function AdminShell({ node, children, ctx }) {
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/80 text-brand-700 shadow-soft">
-                  <ShieldCheck className="h-5 w-5" />
+                  <EipMark className="h-6 w-6" title="EIP" />
                 </div>
                 <div>
                   <p className="text-[0.6rem] uppercase tracking-[0.35em] text-ink-400">{brand}</p>
@@ -350,6 +353,15 @@ export default function AdminShell({ node, children, ctx }) {
             </div>
 
             <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={toggleUiVersion}
+                className="rounded-full border border-white/60 bg-white/80 px-3 py-2 text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-ink-600"
+                aria-pressed={uiVersion === "v1"}
+                title="Switch between the EIP V1 beta presentation and the unchanged classic presentation"
+              >
+                {uiVersion === "v1" ? "EIP V1 Beta" : "Classic UI"}
+              </button>
               {actionLabel ? (
                 <button
                   type="button"

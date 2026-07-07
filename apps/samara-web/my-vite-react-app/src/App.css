@@ -3711,3 +3711,32 @@ a:focus-visible {
     grid-template-columns: 1fr;
   }
 }
+/* Content Studio preview focus is query-gated in App.jsx and never affects shoppers. */
+[data-eip-preview-highlight] {
+  position: relative !important;
+  z-index: 2147483000 !important;
+  outline: 4px solid #5878aa !important;
+  outline-offset: 5px !important;
+  box-shadow: 0 0 0 10px rgba(88, 120, 170, 0.2), 0 18px 50px rgba(11, 20, 48, 0.28) !important;
+  animation: eip-preview-highlight-pulse 1.5s ease-in-out infinite alternate !important;
+}
+
+[data-eip-preview-highlight]::before {
+  content: attr(data-eip-preview-highlight) !important;
+  position: absolute;
+  z-index: 2147483001;
+  top: 8px;
+  left: 8px;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: #0b1430;
+  color: #fff;
+  font: 700 11px/1.1 Montserrat, system-ui, sans-serif;
+  letter-spacing: 0.05em;
+  pointer-events: none;
+}
+
+@keyframes eip-preview-highlight-pulse {
+  from { outline-color: #5878aa; box-shadow: 0 0 0 5px rgba(88, 120, 170, 0.16), 0 18px 50px rgba(11, 20, 48, 0.2); }
+  to { outline-color: #c99a45; box-shadow: 0 0 0 12px rgba(201, 154, 69, 0.2), 0 18px 50px rgba(11, 20, 48, 0.32); }
+}
