@@ -4,6 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  SECTION_TEMPLATES,
   addButton,
   addChild,
   buildScannerTree,
@@ -33,6 +34,26 @@ const imageStudioCss = fs.readFileSync(
   "utf8"
 );
 const globalCss = fs.readFileSync(path.join(dashboardRoot, "src", "index.css"), "utf8");
+const eipMark = fs.readFileSync(
+  path.join(dashboardRoot, "src", "components", "brand", "EipMark.jsx"),
+  "utf8"
+);
+const samaraSource = fs.readFileSync(
+  path.resolve(dashboardRoot, "..", "samara-web", "my-vite-react-app", "src", "App.jsx"),
+  "utf8"
+);
+const samaraCss = fs.readFileSync(
+  path.resolve(dashboardRoot, "..", "samara-web", "my-vite-react-app", "src", "App.css"),
+  "utf8"
+);
+const userShell = fs.readFileSync(
+  path.join(dashboardRoot, "src", "components", "user", "UserShell.jsx"),
+  "utf8"
+);
+const adminShell = fs.readFileSync(
+  path.join(dashboardRoot, "src", "components", "admin", "AdminShell.jsx"),
+  "utf8"
+);
 const surface = fs.readFileSync(
   path.join(dashboardRoot, "src", "engine", "surfaces", "dashboard.js"),
   "utf8"
@@ -59,11 +80,37 @@ test("enhanced studio and photo toolkit share the EIP V1 artwork palette", () =>
   assert.match(imageStudioCss, /var\(--eip-v1-teal\)/);
 });
 
+test("selection in the DOM scanner or component tree is visible in preview", () => {
+  assert.match(source, /eip_content_preview/);
+  assert.match(source, /eip_selector/);
+  assert.match(source, /cse-preview-child-active/);
+  assert.match(studioCss, /cse-selection-focus/);
+  assert.match(samaraSource, /data-eip-preview-highlight/);
+  assert.match(samaraSource, /MutationObserver/);
+  assert.match(samaraSource, /setTimeout\(\(\) => observer\?\.disconnect\(\), 8000\)/);
+  assert.match(samaraCss, /eip-preview-highlight-pulse/);
+});
+
+test("EIP mark and harmonized shells are additive and the studio header stays fixed", () => {
+  assert.match(source, /<EipMark title="EIP"/);
+  assert.match(eipMark, /viewBox="0 0 32 32"/);
+  assert.match(studioCss, /\.cse-topbar\{position:sticky/);
+  assert.match(studioCss, /eip-shell-header-offset/);
+  assert.match(userShell, /overflow-x-clip/);
+  assert.doesNotMatch(userShell, /eip-user-shell[^"\n]*overflow-hidden/);
+  assert.match(userShell, /EIP V1 Beta/);
+  assert.match(userShell, /Classic UI/);
+  assert.match(adminShell, /EIP V1 Beta/);
+  assert.match(adminShell, /Classic UI/);
+  assert.match(globalCss, /\.eip-v1-shell/);
+  assert.match(globalCss, /Opt-in EIP V1 visual layer/);
+});
+
 test("exact builder exposes top bar, three panels, scanner, templates, preview, and inspector tabs", () => {
   for (const label of [
     "Content Studio Enhanced",
     "PAGE STRUCTURE",
-    "RENDERED DOM SCANNER",
+    "PAGE ANALYSIS",
     "LIVE PREVIEW",
     "SECTION INSPECTOR",
     "SECTION TEMPLATE LIBRARY",
@@ -76,7 +123,60 @@ test("exact builder exposes top bar, three panels, scanner, templates, preview, 
   assert.match(source, /cse-center/);
   assert.match(source, /cse-right/);
   assert.match(source, /scan_mode: "rendered"/);
-  assert.match(source, /MAP RENDERED COMPONENT/);
+  assert.match(source, /MAP THIS SECTION/);
+});
+
+test("Page Structure is presented as the scan result with a guided workflow", () => {
+  assert.match(source, /PAGE STRUCTURE/);
+  assert.match(source, /Generated from last scan/);
+  assert.match(source, /Detected sections from the live page/);
+  assert.match(source, /Analyze Page/);
+  assert.match(source, /Accept Suggested Mapping/);
+  assert.match(source, /Review Unmapped/);
+  for (const step of ["Review Sections", "Map", "Edit", "Preview", "Publish"]) {
+    assert.match(source, new RegExp(step));
+  }
+});
+
+test("tree and preview selection synchronize the preview and contextual inspector", () => {
+  assert.match(source, /function selectSection[\s\S]*?setInspectorTab\(defaultInspectorTab\(section\)\)/);
+  assert.match(source, /function selectPreviewElement/);
+  assert.match(source, /onClick=\{\(\) => selectPreviewElement\(child, "Media"\)\}/);
+  assert.match(source, /selectPreviewElement\(previewChild, "Data Binding"\)/);
+  assert.match(source, /eip-content-preview-select/);
+  assert.match(samaraSource, /eip-content-preview-select/);
+});
+
+test("mapping and inspector use progressive, user-facing disclosure", () => {
+  assert.match(source, /useState\("Quick Edit"\)/);
+  assert.match(source, /This section was detected but not yet mapped/);
+  assert.match(source, /Map This Section/);
+  assert.match(source, /Choose Section Type/);
+  assert.match(source, /Confirm Fields/);
+  assert.match(source, /Content Source/);
+  assert.match(source, /Save Mapping/);
+  assert.match(source, /Advanced technical details/);
+  assert.match(source, /scanner confidence/i);
+});
+
+test("contextual editing hides irrelevant controls and keeps Product Studio linked", () => {
+  assert.match(source, /supportsMedia \? <div className="cse-quick-action"/);
+  assert.match(source, /supportsButtons \? <div className="cse-quick-action"/);
+  assert.match(source, /\["hero", "hero_slider", "banner"\]\.includes\(selectedSection\.componentType\)/);
+  assert.match(source, /This section will display Product Studio data\. Product data is not copied\./);
+  assert.match(source, /View Source in Product Studio/);
+  assert.match(source, /Use templates to add a section that does not exist on the scanned page/);
+});
+
+test("component templates are purposeful and disabled controls explain why", () => {
+  for (const label of ["Hero", "Hero Slider", "Product Grid", "Product Carousel", "Image Gallery", "FAQ", "CTA", "Benefits", "Testimonials", "Newsletter"]) {
+    const template = SECTION_TEMPLATES.find((item) => item.label === label);
+    assert.ok(template, `${label} template should exist`);
+    assert.ok(String(template.description || "").trim(), `${label} template should explain its purpose`);
+  }
+  const disabledButtons = source.split(/\r?\n/).filter((line) => line.includes("<button") && line.includes("disabled="));
+  assert.ok(disabledButtons.length > 0);
+  for (const button of disabledButtons) assert.match(button, /title=/);
 });
 
 test("section template parent owns repeatable child order", () => {

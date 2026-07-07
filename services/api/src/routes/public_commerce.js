@@ -331,6 +331,40 @@ function storefrontLoaderScript() {
     node.href = url;
     return node;
   };
+  const highlightPreviewTarget = () => {
+    const params = new URLSearchParams(globalThis.location?.search || "");
+    if (params.get("eip_content_preview") !== "1") return false;
+    const selector = text(params.get("eip_selector")).trim();
+    if (!selector || selector.length > 500) return false;
+    let target;
+    try { target = document.querySelector(selector); } catch { return false; }
+    if (!target) return false;
+    let style = document.getElementById("eip-preview-highlight-style");
+    if (!style) {
+      style = document.createElement("style");
+      style.id = "eip-preview-highlight-style";
+      style.textContent = "[data-eip-preview-highlight]{position:relative!important;z-index:2147483000!important;outline:4px solid #5878aa!important;outline-offset:5px!important;box-shadow:0 0 0 10px rgba(88,120,170,.2),0 18px 50px rgba(11,20,48,.28)!important;animation:eip-preview-highlight-pulse 1.5s ease-in-out infinite alternate!important}[data-eip-preview-highlight]::before{content:attr(data-eip-preview-highlight);position:absolute;z-index:2147483001;top:8px;left:8px;padding:7px 10px;border-radius:999px;background:#0b1430;color:#fff;font:700 11px/1.1 system-ui,sans-serif;letter-spacing:.05em;pointer-events:none}@keyframes eip-preview-highlight-pulse{from{outline-color:#5878aa}to{outline-color:#c99a45}}";
+      document.head.append(style);
+    }
+    document.querySelectorAll("[data-eip-preview-highlight]").forEach((node) => node.removeAttribute("data-eip-preview-highlight"));
+    target.setAttribute("data-eip-preview-highlight", "Selected in Content Studio");
+    if (target.dataset.eipPreviewClickBound !== "true") {
+      target.dataset.eipPreviewClickBound = "true";
+      target.addEventListener("click", () => {
+        if (globalThis.parent !== globalThis) globalThis.parent.postMessage({ type: "eip-content-preview-select", selector }, "*");
+      }, true);
+    }
+    target.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+    return true;
+  };
+  const watchPreviewTarget = () => {
+    if (highlightPreviewTarget()) return;
+    const observer = new MutationObserver(() => {
+      if (highlightPreviewTarget()) observer.disconnect();
+    });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+    globalThis.setTimeout(() => observer.disconnect(), 8000);
+  };
   const productCard = (product) => {
     const card = el("article", "eip-storefront-product-card");
     const media = product?.attrs?.media || {};
@@ -380,6 +414,7 @@ function storefrontLoaderScript() {
     return true;
   };
   const run = async () => {
+    watchPreviewTarget();
     const manifestUrl = apiBase + "/api/public/commerce/" + encodeURIComponent(connection) + "/storefront/manifest?integration=loader";
     const manifest = await getJson(manifestUrl);
     for (const mapping of Array.isArray(manifest.slots) ? manifest.slots : []) {
@@ -390,6 +425,7 @@ function storefrontLoaderScript() {
       try {
         const payload = await getJson(apiBase + mapping.content_endpoint);
         render(target, mapping, payload?.item);
+        highlightPreviewTarget();
       } catch (error) {
         warn("Slot fallback preserved", mapping.slot_code, error?.message || error);
       }

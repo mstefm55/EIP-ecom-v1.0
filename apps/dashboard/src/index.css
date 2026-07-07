@@ -102,6 +102,45 @@
     @apply rounded-2xl border border-ink-200/70 bg-white/90 p-4;
     box-shadow: 0 18px 50px rgba(27, 40, 59, 0.12), 0 4px 10px rgba(27, 40, 59, 0.06);
   }
+
+  /* Opt-in EIP V1 visual layer. Existing screen structure and behavior stay intact. */
+  .eip-v1-shell {
+    color: var(--eip-v1-ink-800);
+    background:
+      radial-gradient(circle at 12% 8%, rgba(142, 166, 207, 0.28), transparent 34%),
+      radial-gradient(circle at 88% 18%, rgba(67, 143, 158, 0.18), transparent 36%),
+      var(--eip-v1-canvas);
+  }
+
+  .eip-v1-shell .glass-panel {
+    border-color: rgba(213, 220, 235, 0.88);
+    background: rgba(249, 250, 255, 0.88);
+    box-shadow: 0 18px 48px var(--eip-v1-shadow);
+  }
+
+  .eip-v1-shell header.glass-panel {
+    border-color: rgba(213, 220, 235, 0.92);
+    background: linear-gradient(105deg, rgba(249, 250, 255, 0.95), rgba(233, 238, 249, 0.9));
+  }
+
+  .eip-v1-shell input,
+  .eip-v1-shell select,
+  .eip-v1-shell textarea {
+    border-color: var(--eip-v1-line);
+    color: var(--eip-v1-ink-800);
+  }
+
+  .eip-v1-shell input:focus,
+  .eip-v1-shell select:focus,
+  .eip-v1-shell textarea:focus {
+    border-color: var(--eip-v1-primary-600);
+    box-shadow: 0 0 0 3px rgba(88, 120, 170, 0.13);
+  }
+
+  .eip-v1-shell header [class*="text-brand-"],
+  .eip-v1-shell header [class*="text-cyan-"] {
+    color: var(--eip-v1-primary-700);
+  }
 }
 
 @layer utilities {

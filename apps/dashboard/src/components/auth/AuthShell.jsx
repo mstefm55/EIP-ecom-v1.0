@@ -1,5 +1,6 @@
 import { Children, cloneElement, isValidElement } from "react";
-import { UserPlus, ShieldCheck } from "lucide-react";
+import { UserPlus } from "lucide-react";
+import EipMark from "../brand/EipMark";
 import { runAction } from "../../engine/actions";
 
 export default function AuthShell({ node, children, ctx }) {
@@ -42,7 +43,7 @@ export default function AuthShell({ node, children, ctx }) {
   const canShowCta = showCta !== false && Boolean(cta);
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-mist-50 text-ink-900">
+    <div className="eip-v1-shell eip-v1-auth-shell relative min-h-screen overflow-hidden bg-mist-50 text-ink-900">
       <div className="pointer-events-none absolute inset-0 bg-auth-aurora opacity-90" />
       <div className="pointer-events-none absolute -left-32 top-24 h-80 w-80 rounded-full bg-brand-200/50 blur-[120px]" />
       <div className="pointer-events-none absolute -right-40 bottom-10 h-96 w-96 rounded-full bg-cyan-200/60 blur-[140px]" />
@@ -51,7 +52,7 @@ export default function AuthShell({ node, children, ctx }) {
       <header className="relative z-10 mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-6">
         <div className="flex items-center gap-3">
           <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/80 text-brand-700 shadow-soft">
-            <ShieldCheck className="h-5 w-5" />
+            <EipMark className="h-6 w-6" title="EIP" />
           </div>
           <div>
             <p className="text-xs uppercase tracking-[0.35em] text-ink-400">{brand}</p>
