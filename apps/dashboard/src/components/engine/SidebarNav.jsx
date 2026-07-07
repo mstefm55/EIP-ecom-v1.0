@@ -96,8 +96,8 @@ export default function SidebarNav({
                 } ${collapsed ? "justify-center" : ""}`}
                 title={item.label}
               >
-                <Icon className="h-4 w-4" />
-                {!collapsed ? <span>{item.label}</span> : null}
+                <Icon className="h-4 w-4 shrink-0" />
+                {!collapsed ? <span className="min-w-0 flex-1 text-left leading-snug">{item.label}</span> : null}
               </button>
             );
           })}

@@ -111,6 +111,7 @@ test("EIP mark and harmonized shells are additive and the studio header stays fi
   assert.match(adminShell, /Classic UI/);
   assert.match(sidebarNav, /eip-sidebar-scroll/);
   assert.match(sidebarNav, /overflow-y-auto/);
+  assert.match(sidebarNav, /min-w-0 flex-1 text-left leading-snug/);
   assert.match(globalCss, /\.eip-v1-shell/);
   assert.match(globalCss, /Opt-in EIP V1 visual layer/);
 });
