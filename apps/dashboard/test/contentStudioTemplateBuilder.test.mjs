@@ -54,6 +54,10 @@ const adminShell = fs.readFileSync(
   path.join(dashboardRoot, "src", "components", "admin", "AdminShell.jsx"),
   "utf8"
 );
+const sidebarNav = fs.readFileSync(
+  path.join(dashboardRoot, "src", "components", "engine", "SidebarNav.jsx"),
+  "utf8"
+);
 const surface = fs.readFileSync(
   path.join(dashboardRoot, "src", "engine", "surfaces", "dashboard.js"),
   "utf8"
@@ -94,14 +98,19 @@ test("selection in the DOM scanner or component tree is visible in preview", () 
 test("EIP mark and harmonized shells are additive and the studio header stays fixed", () => {
   assert.match(source, /<EipMark title="EIP"/);
   assert.match(eipMark, /viewBox="0 0 32 32"/);
-  assert.match(studioCss, /\.cse-topbar\{position:sticky/);
+  assert.match(studioCss, /\.eip-user-shell \.cse-topbar\{position:fixed/);
+  assert.match(studioCss, /\.cse-left\{overflow-y:scroll/);
+  assert.match(studioCss, /\.eip-user-shell \.cse-workspace\{height:auto;min-height:0;flex:1\}/);
   assert.match(studioCss, /eip-shell-header-offset/);
+  assert.match(userShell, /eip-shell-content-offset/);
   assert.match(userShell, /overflow-x-clip/);
   assert.doesNotMatch(userShell, /eip-user-shell[^"\n]*overflow-hidden/);
   assert.match(userShell, /EIP V1 Beta/);
   assert.match(userShell, /Classic UI/);
   assert.match(adminShell, /EIP V1 Beta/);
   assert.match(adminShell, /Classic UI/);
+  assert.match(sidebarNav, /eip-sidebar-scroll/);
+  assert.match(sidebarNav, /overflow-y-auto/);
   assert.match(globalCss, /\.eip-v1-shell/);
   assert.match(globalCss, /Opt-in EIP V1 visual layer/);
 });

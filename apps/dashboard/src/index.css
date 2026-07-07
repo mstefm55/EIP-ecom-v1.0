@@ -141,6 +141,21 @@
   .eip-v1-shell header [class*="text-cyan-"] {
     color: var(--eip-v1-primary-700);
   }
+
+  .eip-sidebar-scroll {
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scrollbar-color: var(--eip-v1-primary-400) transparent;
+  }
+
+  .eip-sidebar-scroll::-webkit-scrollbar {
+    width: 7px;
+  }
+
+  .eip-sidebar-scroll::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: var(--eip-v1-primary-400);
+  }
 }
 
 @layer utilities {

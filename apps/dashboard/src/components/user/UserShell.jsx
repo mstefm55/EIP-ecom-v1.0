@@ -114,7 +114,10 @@ export default function UserShell({ node, children, ctx }) {
   return (
     <div
       className={`${uiVersion === "v1" ? "eip-v1-shell" : "eip-classic-shell"} eip-user-shell relative min-h-screen overflow-x-clip bg-mist-50 text-ink-900`}
-      style={{ "--eip-shell-header-offset": `calc(${headerHeight} + 0.75rem)` }}
+      style={{
+        "--eip-shell-header-offset": `calc(${headerHeight} + 0.75rem)`,
+        "--eip-shell-content-offset": contentOffset,
+      }}
     >
       <div className="pointer-events-none absolute inset-0 bg-auth-aurora opacity-70" />
       <div className="pointer-events-none absolute -left-32 top-24 h-80 w-80 rounded-full bg-brand-200/40 blur-[120px]" />

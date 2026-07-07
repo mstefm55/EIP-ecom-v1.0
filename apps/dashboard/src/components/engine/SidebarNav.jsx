@@ -62,12 +62,12 @@ export default function SidebarNav({
 }) {
   return (
     <aside
-      className={`glass-panel fixed left-4 flex flex-col justify-between py-5 ${
+      className={`glass-panel fixed left-4 flex min-h-0 flex-col overflow-hidden py-5 ${
         collapsed ? "w-20" : "w-64"
       }`}
       style={{ top: topOffset, bottom: bottomOffset }}
     >
-      <div>
+      <div className="flex min-h-0 flex-1 flex-col">
         <div className={`flex items-center gap-3 px-4 ${collapsed ? "justify-center" : ""}`}>
           <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-white/80 text-brand-700 shadow-soft">
             <ShieldCheck className="h-4 w-4" />
@@ -80,7 +80,7 @@ export default function SidebarNav({
           ) : null}
         </div>
 
-        <div className="mt-5 space-y-1.5 px-2.5">
+        <div className="eip-sidebar-scroll mt-5 min-h-0 flex-1 space-y-1.5 overflow-y-auto overscroll-contain px-2.5 pr-2">
           {menu.map((item) => {
             const Icon = resolveIcon(item.icon);
             const active = activeItem === item.code;
