@@ -100,7 +100,8 @@ test("EIP mark and harmonized shells are additive and the studio header stays fi
   assert.match(eipMark, /viewBox="0 0 32 32"/);
   assert.match(studioCss, /\.eip-user-shell \.cse-topbar\{position:fixed/);
   assert.match(studioCss, /\.cse-left\{overflow-y:scroll/);
-  assert.match(studioCss, /\.eip-user-shell \.cse-workspace\{height:auto;min-height:0;flex:1\}/);
+  assert.match(studioCss, /\.eip-user-shell \.cse-root\{padding-top:66px\}/);
+  assert.doesNotMatch(studioCss, /\.eip-user-shell \.cse-root\{[^}]*overflow:hidden/);
   assert.match(studioCss, /eip-shell-header-offset/);
   assert.match(userShell, /eip-shell-content-offset/);
   assert.match(userShell, /overflow-x-clip/);
