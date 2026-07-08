@@ -62,6 +62,7 @@ import "./ContentStudioEnhanced.css";
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
 const PREVIEW_BASE_URL = import.meta.env.VITE_ECOM_PREVIEW_BASE_URL || "http://localhost:5174";
 const UPLOAD_TIMEOUT_MS = 120000;
+const TRANSLATION_CONFIRM_REQUIRED = "translation_unavailable_confirmation_required";
 
 const INSPECTOR_TABS = ["Quick Edit", "Content", "Data Binding", "Media", "Display", "Advanced"];
 const WORKFLOW_STEPS = ["Analyze Page", "Review Sections", "Map", "Edit", "Preview", "Publish"];
@@ -628,21 +629,69 @@ export default function ContentStudioEnhanced({ ctx }) {
   async function publish() {
     if (!selectedSection) return;
     setPublishing(true);
+    setNotice({ tone: "", message: "" });
     try {
       const saved = await saveDraft({ quiet: true });
       if (!saved) return;
-      for (const action of ["DRAFT_READY", "APPROVE", "PUBLISH"]) {
+
+      const callAction = (action, { publishEnglishOnly = false } = {}) =>
+        apiFetch(`/api/eip/ecom/storefront/content/${encodeURIComponent(selectedSection.slot)}/actions`, {
+          method: "POST",
+          body: {
+            action,
+            ...(publishEnglishOnly ? { publish_english_only: true } : {})
+          }
+        });
+
+      for (const action of ["DRAFT_READY", "APPROVE"]) {
         try {
-          await apiFetch(`/api/eip/ecom/storefront/content/${encodeURIComponent(selectedSection.slot)}/actions`, {
-            method: "POST",
-            body: { action }
-          });
+          await callAction(action);
         } catch (error) {
-          if (!String(error?.message || "").includes("INVALID_TRANSITION")) throw error;
+          const code = String(error?.code || error?.payload?.error || error?.message || "");
+          if (!code.includes("INVALID_TRANSITION")) throw error;
         }
       }
-      updateSection(selectedSection.componentId, (section) => ({ ...section, publishStatus: "published" }));
-      setNotice({ tone: "success", message: "Section published." });
+
+      let result = await callAction("PUBLISH");
+      if (result?.publish_state === TRANSLATION_CONFIRM_REQUIRED) {
+        const confirmed = window.confirm(
+          "Translation service is unavailable. Publish this section in English only?"
+        );
+        if (!confirmed) {
+          setNotice({
+            tone: "error",
+            message: "Publish paused. The section remains a draft until translation is available or English-only publishing is confirmed."
+          });
+          return;
+        }
+        result = await callAction("PUBLISH", { publishEnglishOnly: true });
+      }
+
+      const publishedStatus = String(result?.item?.status || "").trim().toLowerCase();
+      const publishCompleted = publishedStatus === "published" || [
+        "published_with_translation",
+        "published_english_only"
+      ].includes(result?.publish_state);
+      if (!publishCompleted) {
+        throw new Error("The server did not confirm publication. The section remains a draft.");
+      }
+
+      if (result?.item) {
+        const normalized = normalizeLegacySection(result.item);
+        updateSection(selectedSection.componentId, () => ({
+          ...normalized,
+          componentId: selectedSection.componentId,
+          publishStatus: "published"
+        }));
+      } else {
+        updateSection(selectedSection.componentId, (section) => ({ ...section, publishStatus: "published" }));
+      }
+      setNotice({
+        tone: "success",
+        message: result?.publish_state === "published_english_only"
+          ? "Section published in English only."
+          : "Section published."
+      });
     } catch (error) {
       setNotice({ tone: "error", message: messageFor(error, "Publish failed.") });
     } finally {
