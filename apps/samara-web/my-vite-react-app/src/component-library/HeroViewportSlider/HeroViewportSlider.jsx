@@ -11,6 +11,38 @@ function normalizeSlides(slides) {
     : [];
 }
 
+function normalizeSlideButtons(slide) {
+  const buttons = Array.isArray(slide?.buttons)
+    ? slide.buttons
+        .map((button, index) => {
+          const label = String(button?.label || button?.text || "").trim();
+          const url = String(button?.url || button?.href || button?.target || "").trim();
+          const styleRaw = String(button?.style || button?.variant || "primary").trim().toLowerCase();
+          const style = ["primary", "secondary", "link"].includes(styleRaw) ? styleRaw : "primary";
+          if (!label && !url) return null;
+          return {
+            id: button?.id || `button-${index + 1}`,
+            label,
+            url,
+            style,
+            cta: button?.cta && typeof button.cta === "object"
+              ? button.cta
+              : { target: url, action: /^https?:\/\//i.test(url) ? "navigate_external" : url.startsWith("#") ? "scroll_to" : "navigate_internal", new_tab: button?.new_tab === true || button?.newTab === true }
+          };
+        })
+        .filter(Boolean)
+    : [];
+  if (buttons.length) return buttons;
+  if (!slide?.ctaLabel) return [];
+  return [{
+    id: "legacy-cta",
+    label: slide.ctaLabel,
+    url: slide.ctaUrl || "",
+    style: "primary",
+    cta: slide.cta || { target: slide.ctaUrl || "", action: "navigate_internal", new_tab: false }
+  }];
+}
+
 export default function HeroViewportSlider({
   slides: slidesProp,
   className = "",
@@ -84,6 +116,7 @@ export default function HeroViewportSlider({
         {slides.map((slide, index) => {
           const isActive = index === active;
           const overlay = slide.overlay === "center" ? "is-overlay-center" : "is-overlay-left";
+          const buttons = normalizeSlideButtons(slide);
           return (
             <article
               key={slide.id}
@@ -96,20 +129,32 @@ export default function HeroViewportSlider({
                 {slide.eyebrow ? <p className="hero-slide-eyebrow">{slide.eyebrow}</p> : null}
                 {slide.title ? <h1>{slide.title}</h1> : null}
                 {slide.subtitle ? <p className="hero-slide-subtitle">{slide.subtitle}</p> : null}
-                {slide.ctaLabel ? (
-                  onCta ? (
-                    <button
-                      type="button"
-                      className="hero-slide-cta"
-                      onClick={() => onCta(slide)}
-                    >
-                      {slide.ctaLabel}
-                    </button>
-                  ) : (
-                    <a className="hero-slide-cta" href={slide.ctaUrl || "#"}>
-                      {slide.ctaLabel}
-                    </a>
-                  )
+                {buttons.length ? (
+                  <div className="hero-slide-actions">
+                    {buttons.map((button) => {
+                      const className = `hero-slide-cta hero-slide-cta--${button.style}`;
+                      const actionSlide = {
+                        ...slide,
+                        ctaLabel: button.label,
+                        ctaUrl: button.url,
+                        cta: button.cta || slide.cta
+                      };
+                      return onCta ? (
+                        <button
+                          key={button.id}
+                          type="button"
+                          className={className}
+                          onClick={() => onCta(actionSlide)}
+                        >
+                          {button.label}
+                        </button>
+                      ) : (
+                        <a key={button.id} className={className} href={button.url || "#"}>
+                          {button.label}
+                        </a>
+                      );
+                    })}
+                  </div>
                 ) : null}
               </div>
             </article>

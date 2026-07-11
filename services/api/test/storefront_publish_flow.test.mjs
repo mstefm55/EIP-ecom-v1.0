@@ -54,3 +54,15 @@ test("dashboard requires final publish confirmation from backend", () => {
   assert.match(dashboard, /published = await callAction\("PUBLISH", \{ publishEnglishOnly: true \}\);/);
   assert.doesNotMatch(dashboard, /callAction\("PUBLISH", \{ allowInvalidTransition: true \}\)/);
 });
+
+test("storefront content APIs preserve enhanced button metadata", () => {
+  const publicRoute = fs.readFileSync(new URL("../src/routes/public_commerce.js", import.meta.url), "utf8");
+
+  assert.match(ecomRoute, /function normalizeStorefrontButtons/);
+  assert.match(ecomRoute, /buttons,\s*\n\s*overlay:/);
+  assert.match(ecomRoute, /cta_label: normalizeOptionalText\(slide\.cta_label \|\| slide\.ctaLabel \|\| buttons\[0\]\?\.label\)/);
+
+  assert.match(publicRoute, /function normalizeStorefrontButtons/);
+  assert.match(publicRoute, /buttons,\s*\n\s*overlay:/);
+  assert.match(publicRoute, /slide\.cta_label \|\|\s*\n\s*slide\.buttons\?\.length/);
+});

@@ -102,3 +102,24 @@ test("enhanced hero serialization preserves every configured slide", async () =>
     "/assets/hero-two.jpg"
   ]);
 });
+
+test("enhanced hero serialization preserves button metadata for the storefront", async () => {
+  const { createSectionFromTemplate, serializeEnhancedSection } = await import(
+    "../src/components/ecom/contentStudioEnhancedModel.js"
+  );
+  const section = createSectionFromTemplate("hero_slider", 0);
+  section.slot = "home.hero";
+  section.children[0].content.buttons = [
+    { id: "brand-button", label: "Explore Brand", url: "/brand", style: "primary", icon: "sparkles", newTab: false },
+    { id: "lookbook-button", label: "Open Lookbook", url: "https://example.com/lookbook", style: "secondary", newTab: true }
+  ];
+
+  const payload = serializeEnhancedSection(section);
+  const [slide] = payload.slides;
+
+  assert.equal(slide.cta_label, "Explore Brand");
+  assert.equal(slide.cta_target, "/brand");
+  assert.equal(slide.buttons.length, 2);
+  assert.deepEqual(slide.buttons.map((button) => button.style), ["primary", "secondary"]);
+  assert.equal(slide.buttons[1].newTab, true);
+});

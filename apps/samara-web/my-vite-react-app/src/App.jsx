@@ -2396,6 +2396,66 @@ function resolveSlotTranslatedField(slotItem, path, lang, fallbackValue = "") {
   return String(fallbackValue || "").trim();
 }
 
+function normalizeStorefrontButton(button = {}, index = 0) {
+  if (!button || typeof button !== "object") return null;
+  const label = String(button.label || button.text || button.cta_label || button.ctaLabel || "").trim();
+  const url = String(button.url || button.href || button.target || button.cta_url || button.ctaUrl || "").trim();
+  const styleRaw = String(button.style || button.variant || "primary").trim().toLowerCase();
+  const style = ["primary", "secondary", "link"].includes(styleRaw) ? styleRaw : "primary";
+  const actionRaw = String(button.cta?.action || button.action || "").trim().toLowerCase();
+  const action = ["navigate_internal", "navigate_external", "scroll_to"].includes(actionRaw)
+    ? actionRaw
+    : /^https?:\/\//i.test(url)
+      ? "navigate_external"
+      : url.startsWith("#")
+        ? "scroll_to"
+        : "navigate_internal";
+  const newTabRaw = button.new_tab ?? button.newTab ?? button.cta?.new_tab ?? button.cta?.newTab;
+  const newTab = newTabRaw === true || String(newTabRaw || "").toLowerCase() === "true";
+  if (!label && !url) return null;
+  return {
+    id: String(button.id || `button-${index + 1}`),
+    label,
+    url,
+    style,
+    icon: String(button.icon || "").trim(),
+    new_tab: newTab,
+    newTab,
+    cta: {
+      action,
+      target: url,
+      new_tab: newTab,
+    },
+  };
+}
+
+function resolveStorefrontSlideButtons(slide, index = 0, translationMeta = null, lang = "en") {
+  const translatedCta = resolveTranslatedPath(translationMeta, `slides.${index}.cta_label`, lang);
+  const buttons = (Array.isArray(slide?.buttons) ? slide.buttons : [])
+    .map((button, buttonIndex) => normalizeStorefrontButton(button, buttonIndex))
+    .filter(Boolean);
+  if (buttons.length) {
+    return translatedCta ? [{ ...buttons[0], label: translatedCta }, ...buttons.slice(1)] : buttons;
+  }
+  const legacyLabel = String(translatedCta || slide?.cta_label || slide?.ctaLabel || "").trim();
+  const legacyUrl = String(
+    slide?.cta?.target ||
+      slide?.cta_target ||
+      slide?.cta_url ||
+      slide?.ctaUrl ||
+      ""
+  ).trim();
+  const legacy = normalizeStorefrontButton({
+    id: "legacy-cta",
+    label: legacyLabel,
+    url: legacyUrl,
+    new_tab: slide?.cta_new_tab ?? slide?.cta?.new_tab ?? slide?.cta?.newTab,
+    action: slide?.cta_action || slide?.cta?.action,
+    style: "primary"
+  });
+  return legacy ? [legacy] : [];
+}
+
 function resolveInfoHeroFromSlot(contentBySlot, slot, fallback = {}, lang = "en") {
   const slotItem = getSlotItem(contentBySlot, slot);
   const slides = getSlotSlides(contentBySlot, slot);
@@ -8372,15 +8432,20 @@ export default function App() {
           "";
         const image = imageRaw ? resolveAssetUrl(imageRaw) : "";
         if (!image) return null;
+        const buttons = resolveStorefrontSlideButtons(slide, index, heroTranslation, language);
+        const primaryButton = buttons[0] || null;
         const ctaTarget = String(
-          slide?.cta?.target ||
+          primaryButton?.cta?.target ||
+            primaryButton?.url ||
+            slide?.cta?.target ||
             slide?.cta_target ||
             slide?.cta_url ||
             slide?.ctaUrl ||
             "/patterns"
         ).trim();
         const ctaActionRaw = String(
-          slide?.cta?.action ||
+          primaryButton?.cta?.action ||
+            slide?.cta?.action ||
             slide?.cta_action ||
             ""
         ).trim().toLowerCase();
@@ -8392,6 +8457,8 @@ export default function App() {
               ? "scroll_to"
               : "navigate_internal";
         const ctaNewTabRaw =
+          primaryButton?.cta?.new_tab ??
+          primaryButton?.new_tab ??
           slide?.cta?.new_tab ??
           slide?.cta_new_tab ??
           slide?.cta?.newTab ??
@@ -8417,7 +8484,8 @@ export default function App() {
           eyebrow: String(eyebrow || slide?.eyebrow || "").trim() || t("hero.kicker"),
           title: String(title || slide?.title || "").trim() || t("hero.title"),
           subtitle: String(subtitle || slide?.subtitle || "").trim() || t("hero.subtitle"),
-          ctaLabel: String(ctaLabel || slide?.cta_label || slide?.ctaLabel || "").trim() || t("hero.shop"),
+          buttons,
+          ctaLabel: String(primaryButton?.label || ctaLabel || slide?.cta_label || slide?.ctaLabel || "").trim() || t("hero.shop"),
           ctaUrl: ctaTarget || "/patterns",
           cta: {
             action: ctaAction,

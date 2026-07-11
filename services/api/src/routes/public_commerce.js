@@ -471,9 +471,12 @@ async function resolveStorefrontSlotProducts(app, tenantId, attrs = {}) {
 }
 
 function normalizeStorefrontCta(slide = {}) {
+  const buttons = normalizeStorefrontButtons(slide.buttons || []);
+  const firstButton = buttons[0] || null;
   const actionRaw = normalizeText(
     slide.cta?.action ||
       slide.cta_action ||
+      firstButton?.cta?.action ||
       ""
   ).toLowerCase();
   const target = normalizeOptionalText(
@@ -481,6 +484,7 @@ function normalizeStorefrontCta(slide = {}) {
       slide.cta_target ||
       slide.cta_url ||
       slide.ctaUrl ||
+      firstButton?.url ||
       ""
   );
   const action = STOREFRONT_CTA_ACTIONS.has(actionRaw)
@@ -497,6 +501,7 @@ function normalizeStorefrontCta(slide = {}) {
   if (newTabRaw === undefined) newTabRaw = slide.cta_new_tab;
   if (newTabRaw === undefined) newTabRaw = slide.cta?.newTab;
   if (newTabRaw === undefined) newTabRaw = slide.cta_newTab;
+  if (newTabRaw === undefined) newTabRaw = firstButton?.new_tab;
   const newTab =
     newTabRaw === true || String(newTabRaw || "").toLowerCase() === "true";
 
@@ -505,6 +510,49 @@ function normalizeStorefrontCta(slide = {}) {
     target: target || "",
     new_tab: newTab
   };
+}
+
+function normalizeStorefrontButton(button = {}, index = 0) {
+  if (!button || typeof button !== "object") return null;
+  const label = normalizeOptionalText(button.label || button.text || button.cta_label || button.ctaLabel);
+  const url = normalizeOptionalText(button.url || button.href || button.target || button.cta_url || button.ctaUrl);
+  const styleRaw = normalizeText(button.style || button.variant || "primary").toLowerCase();
+  const style = ["primary", "secondary", "link"].includes(styleRaw) ? styleRaw : "primary";
+  const actionRaw = normalizeText(button.cta?.action || button.action || "").toLowerCase();
+  const action = STOREFRONT_CTA_ACTIONS.has(actionRaw)
+    ? actionRaw
+    : url
+      ? /^https?:\/\//i.test(url)
+        ? "navigate_external"
+        : url.startsWith("#")
+          ? "scroll_to"
+          : "navigate_internal"
+      : "navigate_internal";
+  const newTabRaw = button.new_tab ?? button.newTab ?? button.cta?.new_tab ?? button.cta?.newTab;
+  const newTab = newTabRaw === true || String(newTabRaw || "").toLowerCase() === "true";
+  if (!label && !url) return null;
+  return {
+    id: normalizeOptionalText(button.id) || `button-${index + 1}`,
+    label,
+    url,
+    style,
+    icon: normalizeOptionalText(button.icon),
+    new_tab: newTab,
+    newTab,
+    cta: {
+      action,
+      target: url || "",
+      new_tab: newTab
+    }
+  };
+}
+
+function normalizeStorefrontButtons(input = []) {
+  if (!Array.isArray(input)) return [];
+  return input
+    .map((button, index) => normalizeStorefrontButton(button, index))
+    .filter(Boolean)
+    .slice(0, 6);
 }
 
 function normalizeStorefrontArticlePublic(input = {}) {
@@ -3445,6 +3493,7 @@ export default async function publicCommerceRoutes(app) {
               );
               const image = rawImage ? signAssetUrl(rawImage, app, access.tenant.id) : "";
               if (rawImage && !image) return null;
+              const buttons = normalizeStorefrontButtons(slide.buttons || []);
               const cta = normalizeStorefrontCta(slide);
               return {
                 id: normalizeText(slide.id || `slide-${index + 1}`),
@@ -3453,12 +3502,13 @@ export default async function publicCommerceRoutes(app) {
                 title: normalizeText(slide.title || ""),
                 subtitle: normalizeText(slide.subtitle || ""),
                 body: normalizeText(slide.body || slide.content || ""),
-                cta_label: normalizeText(slide.cta_label || slide.ctaLabel || ""),
+                cta_label: normalizeText(slide.cta_label || slide.ctaLabel || buttons[0]?.label || ""),
                 cta_url: cta.target,
                 cta,
                 cta_action: cta.action,
                 cta_target: cta.target,
                 cta_new_tab: cta.new_tab,
+                buttons,
                 overlay: normalizeText(slide.overlay || "").toLowerCase() === "center" ? "center" : "left",
                 fit: normalizeText(slide.fit || slide.image_fit || "").toLowerCase() === "contain" ? "contain" : "cover",
                 focus_x: Number.isFinite(Number(slide.focus_x)) ? Number(slide.focus_x) : 50,
@@ -3475,7 +3525,8 @@ export default async function publicCommerceRoutes(app) {
                 slide.subtitle ||
                 slide.body ||
                 slide.eyebrow ||
-                slide.cta_label
+                slide.cta_label ||
+                slide.buttons?.length
               )
             )
             .filter(Boolean)
