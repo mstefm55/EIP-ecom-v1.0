@@ -1,5 +1,4 @@
 import {
-  ShieldCheck,
   LayoutGrid,
   ClipboardList,
   Users,
@@ -18,10 +17,11 @@ import {
   LayoutTemplate,
   PanelLeftClose,
   PanelLeftOpen,
+  ShoppingCart,
 } from "lucide-react";
+import EipMark from "../brand/EipMark";
 
 const ICONS = {
-  ShieldCheck,
   LayoutGrid,
   ClipboardList,
   Users,
@@ -38,6 +38,7 @@ const ICONS = {
   Database,
   Package,
   LayoutTemplate,
+  ShoppingCart,
 };
 
 function resolveIcon(icon) {
@@ -70,7 +71,7 @@ export default function SidebarNav({
       <div className="flex min-h-0 flex-1 flex-col">
         <div className={`flex items-center gap-3 px-4 ${collapsed ? "justify-center" : ""}`}>
           <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-white/80 text-brand-700 shadow-soft">
-            <ShieldCheck className="h-4 w-4" />
+            <EipMark className="h-5 w-5" title="EIP" />
           </div>
           {!collapsed ? (
             <div>
@@ -97,7 +98,12 @@ export default function SidebarNav({
                 title={item.label}
               >
                 <Icon className="h-4 w-4 shrink-0" />
-                {!collapsed ? <span className="min-w-0 flex-1 text-left leading-snug">{item.label}</span> : null}
+                {!collapsed ? <span className="min-w-0 flex-1 truncate text-left">{item.label}</span> : null}
+                {!collapsed && item.badge ? (
+                  <span className="rounded-full bg-brand-100 px-1.5 py-0.5 text-[0.55rem] font-bold uppercase tracking-[0.12em] text-brand-700">
+                    {item.badge}
+                  </span>
+                ) : null}
               </button>
             );
           })}

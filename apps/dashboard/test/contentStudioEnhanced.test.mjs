@@ -18,6 +18,14 @@ const enhancedSource = fs.readFileSync(
   path.join(dashboardRoot, "src", "components", "ecom", "ContentStudioEnhanced.jsx"),
   "utf8"
 );
+const enhancedCssSource = fs.readFileSync(
+  path.join(dashboardRoot, "src", "components", "ecom", "ContentStudioEnhanced.css"),
+  "utf8"
+);
+const sidebarSource = fs.readFileSync(
+  path.join(dashboardRoot, "src", "components", "engine", "SidebarNav.jsx"),
+  "utf8"
+);
 
 test("enhanced Content Studio is opt-in and the original surface remains available", () => {
   assert.match(surfaceSource, /mode:\s*"content-studio"/);
@@ -54,6 +62,23 @@ test("enhanced Content Studio does not report a false publish when translation c
   assert.match(enhancedSource, /publish_english_only:\s*true/);
   assert.match(enhancedSource, /if \(!publishCompleted\)/);
   assert.match(enhancedSource, /The server did not confirm publication/);
+});
+
+test("enhanced Content Studio uses harmonised app chrome and modal confirmations", () => {
+  assert.doesNotMatch(enhancedSource, /window\.confirm/);
+  assert.match(enhancedSource, /confirmEnglishOnlyPublish/);
+  assert.match(enhancedSource, /cse-confirm-modal/);
+  assert.match(enhancedSource, /role="toolbar" aria-label="Content Studio command bar"/);
+  assert.doesNotMatch(enhancedSource, /<header className="cse-topbar"/);
+  assert.match(enhancedCssSource, /one app header, one local studio command strip/);
+  assert.match(enhancedCssSource, /position:relative;top:auto;left:auto;right:auto/);
+});
+
+test("dashboard sidebar uses the EIP mark and keeps long labels aligned", () => {
+  assert.match(sidebarSource, /import EipMark/);
+  assert.match(sidebarSource, /<EipMark className="h-5 w-5"/);
+  assert.match(sidebarSource, /truncate text-left/);
+  assert.match(sidebarSource, /item\.badge/);
 });
 
 test("enhanced hero serialization preserves every configured slide", async () => {

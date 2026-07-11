@@ -218,9 +218,11 @@ export default function ContentStudioEnhanced({ ctx }) {
   const [helpOpen, setHelpOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [editor, setEditor] = useState({ open: false, file: null, sourceUrl: "", childId: "", previousImage: "" });
+  const [confirmModal, setConfirmModal] = useState({ open: false, title: "", message: "", confirmLabel: "", cancelLabel: "" });
   const fileInputRef = useRef(null);
   const previewObjectUrlRef = useRef("");
   const previewInteractionRef = useRef(null);
+  const confirmResolverRef = useRef(null);
 
   const scannerZones = useMemo(() => normalizeScannerZones(structure), [structure]);
   const scannerTree = useMemo(() => buildScannerTree(scannerZones.filter((zone) => zone.page === page)), [page, scannerZones]);
@@ -288,6 +290,30 @@ export default function ContentStudioEnhanced({ ctx }) {
     }));
   };
 
+  function closeConfirmModal(confirmed) {
+    const resolver = confirmResolverRef.current;
+    confirmResolverRef.current = null;
+    setConfirmModal({ open: false, title: "", message: "", confirmLabel: "", cancelLabel: "" });
+    resolver?.(confirmed);
+  }
+
+  function confirmEnglishOnlyPublish() {
+    if (confirmResolverRef.current) {
+      confirmResolverRef.current(false);
+      confirmResolverRef.current = null;
+    }
+    return new Promise((resolve) => {
+      confirmResolverRef.current = resolve;
+      setConfirmModal({
+        open: true,
+        title: "Translation unavailable",
+        message: "The translation service is unavailable. Publish this section in English only, or keep it as a draft until translation is available.",
+        confirmLabel: "Publish in English only",
+        cancelLabel: "Keep as draft"
+      });
+    });
+  }
+
   async function loadWorkspace() {
     setLoading(true);
     setNotice({ tone: "", message: "" });
@@ -320,6 +346,10 @@ export default function ContentStudioEnhanced({ ctx }) {
     const timer = window.setTimeout(() => void loadWorkspace(), 0);
     return () => {
       window.clearTimeout(timer);
+      if (confirmResolverRef.current) {
+        confirmResolverRef.current(false);
+        confirmResolverRef.current = null;
+      }
       if (previewObjectUrlRef.current) URL.revokeObjectURL(previewObjectUrlRef.current);
     };
   }, []);
@@ -654,9 +684,7 @@ export default function ContentStudioEnhanced({ ctx }) {
 
       let result = await callAction("PUBLISH");
       if (result?.publish_state === TRANSLATION_CONFIRM_REQUIRED) {
-        const confirmed = window.confirm(
-          "Translation service is unavailable. Publish this section in English only?"
-        );
+        const confirmed = await confirmEnglishOnlyPublish();
         if (!confirmed) {
           setNotice({
             tone: "error",
@@ -822,8 +850,11 @@ export default function ContentStudioEnhanced({ ctx }) {
 
   return (
     <div className="cse-root">
-      <header className="cse-topbar">
-        <div className="cse-brand"><EipMark title="EIP" /><strong>EIP</strong><span>Content Studio Enhanced</span></div>
+      <div className="cse-topbar" role="toolbar" aria-label="Content Studio command bar">
+        <div className="cse-brand cse-context-title">
+          <span className="cse-mini-mark"><EipMark title="EIP" /></span>
+          <span><small>Studio workspace</small><strong>Content workflow</strong></span>
+        </div>
         <div className="cse-site-select">
           <span>Site:</span>
           <select value={connectionCode} onChange={(event) => setConnectionCode(event.target.value)}>
@@ -845,7 +876,7 @@ export default function ContentStudioEnhanced({ ctx }) {
           </div>
           <button type="button" className="icon" onClick={() => setHelpOpen(true)} aria-label="Open workflow help"><HelpCircle /></button>
         </div>
-      </header>
+      </div>
 
       {notice.message ? <div className={`cse-notice ${notice.tone}`}>{notice.message}<button type="button" onClick={() => setNotice({ tone: "", message: "" })}><X /></button></div> : null}
 
@@ -1120,6 +1151,22 @@ export default function ContentStudioEnhanced({ ctx }) {
               {mappingWizard.step === 4 ? <div className="cse-wizard-review"><CheckCircle2 /><h3>Ready to save mapping</h3><dl><dt>Detected section</dt><dd>{mappingZone.label}</dd><dt>Section type</dt><dd>{mappingTemplate.label}</dd><dt>Content slot</dt><dd>{mappingWizard.slot}</dd><dt>Content Source</dt><dd>{CONTENT_SOURCE_OPTIONS.find((option) => option.value === mappingWizard.dataSource)?.label || "Manual Content"}</dd></dl></div> : null}
             </div>
             <div className="cse-wizard-actions"><button type="button" onClick={() => setMappingWizard((current) => ({ ...current, step: Math.max(1, current.step - 1) }))} disabled={mappingWizard.step === 1} title={mappingWizard.step === 1 ? "You are at the first step" : "Return to the previous mapping step"}>Back</button>{mappingWizard.step < 4 ? <button type="button" className="primary" onClick={() => setMappingWizard((current) => ({ ...current, step: Math.min(4, current.step + 1) }))}>Continue</button> : <button type="button" className="primary" onClick={saveMapping} disabled={mappingSaving || !mappingWizard.slot.trim()} title={!mappingWizard.slot.trim() ? "Enter a Content slot before saving" : "Save this mapping"}>{mappingSaving ? <Loader2 className="spin" /> : <CheckCircle2 />} Save Mapping</button>}</div>
+          </div>
+        </div>
+      ) : null}
+
+      {confirmModal.open ? (
+        <div className="cse-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeConfirmModal(false); }}>
+          <div className="cse-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="cse-confirm-title">
+            <div className="cse-modal-head">
+              <div><strong id="cse-confirm-title">{confirmModal.title}</strong><span>Content Studio confirmation</span></div>
+              <button type="button" onClick={() => closeConfirmModal(false)} title="Close confirmation"><X /></button>
+            </div>
+            <p>{confirmModal.message}</p>
+            <div className="cse-confirm-actions">
+              <button type="button" onClick={() => closeConfirmModal(false)}>{confirmModal.cancelLabel || "Cancel"}</button>
+              <button type="button" className="primary" onClick={() => closeConfirmModal(true)}>{confirmModal.confirmLabel || "Confirm"}</button>
+            </div>
           </div>
         </div>
       ) : null}

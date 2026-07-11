@@ -156,6 +156,70 @@
     border-radius: 999px;
     background: var(--eip-v1-primary-400);
   }
+
+  .eip-v1-shell .glass-panel {
+    border-radius: 1.75rem;
+    border-color: rgba(213, 220, 235, 0.9);
+    background:
+      linear-gradient(145deg, rgba(255, 255, 255, 0.88), rgba(241, 244, 251, 0.78));
+    box-shadow: 0 22px 58px rgba(43, 62, 102, 0.16);
+  }
+
+  .eip-v1-shell aside.glass-panel {
+    background:
+      linear-gradient(180deg, rgba(249, 250, 255, 0.94), rgba(233, 238, 249, 0.86));
+    box-shadow: 0 22px 58px rgba(43, 62, 102, 0.18);
+  }
+
+  .eip-v1-shell header.glass-panel {
+    border-radius: 1.5rem;
+    background:
+      linear-gradient(110deg, rgba(249, 250, 255, 0.96), rgba(233, 238, 249, 0.9));
+  }
+
+  .eip-v1-shell aside.glass-panel button[title] {
+    min-height: 2.25rem;
+  }
+
+  .eip-v1-shell aside.glass-panel button[title][class*="bg-ink-900"],
+  .eip-v1-shell button[class*="bg-ink-900"] {
+    background: linear-gradient(135deg, var(--eip-v1-navy-950), var(--eip-v1-primary-700));
+  }
+
+  .eip-v1-shell button[class*="rounded-full"],
+  .eip-v1-shell button[class*="rounded-2xl"],
+  .eip-v1-shell button[class*="rounded-xl"] {
+    letter-spacing: inherit;
+  }
+
+  .eip-v1-shell input,
+  .eip-v1-shell select,
+  .eip-v1-shell textarea {
+    background-color: rgba(255, 255, 255, 0.88);
+  }
+
+  .eip-v1-shell [class*="border-ink-100"],
+  .eip-v1-shell [class*="border-ink-200"] {
+    border-color: rgba(213, 220, 235, 0.94);
+  }
+
+  .eip-v1-shell [class*="bg-white/70"],
+  .eip-v1-shell [class*="bg-white/75"],
+  .eip-v1-shell [class*="bg-white/80"],
+  .eip-v1-shell [class*="bg-white/85"],
+  .eip-v1-shell [class*="bg-white/90"],
+  .eip-v1-shell [class*="bg-white/95"] {
+    background-color: rgba(249, 250, 255, 0.88);
+  }
+
+  .eip-v1-shell .shadow-glow {
+    box-shadow: 0 18px 38px rgba(88, 120, 170, 0.28);
+  }
+
+  .eip-v1-shell .eip-user-shell,
+  .eip-v1-shell .eip-admin-shell {
+    font-family: Montserrat, system-ui, sans-serif;
+  }
 }
 
 @layer utilities {
