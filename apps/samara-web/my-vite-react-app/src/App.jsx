@@ -1403,6 +1403,7 @@ const COPY = {
 
 const HOME_NAV = ["patterns", "pages", "sizes", "blog", "line", "learning"];
 const PATTERNS_NAV = ["patterns", "pages", "sizes", "blog", "line", "collab", "learning"];
+const BRAND_CONTENT_SLOTS = ["brand", "site.brand", "home.brand", "header.brand", "global.brand"];
 const PAGE_CONTENT_SLOTS = {
   pages: { hero: "pages.hero", cards: "pages.cards" },
   sizes: { hero: "sizes.hero" },
@@ -2377,6 +2378,14 @@ function getSlotItem(contentBySlot, slot) {
   return item && typeof item === "object" ? item : null;
 }
 
+function getFirstSlotItem(contentBySlot, slots = []) {
+  for (const slot of slots) {
+    const item = getSlotItem(contentBySlot, String(slot || "").toLowerCase());
+    if (item) return item;
+  }
+  return null;
+}
+
 function getHomeProductSlotItem(contentBySlot, key) {
   return (
     getSlotItem(contentBySlot, HOME_PRODUCT_SLOTS[key]) ||
@@ -2454,6 +2463,46 @@ function resolveStorefrontSlideButtons(slide, index = 0, translationMeta = null,
     style: "primary"
   });
   return legacy ? [legacy] : [];
+}
+
+function resolveBrandContent(contentBySlot, lang = "en") {
+  const item = getFirstSlotItem(contentBySlot, BRAND_CONTENT_SLOTS);
+  const slides = Array.isArray(item?.slides)
+    ? item.slides.filter((slide) => slide && typeof slide === "object" && slide.visible !== false)
+    : [];
+  const slide = slides[0] || null;
+  const translation = item?.translation && typeof item.translation === "object"
+    ? item.translation
+    : null;
+  const title = String(
+    (slide ? resolveTranslatedPath(translation, "slides.0.title", lang) : "") ||
+      slide?.title ||
+      item?.title ||
+      ""
+  ).trim();
+  const subtitle = String(
+    (slide ? resolveTranslatedPath(translation, "slides.0.subtitle", lang) : "") ||
+      (slide ? resolveTranslatedPath(translation, "slides.0.body", lang) : "") ||
+      slide?.subtitle ||
+      slide?.body ||
+      ""
+  ).trim();
+  const eyebrow = String(
+    (slide ? resolveTranslatedPath(translation, "slides.0.eyebrow", lang) : "") ||
+      slide?.eyebrow ||
+      ""
+  ).trim();
+  const buttons = slide
+    ? resolveStorefrontSlideButtons(slide, 0, translation, lang)
+    : [];
+  return {
+    slot: item?.slot || "",
+    title: title || "Samara",
+    eyebrow,
+    subtitle,
+    buttons,
+    hasPublishedContent: Boolean(item && (title || subtitle || eyebrow || buttons.length)),
+  };
 }
 
 function resolveInfoHeroFromSlot(contentBySlot, slot, fallback = {}, lang = "en") {
@@ -2691,6 +2740,7 @@ function UiIcon({ name, className = "ui-icon" }) {
 function Header({
   activePage,
   onNavigate,
+  siteBrandTitle = "Samara",
   marketplaceValue,
   marketplaceOptions,
   onMarketplaceChange,
@@ -2716,6 +2766,7 @@ function Header({
   const signInLabel = resolveCopy(t, "nav.signIn", "Sign in");
   const profileButtonLabel = memberUser ? profileLabel : signInLabel;
   const greetingLabel = memberUser ? `Hello ${memberLabel || profileButtonLabel}` : profileButtonLabel;
+  const brandTitle = String(siteBrandTitle || "Samara").trim() || "Samara";
   const isActiveNav = (id) => {
     if (id === "patterns") return activePage === "patterns" || activePage === "product";
     return activePage === id;
@@ -2725,7 +2776,7 @@ function Header({
     <header className="samara-header">
       <div className="header-left">
         <button className="brand" type="button" onClick={() => onNavigate("home")}>
-          Samara
+          {brandTitle}
         </button>
       </div>
       <nav className="samara-nav" aria-label="Primary navigation">
@@ -3100,6 +3151,47 @@ function CommunitySection({ t, onSubscribe, onLookbook }) {
   );
 }
 
+function StorefrontBrandSection({ brandContent, onCta }) {
+  if (!brandContent?.hasPublishedContent) return null;
+  const buttons = Array.isArray(brandContent.buttons) ? brandContent.buttons : [];
+  return (
+    <section
+      className="storefront-brand-section"
+      data-eip-parent={brandContent.slot || "brand"}
+      data-eip-page="home"
+    >
+      {brandContent.eyebrow ? <p className="storefront-brand-eyebrow">{brandContent.eyebrow}</p> : null}
+      {brandContent.title ? <h2>{brandContent.title}</h2> : null}
+      {brandContent.subtitle ? <p className="storefront-brand-copy">{brandContent.subtitle}</p> : null}
+      {buttons.length ? (
+        <div className="storefront-brand-actions">
+          {buttons.map((button) => {
+            const actionPayload = {
+              ctaLabel: button.label,
+              ctaUrl: button.url,
+              cta: button.cta || {
+                action: /^https?:\/\//i.test(button.url || "") ? "navigate_external" : "navigate_internal",
+                target: button.url || "",
+                new_tab: button.new_tab === true || button.newTab === true,
+              },
+            };
+            return (
+              <button
+                key={button.id}
+                type="button"
+                className={`btn storefront-brand-btn storefront-brand-btn--${button.style || "primary"}`}
+                onClick={() => onCta?.(actionPayload)}
+              >
+                {button.label || "Explore"}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function HomePage({
   onShop,
   onOpenProduct,
@@ -3108,6 +3200,7 @@ function HomePage({
   onSubscribe,
   t,
   heroSlides,
+  brandContent,
   featuredItems,
   worthItems,
   featuredRenderer,
@@ -3118,6 +3211,7 @@ function HomePage({
   return (
     <main className="page home">
       <Hero onCta={onHeroCta} t={t} slides={heroSlides} />
+      <StorefrontBrandSection brandContent={brandContent} onCta={onHeroCta} />
       <DropSection t={t} featuredItems={featuredItems} onShop={onShop} onOpenProduct={onOpenProduct} renderer={featuredRenderer} />
       <WorthMaking onShop={onShop} onOpenProduct={onOpenProduct} t={t} items={worthItems} useFallback={!plugReady} renderer={worthRenderer} />
       {!plugReady ? (
@@ -6794,6 +6888,9 @@ export default function App() {
   useEffect(() => {
     fetchHomeItems();
     fetchHeroContent();
+    BRAND_CONTENT_SLOTS.forEach((slot) => {
+      fetchSlotContent(slot);
+    });
     Object.values(HOME_PRODUCT_SLOTS).forEach((slot) => {
       fetchSlotContent(slot);
     });
@@ -7108,6 +7205,9 @@ export default function App() {
     const interval = setInterval(() => {
       fetchHomeItems();
       fetchHeroContent();
+      BRAND_CONTENT_SLOTS.forEach((slot) => {
+        fetchSlotContent(slot, { force: true });
+      });
       Object.values(HOME_PRODUCT_SLOTS).forEach((slot) => {
         fetchSlotContent(slot, { force: true });
       });
@@ -8502,6 +8602,11 @@ export default function App() {
     return fallback.slice(0, maxSlides);
   }, [heroContent, language, t]);
 
+  const siteBrand = useMemo(
+    () => resolveBrandContent(contentBySlot, language),
+    [contentBySlot, language]
+  );
+
   const featuredCards = useMemo(() => {
     const configured = getHomeProductSlotItem(contentBySlot, "featured");
     const configuredProducts = Array.isArray(configured?.products) ? configured.products : [];
@@ -8608,6 +8713,7 @@ export default function App() {
       <Header
         activePage={activePage}
         onNavigate={handleNavigate}
+        siteBrandTitle={siteBrand.title}
         marketplaceValue={selectedMarketplaceCode}
         marketplaceOptions={marketplaceOptions}
         onMarketplaceChange={setSelectedMarketplaceCode}
@@ -8629,6 +8735,7 @@ export default function App() {
           onSubscribe={openSubscribe}
           t={t}
           heroSlides={heroSlides}
+          brandContent={siteBrand}
           featuredItems={featuredCards}
           worthItems={worthCards}
           featuredRenderer={getHomeProductSlotItem(contentBySlot, "featured")?.renderer}
@@ -8818,7 +8925,7 @@ export default function App() {
         t={t}
       />
       <footer className="samara-footer">
-        <p>Samara</p>
+        <p>{siteBrand.title}</p>
         <div>
           <span>{t("footer.concept")}</span>
           <span>{t("footer.rizes")}</span>

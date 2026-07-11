@@ -102,6 +102,10 @@ a:focus-visible {
   padding: 2px 0;
 }
 
+.brand:hover {
+  color: var(--accent-dark);
+}
+
 .member-chip {
   display: inline-flex;
   align-items: center;
@@ -1954,6 +1958,60 @@ a:focus-visible {
   color: var(--muted);
   align-items: center;
   flex-wrap: wrap;
+}
+
+.storefront-brand-section {
+  margin: 28px 0;
+  padding: clamp(28px, 5vw, 58px);
+  border: 1px solid rgba(140, 109, 85, 0.2);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at top right, rgba(204, 185, 169, 0.2), transparent 34%),
+    rgba(255, 255, 255, 0.62);
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+
+.storefront-brand-eyebrow {
+  margin-bottom: 10px;
+  color: var(--accent-dark);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.storefront-brand-section h2 {
+  font-size: clamp(2rem, 4vw, 4rem);
+}
+
+.storefront-brand-copy {
+  max-width: 680px;
+  margin: 14px auto 0;
+  line-height: 1.7;
+}
+
+.storefront-brand-actions {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.storefront-brand-btn--secondary {
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--accent-dark);
+  border-color: rgba(140, 109, 85, 0.34);
+}
+
+.storefront-brand-btn--link {
+  background: transparent;
+  border-color: transparent;
+  color: var(--accent-dark);
+  box-shadow: none;
+  text-decoration: underline;
+  text-underline-offset: 4px;
 }
 
 .community {
