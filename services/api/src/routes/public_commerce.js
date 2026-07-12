@@ -89,6 +89,7 @@ const DEFAULT_TRANSLATION_SETTINGS = {
   }
 };
 const STOREFRONT_STRUCTURE_OBJECT_TYPE = "storefront_structure";
+const STOREFRONT_CONTENT_OBJECT_TYPE = "storefront_content";
 const STOREFRONT_STRUCTURE_SCOPE = "auto_scan";
 const SAFE_PUBLIC_SELECTOR = /^[a-z0-9#.[\]="' _>:+~*(),-]+$/i;
 const SAFE_LOADER_RENDERERS = new Set([
@@ -252,6 +253,131 @@ function findConnectionMappingProfile(attrs = {}, connectionCode = "") {
   return normalizeText(active?.connection_code) === code ? active : null;
 }
 
+function escapeHtmlAttribute(value = "") {
+  return normalizeText(value)
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function requestPublicOrigin(req) {
+  const forwardedHost = normalizeText(req?.headers?.["x-forwarded-host"]).split(",")[0].trim();
+  const host = forwardedHost || normalizeText(req?.headers?.host);
+  if (!host) return "";
+  const forwardedProto = normalizeText(req?.headers?.["x-forwarded-proto"]).split(",")[0].trim();
+  const proto = forwardedProto || (req?.protocol ? normalizeText(req.protocol) : "https") || "https";
+  return `${proto}://${host}`;
+}
+
+function buildStorefrontConnectorPatch(req, access, suffix) {
+  const origin = requestPublicOrigin(req);
+  const connection = normalizeText(suffix || access.profile?.identity?.connection_code);
+  const loaderUrl = `${origin}/api/public/commerce-loader/v1.js`;
+  const refreshMs = 30000;
+  const scriptTag = `<script async src="${escapeHtmlAttribute(loaderUrl)}" data-connection="${escapeHtmlAttribute(connection)}" data-api-base="${escapeHtmlAttribute(origin)}" data-refresh-ms="${refreshMs}"></script>`;
+  const loaderEnabled = connectionAllowsStorefrontCapability(access.profile, "loader");
+  return {
+    ok: true,
+    connector: "eip_storefront_connector",
+    connector_version: "loader_polling_v1",
+    connection,
+    loader_enabled: loaderEnabled,
+    public_api_base: origin,
+    loader_url: loaderUrl,
+    script_tag: scriptTag,
+    install_location: "Before </body>, or in the site/app shell so it loads on every editable page.",
+    refresh: {
+      mode: "manifest_version_poll",
+      interval_ms: refreshMs,
+      manifest_endpoint: `/api/public/commerce/${encodeURIComponent(connection)}/storefront/manifest?integration=loader`
+    },
+    receiver_contract: {
+      manual_refresh_event: "document.dispatchEvent(new Event('eip:storefront:refresh'))",
+      post_message: { type: "eip-storefront-refresh", connection },
+      applied_event: "eip:storefront:applied",
+      browser_api: "window.EIPStorefrontConnector.refresh()"
+    },
+    requirements: {
+      mapping_required: true,
+      publish_required: true,
+      loader_must_be_enabled_on_connection_profile: true,
+      origin_should_be_allowlisted: true
+    }
+  };
+}
+
+async function loadPublicStorefrontContentVersion(app, tenantId, slots = []) {
+  const slotCodes = [...new Set(
+    (Array.isArray(slots) ? slots : [])
+      .map((slot) => normalizeText(slot).toLowerCase())
+      .filter(Boolean)
+  )].sort();
+  if (!slotCodes.length) {
+    return {
+      content_version: sha256Hex("storefront-content:empty").slice(0, 24),
+      content_updated_at: null,
+      slot_versions: {}
+    };
+  }
+
+  try {
+    const contentRes = await app.db.query(
+      `
+      SELECT DISTINCT ON (lower(COALESCE(attrs->>'slot', '')))
+        lower(COALESCE(attrs->>'slot', '')) AS slot,
+        status,
+        updated_at,
+        attrs->'workflow'->>'published_at' AS published_at,
+        attrs->'translation'->>'translated_at' AS translated_at
+      FROM eip_core.service_object
+      WHERE tenant_id = $1
+        AND object_type = $2
+        AND lower(COALESCE(attrs->>'slot', '')) = ANY($3::text[])
+        AND lower(COALESCE(attrs->>'is_active', 'true')) <> 'false'
+        AND (
+          lower(COALESCE(status, '')) = $4
+          OR lower(COALESCE(attrs->'workflow'->>'stage', '')) = $4
+        )
+      ORDER BY lower(COALESCE(attrs->>'slot', '')), updated_at DESC, created_at DESC
+      `,
+      [tenantId, STOREFRONT_CONTENT_OBJECT_TYPE, slotCodes, PUBLISHED_STAGE]
+    );
+    const slotVersions = {};
+    for (const row of contentRes.rows || []) {
+      const slot = normalizeText(row?.slot).toLowerCase();
+      if (!slot || !slotCodes.includes(slot)) continue;
+      slotVersions[slot] = {
+        status: normalizeText(row?.status),
+        updated_at: row?.updated_at ? new Date(row.updated_at).toISOString() : null,
+        published_at: normalizeOptionalText(row?.published_at),
+        translated_at: normalizeOptionalText(row?.translated_at)
+      };
+    }
+    const contentUpdatedAt = Object.values(slotVersions)
+      .map((item) => item.published_at || item.translated_at || item.updated_at)
+      .filter(Boolean)
+      .sort()
+      .at(-1) || null;
+    return {
+      content_version: sha256Hex(JSON.stringify({ slotCodes, slotVersions })).slice(0, 24),
+      content_updated_at: contentUpdatedAt,
+      slot_versions: slotVersions
+    };
+  } catch (error) {
+    app.log?.warn?.({
+      event: "storefront_content_version_unavailable",
+      tenant_id: tenantId,
+      error: error?.message || String(error)
+    });
+    return {
+      content_version: sha256Hex(JSON.stringify({ slotCodes })).slice(0, 24),
+      content_updated_at: null,
+      slot_versions: {}
+    };
+  }
+}
+
 async function loadPublicStorefrontManifest(app, access, suffix, integration = "api") {
   const r = await app.db.query(
     `
@@ -277,11 +403,26 @@ async function loadPublicStorefrontManifest(app, access, suffix, integration = "
       ...mapping,
       content_endpoint: `/api/public/commerce/${encodedSuffix}/content?slot=${encodeURIComponent(mapping.slot_code)}${integrationQuery}`
     }));
+  const contentVersion = await loadPublicStorefrontContentVersion(
+    app,
+    access.tenant.id,
+    slots.map((slot) => slot.slot_code)
+  );
+  const mappingVersion = Number(profile?.mapping_version || 0);
   return {
     ok: true,
     connection_code: access.profile.identity?.connection_code || null,
     mapping_profile_code: profile?.mapping_profile_code || null,
-    mapping_version: Number(profile?.mapping_version || 0),
+    mapping_version: mappingVersion,
+    connector_version: sha256Hex(JSON.stringify({
+      mapping_profile_code: profile?.mapping_profile_code || null,
+      mapping_version: mappingVersion,
+      content_version: contentVersion.content_version
+    })).slice(0, 24),
+    content_version: contentVersion.content_version,
+    content_updated_at: contentVersion.content_updated_at,
+    slot_versions: contentVersion.slot_versions,
+    refresh_endpoint: `/api/public/commerce/${encodedSuffix}/storefront/manifest?integration=${integration === "loader" ? "loader" : "api"}`,
     frontend_url: normalizeOptionalText(access.profile.identity?.frontend_url),
     slots
   };
@@ -296,6 +437,11 @@ function storefrontLoaderScript() {
   const apiBase = String(script.dataset.apiBase || new URL(script.src).origin).replace(/\\/+$/, "");
   const apiKey = String(script.dataset.apiKey || "").trim();
   const debug = script.dataset.debug === "true";
+  const refreshMsRaw = Number(script.dataset.refreshMs || script.dataset.pollMs || 30000);
+  const refreshMs = Number.isFinite(refreshMsRaw) ? Math.max(5000, refreshMsRaw) : 30000;
+  const liveRefresh = script.dataset.liveRefresh !== "false" && script.dataset.refresh !== "false";
+  let lastConnectorVersion = "";
+  let running = false;
   const warn = (...args) => { if (debug && globalThis.console) console.warn("[EIP storefront loader]", ...args); };
   if (!connection || !apiBase) return warn("Missing data-connection or data-api-base.");
   const headers = apiKey ? { "X-API-Key": apiKey } : {};
@@ -324,12 +470,29 @@ function storefrontLoaderScript() {
     node.loading = "lazy";
     return node;
   };
-  const buttonLink = (label, href) => {
+  const buttonLink = (label, href, style = "primary") => {
     const url = safeUrl(href);
     if (!label || !url) return null;
     const node = el("a", "eip-storefront-cta", label);
     node.href = url;
+    const variant = text(style).trim().toLowerCase();
+    if (/^[a-z0-9_-]{1,32}$/.test(variant)) node.classList.add("eip-storefront-cta--" + variant);
     return node;
+  };
+  const appendButtons = (parent, entry) => {
+    const buttons = Array.isArray(entry?.buttons) && entry.buttons.length
+      ? entry.buttons
+      : entry?.cta_label
+        ? [{ label: entry.cta_label, url: entry.cta_target || entry.cta_url, style: "primary" }]
+        : [];
+    for (const button of buttons) {
+      const cta = buttonLink(
+        button?.label || button?.text || button?.cta_label,
+        button?.url || button?.href || button?.target || button?.cta?.target || button?.cta_url || button?.ctaUrl,
+        button?.style || button?.variant || "primary"
+      );
+      if (cta) parent.append(cta);
+    }
   };
   const highlightPreviewTarget = () => {
     const params = new URLSearchParams(globalThis.location?.search || "");
@@ -386,8 +549,7 @@ function storefrontLoaderScript() {
         if (slide.eyebrow) panel.append(el("p", "eip-storefront-eyebrow", slide.eyebrow));
         if (slide.title) panel.append(el("h2", "eip-storefront-title", slide.title));
         if (slide.subtitle || slide.body) panel.append(el("p", "eip-storefront-copy", slide.subtitle || slide.body));
-        const cta = buttonLink(slide.cta_label, slide.cta_target || slide.cta_url);
-        if (cta) panel.append(cta);
+        appendButtons(panel, slide);
         root.append(panel);
       }
     } else if (["product_carousel", "product_grid"].includes(mapping.renderer)) {
@@ -404,8 +566,7 @@ function storefrontLoaderScript() {
         if (img) block.append(img);
         if (entry.title || item.title) block.append(el("h3", "eip-storefront-title", entry.title || item.title));
         if (entry.body || entry.subtitle) block.append(el("p", "eip-storefront-copy", entry.body || entry.subtitle));
-        const cta = buttonLink(entry.cta_label, entry.cta_target || entry.cta_url);
-        if (cta) block.append(cta);
+        appendButtons(block, entry);
         root.append(block);
       }
     }
@@ -413,10 +574,13 @@ function storefrontLoaderScript() {
     target.replaceChildren(root);
     return true;
   };
-  const run = async () => {
-    watchPreviewTarget();
-    const manifestUrl = apiBase + "/api/public/commerce/" + encodeURIComponent(connection) + "/storefront/manifest?integration=loader";
-    const manifest = await getJson(manifestUrl);
+  const manifestUrl = () => apiBase + "/api/public/commerce/" + encodeURIComponent(connection) + "/storefront/manifest?integration=loader";
+  const applyManifest = async (manifest, { force = false } = {}) => {
+    const version = text(manifest?.connector_version || manifest?.content_version || manifest?.mapping_version || "");
+    if (!force && version && version === lastConnectorVersion) {
+      return { applied: 0, skipped: true, version };
+    }
+    let applied = 0;
     for (const mapping of Array.isArray(manifest.slots) ? manifest.slots : []) {
       if (!mapping?.selector || !mapping?.content_endpoint) continue;
       let target;
@@ -424,14 +588,57 @@ function storefrontLoaderScript() {
       if (!target) continue;
       try {
         const payload = await getJson(apiBase + mapping.content_endpoint);
-        render(target, mapping, payload?.item);
+        if (render(target, mapping, payload?.item)) applied += 1;
         highlightPreviewTarget();
       } catch (error) {
         warn("Slot fallback preserved", mapping.slot_code, error?.message || error);
       }
     }
+    if (version) lastConnectorVersion = version;
+    document.dispatchEvent(new CustomEvent("eip:storefront:applied", {
+      detail: {
+        connection,
+        version: lastConnectorVersion,
+        applied,
+        slotCount: Array.isArray(manifest.slots) ? manifest.slots.length : 0
+      }
+    }));
+    return { applied, skipped: false, version: lastConnectorVersion };
   };
-  run().catch((error) => warn("Manifest load failed", error?.message || error));
+  const run = async ({ force = false } = {}) => {
+    if (running) return { applied: 0, skipped: true, version: lastConnectorVersion };
+    running = true;
+    try {
+      watchPreviewTarget();
+      const manifest = await getJson(manifestUrl());
+      return await applyManifest(manifest, { force });
+    } finally {
+      running = false;
+    }
+  };
+  const refresh = () => run({ force: true }).catch((error) => warn("Refresh failed", error?.message || error));
+  const previousConnector = globalThis.EIPStorefrontConnector && typeof globalThis.EIPStorefrontConnector === "object"
+    ? globalThis.EIPStorefrontConnector
+    : {};
+  globalThis.EIPStorefrontConnector = {
+    ...previousConnector,
+    connection,
+    apiBase,
+    refresh,
+    getVersion: () => lastConnectorVersion
+  };
+  globalThis.addEventListener("message", (event) => {
+    const data = event?.data || {};
+    if (data?.type !== "eip-storefront-refresh") return;
+    const targetConnection = text(data.connection || "");
+    if (targetConnection && targetConnection !== connection) return;
+    refresh();
+  });
+  document.addEventListener("eip:storefront:refresh", refresh);
+  run({ force: true }).catch((error) => warn("Manifest load failed", error?.message || error));
+  if (liveRefresh && refreshMs > 0) {
+    globalThis.setInterval(() => run().catch((error) => warn("Version refresh failed", error?.message || error)), refreshMs);
+  }
 })();`;
 }
 
@@ -3416,6 +3623,17 @@ export default async function publicCommerceRoutes(app) {
   );
 
   app.get(
+    "/commerce/:suffix/storefront/connector-patch",
+    { config: { rateLimit: RATE_LIMIT, cors: false } },
+    async (req, reply) => {
+      const access = await resolveConnection(app, req, reply, ["website_intake", "custom", "payments"]);
+      if (!access) return;
+      if (!requireStorefrontRead(access, reply, { capability: "public_api", scope: "storefront.mapping.read" })) return;
+      return reply.send(buildStorefrontConnectorPatch(req, access, req.params.suffix));
+    }
+  );
+
+  app.get(
     "/commerce/:suffix/storefront/manifest",
     { config: { rateLimit: RATE_LIMIT, cors: false } },
     async (req, reply) => {
@@ -6387,6 +6605,7 @@ export default async function publicCommerceRoutes(app) {
 }
 
 export {
+  buildStorefrontConnectorPatch,
   loadPublicStorefrontManifest,
   normalizePublicMapping,
   storefrontLoaderScript
