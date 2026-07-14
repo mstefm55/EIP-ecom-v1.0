@@ -114,6 +114,30 @@ function slugifyCode(value) {
   return base.slice(0, 65);
 }
 
+function normalizeApiBaseUrl(value) {
+  return String(value || "http://localhost:4000").replace(/\/+$/, "") || "http://localhost:4000";
+}
+
+function escapeHtmlAttribute(value = "") {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function buildStorefrontConnectorScript({ apiBaseUrl, suffix }) {
+  const connection = String(suffix || "").trim();
+  if (!connection) return "";
+  const apiBase = normalizeApiBaseUrl(apiBaseUrl);
+  return `<script async src="${escapeHtmlAttribute(apiBase)}/api/public/commerce-loader/v1.js" data-connection="${escapeHtmlAttribute(connection)}" data-api-base="${escapeHtmlAttribute(apiBase)}" data-refresh-ms="30000"></script>`;
+}
+
+function connectorPatchPath(suffix) {
+  const connection = String(suffix || "").trim();
+  return connection ? `/api/public/commerce/${encodeURIComponent(connection)}/storefront/connector-patch` : "";
+}
+
 function normalizeJson(text) {
   if (!text) return null;
   try {
@@ -581,12 +605,26 @@ export default function AdminConnectionsPanelSafe() {
   const [validationSummary, setValidationSummary] = useState([]);
   const [rawKey, setRawKey] = useState(null);
   const [rawKeyMeta, setRawKeyMeta] = useState(null);
+  const [connectorPatch, setConnectorPatch] = useState(null);
+  const [connectorPatchLoading, setConnectorPatchLoading] = useState(false);
+  const [connectorPatchCopied, setConnectorPatchCopied] = useState("");
   const [miniModalRequest, setMiniModalRequest] = useState(null);
 
   const selectedTenant = items.find((item) => item.id === selectedTenantId) || detail?.tenant || null;
   const selectedConnection = connections.find((item) => item.id === selectedConnectionId) || connections[0] || null;
-  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
+  const apiBaseUrl = normalizeApiBaseUrl(import.meta.env.VITE_API_BASE_URL || "http://localhost:4000");
   const selectedPaymentProvider = PAYMENT_PROVIDER_SETUP[selectedConnection?.identity?.connection_kind]?.providerCode || "";
+  const selectedStorefrontSuffix = String(selectedConnection?.inbound?.inbound_path_suffix || "").trim();
+  const isWebsiteStorefrontConnection = ["website", "ecommerce"].includes(selectedConnection?.identity?.connection_kind);
+  const selectedConnectorPatchPath = connectorPatchPath(selectedStorefrontSuffix);
+  const selectedConnectorPatchEndpoint = selectedConnectorPatchPath ? `${apiBaseUrl}${selectedConnectorPatchPath}` : "";
+  const selectedConnectorManifestEndpoint = selectedStorefrontSuffix
+    ? `${apiBaseUrl}/api/public/commerce/${encodeURIComponent(selectedStorefrontSuffix)}/storefront/manifest?integration=loader`
+    : "";
+  const selectedConnectorScript = buildStorefrontConnectorScript({
+    apiBaseUrl,
+    suffix: selectedStorefrontSuffix,
+  });
   const inboundUrls = selectedConnection?.inbound?.inbound_path_suffix
     ? selectedPaymentProvider
       ? {
@@ -662,6 +700,11 @@ export default function AdminConnectionsPanelSafe() {
     loadDetail();
     return () => { active = false; };
   }, [selectedTenantId]);
+
+  useEffect(() => {
+    setConnectorPatch(null);
+    setConnectorPatchCopied("");
+  }, [selectedTenantId, selectedConnectionId, selectedStorefrontSuffix]);
 
   const refreshDetail = async ({ clearRaw = false } = {}) => {
     if (!selectedTenantId) return null;
@@ -1007,6 +1050,31 @@ export default function AdminConnectionsPanelSafe() {
     }
   };
 
+  const handleCopyConnectorText = async (text, marker) => {
+    if (!text) return;
+    try {
+      await navigator.clipboard?.writeText?.(text);
+      setConnectorPatchCopied(marker);
+    } catch {
+      setError("Could not copy the connector text automatically. Select and copy it manually.");
+    }
+  };
+
+  const handleLoadConnectorPatch = async () => {
+    if (!selectedConnectorPatchPath) return;
+    setConnectorPatchLoading(true);
+    setConnectorPatch(null);
+    setError(null);
+    try {
+      const result = await apiFetch(selectedConnectorPatchPath);
+      setConnectorPatch(result);
+    } catch (err) {
+      setError(friendlyError(err, "Could not load the live connector patch. Save the website connection, enable Public API and Loader script, and confirm the storefront origin allowlist."));
+    } finally {
+      setConnectorPatchLoading(false);
+    }
+  };
+
   const handleTest = async (type) => {
     if (!selectedTenantId || !selectedConnection) return;
     const validationErrors = validateGatewayConnections([selectedConnection]);
@@ -1052,6 +1120,10 @@ export default function AdminConnectionsPanelSafe() {
   const mappingStudioHref = selectedConnection?.identity?.connection_code
     ? `?surface=dashboard&module=content&storefront_connection=${encodeURIComponent(selectedConnection.identity.connection_code)}`
     : "?surface=dashboard&module=content";
+  const connectorRequiredScopes = ["storefront.mapping.read", "storefront.content.read"];
+  const connectorScopesReady = connectorRequiredScopes.every((scope) => (
+    selectedConnection?.public_storefront?.scopes || []
+  ).includes(scope));
   const paymentSetup = PAYMENT_PROVIDER_SETUP[selectedConnection?.identity?.connection_kind] || null;
   const paymentAuth = selectedConnection?.outbound?.auth || {};
   const paymentHmac = selectedConnection?.verification?.hmac_signature || {};
@@ -1400,6 +1472,54 @@ export default function AdminConnectionsPanelSafe() {
                       ))}
                     </div>
                   </Field>
+                  {isWebsiteStorefrontConnection ? (
+                    <div className="rounded-2xl border border-brand-100/70 bg-white/80 p-4 shadow-soft">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="text-[0.62rem] font-semibold uppercase tracking-[0.24em] text-brand-600">External website connector patch</p>
+                          <p className="mt-1 max-w-3xl text-xs text-ink-500">
+                            Install this script once in the connected website app shell, ideally before <code className="rounded bg-ink-50 px-1">&lt;/body&gt;</code>. After that, Content Studio publishes update the manifest and the website pulls approved mapped content.
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2 text-[0.6rem] uppercase tracking-[0.16em]">
+                          <StatusPill ok={Boolean(selectedStorefrontSuffix)}>Suffix</StatusPill>
+                          <StatusPill ok={selectedConnection.public_storefront.loader_enabled === true}>Loader</StatusPill>
+                          <StatusPill ok={selectedConnection.public_storefront.public_api_enabled === true}>Public API</StatusPill>
+                          <StatusPill ok={connectorScopesReady}>Scopes</StatusPill>
+                        </div>
+                      </div>
+                      {!selectedStorefrontSuffix ? (
+                        <Notice tone="error">Add and save an inbound path suffix before installing the connector patch.</Notice>
+                      ) : null}
+                      {selectedConnection.public_storefront.loader_enabled !== true || selectedConnection.public_storefront.public_api_enabled !== true || !connectorScopesReady ? (
+                        <Notice>Enable Loader script, Public API, and mapping/content read scopes, then save the profile before expecting the live website to pull EIP content.</Notice>
+                      ) : null}
+                      <div className="mt-4 grid gap-3">
+                        <Field label="Patch endpoint">
+                          <div className="flex items-center gap-2 rounded-lg border border-ink-200/70 bg-ink-50/60 px-3 py-2 text-xs">
+                            <span className="min-w-0 flex-1 truncate text-ink-600">{selectedConnectorPatchEndpoint || "Save a suffix to generate the endpoint"}</span>
+                            <button type="button" disabled={!selectedConnectorPatchEndpoint} onClick={() => handleCopyConnectorText(selectedConnectorPatchEndpoint, "endpoint")} className="rounded-full border border-ink-200 bg-white px-2 py-1 text-[0.55rem] uppercase tracking-[0.18em] text-ink-600 disabled:opacity-50"><Copy className="mr-1 inline h-3 w-3" />Copy</button>
+                          </div>
+                        </Field>
+                        <Field label="Install script">
+                          <textarea readOnly value={selectedConnectorScript || "Save a suffix to generate the install script"} className={`${inputClass} min-h-[92px] font-mono text-[0.65rem] normal-case tracking-normal text-ink-700`} />
+                        </Field>
+                        <div className="flex flex-wrap gap-2">
+                          <button type="button" disabled={!selectedConnectorScript} onClick={() => handleCopyConnectorText(selectedConnectorScript, "script")} className="rounded-full border border-brand-200 bg-brand-50 px-3 py-2 text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-brand-700 disabled:opacity-50"><Clipboard className="mr-1 inline h-3 w-3" />Copy install script</button>
+                          <button type="button" disabled={!selectedConnectorPatchPath || connectorPatchLoading} onClick={handleLoadConnectorPatch} className="rounded-full border border-ink-200 bg-white px-3 py-2 text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-ink-600 disabled:opacity-50"><RefreshCw className={`mr-1 inline h-3 w-3 ${connectorPatchLoading ? "animate-spin" : ""}`} />Load live patch JSON</button>
+                          {selectedConnectorManifestEndpoint ? <button type="button" onClick={() => handleCopyConnectorText(selectedConnectorManifestEndpoint, "manifest")} className="rounded-full border border-ink-200 bg-white px-3 py-2 text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-ink-600"><Copy className="mr-1 inline h-3 w-3" />Copy manifest URL</button> : null}
+                        </div>
+                        {connectorPatchCopied ? <p className="text-xs text-emerald-700">Copied {connectorPatchCopied}.</p> : null}
+                        {connectorPatch ? (
+                          <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 text-xs text-emerald-800">
+                            <p className="font-semibold">Live connector patch loaded.</p>
+                            <p className="mt-1">Loader enabled: {connectorPatch.loader_enabled ? "Yes" : "No"} · Receiver: {connectorPatch.receiver_contract?.applied_event || "eip:storefront:applied"}</p>
+                            <pre className="mt-2 max-h-48 overflow-auto rounded-lg bg-white/80 p-2 text-[0.6rem] text-ink-600">{JSON.stringify(connectorPatch, null, 2)}</pre>
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : null}
                   <a href={mappingStudioHref} className="inline-flex rounded-full border border-ink-200/70 bg-white px-3 py-2 text-[0.6rem] font-semibold uppercase tracking-[0.2em] text-ink-600">Open Mapping Studio</a>
                 </div>
               )

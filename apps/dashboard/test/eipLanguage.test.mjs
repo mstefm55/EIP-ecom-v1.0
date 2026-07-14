@@ -57,6 +57,16 @@ test("EIP dashboard translations are read from a metadata language pack", () => 
   assert.equal(translateEipText("Language", "de", tenantLanguagePack), "Sprache");
 });
 
+test("EIP dashboard language pack covers Product Studio UI labels and templates", () => {
+  assert.equal(translateEipText("Library", "fr"), "Bibliothèque");
+  assert.equal(translateEipText("Selected product", "fr"), "Produit sélectionné");
+  assert.equal(translateEipText("Buyer preview", "fr"), "Aperçu acheteur");
+  assert.equal(translateEipText("Supplier code", "fr"), "Code fournisseur");
+  assert.equal(translateEipText("Translation service offline.", "fr"), "Service de traduction hors ligne.");
+  assert.equal(translateEipText("Showing 1-3 of 3", "fr"), "Affichage 1-3 sur 3");
+  assert.equal(translateEipText("New product", "fr"), "New product");
+});
+
 test("EIP dashboard wraps app in language provider and exposes switchers in all shells", () => {
   assert.match(mainSource, /<EipLanguageProvider>/);
   assert.match(adminShellSource, /<EipLanguageSwitcher compact \/>/);
