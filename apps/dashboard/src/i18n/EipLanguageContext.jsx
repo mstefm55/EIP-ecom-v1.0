@@ -1,10 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
+  DEFAULT_EIP_LANGUAGE_PACK,
   EIP_LANGUAGE_OPTIONS,
   getEipLanguageMetadata,
   normalizeEipLocale,
   translateEipText,
 } from "./eipLanguageLibrary";
+import { apiFetch } from "../services/apiClient";
 
 const STORAGE_KEY = "eip.dashboard.language";
 const EipLanguageContext = createContext(null);
@@ -74,6 +76,59 @@ function safeReadStoredLanguage() {
   }
 }
 
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function mergeLanguagePack(base = DEFAULT_EIP_LANGUAGE_PACK, override = {}) {
+  const output = {
+    ...base,
+    ...(isPlainObject(override) ? override : {}),
+    translations: { ...(base.translations || {}) },
+    component_metadata: { ...(base.component_metadata || {}) },
+  };
+  if (isPlainObject(override?.translations)) {
+    for (const [locale, messages] of Object.entries(override.translations)) {
+      output.translations[locale] = {
+        ...(output.translations[locale] || {}),
+        ...(isPlainObject(messages) ? messages : {}),
+      };
+    }
+  }
+  if (isPlainObject(override?.component_metadata)) {
+    for (const [key, metadata] of Object.entries(override.component_metadata)) {
+      output.component_metadata[key] = {
+        ...(output.component_metadata[key] || {}),
+        ...(isPlainObject(metadata) ? metadata : {}),
+      };
+    }
+  }
+  return output;
+}
+
+async function fetchLanguagePackMetadata() {
+  try {
+    const result = await apiFetch("/api/eip/ui/language-pack");
+    return result?.language_pack || result?.pack || result;
+  } catch {
+    try {
+      const params = typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search || "")
+        : new URLSearchParams();
+      const query = new URLSearchParams();
+      const tenantId = params.get("tenant_id");
+      const tenantCode = params.get("tenant_code") || params.get("tenant");
+      if (tenantId) query.set("tenant_id", tenantId);
+      if (tenantCode) query.set("tenant_code", tenantCode);
+      const suffix = query.toString() ? `?${query.toString()}` : "";
+      const result = await apiFetch(`/api/public/ui/language-pack${suffix}`);
+      return result?.language_pack || result?.pack || result;
+    } catch {
+      return null;
+    }
+  }
+}
+
 function preserveWhitespace(original, translated) {
   const leading = String(original || "").match(/^\s*/)?.[0] || "";
   const trailing = String(original || "").match(/\s*$/)?.[0] || "";
@@ -96,6 +151,7 @@ function isSkippableTextNode(node) {
 
 export function EipLanguageProvider({ children }) {
   const [language, setLanguageState] = useState(safeReadStoredLanguage);
+  const [languagePack, setLanguagePack] = useState(DEFAULT_EIP_LANGUAGE_PACK);
   const textOriginalsRef = useRef(new WeakMap());
   const attrOriginalsRef = useRef(new WeakMap());
   const translatedTextMutationsRef = useRef(new WeakSet());
@@ -117,12 +173,23 @@ export function EipLanguageProvider({ children }) {
   const metadata = getEipLanguageMetadata(language);
 
   useEffect(() => {
+    let active = true;
+    fetchLanguagePackMetadata().then((pack) => {
+      if (!active || !pack || !isPlainObject(pack)) return;
+      setLanguagePack(mergeLanguagePack(DEFAULT_EIP_LANGUAGE_PACK, pack));
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
     if (typeof document === "undefined") return;
     document.documentElement.lang = metadata.code;
     document.documentElement.dir = metadata.direction || "ltr";
   }, [metadata]);
 
-  const t = useCallback((text) => translateEipText(text, language), [language]);
+  const t = useCallback((text) => translateEipText(text, language, languagePack), [language, languagePack]);
 
   useEffect(() => {
     if (typeof document === "undefined" || typeof MutationObserver === "undefined") return undefined;
@@ -272,10 +339,11 @@ export function EipLanguageProvider({ children }) {
       setLanguage,
       languageOptions: EIP_LANGUAGE_OPTIONS,
       metadata,
+      languagePack,
       t,
       translateText: t,
     }),
-    [language, metadata, setLanguage, t]
+    [language, languagePack, metadata, setLanguage, t]
   );
 
   return (
@@ -293,6 +361,7 @@ export function useEipLanguage() {
     setLanguage: () => {},
     languageOptions: EIP_LANGUAGE_OPTIONS,
     metadata: getEipLanguageMetadata("en"),
+    languagePack: DEFAULT_EIP_LANGUAGE_PACK,
     t: (text) => text,
     translateText: (text) => text,
   };

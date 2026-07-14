@@ -600,6 +600,16 @@ export const EIP_TRANSLATIONS = Object.freeze({
   de: DE,
 });
 
+export const DEFAULT_EIP_LANGUAGE_PACK = Object.freeze({
+  id: "eip-dashboard-language-pack",
+  version: EIP_LANGUAGE_LIBRARY_VERSION,
+  source_locale: "en",
+  supported_locales: EIP_REQUIRED_LANGUAGE_CODES,
+  component_metadata: EIP_UI_COMPONENT_LANGUAGE_METADATA,
+  translations: EIP_TRANSLATIONS,
+  source: "bundled_seed_metadata",
+});
+
 export function normalizeEipLocale(value) {
   const normalized = String(value || "").trim().toLowerCase().replace(/_/g, "-");
   if (!normalized) return "en";
@@ -611,11 +621,14 @@ export function getEipLanguageMetadata(value) {
   return EIP_LANGUAGE_METADATA[normalizeEipLocale(value)] || EIP_LANGUAGE_METADATA.en;
 }
 
-export function translateEipText(value, language = "en") {
+export function translateEipText(value, language = "en", languagePack = DEFAULT_EIP_LANGUAGE_PACK) {
   if (typeof value !== "string") return value;
   const text = value.trim();
   if (!text) return value;
   const locale = normalizeEipLocale(language);
-  const translated = EIP_TRANSLATIONS[locale]?.[text];
+  const translations = languagePack?.translations && typeof languagePack.translations === "object"
+    ? languagePack.translations
+    : EIP_TRANSLATIONS;
+  const translated = translations[locale]?.[text];
   return translated || value;
 }
