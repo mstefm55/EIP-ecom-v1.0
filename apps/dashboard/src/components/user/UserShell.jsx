@@ -5,6 +5,7 @@ import { apiFetch } from "../../services/apiClient";
 import { useIdleLogout } from "../../hooks/useIdleLogout";
 import { useUiVersion } from "../../hooks/useUiVersion";
 import SidebarNav from "../engine/SidebarNav";
+import { EipLanguageSwitcher, useEipLanguage } from "../../i18n/EipLanguageContext.jsx";
 
 function normalizeModules(values) {
   return Array.isArray(values)
@@ -13,6 +14,7 @@ function normalizeModules(values) {
 }
 
 export default function UserShell({ node, children, ctx }) {
+  const { t } = useEipLanguage();
   const {
     brand = "EIP Core",
     nav = ["Dashboard", "Tasks", "Reports"],
@@ -144,7 +146,7 @@ export default function UserShell({ node, children, ctx }) {
                 <div>
                   <p className="text-[0.6rem] uppercase tracking-[0.35em] text-ink-400">{brand}</p>
                   <p className="text-lg font-semibold font-display">
-                    {user.tenantName || "Workspace"}
+                    {user.tenantName || t("Workspace")}
                   </p>
                 </div>
               </div>
@@ -155,10 +157,11 @@ export default function UserShell({ node, children, ctx }) {
               onClick={toggleUiVersion}
               className="rounded-full border border-white/60 bg-white/80 px-3 py-2 text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-ink-600"
               aria-pressed={uiVersion === "v1"}
-              title="Switch between the EIP V1 beta presentation and the unchanged classic presentation"
+              title={t("Switch between the EIP V1 beta presentation and the unchanged classic presentation")}
             >
-              {uiVersion === "v1" ? "EIP V1 Beta" : "Classic UI"}
+              {uiVersion === "v1" ? t("EIP V1 Beta") : t("Classic UI")}
             </button>
+            <EipLanguageSwitcher compact />
             <div className="relative">
             <button
               type="button"
@@ -200,7 +203,7 @@ export default function UserShell({ node, children, ctx }) {
                     className="flex w-full items-center gap-3 rounded-2xl px-3 py-2 hover:bg-ink-50"
                   >
                     <UserCircle2 className="h-4 w-4" />
-                    Account
+                    {t("Account")}
                   </button>
                   <button
                     type="button"
@@ -208,7 +211,7 @@ export default function UserShell({ node, children, ctx }) {
                     className="flex w-full items-center gap-3 rounded-2xl px-3 py-2 text-rose-600 hover:bg-rose-50"
                   >
                     <LogOut className="h-4 w-4" />
-                    Sign out
+                    {t("Sign out")}
                   </button>
                 </div>
               </div>
@@ -220,7 +223,7 @@ export default function UserShell({ node, children, ctx }) {
 
       <SidebarNav
         brand={brand}
-        title="Workspace"
+        title={t("Workspace")}
         menu={menuItems}
         activeItem={activeTab}
         onSelect={(code) => setActiveTab?.(code)}
@@ -268,7 +271,7 @@ export default function UserShell({ node, children, ctx }) {
       >
         <p className="flex items-center gap-2">
           <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-          {helper}
+          {t(helper)}
         </p>
       </footer>
     </div>

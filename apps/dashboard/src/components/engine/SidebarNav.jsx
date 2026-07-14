@@ -20,6 +20,7 @@ import {
   ShoppingCart,
 } from "lucide-react";
 import EipMark from "../brand/EipMark";
+import { useEipLanguage } from "../../i18n/EipLanguageContext.jsx";
 
 const ICONS = {
   LayoutGrid,
@@ -61,6 +62,7 @@ export default function SidebarNav({
   topOffset = "1.5rem",
   bottomOffset = "1.5rem",
 }) {
+  const { t } = useEipLanguage();
   return (
     <aside
       className={`glass-panel fixed left-4 flex min-h-0 flex-col overflow-hidden py-5 ${
@@ -85,6 +87,7 @@ export default function SidebarNav({
           {menu.map((item) => {
             const Icon = resolveIcon(item.icon);
             const active = activeItem === item.code;
+            const label = t(item.label);
             return (
               <button
                 key={item.code}
@@ -95,10 +98,10 @@ export default function SidebarNav({
                     ? "bg-ink-900 text-white shadow-soft"
                     : "text-ink-500 hover:bg-white/70"
                 } ${collapsed ? "justify-center" : ""}`}
-                title={item.label}
+                title={label}
               >
                 <Icon className="h-4 w-4 shrink-0" />
-                {!collapsed ? <span className="min-w-0 flex-1 truncate text-left">{item.label}</span> : null}
+                {!collapsed ? <span className="min-w-0 flex-1 truncate text-left">{label}</span> : null}
                 {!collapsed && item.badge ? (
                   <span className="rounded-full bg-brand-100 px-1.5 py-0.5 text-[0.55rem] font-bold uppercase tracking-[0.12em] text-brand-700">
                     {item.badge}
@@ -118,7 +121,7 @@ export default function SidebarNav({
             className="flex w-full items-center justify-center gap-2 rounded-2xl border border-white/60 bg-white/70 px-3 py-1.5 text-[0.6rem] font-semibold uppercase tracking-[0.2em] text-ink-500"
           >
             {collapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
-            {!collapsed ? "Collapse" : null}
+            {!collapsed ? t("Collapse") : null}
           </button>
         </div>
       ) : null}

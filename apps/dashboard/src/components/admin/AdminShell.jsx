@@ -28,6 +28,7 @@ import { runAction } from "../../engine/actions";
 import { useIdleLogout } from "../../hooks/useIdleLogout";
 import { useAuthApi } from "../../hooks/useAuthApi";
 import SidebarNav from "../engine/SidebarNav";
+import { EipLanguageSwitcher, useEipLanguage } from "../../i18n/EipLanguageContext.jsx";
 
 const DEFAULT_MENU = [
   { code: "dashboard", label: "Dashboard", icon: "LayoutGrid" },
@@ -55,6 +56,7 @@ function resolveAssetUrl(url) {
 }
 
 export default function AdminShell({ node, children, ctx }) {
+  const { t } = useEipLanguage();
   const {
     brand = "EIP Core",
     nav = ["Tenant Requests", "Security", "Audit"],
@@ -266,13 +268,13 @@ export default function AdminShell({ node, children, ctx }) {
       if (profile.display_name || profileForm.display_name) {
         setUser((prev) => ({ ...prev, name: profile.display_name || profileForm.display_name }));
       }
-      setProfileNotice("Profile saved.");
+      setProfileNotice(t("Profile saved."));
     } catch (err) {
-      setProfileError(err.message || "Failed to save profile.");
+      setProfileError(err.message || t("Failed to save profile."));
     } finally {
       setProfileSaving(false);
     }
-  }, [profileForm]);
+  }, [profileForm, t]);
 
   const handleAvatarUpload = useCallback(async (event) => {
     const file = event.target.files?.[0];
@@ -293,13 +295,13 @@ export default function AdminShell({ node, children, ctx }) {
         avatar_display_url:
           data.avatar_display_url || profile.avatar_display_url || data.avatar_url || prev.avatar_display_url,
       }));
-      setProfileNotice("Avatar updated.");
+      setProfileNotice(t("Avatar updated."));
     } catch (err) {
-      setProfileError(err.userMessage || err.message || "Failed to upload avatar.");
+      setProfileError(err.userMessage || err.message || t("Failed to upload avatar."));
     } finally {
       event.target.value = "";
     }
-  }, []);
+  }, [t]);
 
   return (
     <div className={`${uiVersion === "v1" ? "eip-v1-shell" : "eip-classic-shell"} eip-admin-shell relative min-h-screen overflow-hidden bg-mist-50 text-ink-900`}>
@@ -311,7 +313,7 @@ export default function AdminShell({ node, children, ctx }) {
       <div className="relative z-10 w-full px-6 py-6">
         <SidebarNav
           brand={brand}
-          title="Admin Console"
+          title={t("Admin Console")}
           menu={menu}
           activeItem={activeTab}
           onSelect={(code) => setActiveTab?.(code)}
@@ -328,7 +330,7 @@ export default function AdminShell({ node, children, ctx }) {
                 </div>
                 <div>
                   <p className="text-[0.6rem] uppercase tracking-[0.35em] text-ink-400">{brand}</p>
-                  <p className="text-sm font-semibold font-display">Admin Console</p>
+                  <p className="text-sm font-semibold font-display">{t("Admin Console")}</p>
                 </div>
               </div>
               <nav className="flex items-center gap-2">
@@ -345,7 +347,7 @@ export default function AdminShell({ node, children, ctx }) {
                           : "border border-white/60 bg-white/70 text-ink-500 hover:bg-white"
                       }`}
                     >
-                      {tab.label}
+                      {t(tab.label)}
                     </button>
                   );
                 })}
@@ -358,17 +360,18 @@ export default function AdminShell({ node, children, ctx }) {
                 onClick={toggleUiVersion}
                 className="rounded-full border border-white/60 bg-white/80 px-3 py-2 text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-ink-600"
                 aria-pressed={uiVersion === "v1"}
-                title="Switch between the EIP V1 beta presentation and the unchanged classic presentation"
+                title={t("Switch between the EIP V1 beta presentation and the unchanged classic presentation")}
               >
-                {uiVersion === "v1" ? "EIP V1 Beta" : "Classic UI"}
+                {uiVersion === "v1" ? t("EIP V1 Beta") : t("Classic UI")}
               </button>
+              <EipLanguageSwitcher compact />
               {actionLabel ? (
                 <button
                   type="button"
                   onClick={() => runAction(actionEvent, ctx)}
                   className="rounded-full bg-ink-900 px-4 py-2 text-xs font-semibold uppercase tracking-[0.25em] text-white shadow-glow hover:bg-ink-800"
                 >
-                  {actionLabel}
+                  {t(actionLabel)}
                 </button>
               ) : null}
 
@@ -429,7 +432,7 @@ export default function AdminShell({ node, children, ctx }) {
                         className="flex w-full items-center gap-3 rounded-2xl px-3 py-2 hover:bg-ink-50"
                       >
                         <UserCircle2 className="h-4 w-4" />
-                        Account management
+                        {t("Account management")}
                       </button>
                       <button
                         type="button"
@@ -440,7 +443,7 @@ export default function AdminShell({ node, children, ctx }) {
                         className="flex w-full items-center gap-3 rounded-2xl px-3 py-2 hover:bg-ink-50"
                       >
                         <IdCard className="h-4 w-4" />
-                        Profile details
+                        {t("Profile details")}
                       </button>
                       <button
                         type="button"
@@ -452,7 +455,7 @@ export default function AdminShell({ node, children, ctx }) {
                         className="flex w-full items-center gap-3 rounded-2xl px-3 py-2 hover:bg-ink-50"
                       >
                         <ShieldCheck className="h-4 w-4" />
-                        Step-up access
+                        {t("Step-up access")}
                       </button>
                       <button
                         type="button"
@@ -460,7 +463,7 @@ export default function AdminShell({ node, children, ctx }) {
                         className="flex w-full items-center gap-3 rounded-2xl px-3 py-2 text-rose-600 hover:bg-rose-50"
                       >
                         <LogOut className="h-4 w-4" />
-                        Sign out
+                        {t("Sign out")}
                       </button>
                     </div>
                   </div>
@@ -477,7 +480,7 @@ export default function AdminShell({ node, children, ctx }) {
       <footer className="relative z-10 w-full px-6 pb-10 text-sm text-ink-400" style={{ marginLeft: contentOffset }}>
         <p className="flex items-center gap-2">
           <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-          {helper}
+          {t(helper)}
         </p>
       </footer>
 
@@ -486,10 +489,10 @@ export default function AdminShell({ node, children, ctx }) {
           <div className="w-full max-w-md rounded-3xl border border-white/60 bg-white/95 p-6 shadow-strong">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="text-xs uppercase tracking-[0.35em] text-ink-400">Step-up verification</p>
-                <h3 className="text-lg font-semibold text-ink-900">Confirm admin action</h3>
+                <p className="text-xs uppercase tracking-[0.35em] text-ink-400">{t("Step-up verification")}</p>
+                <h3 className="text-lg font-semibold text-ink-900">{t("Confirm admin action")}</h3>
                 <p className="mt-1 text-xs text-ink-500">
-                  Use OTP or TOTP to elevate this session.
+                  {t("Use OTP or TOTP to elevate this session.")}
                 </p>
               </div>
               <button
@@ -497,7 +500,7 @@ export default function AdminShell({ node, children, ctx }) {
                 onClick={closeStepUp}
                 className="rounded-full border border-ink-200/70 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-ink-500"
               >
-                Close
+                {t("Close")}
               </button>
             </div>
 
@@ -515,7 +518,7 @@ export default function AdminShell({ node, children, ctx }) {
 
             <div className="mt-4 space-y-3 text-xs text-ink-500">
               <div>
-                <p className="text-[0.6rem] uppercase tracking-[0.3em] text-ink-400">Email</p>
+                <p className="text-[0.6rem] uppercase tracking-[0.3em] text-ink-400">{t("Email")}</p>
                 <p className="mt-1 rounded-xl border border-ink-200/60 bg-ink-50 px-3 py-2 text-sm text-ink-700">
                   {user.email || "admin@eip.local"}
                 </p>
@@ -525,7 +528,7 @@ export default function AdminShell({ node, children, ctx }) {
             {stepUpStage === "request" ? (
               <div className="mt-4 space-y-4">
                 <label className="text-xs font-semibold uppercase tracking-[0.25em] text-ink-400">
-                  <span className="mb-1 block">Password</span>
+                  <span className="mb-1 block">{t("Password")}</span>
                   <input
                     type="password"
                     value={stepUpForm.password}
@@ -539,13 +542,13 @@ export default function AdminShell({ node, children, ctx }) {
                   disabled={stepUpLoading}
                   className="mt-2 w-full rounded-full bg-ink-900 px-4 py-2 text-xs font-semibold uppercase tracking-[0.25em] text-white shadow-glow disabled:opacity-60"
                 >
-                  {stepUpLoading ? "Sending..." : "Send OTP"}
+                  {stepUpLoading ? t("Sending...") : t("Send OTP")}
                 </button>
               </div>
             ) : (
               <div className="mt-4 space-y-3">
                 <label className="text-xs font-semibold uppercase tracking-[0.25em] text-ink-400">
-                  <span className="mb-1 block">OTP / TOTP Code</span>
+                  <span className="mb-1 block">{t("OTP / TOTP Code")}</span>
                   <input
                     type="text"
                     value={stepUpForm.otp}
@@ -559,14 +562,14 @@ export default function AdminShell({ node, children, ctx }) {
                   disabled={stepUpLoading}
                   className="w-full rounded-full bg-ink-900 px-4 py-2 text-xs font-semibold uppercase tracking-[0.25em] text-white shadow-glow disabled:opacity-60"
                 >
-                  {stepUpLoading ? "Verifying..." : "Verify"}
+                  {stepUpLoading ? t("Verifying...") : t("Verify")}
                 </button>
                 <button
                   type="button"
                   onClick={() => setStepUpStage("request")}
                   className="w-full rounded-full border border-ink-200/70 bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.25em] text-ink-500"
                 >
-                  Back
+                  {t("Back")}
                 </button>
               </div>
             )}
@@ -579,16 +582,16 @@ export default function AdminShell({ node, children, ctx }) {
           <div className="w-full max-w-lg rounded-3xl border border-white/60 bg-white/95 p-6 shadow-strong">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="text-xs uppercase tracking-[0.35em] text-ink-400">Account management</p>
-                <h3 className="text-lg font-semibold text-ink-900">Profile details</h3>
-                <p className="mt-1 text-xs text-ink-500">Update your display name and avatar.</p>
+                <p className="text-xs uppercase tracking-[0.35em] text-ink-400">{t("Account management")}</p>
+                <h3 className="text-lg font-semibold text-ink-900">{t("Profile details")}</h3>
+                <p className="mt-1 text-xs text-ink-500">{t("Update your display name and avatar.")}</p>
               </div>
               <button
                 type="button"
                 onClick={() => setProfileOpen(false)}
                 className="rounded-full border border-ink-200/70 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-ink-500"
               >
-                Close
+                {t("Close")}
               </button>
             </div>
 
@@ -618,15 +621,15 @@ export default function AdminShell({ node, children, ctx }) {
               <div>
                 <label className="inline-flex items-center gap-2 rounded-full border border-ink-200/70 bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-ink-500 hover:bg-ink-50">
                   <input type="file" accept="image/*" className="hidden" onChange={handleAvatarUpload} />
-                  Upload avatar
+                  {t("Upload avatar")}
                 </label>
-                <p className="mt-2 text-[0.65rem] text-ink-400">PNG/JPG up to 15MB.</p>
+                <p className="mt-2 text-[0.65rem] text-ink-400">{t("PNG/JPG up to 15MB.")}</p>
               </div>
             </div>
 
             <div className="mt-4 grid gap-3">
               <label className="text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-ink-400">
-                Display name
+                {t("Display name")}
                 <input
                   value={profileForm.display_name}
                   onChange={(event) =>
@@ -636,7 +639,7 @@ export default function AdminShell({ node, children, ctx }) {
                 />
               </label>
               <label className="text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-ink-400">
-                Title
+                {t("Title")}
                 <input
                   value={profileForm.title}
                   onChange={(event) => setProfileForm((prev) => ({ ...prev, title: event.target.value }))}
@@ -644,7 +647,7 @@ export default function AdminShell({ node, children, ctx }) {
                 />
               </label>
               <label className="text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-ink-400">
-                Phone
+                {t("Phone")}
                 <input
                   value={profileForm.phone}
                   onChange={(event) => setProfileForm((prev) => ({ ...prev, phone: event.target.value }))}
@@ -652,7 +655,7 @@ export default function AdminShell({ node, children, ctx }) {
                 />
               </label>
               <label className="text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-ink-400">
-                Locale
+                {t("Locale")}
                 <input
                   value={profileForm.locale}
                   onChange={(event) => setProfileForm((prev) => ({ ...prev, locale: event.target.value }))}
@@ -660,7 +663,7 @@ export default function AdminShell({ node, children, ctx }) {
                 />
               </label>
               <label className="text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-ink-400">
-                Timezone
+                {t("Timezone")}
                 <input
                   value={profileForm.timezone}
                   onChange={(event) => setProfileForm((prev) => ({ ...prev, timezone: event.target.value }))}
@@ -676,7 +679,7 @@ export default function AdminShell({ node, children, ctx }) {
               className="mt-4 flex w-full items-center justify-center gap-2 rounded-full bg-ink-900 px-4 py-2 text-xs font-semibold uppercase tracking-[0.25em] text-white shadow-glow disabled:bg-ink-300"
             >
               <Pencil className="h-4 w-4" />
-              {profileSaving ? "Saving..." : "Save profile"}
+              {profileSaving ? t("Saving...") : t("Save profile")}
             </button>
           </div>
         </div>

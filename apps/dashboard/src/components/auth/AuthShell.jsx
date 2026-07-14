@@ -2,8 +2,10 @@ import { Children, cloneElement, isValidElement } from "react";
 import { UserPlus } from "lucide-react";
 import EipMark from "../brand/EipMark";
 import { runAction } from "../../engine/actions";
+import { EipLanguageSwitcher, useEipLanguage } from "../../i18n/EipLanguageContext.jsx";
 
 export default function AuthShell({ node, children, ctx }) {
+  const { t } = useEipLanguage();
   const {
     brand,
     nav = [],
@@ -56,14 +58,14 @@ export default function AuthShell({ node, children, ctx }) {
           </div>
           <div>
             <p className="text-xs uppercase tracking-[0.35em] text-ink-400">{brand}</p>
-            <p className="text-lg font-semibold font-display">Identity Gateway</p>
+            <p className="text-lg font-semibold font-display">{t("Identity Gateway")}</p>
           </div>
         </div>
 
         <nav className="hidden items-center gap-6 text-sm text-ink-500 md:flex">
           {nav.map((item) => (
             <span key={item} className="hover:text-ink-900 transition">
-              {item}
+              {t(item)}
             </span>
           ))}
         </nav>
@@ -75,9 +77,10 @@ export default function AuthShell({ node, children, ctx }) {
               onClick={() => runAction(quickAction, ctx)}
               className="rounded-full border border-ink-200/70 bg-white/70 px-4 py-2 text-xs font-semibold uppercase tracking-[0.25em] text-ink-600 shadow-soft hover:bg-white"
             >
-              {quickLoginLabel}
+              {t(quickLoginLabel)}
             </button>
           ) : null}
+          <EipLanguageSwitcher compact />
           {canShowCta ? (
             <button
               type="button"
@@ -85,7 +88,7 @@ export default function AuthShell({ node, children, ctx }) {
               className="hidden items-center gap-2 rounded-full bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-glow hover:bg-brand-700 md:flex"
             >
               <UserPlus className="h-4 w-4" />
-              {cta}
+              {t(cta)}
             </button>
           ) : null}
         </div>
@@ -102,7 +105,7 @@ export default function AuthShell({ node, children, ctx }) {
       <footer className="relative z-10 mx-auto w-full max-w-6xl px-6 pb-10 text-sm text-ink-400">
         <p className="flex items-center gap-2">
           <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-          {helper}
+          {t(helper)}
         </p>
       </footer>
 
