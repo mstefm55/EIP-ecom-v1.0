@@ -83,10 +83,20 @@ const COMMERCE_SETTINGS_MODULE = "ecom";
 const COMMERCE_SETTINGS_CODE = "commerce";
 const DEFAULT_TRANSLATION_SETTINGS = {
   default_locale: "en",
+  supported_locales: ["en", "ru", "fr", "ky", "es", "de"],
   marketplaces: [],
   engine: {
     source_locale: "en"
   }
+};
+const REQUIRED_STOREFRONT_LOCALES = new Set(["en", "ru", "fr", "ky", "es", "de"]);
+const PUBLIC_LOCALE_METADATA = {
+  en: { label: "EN", native_label: "English", english_label: "English", direction: "ltr", flag_iso: "gb", order: 10 },
+  ru: { label: "RU", native_label: "Русский", english_label: "Russian", direction: "ltr", flag_iso: "ru", order: 20 },
+  fr: { label: "FR", native_label: "Français", english_label: "French", direction: "ltr", flag_iso: "fr", order: 30 },
+  ky: { label: "KY", native_label: "Кыргызча", english_label: "Kyrgyz", direction: "ltr", flag_iso: "kg", order: 40 },
+  es: { label: "ES", native_label: "Español", english_label: "Spanish", direction: "ltr", flag_iso: "es", order: 50 },
+  de: { label: "DE", native_label: "Deutsch", english_label: "German", direction: "ltr", flag_iso: "de", order: 60 }
 };
 const STOREFRONT_STRUCTURE_OBJECT_TYPE = "storefront_structure";
 const STOREFRONT_CONTENT_OBJECT_TYPE = "storefront_content";
@@ -1480,6 +1490,10 @@ async function loadCommerceTranslationSettings(app, tenantId) {
       ...DEFAULT_TRANSLATION_SETTINGS.engine,
       ...(raw.engine && typeof raw.engine === "object" ? raw.engine : {})
     },
+    supported_locales: Array.from(new Set([
+      ...DEFAULT_TRANSLATION_SETTINGS.supported_locales,
+      ...(Array.isArray(raw.supported_locales) ? raw.supported_locales : [])
+    ])),
     marketplaces: Array.isArray(raw.marketplaces) ? raw.marketplaces : []
   };
 }
@@ -1490,6 +1504,16 @@ function resolveTranslationLocales(translationSettings) {
   const sourceLocale = normalizeLocaleCode(translationSettings?.engine?.source_locale) || defaultLocale;
   locales.add(defaultLocale);
   locales.add(sourceLocale);
+  for (const locale of REQUIRED_STOREFRONT_LOCALES) {
+    const normalized = normalizeLocaleCode(locale);
+    if (normalized) locales.add(normalized);
+  }
+  for (const locale of Array.isArray(translationSettings?.supported_locales)
+    ? translationSettings.supported_locales
+    : []) {
+    const normalized = normalizeLocaleCode(locale);
+    if (normalized) locales.add(normalized);
+  }
   for (const marketplace of Array.isArray(translationSettings?.marketplaces)
     ? translationSettings.marketplaces
     : []) {
@@ -1510,6 +1534,9 @@ function resolveTranslationLocales(translationSettings) {
 function localeLabel(localeCode) {
   const normalized = normalizeLocaleCode(localeCode);
   if (!normalized) return "";
+  if (PUBLIC_LOCALE_METADATA[normalized]?.english_label) {
+    return `${PUBLIC_LOCALE_METADATA[normalized].english_label} (${normalized.toUpperCase()})`;
+  }
   try {
     const display = new Intl.DisplayNames(["en"], { type: "language" });
     const baseLanguage = normalized.split("-")[0];
@@ -1519,6 +1546,21 @@ function localeLabel(localeCode) {
     // Ignore; fallback below.
   }
   return normalized.toUpperCase();
+}
+
+function publicLocaleMetadata(localeCode) {
+  const normalized = normalizeLocaleCode(localeCode);
+  const metadata = PUBLIC_LOCALE_METADATA[normalized] || {};
+  return {
+    code: normalized,
+    label: metadata.label || normalized.toUpperCase(),
+    short_label: metadata.label || normalized.toUpperCase(),
+    native_label: metadata.native_label || localeLabel(normalized),
+    english_label: metadata.english_label || localeLabel(normalized),
+    direction: metadata.direction || "ltr",
+    flag_iso: metadata.flag_iso || "",
+    order: Number.isFinite(Number(metadata.order)) ? Number(metadata.order) : 999
+  };
 }
 
 function resolveFxRateFromConditions(conditions, { baseCurrency, targetCurrency, jurisdiction }) {
@@ -3555,7 +3597,10 @@ export default async function publicCommerceRoutes(app) {
         ok: true,
         default_locale: resolved.defaultLocale,
         source_locale: resolved.sourceLocale,
-        locales: resolved.locales.map((code) => ({ code, label: localeLabel(code) }))
+        language_library_version: "storefront-public-locales-v1",
+        locales: resolved.locales
+          .map((code) => publicLocaleMetadata(code))
+          .sort((a, b) => a.order - b.order || a.label.localeCompare(b.label))
       });
     }
   );

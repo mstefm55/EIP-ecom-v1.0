@@ -222,3 +222,13 @@ test("public commerce exposes approved mapping, content, catalog, and loader con
   assert.match(publicCommerceRoute, /scope: "storefront\.content\.read"/);
   assert.match(publicCommerceRoute, /scope: "storefront\.catalog\.read"/);
 });
+
+test("public locale contract includes required multilingual storefront metadata", () => {
+  for (const code of ["en", "ru", "fr", "ky", "es", "de"]) {
+    assert.match(publicCommerceRoute, new RegExp(`["']${code}["']`));
+  }
+  assert.match(publicCommerceRoute, /language_library_version/);
+  assert.match(publicCommerceRoute, /publicLocaleMetadata/);
+  assert.match(publicCommerceRoute, /native_label/);
+  assert.match(publicCommerceRoute, /flag_iso/);
+});

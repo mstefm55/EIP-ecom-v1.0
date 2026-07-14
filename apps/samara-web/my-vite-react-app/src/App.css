@@ -330,6 +330,11 @@ a:focus-visible {
   text-transform: uppercase;
 }
 
+.nav-marketplace select {
+  max-width: min(220px, 34vw);
+  text-overflow: ellipsis;
+}
+
 .nav-search img {
   width: 13px;
   height: 13px;

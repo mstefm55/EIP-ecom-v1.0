@@ -41,6 +41,11 @@ import {
   HeroViewportSlider,
   ImageAssetStudioModal,
 } from "./component-library";
+import {
+  DEFAULT_LANGUAGE_OPTIONS,
+  buildLocalizedCopy,
+  getLanguageMetadata,
+} from "./i18n/languageLibrary";
 
 import heroImage from "./assets/hero/slide1.jpg";
 import dropMain from "./assets/hero/pexels-aydin-sefidi-41034179-12367369.jpg";
@@ -69,9 +74,6 @@ import pattern11 from "./assets/ChatGPT Image Oct 8, 2025, 11_04_32 PM.png";
 import pattern12 from "./assets/ChatGPT Image Oct 8, 2025, 11_04_37 PM.png";
 import sizeDummy from "./assets/Dummy.png";
 
-const DEFAULT_LANGUAGE_OPTIONS = [
-  { code: "en", label: "EN" },
-];
 const DEFAULT_STOREFRONT_FX = {
   fx: {
     enabled: false,
@@ -181,16 +183,23 @@ function normalizeLanguageOptions(input, fallback = DEFAULT_LANGUAGE_OPTIONS) {
   const seed = Array.isArray(fallback) ? fallback : [];
   const source = Array.isArray(input) ? input : [];
   const map = new Map();
-  for (const item of [...source, ...seed]) {
+  for (const item of [...seed, ...source]) {
     const code = normalizeLocaleCode(item?.code);
     if (!code || map.has(code)) continue;
     const shortCode = code.split("-")[0].toUpperCase();
+    const meta = getLanguageMetadata(code);
     map.set(code, {
       code,
-      label: shortCode || code.toUpperCase()
+      label: String(item?.label || meta?.label || shortCode || code.toUpperCase()).trim(),
+      shortLabel: String(item?.shortLabel || item?.short_label || meta?.shortLabel || shortCode || code.toUpperCase()).trim(),
+      englishName: String(item?.englishName || item?.english_label || meta?.englishName || "").trim(),
+      nativeName: String(item?.nativeName || item?.native_label || meta?.nativeName || item?.label || shortCode || code.toUpperCase()).trim(),
+      direction: String(item?.direction || meta?.direction || "ltr").trim(),
+      flagIso: String(item?.flagIso || item?.flag_iso || meta?.flagIso || "").trim(),
+      order: Number.isFinite(Number(item?.order ?? meta?.order)) ? Number(item?.order ?? meta?.order) : 999,
     });
   }
-  return [...map.values()].sort((a, b) => a.label.localeCompare(b.label));
+  return [...map.values()].sort((a, b) => a.order - b.order || a.label.localeCompare(b.label));
 }
 
 function buildMarketplaceOptions(storefrontFx, countryOptions = [], languageOptions = []) {
@@ -204,7 +213,7 @@ function buildMarketplaceOptions(storefrontFx, countryOptions = [], languageOpti
   );
   const localeLabels = new Map(
     (Array.isArray(languageOptions) ? languageOptions : [])
-      .map((entry) => [normalizeLocaleCode(entry?.code), String(entry?.label || "").trim()])
+      .map((entry) => [normalizeLocaleCode(entry?.code), String(entry?.shortLabel || entry?.label || "").trim()])
       .filter(([code, label]) => code && label)
   );
 
@@ -523,7 +532,7 @@ function toNumericAmount(...values) {
   return null;
 }
 
-const COPY = {
+const LEGACY_COPY = {
   en: {
     nav: {
       patterns: "Patterns",
@@ -1400,6 +1409,8 @@ const COPY = {
     },
   },
 };
+
+const COPY = buildLocalizedCopy(LEGACY_COPY);
 
 const HOME_NAV = ["patterns", "pages", "sizes", "blog", "line", "learning"];
 const PATTERNS_NAV = ["patterns", "pages", "sizes", "blog", "line", "collab", "learning"];
@@ -2741,6 +2752,9 @@ function Header({
   activePage,
   onNavigate,
   siteBrandTitle = "Samara",
+  languageValue,
+  languageOptions,
+  onLanguageChange,
   marketplaceValue,
   marketplaceOptions,
   onMarketplaceChange,
@@ -2792,23 +2806,38 @@ function Header({
         ))}
       </nav>
       <div className="nav-controls">
-        <label className="nav-lang">
+        <label className="nav-lang" aria-label={t("nav.language")} title={t("nav.language")}>
           <img src={globeIcon} alt="" className="nav-lang-icon" />
+          <span>{t("nav.language")}</span>
           <select
-            value={marketplaceValue}
-            onChange={(event) => onMarketplaceChange(event.target.value)}
-            disabled={!Array.isArray(marketplaceOptions) || marketplaceOptions.length === 0}
+            value={languageValue}
+            onChange={(event) => onLanguageChange(event.target.value)}
           >
-            {(Array.isArray(marketplaceOptions) && marketplaceOptions.length
-              ? marketplaceOptions
-              : [{ code: "", label: "No marketplace configured" }]
+            {(Array.isArray(languageOptions) && languageOptions.length
+              ? languageOptions
+              : DEFAULT_LANGUAGE_OPTIONS
             ).map((item) => (
               <option key={item.code} value={item.code}>
-                {item.label}
+                {item.shortLabel || item.label}
               </option>
             ))}
           </select>
         </label>
+        {Array.isArray(marketplaceOptions) && marketplaceOptions.length ? (
+          <label className="nav-lang nav-marketplace" aria-label={t("nav.marketplace")} title={t("nav.marketplace")}>
+            <span>{t("nav.marketplace")}</span>
+            <select
+              value={marketplaceValue}
+              onChange={(event) => onMarketplaceChange(event.target.value)}
+            >
+              {marketplaceOptions.map((item) => (
+                <option key={item.code} value={item.code}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
         <label className="nav-search" aria-label={t("nav.search")}>
           <img src={searchIcon} alt="" />
           <input type="search" placeholder={t("nav.search")} />
@@ -6336,6 +6365,7 @@ export default function App() {
   const lastMemberLoginRef = useRef("");
   const paypalReturnHandledRef = useRef(false);
   const paypalCheckoutWindowRef = useRef(null);
+  const languageManuallySelectedRef = useRef(false);
   const favoritesStorageKey = useMemo(() => buildFavoritesStorageKey(memberUser), [memberUser]);
   const marketplaceOptions = useMemo(
     () => buildMarketplaceOptions(storefrontFx, countryOptions, languageOptions),
@@ -6369,6 +6399,16 @@ export default function App() {
           .toUpperCase() || null,
     };
   }, [storefrontFx, activeMarketplace]);
+
+  const handleLanguageChange = useCallback((value) => {
+    const nextLanguage = normalizeLocaleCode(value) || "en";
+    languageManuallySelectedRef.current = true;
+    if (nextLanguage !== language) setLanguage(nextLanguage);
+  }, [language]);
+
+  const handleMarketplaceChange = useCallback((value) => {
+    setSelectedMarketplaceCode(value);
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -6968,6 +7008,16 @@ export default function App() {
   }, [language, languageOptions, activeMarketplace]);
 
   useEffect(() => {
+    if (typeof document === "undefined") return;
+    const active =
+      (Array.isArray(languageOptions) ? languageOptions : []).find(
+        (item) => normalizeLocaleCode(item?.code) === normalizeLocaleCode(language)
+      ) || getLanguageMetadata(language);
+    document.documentElement.lang = normalizeLocaleCode(language) || "en";
+    document.documentElement.dir = active?.direction || "ltr";
+  }, [language, languageOptions]);
+
+  useEffect(() => {
     if (!marketplaceOptions.length) {
       setSelectedMarketplaceCode("");
       return;
@@ -6978,6 +7028,7 @@ export default function App() {
   }, [marketplaceOptions, selectedMarketplaceCode]);
 
   useEffect(() => {
+    if (languageManuallySelectedRef.current) return;
     if (!marketplaceOptions.length) return;
     const active =
       marketplaceOptions.find((item) => item.code === selectedMarketplaceCode) ||
@@ -8714,9 +8765,12 @@ export default function App() {
         activePage={activePage}
         onNavigate={handleNavigate}
         siteBrandTitle={siteBrand.title}
+        languageValue={language}
+        languageOptions={languageOptions}
+        onLanguageChange={handleLanguageChange}
         marketplaceValue={selectedMarketplaceCode}
         marketplaceOptions={marketplaceOptions}
-        onMarketplaceChange={setSelectedMarketplaceCode}
+        onMarketplaceChange={handleMarketplaceChange}
         onOpenCart={() => setCartOpen(true)}
         memberUser={memberUser}
         onOpenLoginPicker={openMemberEntry}
