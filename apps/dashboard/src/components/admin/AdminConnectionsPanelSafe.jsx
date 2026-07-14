@@ -618,6 +618,9 @@ export default function AdminConnectionsPanelSafe() {
   const isWebsiteStorefrontConnection = ["website", "ecommerce"].includes(selectedConnection?.identity?.connection_kind);
   const selectedConnectorPatchPath = connectorPatchPath(selectedStorefrontSuffix);
   const selectedConnectorPatchEndpoint = selectedConnectorPatchPath ? `${apiBaseUrl}${selectedConnectorPatchPath}` : "";
+  const selectedConnectorPatchAdminPath = selectedTenantId && selectedConnection?.identity?.connection_code
+    ? `/api/eip/gateway/connections/${selectedTenantId}/profile/${encodeURIComponent(selectedConnection.identity.connection_code)}/storefront/connector-patch`
+    : "";
   const selectedConnectorManifestEndpoint = selectedStorefrontSuffix
     ? `${apiBaseUrl}/api/public/commerce/${encodeURIComponent(selectedStorefrontSuffix)}/storefront/manifest?integration=loader`
     : "";
@@ -1061,15 +1064,15 @@ export default function AdminConnectionsPanelSafe() {
   };
 
   const handleLoadConnectorPatch = async () => {
-    if (!selectedConnectorPatchPath) return;
+    if (!selectedConnectorPatchAdminPath) return;
     setConnectorPatchLoading(true);
     setConnectorPatch(null);
     setError(null);
     try {
-      const result = await apiFetch(selectedConnectorPatchPath);
+      const result = await apiFetch(selectedConnectorPatchAdminPath);
       setConnectorPatch(result);
     } catch (err) {
-      setError(friendlyError(err, "Could not load the live connector patch. Save the website connection, enable Public API and Loader script, and confirm the storefront origin allowlist."));
+      setError(friendlyError(err, "Could not load the connector patch. Save the website connection, ensure it has an inbound suffix, and enable Public API and Loader script."));
     } finally {
       setConnectorPatchLoading(false);
     }
@@ -1506,7 +1509,7 @@ export default function AdminConnectionsPanelSafe() {
                         </Field>
                         <div className="flex flex-wrap gap-2">
                           <button type="button" disabled={!selectedConnectorScript} onClick={() => handleCopyConnectorText(selectedConnectorScript, "script")} className="rounded-full border border-brand-200 bg-brand-50 px-3 py-2 text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-brand-700 disabled:opacity-50"><Clipboard className="mr-1 inline h-3 w-3" />Copy install script</button>
-                          <button type="button" disabled={!selectedConnectorPatchPath || connectorPatchLoading} onClick={handleLoadConnectorPatch} className="rounded-full border border-ink-200 bg-white px-3 py-2 text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-ink-600 disabled:opacity-50"><RefreshCw className={`mr-1 inline h-3 w-3 ${connectorPatchLoading ? "animate-spin" : ""}`} />Load live patch JSON</button>
+                          <button type="button" disabled={!selectedConnectorPatchAdminPath || connectorPatchLoading} onClick={handleLoadConnectorPatch} className="rounded-full border border-ink-200 bg-white px-3 py-2 text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-ink-600 disabled:opacity-50"><RefreshCw className={`mr-1 inline h-3 w-3 ${connectorPatchLoading ? "animate-spin" : ""}`} />Load live patch JSON</button>
                           {selectedConnectorManifestEndpoint ? <button type="button" onClick={() => handleCopyConnectorText(selectedConnectorManifestEndpoint, "manifest")} className="rounded-full border border-ink-200 bg-white px-3 py-2 text-[0.6rem] font-semibold uppercase tracking-[0.18em] text-ink-600"><Copy className="mr-1 inline h-3 w-3" />Copy manifest URL</button> : null}
                         </div>
                         {connectorPatchCopied ? <p className="text-xs text-emerald-700">Copied {connectorPatchCopied}.</p> : null}

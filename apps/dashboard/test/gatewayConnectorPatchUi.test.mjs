@@ -12,6 +12,7 @@ test("Gateway Connection Profiles exposes external website connector patch insta
   assert.match(source, /buildStorefrontConnectorScript/);
   assert.match(source, /\/api\/public\/commerce-loader\/v1\.js/);
   assert.match(source, /\/api\/public\/commerce\/.*\/storefront\/connector-patch/);
+  assert.match(source, /\/api\/eip\/gateway\/connections\/.*\/storefront\/connector-patch/);
   assert.match(source, /Copy install script/);
   assert.match(source, /Load live patch JSON/);
   assert.match(source, /eip:storefront:applied/);

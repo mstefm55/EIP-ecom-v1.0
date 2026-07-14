@@ -64,6 +64,63 @@ function buildInboundUrl(baseUrl, suffix, channel) {
   return `${root}/api/public/gateway/intake/${suffix}`;
 }
 
+function escapeHtmlAttribute(value = "") {
+  return normalizeText(value)
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function requestPublicOrigin(req) {
+  const forwardedHost = normalizeText(req?.headers?.["x-forwarded-host"]).split(",")[0].trim();
+  const host = forwardedHost || normalizeText(req?.headers?.host);
+  const forwardedProto = normalizeText(req?.headers?.["x-forwarded-proto"]).split(",")[0].trim();
+  const proto = forwardedProto || req?.protocol || "https";
+  return `${proto}://${host}`;
+}
+
+function buildAdminStorefrontConnectorPatch(req, profile) {
+  const origin = requestPublicOrigin(req);
+  const connection = normalizeText(profile?.inbound?.inbound_path_suffix);
+  const loaderUrl = `${origin}/api/public/commerce-loader/v1.js`;
+  const refreshMs = 30000;
+  const scriptTag = connection
+    ? `<script async src="${escapeHtmlAttribute(loaderUrl)}" data-connection="${escapeHtmlAttribute(connection)}" data-api-base="${escapeHtmlAttribute(origin)}" data-refresh-ms="${refreshMs}"></script>`
+    : "";
+  return {
+    ok: true,
+    connector: "eip_storefront_connector",
+    connector_version: "loader_polling_v1",
+    connection,
+    connection_code: normalizeText(profile?.identity?.connection_code),
+    loader_enabled: profile?.public_storefront?.loader_enabled === true,
+    public_api_enabled: profile?.public_storefront?.public_api_enabled !== false,
+    public_api_base: origin,
+    loader_url: loaderUrl,
+    script_tag: scriptTag,
+    install_location: "before </body> or in the connected website app shell",
+    refresh: {
+      mode: "manifest_version_poll",
+      interval_ms: refreshMs,
+      manifest_endpoint: connection ? `/api/public/commerce/${encodeURIComponent(connection)}/storefront/manifest?integration=loader` : null
+    },
+    receiver_contract: {
+      manual_refresh_event: "document.dispatchEvent(new Event('eip:storefront:refresh'))",
+      post_message: { type: "eip-storefront-refresh", connection },
+      applied_event: "eip:storefront:applied",
+      browser_api: "window.EIPStorefrontConnector.refresh()"
+    },
+    requirements: {
+      mapping_required: true,
+      publish_required: true,
+      loader_must_be_enabled_on_connection_profile: true,
+      origin_should_be_allowlisted: true,
+      public_scopes_required: ["storefront.mapping.read", "storefront.content.read"]
+    }
+  };
+}
+
 function buildJwtHs256(payload, secret) {
   const header = { alg: "HS256", typ: "JWT" };
   const encode = (obj) =>
@@ -366,6 +423,41 @@ export default async function gatewayRoutes(app) {
         connections: connectionDiagnostics
       }
     });
+  });
+
+  app.get("/gateway/connections/:tenantId/profile/:connectionCode/storefront/connector-patch", async (req, reply) => {
+    const s = await app.requireSession(req, { realm: "EIP" });
+    if (!s.ok) return reply.code(s.status).send({ ok: false, error: s.error });
+
+    const allowed = await hasPermission(app, s.session.tenant_id, s.session.identity_id, "tenant.connection.read");
+    if (!allowed) return reply.code(403).send({ ok: false, error: "FORBIDDEN" });
+
+    const tenantId = req.params.tenantId;
+    const target = await requireConnectionTargetAccess(app, s.session, tenantId, reply, req);
+    if (!target) return;
+
+    const tenantRes = await app.db.query(
+      `
+      SELECT attrs
+      FROM eip_core.tenant
+      WHERE id = $1::uuid
+      `,
+      [tenantId]
+    );
+    if (tenantRes.rowCount === 0) return reply.code(404).send({ ok: false, error: "TENANT_NOT_FOUND" });
+
+    const connectionCode = normalizeText(req.params.connectionCode);
+    const profiles = extractProfiles(tenantRes.rows[0]?.attrs || {});
+    const profile = profiles.find((item) => normalizeText(item?.identity?.connection_code) === connectionCode);
+    if (!profile) return reply.code(404).send({ ok: false, error: "CONNECTION_NOT_FOUND" });
+    if (!["website", "ecommerce"].includes(profile.identity?.connection_kind)) {
+      return reply.code(400).send({ ok: false, error: "CONNECTOR_PATCH_REQUIRES_WEBSITE_CONNECTION" });
+    }
+    if (!profile.inbound?.inbound_path_suffix) {
+      return reply.code(400).send({ ok: false, error: "INBOUND_SUFFIX_REQUIRED" });
+    }
+
+    return reply.send(buildAdminStorefrontConnectorPatch(req, profile));
   });
 
   app.post("/gateway/connections/:tenantId/profile", async (req, reply) => {
