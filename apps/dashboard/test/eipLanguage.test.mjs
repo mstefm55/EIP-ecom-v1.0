@@ -48,3 +48,15 @@ test("EIP engine renderer translates static UI props live", () => {
   assert.match(rendererSource, /translateUiProps/);
   assert.match(rendererSource, /ctx, i18n/);
 });
+
+test("EIP live translation covers rendered text and metadata attributes", () => {
+  const contextSource = fs.readFileSync(new URL("../src/i18n/EipLanguageContext.jsx", import.meta.url), "utf8");
+  assert.match(contextSource, /MutationObserver/);
+  assert.match(contextSource, /TRANSLATABLE_ATTRIBUTES/);
+  assert.match(contextSource, /"placeholder"/);
+  assert.match(contextSource, /"aria-label"/);
+  assert.match(contextSource, /"title"/);
+  assert.match(contextSource, /"alt"/);
+  assert.match(contextSource, /translatedTextMutationsRef/);
+  assert.match(contextSource, /data-eip-i18n='off'/);
+});

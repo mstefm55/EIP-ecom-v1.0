@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   EIP_LANGUAGE_OPTIONS,
   getEipLanguageMetadata,
@@ -8,6 +8,25 @@ import {
 
 const STORAGE_KEY = "eip.dashboard.language";
 const EipLanguageContext = createContext(null);
+const TRANSLATABLE_ATTRIBUTES = Object.freeze([
+  "title",
+  "aria-label",
+  "aria-description",
+  "placeholder",
+  "alt",
+  "data-title",
+  "data-tooltip",
+]);
+const SKIP_SUBTREE_TAGS = new Set([
+  "SCRIPT",
+  "STYLE",
+  "NOSCRIPT",
+  "CODE",
+  "PRE",
+  "SVG",
+  "CANVAS",
+]);
+const SKIP_TEXT_TAGS = new Set([...SKIP_SUBTREE_TAGS, "TEXTAREA"]);
 
 const SKIP_TRANSLATION_KEYS = new Set([
   "id",
@@ -55,8 +74,33 @@ function safeReadStoredLanguage() {
   }
 }
 
+function preserveWhitespace(original, translated) {
+  const leading = String(original || "").match(/^\s*/)?.[0] || "";
+  const trailing = String(original || "").match(/\s*$/)?.[0] || "";
+  return `${leading}${translated}${trailing}`;
+}
+
+function isSkippableElement(element) {
+  if (!element || element.nodeType !== 1) return false;
+  if (SKIP_SUBTREE_TAGS.has(element.tagName)) return true;
+  if (element.closest?.("[data-eip-i18n='off'], [translate='no'], [contenteditable='true']")) {
+    return true;
+  }
+  return false;
+}
+
+function isSkippableTextNode(node) {
+  const parent = node?.parentElement;
+  return !parent || SKIP_TEXT_TAGS.has(parent.tagName) || isSkippableElement(parent);
+}
+
 export function EipLanguageProvider({ children }) {
   const [language, setLanguageState] = useState(safeReadStoredLanguage);
+  const textOriginalsRef = useRef(new WeakMap());
+  const attrOriginalsRef = useRef(new WeakMap());
+  const translatedTextMutationsRef = useRef(new WeakSet());
+  const translatedAttributeMutationsRef = useRef(new WeakMap());
+  const applyingDomTranslationRef = useRef(false);
 
   const setLanguage = useCallback((value) => {
     const next = normalizeEipLocale(value);
@@ -79,6 +123,148 @@ export function EipLanguageProvider({ children }) {
   }, [metadata]);
 
   const t = useCallback((text) => translateEipText(text, language), [language]);
+
+  useEffect(() => {
+    if (typeof document === "undefined" || typeof MutationObserver === "undefined") return undefined;
+    const root = document.getElementById("root") || document.body;
+    if (!root) return undefined;
+
+    const translateTextNode = (node) => {
+      if (!node || node.nodeType !== 3 || isSkippableTextNode(node)) return;
+      if (!textOriginalsRef.current.has(node)) {
+        textOriginalsRef.current.set(node, node.nodeValue || "");
+      }
+      const original = textOriginalsRef.current.get(node) || "";
+      const trimmed = original.trim();
+      if (!trimmed || trimmed.length < 2) {
+        node.nodeValue = original;
+        return;
+      }
+      const translated = t(trimmed);
+      const nextValue = translated && translated !== trimmed
+        ? preserveWhitespace(original, translated)
+        : original;
+      if (node.nodeValue !== nextValue) {
+        translatedTextMutationsRef.current.add(node);
+        node.nodeValue = nextValue;
+      }
+    };
+
+    const translateElementAttributes = (element) => {
+      if (!element || element.nodeType !== 1 || isSkippableElement(element)) return;
+      let originals = attrOriginalsRef.current.get(element);
+      if (!originals) {
+        originals = new Map();
+        attrOriginalsRef.current.set(element, originals);
+      }
+      for (const attr of TRANSLATABLE_ATTRIBUTES) {
+        if (!element.hasAttribute(attr)) continue;
+        if (!originals.has(attr)) originals.set(attr, element.getAttribute(attr) || "");
+        const original = originals.get(attr) || "";
+        const trimmed = original.trim();
+        if (!trimmed || trimmed.length < 2) {
+          element.setAttribute(attr, original);
+          continue;
+        }
+        const translated = t(trimmed);
+        const nextValue = translated && translated !== trimmed ? translated : original;
+        if (element.getAttribute(attr) !== nextValue) {
+          let translatedAttrs = translatedAttributeMutationsRef.current.get(element);
+          if (!translatedAttrs) {
+            translatedAttrs = new Set();
+            translatedAttributeMutationsRef.current.set(element, translatedAttrs);
+          }
+          translatedAttrs.add(attr);
+          element.setAttribute(attr, nextValue);
+        }
+      }
+    };
+
+    const applyNode = (node) => {
+      if (!node) return;
+      if (node.nodeType === 3) {
+        translateTextNode(node);
+        return;
+      }
+      if (node.nodeType !== 1 || isSkippableElement(node)) return;
+      translateElementAttributes(node);
+      const walker = document.createTreeWalker(
+        node,
+        NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,
+        {
+          acceptNode(candidate) {
+            if (candidate.nodeType === 1 && isSkippableElement(candidate)) {
+              return NodeFilter.FILTER_REJECT;
+            }
+            if (candidate.nodeType === 3 && isSkippableTextNode(candidate)) {
+              return NodeFilter.FILTER_REJECT;
+            }
+            return NodeFilter.FILTER_ACCEPT;
+          },
+        }
+      );
+      let current = walker.nextNode();
+      while (current) {
+        if (current.nodeType === 3) translateTextNode(current);
+        if (current.nodeType === 1) translateElementAttributes(current);
+        current = walker.nextNode();
+      }
+    };
+
+    const applyAll = () => {
+      applyingDomTranslationRef.current = true;
+      try {
+        applyNode(root);
+      } finally {
+        applyingDomTranslationRef.current = false;
+      }
+    };
+
+    let frame = 0;
+    const scheduleApply = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        applyAll();
+      });
+    };
+
+    applyAll();
+
+    const observer = new MutationObserver((mutations) => {
+      if (applyingDomTranslationRef.current) return;
+      for (const mutation of mutations) {
+        if (mutation.type === "characterData") {
+          if (translatedTextMutationsRef.current.has(mutation.target)) {
+            translatedTextMutationsRef.current.delete(mutation.target);
+          } else {
+            textOriginalsRef.current.delete(mutation.target);
+          }
+        } else if (mutation.type === "attributes") {
+          const translatedAttrs = translatedAttributeMutationsRef.current.get(mutation.target);
+          if (translatedAttrs?.has(mutation.attributeName)) {
+            translatedAttrs.delete(mutation.attributeName);
+          } else {
+            const originals = attrOriginalsRef.current.get(mutation.target);
+            originals?.delete(mutation.attributeName);
+          }
+        }
+      }
+      scheduleApply();
+    });
+    observer.observe(root, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: TRANSLATABLE_ATTRIBUTES,
+    });
+
+    return () => {
+      observer.disconnect();
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, [language, t]);
 
   const value = useMemo(
     () => ({
