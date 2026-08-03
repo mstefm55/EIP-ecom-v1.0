@@ -18,6 +18,10 @@ function firstText(...values) {
   return "";
 }
 
+function isEnabled(value) {
+  return String(value || "").trim().toLowerCase() === "true";
+}
+
 function buildLegacyEndpoint() {
   const legacyBase = firstCleanUrl(
     import.meta.env.VITE_EIP_GATEWAY_BASE_URL,
@@ -101,6 +105,8 @@ export const EIP_CONFIG = {
   clientSource: "web-client",
   externalRefPrefix: "web",
   lookbookUrl: import.meta.env.VITE_EIP_LOOKBOOK_URL || "",
+  enableCatalogVariant: isEnabled(import.meta.env.VITE_ENABLE_CATALOG_VARIANT),
+  enableCheckoutVariant: isEnabled(import.meta.env.VITE_ENABLE_CHECKOUT_VARIANT),
   dropRenderer: String(
     import.meta.env.VITE_EIP_DROP_RENDERER ||
       (String(import.meta.env.VITE_EIP_DROP_CARD_CAROUSEL_TEST || "").trim().toLowerCase() === "true"

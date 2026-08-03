@@ -1,4 +1,14 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import {
+  BrowserRouter,
+  Link,
+  Navigate,
+  NavLink,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
 import "./App.css";
 import "flag-icons/css/flag-icons.min.css";
 import { getCountryCallingCode } from "libphonenumber-js";
@@ -46,6 +56,8 @@ import {
   buildLocalizedCopy,
   getLanguageMetadata,
 } from "./i18n/languageLibrary";
+import CatalogueVariantShowcase from "./components/variants/CatalogueVariantShowcase";
+import CheckoutVariantShowcase from "./components/variants/CheckoutVariantShowcase";
 
 import heroImage from "./assets/hero/slide1.jpg";
 import dropMain from "./assets/hero/pexels-aydin-sefidi-41034179-12367369.jpg";
@@ -1412,8 +1424,95 @@ const LEGACY_COPY = {
 
 const COPY = buildLocalizedCopy(LEGACY_COPY);
 
-const HOME_NAV = ["patterns", "pages", "sizes", "blog", "line", "learning"];
-const PATTERNS_NAV = ["patterns", "pages", "sizes", "blog", "line", "collab", "learning"];
+const HOME_NAV = ["home", "patterns", "learning", "blog", "pages", "contact"];
+const PATTERNS_NAV = HOME_NAV;
+const NAV_ROUTE_MAP = {
+  home: "/",
+  patterns: "/patterns",
+  pages: "/about",
+  about: "/about",
+  contact: "/contact",
+  learning: "/courses",
+  courses: "/courses",
+  blog: "/blog",
+  sizes: "/faq",
+  faq: "/faq",
+  line: "/line",
+  collab: "/contact",
+  account: "/account",
+  profile: "/profile",
+  cart: "/cart",
+  checkout: "/checkout",
+  "order-confirmation": "/checkout/success",
+  "checkout-cancel": "/checkout/cancel",
+};
+const NAV_LABEL_FALLBACKS = {
+  home: "Home",
+  pages: "About",
+  about: "About",
+  contact: "Contact",
+  learning: "Courses",
+  courses: "Courses",
+  faq: "FAQ",
+};
+
+function routeForNavId(id) {
+  return NAV_ROUTE_MAP[id] || "/";
+}
+
+function productRoute(code) {
+  const value = String(code || "").trim();
+  return value ? `/patterns/${encodeURIComponent(value)}` : "/patterns";
+}
+
+function pageRoute(page, productCode = "") {
+  if (page === "product") return productRoute(productCode);
+  return routeForNavId(page);
+}
+
+function routeStateFromLocation(pathname = "/", search = "") {
+  const normalizedPath = `/${String(pathname || "/").replace(/^\/+/, "")}`.replace(/\/+$/, "") || "/";
+  const params = new URLSearchParams(search || "");
+  if (normalizedPath === "/") return { page: "home" };
+  if (normalizedPath === "/patterns") return { page: "patterns" };
+  if (normalizedPath.startsWith("/patterns/")) {
+    const rawCode = normalizedPath.slice("/patterns/".length);
+    return { page: "product", productCode: decodeURIComponent(rawCode || "") };
+  }
+  if (normalizedPath === "/cart") return { page: "cart" };
+  if (normalizedPath === "/checkout") return { page: "checkout" };
+  if (normalizedPath === "/checkout/success") {
+    return {
+      page: "order-confirmation",
+      orderCode: String(params.get("order") || "").trim(),
+      paymentCode: String(params.get("payment") || "").trim(),
+    };
+  }
+  if (normalizedPath === "/checkout/cancel") return { page: "checkout-cancel" };
+  if (normalizedPath === "/about") return { page: "pages" };
+  if (normalizedPath === "/contact") return { page: "contact" };
+  if (normalizedPath === "/courses") return { page: "learning" };
+  if (normalizedPath === "/blog") return { page: "blog" };
+  if (normalizedPath === "/faq") return { page: "sizes" };
+  if (normalizedPath === "/line") return { page: "line" };
+  if (normalizedPath === "/account") return { page: "account" };
+  if (normalizedPath === "/profile") return { page: "profile" };
+  if (normalizedPath.startsWith("/variants/")) return { page: "variant" };
+  return { page: "home", redirect: true };
+}
+
+function buildStorefrontReturnUrl(path) {
+  const base =
+    EIP_CONFIG.publicSiteUrl ||
+    EIP_CONFIG.siteUrl ||
+    (typeof window !== "undefined" ? window.location.origin : "");
+  if (!base) return path;
+  try {
+    return new URL(path, `${String(base).replace(/\/+$/, "")}/`).toString();
+  } catch {
+    return path;
+  }
+}
 const BRAND_CONTENT_SLOTS = ["brand", "site.brand", "home.brand", "header.brand", "global.brand"];
 const PAGE_CONTENT_SLOTS = {
   pages: { hero: "pages.hero", cards: "pages.cards" },
@@ -2781,28 +2880,23 @@ function Header({
   const profileButtonLabel = memberUser ? profileLabel : signInLabel;
   const greetingLabel = memberUser ? `Hello ${memberLabel || profileButtonLabel}` : profileButtonLabel;
   const brandTitle = String(siteBrandTitle || EIP_CONFIG.siteTitle || "Perfect Fit Bureau").trim() || "Perfect Fit Bureau";
-  const isActiveNav = (id) => {
-    if (id === "patterns") return activePage === "patterns" || activePage === "product";
-    return activePage === id;
-  };
-
   return (
     <header className="samara-header">
       <div className="header-left">
-        <button className="brand" type="button" onClick={() => onNavigate("home")}>
+        <Link className="brand" to="/">
           {brandTitle}
-        </button>
+        </Link>
       </div>
       <nav className="samara-nav" aria-label="Primary navigation">
         {navItems.map((id) => (
-          <button
+          <NavLink
             key={id}
-            type="button"
-            className={`nav-link ${isActiveNav(id) ? "is-active" : ""}`}
-            onClick={() => onNavigate(id)}
+            to={routeForNavId(id)}
+            end={id === "home"}
+            className={({ isActive }) => `nav-link ${isActive ? "is-active" : ""}`}
           >
-            {t(`nav.${id}`)}
-          </button>
+            {resolveCopy(t, `nav.${id}`, NAV_LABEL_FALLBACKS[id] || id)}
+          </NavLink>
         ))}
       </nav>
       <div className="nav-controls">
@@ -2842,11 +2936,11 @@ function Header({
           <img src={searchIcon} alt="" />
           <input type="search" placeholder={t("nav.search")} />
         </label>
-        <button type="button" className="nav-cart" onClick={onOpenCart}>
+        <Link className="nav-cart" to="/cart" onClick={onOpenCart}>
           <UiIcon name="cart" />
           {t("nav.cart")}
           <span className="nav-cart-count">{cartCount}</span>
-        </button>
+        </Link>
         {memberUser ? (
           <details className="account-menu">
             <summary className="nav-profile-trigger">
@@ -6226,8 +6320,146 @@ function OrderConfirmationPage({ confirmation, onContinueShopping }) {
   );
 }
 
-export default function App() {
-  const [activePage, setActivePage] = useState("home");
+function CheckoutSuccessPage({ confirmation, status, onCheckPaymentStatus, onContinueShopping }) {
+  const confirmed = Boolean(status?.success || confirmation?.orderCode || confirmation?.paymentCode);
+  if (confirmed) {
+    return <OrderConfirmationPage confirmation={confirmation} onContinueShopping={onContinueShopping} />;
+  }
+  return (
+    <main className="page checkout-result-page">
+      <section className="order-confirmation-card">
+        <div className="order-confirmation-mark is-pending" aria-hidden="true">…</div>
+        <p className="order-confirmation-eyebrow">Payment verification</p>
+        <h1>Confirming your payment</h1>
+        <p>
+          We are waiting for EIP to verify the payment before showing a paid
+          order confirmation.
+        </p>
+        {status?.paymentCode ? (
+          <dl className="order-confirmation-details">
+            <div><dt>Payment</dt><dd>{status.paymentCode}</dd></div>
+          </dl>
+        ) : null}
+        <div className="modal-actions">
+          <button
+            type="button"
+            className="btn"
+            onClick={onCheckPaymentStatus}
+            disabled={!status?.paymentCode || status?.checkingStatus}
+          >
+            <UiIcon name="checkout" />
+            {status?.checkingStatus ? "Checking…" : "Check status"}
+          </button>
+          <button type="button" className="btn ghost" onClick={onContinueShopping}>
+            Continue shopping
+          </button>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function CheckoutCancelPage({ onReturnToCart, onContinueShopping }) {
+  return (
+    <main className="page checkout-result-page">
+      <section className="order-confirmation-card">
+        <div className="order-confirmation-mark is-cancelled" aria-hidden="true">×</div>
+        <p className="order-confirmation-eyebrow">Checkout cancelled</p>
+        <h1>Payment was not completed</h1>
+        <p>No payment was recorded. Your cart is still available if you want to try again.</p>
+        <div className="modal-actions">
+          <button type="button" className="btn" onClick={onReturnToCart}>
+            <UiIcon name="cart" />
+            Return to cart
+          </button>
+          <button type="button" className="btn ghost" onClick={onContinueShopping}>
+            Continue shopping
+          </button>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function CheckoutRouteShell({ mode = "cart", itemCount = 0 }) {
+  const isCheckout = mode === "checkout";
+  return (
+    <main className="page checkout-route-page">
+      <section className="patterns-hero checkout-route-hero">
+        <p className="section-kicker">{isCheckout ? "Secure checkout" : "Your cart"}</p>
+        <h1>{isCheckout ? "Complete your order" : "Review your selection"}</h1>
+        <p>
+          {itemCount
+            ? "Your cart and checkout details are open here. The order uses the live EIP checkout flow."
+            : "Add a pattern to begin checkout. Cart state is preserved as you move through the storefront."}
+        </p>
+      </section>
+    </main>
+  );
+}
+
+function AboutPage({ siteBrand, onShop }) {
+  return (
+    <main className="page info-route-page">
+      <section className="patterns-hero">
+        <p className="section-kicker">About</p>
+        <h1>{siteBrand?.title || "Perfect Fit Bureau"}</h1>
+        <p>
+          A digital sewing pattern bureau for modern makers: curated drops,
+          clear sizing, and checkout governed by EIP.
+        </p>
+        <button type="button" className="btn" onClick={onShop}>
+          Shop patterns
+          <UiIcon name="arrowRight" />
+        </button>
+      </section>
+    </main>
+  );
+}
+
+function ContactPage({ onSubscribe, onShop }) {
+  return (
+    <main className="page info-route-page">
+      <section className="patterns-hero">
+        <p className="section-kicker">Contact</p>
+        <h1>Talk to the bureau</h1>
+        <p>
+          For pattern drops, collaborations, or order questions, use the Samara
+          storefront contact route while EIP keeps commerce data connected.
+        </p>
+        <div className="modal-actions info-route-actions">
+          <button type="button" className="btn" onClick={onSubscribe}>
+            Join updates
+          </button>
+          <button type="button" className="btn ghost" onClick={onShop}>
+            Browse patterns
+          </button>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function HiddenVariantPage({ type }) {
+  const enabled = type === "catalogue"
+    ? EIP_CONFIG.enableCatalogVariant
+    : EIP_CONFIG.enableCheckoutVariant;
+  if (!enabled) return <Navigate to="/" replace />;
+  return (
+    <main className="page info-route-page">
+      {type === "catalogue" ? <CatalogueVariantShowcase /> : <CheckoutVariantShowcase />}
+    </main>
+  );
+}
+
+function SamaraStorefrontApp() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const routeState = useMemo(
+    () => routeStateFromLocation(location.pathname, location.search),
+    [location.pathname, location.search]
+  );
+  const [activePage, setActivePageState] = useState(routeState.page || "home");
   const [language, setLanguage] = useState("en");
   const [selectedMarketplaceCode, setSelectedMarketplaceCode] = useState("");
   const [languageOptions, setLanguageOptions] = useState(() =>
@@ -6410,6 +6642,44 @@ export default function App() {
     setSelectedMarketplaceCode(value);
   }, []);
 
+  const setActivePage = useCallback(
+    (nextPage, options = {}) => {
+      const target = String(nextPage || "home").trim() || "home";
+      const productCode = options.productCode || selectedProductCode;
+      setActivePageState(target);
+      const nextPath = pageRoute(target, productCode);
+      if (nextPath && nextPath !== location.pathname) {
+        navigate(nextPath, { replace: Boolean(options.replace) });
+      }
+    },
+    [location.pathname, navigate, selectedProductCode]
+  );
+
+  useEffect(() => {
+    if (routeState.redirect) {
+      navigate("/", { replace: true });
+      return;
+    }
+    const nextPage = routeState.page || "home";
+    setActivePageState(nextPage);
+    if (routeState.productCode) {
+      setSelectedProductCode(routeState.productCode);
+    }
+    if (nextPage === "order-confirmation") {
+      setOrderConfirmation((previous) => ({
+        ...previous,
+        orderCode: routeState.orderCode || previous.orderCode,
+        paymentCode: routeState.paymentCode || previous.paymentCode,
+      }));
+      if (routeState.paymentCode) {
+        setCheckoutStatus((previous) => ({
+          ...previous,
+          paymentCode: routeState.paymentCode,
+        }));
+      }
+    }
+  }, [navigate, routeState]);
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search || "");
@@ -6418,15 +6688,30 @@ export default function App() {
     const productParam = String(params.get("product") || "").trim();
     const mlChallenge = String(params.get("mlc") || "").trim();
     const mlToken = String(params.get("mlt") || "").trim();
-    const allowedPages = new Set(["home", "patterns", "pages", "sizes", "blog", "line", "learning", "collab", "account", "profile"]);
-    if (allowedPages.has(pageParam)) setActivePage(pageParam);
+    const allowedPages = new Set([
+      "home",
+      "patterns",
+      "pages",
+      "sizes",
+      "blog",
+      "line",
+      "learning",
+      "collab",
+      "account",
+      "profile",
+      "cart",
+      "checkout",
+      "order-confirmation",
+      "contact",
+    ]);
+    if (allowedPages.has(pageParam)) setActivePage(pageParam, { replace: true });
     if (productParam) {
       setSelectedProductCode(productParam);
-      setActivePage("product");
+      setActivePage("product", { productCode: productParam, replace: true });
     }
     if (previewParam) {
       setPreviewCode(previewParam);
-      setActivePage("patterns");
+      setActivePage("patterns", { replace: true });
     }
     if (mlChallenge && mlToken) {
       verifyMemberAuth({
@@ -6455,7 +6740,7 @@ export default function App() {
           window.history.replaceState({}, "", clean.toString());
         });
     }
-  }, []);
+  }, [setActivePage]);
 
   useEffect(() => {
     if (typeof window === "undefined" || typeof document === "undefined") return undefined;
@@ -6559,17 +6844,16 @@ export default function App() {
       setCartOpen(false);
       if (!popupReturn) {
         setPaymentLifecycleView((previous) => ({ ...previous, open: false }));
-        setActivePage("order-confirmation");
-        if (typeof window !== "undefined") {
-          const confirmationUrl = new URL(window.location.href);
-          confirmationUrl.searchParams.set("page", "order-confirmation");
-          if (orderCode) confirmationUrl.searchParams.set("order", orderCode);
-          window.history.replaceState({}, "", confirmationUrl.toString());
-        }
+        setActivePageState("order-confirmation");
+        const confirmationParams = new URLSearchParams();
+        if (orderCode) confirmationParams.set("order", orderCode);
+        if (paymentCode) confirmationParams.set("payment", paymentCode);
+        const confirmationQuery = confirmationParams.toString();
+        navigate(`/checkout/success${confirmationQuery ? `?${confirmationQuery}` : ""}`, { replace: true });
       }
     }
     return lifecycle;
-  }, [cartItems, instantCheckoutItem]);
+  }, [cartItems, instantCheckoutItem, navigate]);
 
   const checkPaymentLifecycle = useCallback(async (paymentCode, { openPending = false, background = false, popupReturn = false } = {}) => {
     const reference = String(paymentCode || "").trim();
@@ -7346,7 +7630,7 @@ export default function App() {
 
   const openPatternsPage = useCallback(() => {
     setActivePage("patterns");
-  }, []);
+  }, [setActivePage]);
 
   const openSubscribe = useCallback(() => {
     setSubscribeForm({ name: "", email: "", phone: "" });
@@ -7376,7 +7660,7 @@ export default function App() {
         const maybeCode = parts.length > 2 ? String(parts[2] || "").trim() : "";
         if (maybeCode) {
           setSelectedProductCode(maybeCode);
-          setActivePage("product");
+          setActivePage("product", { productCode: maybeCode });
           return;
         }
         openPatternsPage();
@@ -7394,7 +7678,7 @@ export default function App() {
         setActivePage("blog");
         return;
       }
-      if (normalizedPath.startsWith("/learning")) {
+      if (normalizedPath.startsWith("/learning") || normalizedPath.startsWith("/courses")) {
         setActivePage("learning");
         return;
       }
@@ -7402,8 +7686,24 @@ export default function App() {
         setActivePage("line");
         return;
       }
-      if (normalizedPath.startsWith("/sizes")) {
+      if (normalizedPath.startsWith("/sizes") || normalizedPath.startsWith("/faq")) {
         setActivePage("sizes");
+        return;
+      }
+      if (normalizedPath.startsWith("/about") || normalizedPath.startsWith("/pages")) {
+        setActivePage("pages");
+        return;
+      }
+      if (normalizedPath.startsWith("/contact") || normalizedPath.startsWith("/collab")) {
+        setActivePage("contact");
+        return;
+      }
+      if (normalizedPath.startsWith("/cart")) {
+        setActivePage("cart");
+        return;
+      }
+      if (normalizedPath.startsWith("/checkout")) {
+        setActivePage("checkout");
         return;
       }
       if (normalizedPath === "/subscribe") {
@@ -7412,7 +7712,7 @@ export default function App() {
       }
       openPatternsPage();
     },
-    [openPatternsPage, openSubscribe]
+    [openPatternsPage, openSubscribe, setActivePage]
   );
 
   const scrollToHomeSection = useCallback((targetRaw) => {
@@ -7430,7 +7730,7 @@ export default function App() {
       }
     });
     return true;
-  }, [activePage]);
+  }, [activePage, setActivePage]);
 
   const handleHeroCta = useCallback(
     (slide) => {
@@ -7981,6 +8281,7 @@ export default function App() {
     if (!item?.code) return;
     setInstantCheckoutItem(toCartItem(item, 1, priceContext));
     setCartOpen(true);
+    setActivePage("checkout");
     setCheckoutStatus({ loading: false, error: "", success: false, orderCode: "", paymentCode: "" });
   };
 
@@ -8281,6 +8582,10 @@ export default function App() {
       const paymentMetadata = {
         source: clientSource,
         locale: language,
+        return_urls: {
+          success: buildStorefrontReturnUrl("/checkout/success"),
+          cancel: buildStorefrontReturnUrl("/checkout/cancel"),
+        },
         checkout: {
           delivery_address: deliveryAddress,
           billing_address: billingAddress,
@@ -8293,6 +8598,8 @@ export default function App() {
           order_id: orderId || undefined,
           method: selectedMethod,
           provider_code: selectedPaymentOption.provider_code || undefined,
+          return_url: buildStorefrontReturnUrl("/checkout/success"),
+          cancel_url: buildStorefrontReturnUrl("/checkout/cancel"),
           metadata: paymentMetadata,
         },
       });
@@ -8346,12 +8653,29 @@ export default function App() {
         orderCode: confirmedOrderCode,
         paymentCode: finalPayment?.code || "",
       });
+      const confirmedPaymentCode = finalPayment?.code || "";
+      setOrderConfirmation({
+        orderCode: confirmedOrderCode,
+        paymentCode: confirmedPaymentCode,
+        items: checkoutItems.map((item) => ({
+          id: item.id || null,
+          code: item.code || "",
+          title: item.title || item.code || "Item",
+          quantity: item.quantity || 1,
+        })),
+      });
       if (instantCheckoutItem) {
         setInstantCheckoutItem(null);
       } else {
         setCartItems([]);
       }
       setCartOpen(false);
+      setActivePageState("order-confirmation");
+      const confirmationParams = new URLSearchParams();
+      if (confirmedOrderCode) confirmationParams.set("order", confirmedOrderCode);
+      if (confirmedPaymentCode) confirmationParams.set("payment", confirmedPaymentCode);
+      const confirmationQuery = confirmationParams.toString();
+      navigate(`/checkout/success${confirmationQuery ? `?${confirmationQuery}` : ""}`, { replace: true });
       const defaultCountry = countryOptions[0]?.iso || DEFAULT_COUNTRY_ISO;
       const defaultPaymentOption = checkoutPaymentMethods.find(
         (item) => item.enabled !== false && item.available !== false
@@ -8377,7 +8701,7 @@ export default function App() {
   const openProduct = (item) => {
     if (!item?.code) return;
     setSelectedProductCode(item.code);
-    setActivePage("product");
+    setActivePage("product", { productCode: item.code });
     setReviewForm({
       rating: 5,
       title: "",
@@ -8744,7 +9068,23 @@ export default function App() {
 
   const handleNavigate = useCallback(
     (nextPage) => {
-      const allowed = new Set(["home", "patterns", "product", "account", "profile", "pages", "sizes", "blog", "line", "learning", "collab"]);
+      const allowed = new Set([
+        "home",
+        "patterns",
+        "product",
+        "account",
+        "profile",
+        "pages",
+        "sizes",
+        "blog",
+        "line",
+        "learning",
+        "collab",
+        "contact",
+        "cart",
+        "checkout",
+        "order-confirmation",
+      ]);
       const target = allowed.has(nextPage) ? nextPage : "home";
       if ((target === "account" || target === "profile") && !memberUser) {
         openMemberEntry();
@@ -8756,7 +9096,7 @@ export default function App() {
       }
       setActivePage(target);
     },
-    [memberUser, openMemberEntry, openPatternsPage]
+    [memberUser, openMemberEntry, openPatternsPage, setActivePage]
   );
 
   return (
@@ -8771,7 +9111,10 @@ export default function App() {
         marketplaceValue={selectedMarketplaceCode}
         marketplaceOptions={marketplaceOptions}
         onMarketplaceChange={handleMarketplaceChange}
-        onOpenCart={() => setCartOpen(true)}
+        onOpenCart={() => {
+          setCartOpen(true);
+          setActivePage("cart");
+        }}
         memberUser={memberUser}
         onOpenLoginPicker={openMemberEntry}
         onOpenAccount={() => setActivePage("account")}
@@ -8780,134 +9123,183 @@ export default function App() {
         cartCount={cartCount}
         t={t}
       />
-      {activePage === "home" ? (
-      <HomePage
-          onShop={openPatternsPage}
-          onOpenProduct={openProduct}
-          onHeroCta={handleHeroCta}
-          onLookbook={handleLookbook}
-          onSubscribe={openSubscribe}
-          t={t}
-          heroSlides={heroSlides}
-          brandContent={siteBrand}
-          featuredItems={featuredCards}
-          worthItems={worthCards}
-          featuredRenderer={getHomeProductSlotItem(contentBySlot, "featured")?.renderer}
-          worthRenderer={getHomeProductSlotItem(contentBySlot, "worth")?.renderer}
-          loading={homeLoading}
-          plugReady={plugReady}
+      <Routes>
+        <Route
+          path="/"
+          element={
+            <HomePage
+              onShop={openPatternsPage}
+              onOpenProduct={openProduct}
+              onHeroCta={handleHeroCta}
+              onLookbook={handleLookbook}
+              onSubscribe={openSubscribe}
+              t={t}
+              heroSlides={heroSlides}
+              brandContent={siteBrand}
+              featuredItems={featuredCards}
+              worthItems={worthCards}
+              featuredRenderer={getHomeProductSlotItem(contentBySlot, "featured")?.renderer}
+              worthRenderer={getHomeProductSlotItem(contentBySlot, "worth")?.renderer}
+              loading={homeLoading}
+              plugReady={plugReady}
+            />
+          }
         />
-      ) : activePage === "patterns" ? (
-        <PatternsPage
-          t={t}
-          items={plugReady ? filteredCatalog : null}
-          useFallback={!plugReady}
-          loading={catalogLoading}
-          error={catalogError}
-          filters={filters}
-          onFilterChange={handleFilterChange}
-          page={catalogPage}
-          pages={pages}
-          onPageChange={setCatalogPage}
-          canNext={canNext}
-          showingText={showingText}
-          onView={openProduct}
-          onAddToCart={addToCart}
-          onCheckout={checkoutItem}
-          onToggleFavorite={toggleFavorite}
-          isFavorite={isFavorite}
-          canOrder={plugReady}
-          previewCode={previewCode}
+        <Route
+          path="/patterns"
+          element={
+            <PatternsPage
+              t={t}
+              items={plugReady ? filteredCatalog : null}
+              useFallback={!plugReady}
+              loading={catalogLoading}
+              error={catalogError}
+              filters={filters}
+              onFilterChange={handleFilterChange}
+              page={catalogPage}
+              pages={pages}
+              onPageChange={setCatalogPage}
+              canNext={canNext}
+              showingText={showingText}
+              onView={openProduct}
+              onAddToCart={addToCart}
+              onCheckout={checkoutItem}
+              onToggleFavorite={toggleFavorite}
+              isFavorite={isFavorite}
+              canOrder={plugReady}
+              previewCode={previewCode}
+            />
+          }
         />
-      ) : activePage === "account" ? (
-        <AccountPage
-          t={t}
-          memberUser={memberUser}
-          historyItems={memberHistory}
-          historyLoading={memberHistoryLoading}
-          onOpenLogin={openMemberEntry}
+        <Route
+          path="/patterns/:slug"
+          element={
+            <ProductDetailPage
+              t={t}
+              language={language}
+              item={productDetailCard}
+              loading={productDetailLoading}
+              error={productDetailError}
+              onBack={() => setActivePage("patterns")}
+              canOrder={plugReady}
+              onAddToCart={addToCart}
+              onCheckout={checkoutItem}
+              reviews={productReviews}
+              summary={productReviewSummary}
+              reviewsLoading={productReviewsLoading}
+              reviewsError={productReviewsError}
+              reviewForm={reviewForm}
+              onReviewChange={handleReviewChange}
+              onReviewSubmit={handleReviewSubmit}
+              reviewSubmitState={reviewSubmitState}
+            />
+          }
         />
-      ) : activePage === "profile" ? (
-        <ProfilePage
-          t={t}
-          memberUser={memberUser}
-          form={profileForm}
-          onChange={handleProfileChange}
-          onSubmit={handleProfileSubmit}
-          status={profileStatus}
-          onOpenLogin={openMemberEntry}
+        <Route
+          path="/cart"
+          element={<CheckoutRouteShell mode="cart" itemCount={checkoutItems.length} />}
         />
-      ) : activePage === "order-confirmation" ? (
-        <OrderConfirmationPage
-          confirmation={orderConfirmation}
-          onContinueShopping={() => {
-            setActivePage("patterns");
-            if (typeof window !== "undefined") {
-              const nextUrl = new URL(window.location.href);
-              nextUrl.searchParams.delete("order");
-              nextUrl.searchParams.set("page", "patterns");
-              window.history.replaceState({}, "", nextUrl.toString());
-            }
-          }}
+        <Route
+          path="/checkout"
+          element={<CheckoutRouteShell mode="checkout" itemCount={checkoutItems.length} />}
         />
-      ) : activePage === "pages" ? (
-        <PagesHubPage
-          t={t}
-          language={language}
-          onNavigate={handleNavigate}
-          contentBySlot={contentBySlot}
-          contentListsBySlot={contentListsBySlot}
-          onContentCta={handleHeroCta}
+        <Route
+          path="/checkout/success"
+          element={
+            <CheckoutSuccessPage
+              confirmation={orderConfirmation}
+              status={checkoutStatus}
+              onCheckPaymentStatus={() => checkPaymentLifecycle(checkoutStatus.paymentCode, { openPending: true })}
+              onContinueShopping={() => setActivePage("patterns")}
+            />
+          }
         />
-      ) : activePage === "sizes" ? (
-        <SizesGuidePage t={t} language={language} contentBySlot={contentBySlot} onContentCta={handleHeroCta} />
-      ) : activePage === "blog" ? (
-        <BlogFeedPage
-          t={t}
-          language={language}
-          blogPosts={blogPosts}
-          loading={blogLoading}
-          error={blogError}
-          onCreatePost={handleCreateBlogPost}
-          onDeletePost={handleDeleteBlogPost}
-          memberUser={memberUser}
-          onOpenLogin={openMemberEntry}
-          onContentCta={handleHeroCta}
-          contentBySlot={contentBySlot}
+        <Route
+          path="/checkout/cancel"
+          element={
+            <CheckoutCancelPage
+              onReturnToCart={() => setActivePage("cart")}
+              onContinueShopping={() => setActivePage("patterns")}
+            />
+          }
         />
-      ) : activePage === "line" ? (
-        <LineStudioPage t={t} language={language} contentBySlot={contentBySlot} onContentCta={handleHeroCta} />
-      ) : activePage === "learning" ? (
-        <LearningPage
-          t={t}
-          language={language}
-          onOpenIntake={() => setLearningIntakeOpen(true)}
-          contentBySlot={contentBySlot}
-          onContentCta={handleHeroCta}
+        <Route path="/about" element={<AboutPage siteBrand={siteBrand} onShop={openPatternsPage} />} />
+        <Route
+          path="/contact"
+          element={<ContactPage onSubscribe={openSubscribe} onShop={openPatternsPage} />}
         />
-      ) : activePage === "collab" ? (
-        <CollabShopPage t={t} language={language} contentBySlot={contentBySlot} onContentCta={handleHeroCta} />
-      ) : (
-        <ProductDetailPage
-          t={t}
-          language={language}
-          item={productDetailCard}
-          loading={productDetailLoading}
-          error={productDetailError}
-          onBack={() => setActivePage("patterns")}
-          canOrder={plugReady}
-          onAddToCart={addToCart}
-          onCheckout={checkoutItem}
-          reviews={productReviews}
-          summary={productReviewSummary}
-          reviewsLoading={productReviewsLoading}
-          reviewsError={productReviewsError}
-          reviewForm={reviewForm}
-          onReviewChange={handleReviewChange}
-          onReviewSubmit={handleReviewSubmit}
-          reviewSubmitState={reviewSubmitState}
+        <Route
+          path="/courses"
+          element={
+            <LearningPage
+              t={t}
+              language={language}
+              onOpenIntake={() => setLearningIntakeOpen(true)}
+              contentBySlot={contentBySlot}
+              onContentCta={handleHeroCta}
+            />
+          }
         />
-      )}
+        <Route
+          path="/blog"
+          element={
+            <BlogFeedPage
+              t={t}
+              language={language}
+              blogPosts={blogPosts}
+              loading={blogLoading}
+              error={blogError}
+              onCreatePost={handleCreateBlogPost}
+              onDeletePost={handleDeleteBlogPost}
+              memberUser={memberUser}
+              onOpenLogin={openMemberEntry}
+              onContentCta={handleHeroCta}
+              contentBySlot={contentBySlot}
+            />
+          }
+        />
+        <Route
+          path="/faq"
+          element={<SizesGuidePage t={t} language={language} contentBySlot={contentBySlot} onContentCta={handleHeroCta} />}
+        />
+        <Route
+          path="/line"
+          element={<LineStudioPage t={t} language={language} contentBySlot={contentBySlot} onContentCta={handleHeroCta} />}
+        />
+        <Route
+          path="/account"
+          element={
+            <AccountPage
+              t={t}
+              memberUser={memberUser}
+              historyItems={memberHistory}
+              historyLoading={memberHistoryLoading}
+              onOpenLogin={openMemberEntry}
+            />
+          }
+        />
+        <Route
+          path="/profile"
+          element={
+            <ProfilePage
+              t={t}
+              memberUser={memberUser}
+              form={profileForm}
+              onChange={handleProfileChange}
+              onSubmit={handleProfileSubmit}
+              status={profileStatus}
+              onOpenLogin={openMemberEntry}
+            />
+          }
+        />
+        <Route path="/pages" element={<Navigate to="/about" replace />} />
+        <Route path="/sizes" element={<Navigate to="/faq" replace />} />
+        <Route path="/learning" element={<Navigate to="/courses" replace />} />
+        <Route path="/collab" element={<Navigate to="/contact" replace />} />
+        <Route path="/variants/catalogue" element={<HiddenVariantPage type="catalogue" />} />
+        <Route path="/variants/checkout" element={<HiddenVariantPage type="checkout" />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
       <SubscribeModal
         open={subscribeOpen}
         onClose={() => setSubscribeOpen(false)}
@@ -8938,10 +9330,11 @@ export default function App() {
         t={t}
       />
       <CartModal
-        open={cartOpen}
+        open={cartOpen || activePage === "cart" || activePage === "checkout"}
         onClose={() => {
           setCartOpen(false);
           setInstantCheckoutItem(null);
+          if (activePage === "cart" || activePage === "checkout") setActivePage("patterns");
         }}
         items={checkoutItems}
         onChangeQty={handleCartQtyChange}
@@ -8966,6 +9359,7 @@ export default function App() {
         onReturnToCart={() => {
           setPaymentLifecycleView((previous) => ({ ...previous, open: false }));
           setCartOpen(true);
+          setActivePage("cart");
         }}
         onClose={() => setPaymentLifecycleView((previous) => ({ ...previous, open: false }))}
       />
@@ -9002,5 +9396,13 @@ export default function App() {
         </div>
       </footer>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <SamaraStorefrontApp />
+    </BrowserRouter>
   );
 }
