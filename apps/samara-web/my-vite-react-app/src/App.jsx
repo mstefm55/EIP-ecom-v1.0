@@ -2508,7 +2508,7 @@ function resolveBrandContent(contentBySlot, lang = "en") {
     : [];
   return {
     slot: item?.slot || "",
-    title: title || "Samara",
+    title: title || EIP_CONFIG.siteTitle || "Perfect Fit Bureau",
     eyebrow,
     subtitle,
     buttons,
@@ -2751,7 +2751,7 @@ function UiIcon({ name, className = "ui-icon" }) {
 function Header({
   activePage,
   onNavigate,
-  siteBrandTitle = "Samara",
+  siteBrandTitle = EIP_CONFIG.siteTitle || "Perfect Fit Bureau",
   languageValue,
   languageOptions,
   onLanguageChange,
@@ -2780,7 +2780,7 @@ function Header({
   const signInLabel = resolveCopy(t, "nav.signIn", "Sign in");
   const profileButtonLabel = memberUser ? profileLabel : signInLabel;
   const greetingLabel = memberUser ? `Hello ${memberLabel || profileButtonLabel}` : profileButtonLabel;
-  const brandTitle = String(siteBrandTitle || "Samara").trim() || "Samara";
+  const brandTitle = String(siteBrandTitle || EIP_CONFIG.siteTitle || "Perfect Fit Bureau").trim() || "Perfect Fit Bureau";
   const isActiveNav = (id) => {
     if (id === "patterns") return activePage === "patterns" || activePage === "product";
     return activePage === id;

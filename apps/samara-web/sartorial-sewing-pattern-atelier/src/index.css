@@ -1,0 +1,102 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,405;1,500&family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Outfit", system-ui, sans-serif;
+  --font-serif: "Cormorant Garamond", Georgia, serif;
+  --font-mono: "JetBrains Mono", monospace;
+
+  /* Natural Tones organic color palette */
+  --color-sand-50: #FAF8F5;     /* Soft linen ivory */
+  --color-sand-100: #F3ECE1;    /* Refined bone cream */
+  --color-sand-200: #E7DCcb;    /* Warm oatmeal */
+  --color-sand-300: #D8CCA8;    /* Muted straw */
+  --color-sand-400: #BFB08E;    /* Soft khakis */
+  --color-sand-500: #9E8D6B;    /* Olive clay mud */
+  --color-sand-600: #887857;    /* Warm taupe brass */
+  --color-sand-700: #6D5E44;    /* Cast-iron bronze */
+  --color-sand-800: #524733;    /* Raw amber soil */
+  --color-sand-900: #362E21;    /* Deep roasted walnut */
+
+  --color-clay-50: #FDF7F4;     /* Pale blush dust */
+  --color-clay-100: #FCECE4;    /* Soft peach silk */
+  --color-clay-200: #F8D6C7;    /* Warm coral dust */
+  --color-clay-300: #EDB39A;    /* Terracotta wash */
+  --color-clay-400: #E08562;    /* Amber brick */
+  --color-clay-500: #C26B4A;    /* Primary natural clay */
+  --color-clay-600: #B25838;    /* Deep Sienna dry */
+  --color-clay-700: #924327;    /* Rustic cedar bark */
+  --color-clay-800: #78341D;    /* Roasted chestnut */
+  --color-clay-900: #5E2614;    /* Crimson earth magma */
+
+  --color-sage-50: #F6F7F5;     /* Pale eucalyptus */
+  --color-sage-100: #E9ECE6;    /* Soft moss breath */
+  --color-sage-200: #D2DAD1;    /* Muted sage leaf */
+  --color-sage-300: #B1BEB0;    /* Dusty evergreen */
+  --color-sage-400: #8AA189;    /* Mineral pine shadow */
+  --color-sage-500: #6B816A;    /* Herbal wellness sage */
+  --color-sage-600: #546552;    /* Dark forest fern */
+  --color-sage-700: #445242;    /* Dark spruce olive */
+  --color-sage-800: #364235;    /* Deep damp moss */
+  --color-sage-900: #293228;    /* Pine charcoal night */
+
+  --color-bark-50: #FAF8F6;    /* Antique soft white */
+  --color-bark-100: #F2EBE5;   /* Warm desert sand */
+  --color-bark-200: #E3D4C7;   /* Faded linen roll */
+  --color-bark-300: #CFB8A5;   /* Light warm earth */
+  --color-bark-400: #B6977F;   /* Natural wild leather */
+  --color-bark-500: #9C795F;   /* Light roasted cocoa */
+  --color-bark-600: #805E46;   /* Classic walnut timber */
+  --color-bark-700: #664934;   /* Dark soil earth */
+  --color-bark-800: #4C3525;   /* Double shot espresso */
+  --color-bark-900: #2D1E15;   /* Midnight espresso bean */
+
+  --shadow-bento: 0 4px 20px -2px rgba(136, 120, 87, 0.06), 0 2px 6px -1px rgba(136, 120, 87, 0.04);
+  --shadow-lux: 0 20px 40px -15px rgba(45, 30, 21, 0.08), 0 10px 20px -10px rgba(45, 30, 21, 0.05);
+
+  /* Configure border-radius globally to allow beautiful organic curved containers while keeping buttons sharp and crisp */
+  --radius-xs: 2px;
+  --radius-sm: 3px;
+  --radius: 4px;
+  --radius-md: 4px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-3xl: 24px;
+  --radius-4xl: 32px;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    background-color: var(--color-sand-50);
+    color: var(--color-bark-900);
+    line-height: 1.6;
+    letter-spacing: -0.01em;
+  }
+}
+
+/* Custom scrollbar to match the premium natural aesthetic */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-sand-100);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-bark-300);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-bark-400);
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Perfect Fit Bureau",
+  "description": "A modern landing page for fashionable sewing patterns, featuring a curated gallery, an interactive size guide calculator, and a seamless checkout experience.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

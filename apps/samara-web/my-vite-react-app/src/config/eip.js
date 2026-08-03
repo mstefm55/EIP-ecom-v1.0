@@ -2,11 +2,27 @@ function cleanUrl(value) {
   return String(value || "").trim().replace(/\/+$/, "");
 }
 
+function firstCleanUrl(...values) {
+  for (const value of values) {
+    const cleaned = cleanUrl(value);
+    if (cleaned) return cleaned;
+  }
+  return "";
+}
+
+function firstText(...values) {
+  for (const value of values) {
+    const text = String(value || "").trim();
+    if (text) return text;
+  }
+  return "";
+}
+
 function buildLegacyEndpoint() {
-  const legacyBase = cleanUrl(
-    import.meta.env.VITE_EIP_GATEWAY_BASE_URL ??
-      import.meta.env.VITE_EIP_API_BASE_URL ??
-      import.meta.env.VITE_API_BASE_URL
+  const legacyBase = firstCleanUrl(
+    import.meta.env.VITE_EIP_GATEWAY_BASE_URL,
+    import.meta.env.VITE_EIP_API_BASE_URL,
+    import.meta.env.VITE_API_BASE_URL
   );
   const legacySuffix = String(import.meta.env.VITE_EIP_SUFFIX || "").trim();
   if (!legacyBase || !legacySuffix) return "";
@@ -35,10 +51,17 @@ function buildGatewayBootstrapUrl(endpoint) {
   }
 }
 
-const endpoint = cleanUrl(
-  import.meta.env.VITE_EIP_ENDPOINT ||
-    import.meta.env.VITE_EIP_SITE_ENDPOINT ||
-    buildLegacyEndpoint()
+const publicSiteUrl = firstCleanUrl(
+  import.meta.env.VITE_PUBLIC_SITE_URL,
+  import.meta.env.VITE_SITE_URL,
+  import.meta.env.VITE_STORE_URL,
+  import.meta.env.VITE_APP_URL
+);
+
+const endpoint = firstCleanUrl(
+  import.meta.env.VITE_EIP_ENDPOINT,
+  import.meta.env.VITE_EIP_SITE_ENDPOINT,
+  buildLegacyEndpoint()
 );
 
 const apiKey =
@@ -51,6 +74,13 @@ const apiKey =
 export const EIP_CONFIG = {
   endpoint,
   apiKey,
+  publicSiteUrl,
+  siteUrl: publicSiteUrl,
+  siteTitle: firstText(
+    import.meta.env.VITE_SITE_TITLE,
+    import.meta.env.VITE_PUBLIC_SITE_NAME,
+    "Perfect Fit Bureau"
+  ),
   apiKeyHeader: "X-API-Key",
   connectionCode: import.meta.env.VITE_EIP_CONNECTION_CODE || "",
   gatewayBootstrapUrl: buildGatewayBootstrapUrl(endpoint),

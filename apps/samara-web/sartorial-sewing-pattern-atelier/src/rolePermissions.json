@@ -1,0 +1,62 @@
+{
+  "roles": {
+    "visitor": {
+      "name": "Casual Visitor",
+      "description": "Public spectator browsing catalog designs and digital patterns.",
+      "permissions": {
+        "gallery": "allowed",
+        "checkoutStore": "allowed",
+        "projectManagement": "denied",
+        "inventory": "denied",
+        "professionalDashboard": "denied",
+        "permissionsOverview": "allowed",
+        "analytics": "denied"
+      }
+    },
+    "member": {
+      "name": "Perfect Fit Member",
+      "description": "Active enthusiast drafting custom projects and coordinating garments.",
+      "permissions": {
+        "gallery": "allowed",
+        "checkoutStore": "allowed",
+        "projectManagement": "allowed",
+        "inventory": "denied",
+        "professionalDashboard": "denied",
+        "permissionsOverview": "allowed",
+        "analytics": "denied"
+      }
+    },
+    "partner": {
+      "name": "Creative Partner",
+      "description": "Authorized partner managing fabric inventories and production timelines.",
+      "permissions": {
+        "gallery": "allowed",
+        "checkoutStore": "allowed",
+        "projectManagement": "allowed",
+        "inventory": "allowed",
+        "professionalDashboard": "allowed",
+        "permissionsOverview": "allowed",
+        "analytics": "denied"
+      }
+    },
+    "professional": {
+      "name": "Master Professional",
+      "description": "Super administrator possessing comprehensive system overrides and telemetry tracking.",
+      "permissions": {
+        "gallery": "allowed",
+        "checkoutStore": "allowed",
+        "projectManagement": "allowed",
+        "inventory": "allowed",
+        "professionalDashboard": "allowed",
+        "permissionsOverview": "allowed",
+        "analytics": "allowed"
+      }
+    }
+  },
+  "meta": {
+    "version": "1.0.0",
+    "lastUpdated": "2026-07-12",
+    "engine": "DynamicLayout Engine V2",
+    "authStandard": "ISO-27001 Perfect Fit Log Integrity"
+  }
+}
