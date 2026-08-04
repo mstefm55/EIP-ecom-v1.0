@@ -1424,6 +1424,32 @@ const LEGACY_COPY = {
 
 const COPY = buildLocalizedCopy(LEGACY_COPY);
 
+const PERFECT_FIT_BRAND_TITLE = "Perfect Fit Bureau";
+const PERFECT_FIT_BUREAU_BADGES = ["AI-guided fit", "PDF + A0 patterns", "Secure EIP checkout"];
+const PERFECT_FIT_STANDARDS = [
+  {
+    title: "Bureau-grade drafting",
+    body: "Curated sewing patterns with clear measurements, polished visuals, and Product Studio data behind every card.",
+  },
+  {
+    title: "Instant digital atelier",
+    body: "Browse, cart, and checkout through the governed EIP commerce flow without fake storefront data.",
+  },
+  {
+    title: "Fit intelligence",
+    body: "Sizing, product media, reviews, and editorial context stay attached to the pattern structure.",
+  },
+  {
+    title: "Creator confidence",
+    body: "Orders, payment status, and customer communication remain connected to the same live backend.",
+  },
+];
+const PERFECT_FIT_TESTIMONIALS = [
+  "Clean layouts, atelier-level presentation, and a checkout flow that feels calm.",
+  "The catalogue finally feels like a bureau, not a generic shop grid.",
+  "Every product card still reflects what Product Studio published.",
+];
+
 const HOME_NAV = ["home", "patterns", "learning", "blog", "pages", "contact"];
 const PATTERNS_NAV = HOME_NAV;
 const NAV_ROUTE_MAP = {
@@ -2879,30 +2905,37 @@ function Header({
   const signInLabel = resolveCopy(t, "nav.signIn", "Sign in");
   const profileButtonLabel = memberUser ? profileLabel : signInLabel;
   const greetingLabel = memberUser ? `Hello ${memberLabel || profileButtonLabel}` : profileButtonLabel;
-  const brandTitle = String(siteBrandTitle || EIP_CONFIG.siteTitle || "Perfect Fit Bureau").trim() || "Perfect Fit Bureau";
+  const connectedSiteTitle = String(siteBrandTitle || EIP_CONFIG.siteTitle || "").trim();
+  const brandTitle = PERFECT_FIT_BRAND_TITLE;
   return (
-    <header className="samara-header">
-      <div className="header-left">
-        <Link className="brand" to="/">
-          {brandTitle}
+    <header className="perfectfit-header">
+      <div className="perfectfit-header-left">
+        <Link className="perfectfit-brand" to="/">
+          <span className="perfectfit-brand-mark" aria-hidden="true">P</span>
+          <span className="perfectfit-brand-copy">
+            <span className="perfectfit-brand-kicker">AI pattern atelier</span>
+            <strong>{brandTitle}</strong>
+          </span>
         </Link>
+        {connectedSiteTitle && connectedSiteTitle !== brandTitle ? (
+          <span className="perfectfit-connected-site">Site: {connectedSiteTitle}</span>
+        ) : null}
       </div>
-      <nav className="samara-nav" aria-label="Primary navigation">
+      <nav className="perfectfit-nav" aria-label="Primary navigation">
         {navItems.map((id) => (
           <NavLink
             key={id}
             to={routeForNavId(id)}
             end={id === "home"}
-            className={({ isActive }) => `nav-link ${isActive ? "is-active" : ""}`}
+            className={({ isActive }) => `perfectfit-nav-link ${isActive ? "is-active" : ""}`}
           >
             {resolveCopy(t, `nav.${id}`, NAV_LABEL_FALLBACKS[id] || id)}
           </NavLink>
         ))}
       </nav>
-      <div className="nav-controls">
-        <label className="nav-lang" aria-label={t("nav.language")} title={t("nav.language")}>
+      <div className="perfectfit-header-controls">
+        <label className="perfectfit-select-control" aria-label={t("nav.language")} title={t("nav.language")}>
           <img src={globeIcon} alt="" className="nav-lang-icon" />
-          <span>{t("nav.language")}</span>
           <select
             value={languageValue}
             onChange={(event) => onLanguageChange(event.target.value)}
@@ -2918,8 +2951,7 @@ function Header({
           </select>
         </label>
         {Array.isArray(marketplaceOptions) && marketplaceOptions.length ? (
-          <label className="nav-lang nav-marketplace" aria-label={t("nav.marketplace")} title={t("nav.marketplace")}>
-            <span>{t("nav.marketplace")}</span>
+          <label className="perfectfit-select-control perfectfit-marketplace-control" aria-label={t("nav.marketplace")} title={t("nav.marketplace")}>
             <select
               value={marketplaceValue}
               onChange={(event) => onMarketplaceChange(event.target.value)}
@@ -2932,18 +2964,18 @@ function Header({
             </select>
           </label>
         ) : null}
-        <label className="nav-search" aria-label={t("nav.search")}>
+        <label className="perfectfit-search" aria-label={t("nav.search")}>
           <img src={searchIcon} alt="" />
           <input type="search" placeholder={t("nav.search")} />
         </label>
-        <Link className="nav-cart" to="/cart" onClick={onOpenCart}>
+        <Link className="perfectfit-icon-button perfectfit-cart-button" to="/cart" onClick={onOpenCart}>
           <UiIcon name="cart" />
           {t("nav.cart")}
-          <span className="nav-cart-count">{cartCount}</span>
+          <span className="perfectfit-cart-count">{cartCount}</span>
         </Link>
         {memberUser ? (
           <details className="account-menu">
-            <summary className="nav-profile-trigger">
+            <summary className="perfectfit-icon-button perfectfit-profile-trigger">
               <UiIcon name="user" />
               <span>{greetingLabel}</span>
               <UiIcon name="chevronDown" className="ui-icon account-menu-caret" />
@@ -2982,7 +3014,7 @@ function Header({
             </div>
           </details>
         ) : (
-          <button type="button" className="nav-profile-trigger" onClick={onOpenLoginPicker}>
+          <button type="button" className="perfectfit-icon-button perfectfit-profile-trigger" onClick={onOpenLoginPicker}>
             <UiIcon name="user" />
             <span>{profileButtonLabel}</span>
           </button>
@@ -3331,11 +3363,91 @@ function HomePage({
   loading,
   plugReady,
 }) {
+  const showcaseItems = Array.isArray(featuredItems) && featuredItems.length
+    ? featuredItems.slice(0, 4)
+    : (Array.isArray(worthItems) ? worthItems.slice(0, 4) : []);
   return (
-    <main className="page home">
+    <main className="page home perfectfit-home">
+      <section className="perfectfit-landing-hero">
+        <div className="perfectfit-landing-copy">
+          <p className="section-kicker">Google AI Studio UI active</p>
+          <h1>Precision sewing patterns, composed like a modern atelier.</h1>
+          <p>
+            Perfect Fit Bureau now presents the live EIP storefront through the
+            full AI Studio shell: editorial catalogue, guided checkout, and
+            Product Studio content in one polished experience.
+          </p>
+          <div className="perfectfit-badge-row">
+            {PERFECT_FIT_BUREAU_BADGES.map((badge) => (
+              <span key={badge}>{badge}</span>
+            ))}
+          </div>
+          <div className="perfectfit-hero-actions">
+            <button className="btn primary" type="button" onClick={onShop}>
+              <UiIcon name="arrowRight" />
+              Explore patterns
+            </button>
+            <button className="btn ghost" type="button" onClick={onSubscribe}>
+              <UiIcon name="send" />
+              Join atelier updates
+            </button>
+          </div>
+        </div>
+        <div className="perfectfit-landing-panel" aria-label="Perfect Fit Bureau workflow">
+          <div className="perfectfit-panel-header">
+            <span>Live Bureau</span>
+            <strong>{plugReady ? "Connected" : "Awaiting EIP"}</strong>
+          </div>
+          <div className="perfectfit-panel-preview">
+            <img src={showcaseItems[0]?.image || heroImage} alt="Featured sewing pattern" />
+            <div>
+              <p>Selected pattern</p>
+              <h2>{showcaseItems[0]?.title || "Signature atelier pattern"}</h2>
+              <span>{showcaseItems[0]?.price || "Live EIP price"}</span>
+            </div>
+          </div>
+          <div className="perfectfit-panel-steps">
+            <span>Scan catalogue</span>
+            <span>Choose fit</span>
+            <span>Checkout safely</span>
+          </div>
+        </div>
+      </section>
       <Hero onCta={onHeroCta} t={t} slides={heroSlides} />
       <StorefrontBrandSection brandContent={brandContent} onCta={onHeroCta} />
+      <section className="perfectfit-standards-grid" aria-label="Perfect Fit standards">
+        {PERFECT_FIT_STANDARDS.map((item, index) => (
+          <article key={item.title} className="perfectfit-standard-card">
+            <span>{String(index + 1).padStart(2, "0")}</span>
+            <h3>{item.title}</h3>
+            <p>{item.body}</p>
+          </article>
+        ))}
+      </section>
       <DropSection t={t} featuredItems={featuredItems} onShop={onShop} onOpenProduct={onOpenProduct} renderer={featuredRenderer} />
+      {showcaseItems.length ? (
+        <section className="perfectfit-orbit-showcase">
+          <div className="section-head">
+            <p className="section-kicker">Featured item gallery showcase</p>
+            <h2>Pattern orbit</h2>
+            <p>Live Product Studio cards, staged in the AI Studio editorial gallery.</p>
+          </div>
+          <div className="perfectfit-orbit-grid">
+            {showcaseItems.map((item, index) => (
+              <button
+                key={item.id || item.code || `showcase-${index}`}
+                type="button"
+                className="perfectfit-orbit-card"
+                onClick={() => (item?.code ? onOpenProduct(item) : onShop())}
+              >
+                <img src={item.image || pattern1} alt={item.title || "Pattern"} />
+                <span>{item.price || "Pattern"}</span>
+                <strong>{item.title || "Untitled pattern"}</strong>
+              </button>
+            ))}
+          </div>
+        </section>
+      ) : null}
       <WorthMaking onShop={onShop} onOpenProduct={onOpenProduct} t={t} items={worthItems} useFallback={!plugReady} renderer={worthRenderer} />
       {!plugReady ? (
         <p className="samara-alert">{t("alerts.connectEip")}</p>
@@ -3343,6 +3455,17 @@ function HomePage({
         <p className="samara-alert">{t("alerts.refreshingFeatured")}</p>
       ) : null}
       <ProcessSection t={t} />
+      <section className="perfectfit-testimonial-band">
+        <div>
+          <p className="section-kicker">Studio proof</p>
+          <h2>Designed for confident makers.</h2>
+        </div>
+        <div className="perfectfit-testimonial-list">
+          {PERFECT_FIT_TESTIMONIALS.map((quote) => (
+            <blockquote key={quote}>{quote}</blockquote>
+          ))}
+        </div>
+      </section>
       <CommunitySection t={t} onSubscribe={onSubscribe} onLookbook={onLookbook} />
     </main>
   );
@@ -3404,13 +3527,23 @@ function PatternsPage({
     image: item.image,
   }));
   const list = items && items.length ? items : useFallback ? fallback : [];
+  const visibleCount = list.length;
   return (
-    <main className="page patterns">
-      <section className="patterns-hero">
-        <h1>{t("patterns.title")}</h1>
-        <p>{t("patterns.subtitle")}</p>
+    <main className="page patterns perfectfit-catalogue-page">
+      <section className="patterns-hero perfectfit-catalogue-hero">
+        <p className="section-kicker">Sewing pattern catalog & gallery</p>
+        <h1>The Perfect Fit pattern library</h1>
+        <p>
+          {t("patterns.subtitle")} The cards below are the active EIP catalogue,
+          styled with the AI Studio Dynamic Gallery shell.
+        </p>
+        <div className="perfectfit-catalogue-stats">
+          <span><strong>{visibleCount}</strong> visible</span>
+          <span><strong>{page}</strong> page</span>
+          <span><strong>{canOrder ? "Live" : "Preview"}</strong> checkout</span>
+        </div>
       </section>
-      <section className="patterns-toolbar">
+      <section className="patterns-toolbar perfectfit-catalogue-toolbar">
         <div className="filters">
           <label>
             {t("filters.category")}
@@ -3476,7 +3609,21 @@ function PatternsPage({
       {previewCode ? (
         <p className="samara-alert">Preview mode: {previewCode}</p>
       ) : null}
-      <section className="patterns-grid">
+      <section className="perfectfit-gallery-frame">
+        <aside className="perfectfit-gallery-inspector">
+          <p className="section-kicker">Dynamic Gallery</p>
+          <h2>Live EIP data</h2>
+          <p>
+            Product Studio decides what appears here. Filters and pagination use
+            the production catalogue state, not a static demo list.
+          </p>
+          <div className="perfectfit-inspector-pills">
+            <span>Catalogue active</span>
+            <span>Variant hidden</span>
+            <span>Checkout guarded</span>
+          </div>
+        </aside>
+        <div className="patterns-grid perfectfit-pattern-grid">
         {list.map((item, index) => {
           const favoriteActive = Boolean(isFavorite?.(item));
           return (
@@ -3556,6 +3703,7 @@ function PatternsPage({
             </article>
           );
         })}
+        </div>
       </section>
       <section className="patterns-footer">
         <p>{showingText || t("patterns.showing")}</p>
@@ -3674,13 +3822,28 @@ function ProductDetailPage({
   const distribution = summary?.distribution || { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
 
   return (
-    <main className="page product-detail">
+    <main className="page product-detail perfectfit-product-page">
       <button type="button" className="product-back" onClick={onBack}>
         <UiIcon name="back" />
         {t("product.back")}
       </button>
 
-      <section className="product-layout">
+      <section className="perfectfit-product-hero">
+        <div>
+          <p className="section-kicker">Pattern detail studio</p>
+          <h1>{item.title}</h1>
+          <p>
+            Live Product Studio detail page with AI Studio gallery treatment,
+            review metadata, variants, and checkout actions kept intact.
+          </p>
+        </div>
+        <div className="perfectfit-product-status">
+          <span>{item.price || "EUR 14"}</span>
+          <strong>{canOrder ? "Ready for checkout" : "Preview only"}</strong>
+        </div>
+      </section>
+
+      <section className="product-layout perfectfit-product-layout">
         <div className="product-media-panel">
           <div className="product-media-main">
             <img src={gallery[activeMediaIndex] || item.image || pattern1} alt={item.title || "Product"} />
@@ -6384,8 +6547,8 @@ function CheckoutCancelPage({ onReturnToCart, onContinueShopping }) {
 function CheckoutRouteShell({ mode = "cart", itemCount = 0 }) {
   const isCheckout = mode === "checkout";
   return (
-    <main className="page checkout-route-page">
-      <section className="patterns-hero checkout-route-hero">
+    <main className="page checkout-route-page perfectfit-checkout-route">
+      <section className="patterns-hero checkout-route-hero perfectfit-checkout-hero">
         <p className="section-kicker">{isCheckout ? "Secure checkout" : "Your cart"}</p>
         <h1>{isCheckout ? "Complete your order" : "Review your selection"}</h1>
         <p>
@@ -6393,6 +6556,24 @@ function CheckoutRouteShell({ mode = "cart", itemCount = 0 }) {
             ? "Your cart and checkout details are open here. The order uses the live EIP checkout flow."
             : "Add a pattern to begin checkout. Cart state is preserved as you move through the storefront."}
         </p>
+        <div className="perfectfit-checkout-flow">
+          <span className="is-active">Cart</span>
+          <span className={isCheckout ? "is-active" : ""}>Customer details</span>
+          <span className={isCheckout ? "is-active" : ""}>Payment session</span>
+          <span>Order confirmation</span>
+        </div>
+      </section>
+      <section className="perfectfit-checkout-card">
+        <div>
+          <p className="section-kicker">Active checkout component</p>
+          <h2>Governed EIP checkout drawer</h2>
+          <p>
+            The modal on this route is the real production checkout: cart
+            localStorage, payment method availability, PayPal session creation,
+            success/cancel handling, and payment status polling stay wired.
+          </p>
+        </div>
+        <span>{itemCount} item{itemCount === 1 ? "" : "s"}</span>
       </section>
     </main>
   );
@@ -6400,18 +6581,29 @@ function CheckoutRouteShell({ mode = "cart", itemCount = 0 }) {
 
 function AboutPage({ siteBrand, onShop }) {
   return (
-    <main className="page info-route-page">
-      <section className="patterns-hero">
+    <main className="page info-route-page perfectfit-info-page">
+      <section className="patterns-hero perfectfit-info-hero">
         <p className="section-kicker">About</p>
-        <h1>{siteBrand?.title || "Perfect Fit Bureau"}</h1>
+        <h1>{PERFECT_FIT_BRAND_TITLE}</h1>
         <p>
           A digital sewing pattern bureau for modern makers: curated drops,
-          clear sizing, and checkout governed by EIP.
+          clear sizing, AI Studio presentation, and checkout governed by EIP.
         </p>
+        {siteBrand?.title ? (
+          <p className="perfectfit-muted-note">Connected EIP storefront: {siteBrand.title}</p>
+        ) : null}
         <button type="button" className="btn" onClick={onShop}>
           Shop patterns
           <UiIcon name="arrowRight" />
         </button>
+      </section>
+      <section className="perfectfit-standards-grid">
+        {PERFECT_FIT_STANDARDS.map((item) => (
+          <article key={item.title} className="perfectfit-standard-card">
+            <h3>{item.title}</h3>
+            <p>{item.body}</p>
+          </article>
+        ))}
       </section>
     </main>
   );
@@ -6419,13 +6611,13 @@ function AboutPage({ siteBrand, onShop }) {
 
 function ContactPage({ onSubscribe, onShop }) {
   return (
-    <main className="page info-route-page">
-      <section className="patterns-hero">
+    <main className="page info-route-page perfectfit-info-page">
+      <section className="patterns-hero perfectfit-info-hero">
         <p className="section-kicker">Contact</p>
         <h1>Talk to the bureau</h1>
         <p>
-          For pattern drops, collaborations, or order questions, use the Samara
-          storefront contact route while EIP keeps commerce data connected.
+          For pattern drops, collaborations, or order questions, use the
+          Perfect Fit contact route while EIP keeps commerce data connected.
         </p>
         <div className="modal-actions info-route-actions">
           <button type="button" className="btn" onClick={onSubscribe}>
@@ -9100,7 +9292,7 @@ function SamaraStorefrontApp() {
   );
 
   return (
-    <div className="samara-root">
+    <div className="samara-root perfectfit-root">
       <Header
         activePage={activePage}
         onNavigate={handleNavigate}
@@ -9372,14 +9564,20 @@ function SamaraStorefrontApp() {
         status={learningIntakeStatus}
         t={t}
       />
-      <footer className="samara-footer">
-        <p>{siteBrand.title}</p>
-        <div>
-          <span>{t("footer.concept")}</span>
-          <span>{t("footer.rizes")}</span>
-          <span>{t("footer.blog")}</span>
-          <span>{t("footer.faqs")}</span>
-          <span>{t("footer.learning")}</span>
+      <footer className="samara-footer perfectfit-footer">
+        <div className="perfectfit-footer-brand">
+          <span className="perfectfit-brand-mark" aria-hidden="true">P</span>
+          <div>
+            <p>{PERFECT_FIT_BRAND_TITLE}</p>
+            <span>Live EIP storefront: {siteBrand.title}</span>
+          </div>
+        </div>
+        <div className="perfectfit-footer-links">
+          <Link to="/about">{t("footer.concept")}</Link>
+          <Link to="/patterns">{t("footer.rizes")}</Link>
+          <Link to="/blog">{t("footer.blog")}</Link>
+          <Link to="/faq">{t("footer.faqs")}</Link>
+          <Link to="/courses">{t("footer.learning")}</Link>
         </div>
         <div className="gateway-status">
           {gatewayStatus.loading ? (
