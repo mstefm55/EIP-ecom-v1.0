@@ -20,11 +20,11 @@ Current status:
 - Stable reference convention: established
 - Pattern Library: next active element
 
-## Phase B — Pattern Library
-
-### B1. Vendor-neutral frontend model
+## Phase B — Pattern Library B1
 
 Build `WorkspacePatternLibrary` in Perfect Fit using the same compact one-viewport design principles as Media.
+
+B1 is **frontend/manual-first** and does not depend on a CLO licence or automated CAD integration.
 
 Required first-version concepts:
 
@@ -33,168 +33,94 @@ Required first-version concepts:
 - base/reference size
 - Master Pattern view
 - Size Sets view
-- Other/Supporting Files view if required
+- Other/Supporting Files view when useful
 - selected-file inspector
-- upload/replace/delete/download interactions
+- manual upload
+- replace/delete/download interactions
 - file status
 - authoritative/supporting distinction
-- source provider/provenance
+- provider/provenance
+- intake method
 - technical notes
 - compact completeness information
 
-Do not expose internal EIP mapping keys in the designer-facing UI.
+Manual upload remains a permanent supported workflow after integrations exist.
 
-### B2. Real CLO-originated manual file proof
+The UI must not expose internal EIP mapping keys.
 
-Use a real file exported/saved from CLO and prove that the Pattern Library can host it correctly.
+## Phase C — Continue Workspace modules
 
-For the first proof capture:
+After Pattern Library B1 is coherent, move forward through the other Workspace modules rather than waiting for CLO connectivity.
 
-- variant
-- pattern revision
-- base/reference size
-- source provider = CLO
-- source/native type
-- technical role
-- file name
-- governed format/profile
-- covered sizes where applicable
-- authoritative/supporting status
-- created/updated timestamps
+Priority connected areas include:
 
-The first proof is manual intake. No CLO API automation is required yet.
+- dedicated Size Set
+- Sewing
+- Tech Pack
+- Change History
+- then Measurements/POM
+- Materials/BOM
+- Fit/Avatar/3D
+- Marker
+- Costing as the connected model matures
 
-### B3. Size Set model
+Each module remains a piece of the same digital thread.
 
-Implement one Size Set per supported format/output profile. Each Size Set represents the complete available size range.
+## Phase D — Pattern Library / Size Set refinement
 
-Support both packaging patterns:
+As the neighbouring modules clarify the technical model, return to Pattern Library where necessary to refine relationships without introducing provider-specific assumptions.
+
+A Size Set remains format-specific and represents the complete graded size range for that profile.
+
+Support both physical packaging patterns:
 
 - one file contains all sizes
 - several physical files collectively cover all sizes
 
 Display coverage such as `5 / 5 sizes` and identify missing sizes.
 
-### B4. V1 backend contract
+## Phase E — EIP V1 backend persistence
 
-After the frontend/data model is proven, define the minimum EIP V1 API and persistence contract required for durable Pattern Library storage.
+Once the frontend/domain contracts are sufficiently proven, define the minimum EIP V1 API and persistence required for durable storage.
 
 Backend belongs to EIP, not Perfect Fit.
 
-Avoid premature schema expansion: reuse existing EIP V1 asset/document/governed structures where practical and add only what the working contract requires.
+Manual-upload production path:
 
-### B5. CLO connector proof
+`Perfect Fit -> EIP Gateway/API boundary -> governed EIP technical/asset services`
 
-Build the first CLO integration only after B1–B4 are stable.
+Reuse existing EIP V1 governed structures where practical and add only what the proven working contract requires.
 
-Target flow:
+## Phase F — External provider integrations through EIP Gateway
 
-`CLO -> EIP adapter/plugin -> EIP API -> Pattern Library`
+Provider connectivity is intentionally deferred until licence/access and proven domain contracts are available.
 
-Initial automatic capabilities should focus on:
+All automated technical-software integration enters through the **EIP Gateway**.
+
+Canonical flow:
+
+`provider application/plugin -> EIP Gateway -> provider adapter -> governed EIP domain -> Perfect Fit/EIP UI`
+
+Perfect Fit never connects directly to CLO, Gerber, Richpeace, Optitex, Lectra or another provider.
+
+### CLO integration
+
+When a CLO licence becomes available, implement the first CLO adapter against the already-proven contracts.
+
+Initial CLO goals may include:
 
 - identify linked variant/revision
-- push a pattern/source file
+- push/pull pattern source files
 - transfer format/type metadata
-- transfer size/grading information where available
-- update sync status
+- transfer grading/size information where available
+- later POM, BOM, materials, 3D, render, animation and Tech Pack data
+- update synchronization/provenance status
 
-The same Pattern Library contract must continue to support manual files and future Gerber/Richpeace/Optitex/Lectra adapters.
+The CLO connector must not replace manual upload.
 
-## Phase C — Size Set
+### Additional adapters
 
-Connect Pattern Library grading/format coverage to the dedicated Size Set module.
-
-The Size Set module must not duplicate Pattern Library files. It represents the technical available size range and its governed relationship to the approved base/reference size and grading state.
-
-## Phase D — Measurements / POM
-
-Introduce measurement specifications and CLO/provider extraction after pattern/size semantics are stable.
-
-Prepare for:
-
-- POM definition
-- target measurement
-- tolerance
-- size values
-- provider-extracted measurements
-- revision comparison
-- fit/QC use
-
-## Phase E — Materials / BOM
-
-Connect design materials to EIP material masters.
-
-Prepare for:
-
-- fabric/trims
-- colorways
-- supplier/material mapping
-- BOM revisions
-- provider extraction
-- later inventory/cost sourcing
-
-## Phase F — Sewing / operations
-
-Keep the distinction:
-
-`CAD seam/construction relationship -> EIP sewing construction -> factory operation bulletin`.
-
-Later add:
-
-- machine class
-- attachments
-- SAM/SMV
-- skills
-- precedence
-- quality checkpoints
-- routing
-
-## Phase G — 3D / avatar / fit / media generation
-
-Use external engines as sources for:
-
-- 3D garment
-- avatars
-- simulation evidence
-- fit review
-- renders
-- animation
-
-Perfect Fit/EIP governs the resulting asset, role, visibility and revision context.
-
-## Phase H — Marker / cutting
-
-Build EIP's marker/cutting domain independently of any single nesting engine.
-
-External providers can supply nesting/marker capabilities, but EIP must own:
-
-- marker plan identity/revision
-- size ratio
-- fabric width/rules
-- marker consumption
-- production quantity relationship
-- later lay plan
-- roll/shade allocation
-- cut order
-
-## Phase I — BOQ / costing / production dependency
-
-Combine technical inputs with ERP data:
-
-- BOM
-- order quantity
-- size/color mix
-- marker consumption
-- waste/shrinkage
-- material inventory/prices
-- labor routing
-
-Generate BOQ, shortages and cost implications in EIP.
-
-## Phase J — Additional technical adapters
-
-After the CLO adapter contract works, add providers without changing the permanent domain model:
+After the adapter contract is proven, add providers without changing the permanent domain model:
 
 - Gerber / AccuMark
 - Richpeace
@@ -202,9 +128,17 @@ After the CLO adapter contract works, add providers without changing the permane
 - Lectra
 - others as required
 
-Provider capability discovery determines which actions are available.
+Provider capability discovery determines which automated actions are available.
 
-## Phase K — V2 migration
+## Phase G — Industrial continuation
+
+Keep the domain distinctions clear as the Workspace expands:
+
+`Pattern -> Grading -> Size Sets -> Measurements/POM -> BOM -> Sewing -> Operations -> Marker -> Consumption -> BOQ/Cost -> Production Release`
+
+External engines can contribute technical data or specialist processing; EIP owns governance, manufacturing interpretation and ERP execution.
+
+## Phase H — V2 migration
 
 Only after the V1 technical workflow is proven:
 
@@ -217,4 +151,4 @@ Do not interrupt the current V1 build to prematurely duplicate incomplete functi
 
 ## Immediate next task
 
-Design and implement **Pattern Library B1**, prepared to host the first real CLO-originated pattern file in B2.
+Implement **Pattern Library B1 with manual upload and vendor-neutral metadata**. Do not build CLO connectivity now. Once B1 is complete, continue to the next Workspace section and return to external integrations later through the EIP Gateway.
