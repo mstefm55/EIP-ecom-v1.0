@@ -40,6 +40,7 @@ EIP owns:
 - workflow and approvals
 - audit/change history
 - integration credentials and connection state
+- EIP Gateway
 - external CAD/3D/marker adapters
 - synchronization jobs
 - file transfer and transformation services
@@ -69,9 +70,19 @@ Examples of external engines include:
 
 CLO is the first planned deep integration, but EIP must remain vendor-neutral.
 
-## 4. Adapter architecture
+## 4. Gateway and adapter architecture
 
-Every external technical system connects to EIP through an adapter or connector contract.
+All external technical-system connectivity enters EIP through the **EIP Gateway**.
+
+Canonical integration path:
+
+`External technical application / plugin -> EIP Gateway -> EIP adapter/integration service -> governed EIP domain/services -> Perfect Fit or EIP ERP UI`
+
+Perfect Fit must not connect directly to CLO, Gerber, Richpeace, Optitex, Lectra or another technical engine.
+
+The browser must not own integration credentials, provider authentication, synchronization rules or provider-specific business logic.
+
+Every external technical system connects behind the Gateway through an adapter or connector contract.
 
 A provider may expose capabilities such as:
 
@@ -94,7 +105,9 @@ A provider may expose capabilities such as:
 - production marker functions
 - cut-planning functions
 
-The UI requests a business operation such as `Open in CAD`, `Sync Measurements`, `Generate Size Set`, or `Generate Marker`; EIP selects/uses the connected provider capability. Permanent UI/domain semantics must not be hardcoded to CLO.
+The UI requests a business operation such as `Open in CAD`, `Sync Measurements`, `Generate Size Set`, or `Generate Marker`; EIP selects/uses the connected provider capability behind the Gateway. Permanent UI/domain semantics must not be hardcoded to CLO.
+
+The exact Gateway route contract is defined only when the integration implementation begins; it must not be invented prematurely in the frontend.
 
 ## 5. Technical digital thread
 
@@ -157,35 +170,44 @@ A Size Set may be physically packaged as one file containing all sizes or multip
 Technical assets must be able to retain vendor-neutral provenance including:
 
 - source provider
-- external/source reference
+- intake method
+- external/source reference where applicable
 - source revision
 - EIP revision
 - source file type
 - derivative/output type
-- sync direction
-- sync status
-- last synchronization
-- who initiated the synchronization
+- sync direction where applicable
+- sync status where applicable
+- last synchronization where applicable
+- who initiated the upload/synchronization
 - files generated/received
 - dependency/revision relationship
 
 Typical source providers include `MANUAL`, `CLO`, `GERBER`, `RICHPEACE`, `OPTITEX`, `LECTRA`, and `OTHER`.
 
+Manual upload is a first-class intake path. It must remain available even after automated provider integrations are introduced.
+
 ## 10. CLO integration model
 
 CLO integration belongs to EIP, while Perfect Fit exposes the user experience.
 
-The preferred architecture is:
+There is **no active CLO integration dependency during the current frontend build** because a CLO licence is not yet available.
 
-`Perfect Fit -> EIP API -> EIP integration layer`
+Current phase:
 
-and for CLO-authoring workflows:
+`Perfect Fit manual upload -> Pattern Library frontend model`
 
-`CLO EIP Plugin -> EIP API`
+Future production/manual-upload path:
 
-A Python plug-in/service may act as the CLO-specific adapter, but Fastify/EIP remains the authoritative business API and system of record.
+`Perfect Fit -> EIP Gateway -> governed EIP asset/technical services`
 
-The browser must not become the owner of CLO integration credentials or technical synchronization logic.
+Future CLO-authoring path:
+
+`CLO EIP plugin/adapter -> EIP Gateway -> EIP integration services -> governed EIP technical domain`
+
+A Python plug-in/service may later act as the CLO-specific adapter, but Fastify/EIP remains the authoritative business API and system of record.
+
+CLO integration is deferred until the Workspace technical modules and their vendor-neutral contracts are sufficiently proven.
 
 ## 11. Licensing/business boundary
 
@@ -222,17 +244,21 @@ For each new element:
 1. define its place in the digital thread;
 2. define vendor-neutral data semantics;
 3. build the smallest working Perfect Fit UI;
-4. preserve the future EIP API/integration boundary;
-5. connect the next dependency only after the current element works;
-6. avoid speculative tables/services unless the next working step requires them.
+4. support manual data/file intake where the provider integration is not yet available;
+5. preserve the future EIP Gateway/API/integration boundary;
+6. move to the next connected Workspace element once the current UI contract is coherent;
+7. return later to provider integration without redesigning the frontend/domain contract;
+8. avoid speculative tables/services unless the next working step requires them.
 
 ## 14. Current next element
 
-The next element is **Pattern Library**.
+The next element is **Pattern Library B1**.
 
-The first goal is not full CLO automation. The first goal is to make the Perfect Fit Pattern Library capable of correctly hosting and governing a real CLO-originated pattern file and its technical metadata in a vendor-neutral model.
+B1 must provide a complete frontend working model including manual upload. It must be capable of representing files that could later originate from CLO, Gerber, Richpeace, Optitex, Lectra or another provider without requiring an active integration.
 
-After manual file intake works, the same EIP contract will be used by the CLO adapter for automatic transfer.
+We will not wait for a CLO licence and we will not make CLO connectivity a dependency of completing B1.
+
+After B1 is coherent, development moves to the other Workspace sections. Automated technical-software connectivity is a later integration pass through the EIP Gateway.
 
 ## 15. V2 migration rule
 
