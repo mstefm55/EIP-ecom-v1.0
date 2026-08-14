@@ -44,6 +44,7 @@ EIP V1 owns all backend and integration responsibilities:
 - durable asset/document storage
 - revisioning and audit
 - workflow/approval
+- EIP Gateway
 - external CAD/3D/marker connectors
 - synchronization and file transfer
 - manufacturing calculations and ERP services
@@ -98,10 +99,19 @@ It must support:
 - format-specific Size Sets
 - physical files belonging to a Size Set
 - provenance/source provider
+- intake method
 - source and derived output distinction
 - status/approval
 - notes
 - future sync status
+
+### Manual-first rule
+
+Manual upload is a permanent supported intake method, not a temporary workaround.
+
+During the current B1 phase there is no dependency on a CLO licence or CLO API connection. The UI must allow the user to manually upload and classify source or output files while preserving enough metadata that the same objects can later be populated automatically through an EIP Gateway adapter.
+
+A manually uploaded file may record a provider/provenance value such as CLO if the user knows the file came from CLO, but the transfer method remains `MANUAL_UPLOAD`.
 
 ### Size Set rule
 
@@ -121,13 +131,15 @@ Possible Size Sets:
 
 A Size Set can contain one physical file covering all sizes or multiple physical files covering individual/subsets of sizes.
 
-### First integration proof
+## 6. Gateway/provider adapter model
 
-The first Pattern Library milestone is manual intake of a real CLO-originated pattern file.
+All automated provider connectivity is routed through the EIP Gateway.
 
-The system must capture the file and vendor-neutral technical metadata correctly before automatic CLO transfer is introduced.
+Canonical direction:
 
-## 6. Provider adapter model
+`provider/plugin -> EIP Gateway -> provider adapter/integration service -> governed EIP domain`
+
+Perfect Fit never talks directly to a CAD/3D/marker provider.
 
 Each provider exposes a capability contract. Example capabilities include:
 
@@ -147,13 +159,17 @@ Each provider exposes a capability contract. Example capabilities include:
 - marker
 - cut planning
 
-Perfect Fit requests business actions. EIP invokes the connected adapter.
+Perfect Fit requests business actions. EIP invokes the connected adapter behind the Gateway.
 
-## 7. CLO first, not CLO-only
+## 7. CLO first planned integration, not current dependency
 
-CLO is the first deep technical integration because it can contribute pattern, grading, POM, BOM, materials, 3D, simulation, render, animation and technical output data.
+CLO remains the first planned deep technical integration because it can contribute pattern, grading, POM, BOM, materials, 3D, simulation, render, animation and technical output data.
 
-CLO-specific integration belongs behind EIP. Perfect Fit must not embed CLO-specific persistence/business rules into Pattern Library or other permanent modules.
+However, CLO integration is deferred until a licence is available and the Workspace technical modules are further developed.
+
+Current implementation therefore remains provider-neutral and manual-first.
+
+When CLO integration begins, its connector must populate the same Pattern Library/Size Set/other domain contracts already used by manual upload. No CLO-specific redesign of the frontend model is permitted unless a genuine missing business concept is identified.
 
 ## 8. Industrial continuation
 
@@ -183,7 +199,19 @@ may require:
 
 The working model must leave room for dependency invalidation even if the first UI version does not automate it yet.
 
-## 10. V2 migration
+## 10. Current build sequence
+
+Current sequence:
+
+1. complete Pattern Library B1 with manual upload;
+2. move to the next Workspace modules and establish their frontend/domain contracts;
+3. complete the connected Workspace progressively;
+4. return later to EIP Gateway integrations when licences/provider access are available;
+5. make provider adapters populate the already-proven EIP contracts.
+
+This preserves speed now without creating disposable standalone modules.
+
+## 11. V2 migration
 
 Do not implement current Perfect Fit work directly against V2.
 
