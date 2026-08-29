@@ -1,18 +1,11 @@
-import { DYNAMIC_PROJECT_SEED as INITIAL_PROJECTS } from '../../data/runtimeSeeds';
-import { runtimeDataStorage } from '../../lib/runtimeDataGateway';
 import React, { useState } from 'react';
+import { useRuntimeCollectionState } from '../../context/RuntimeDataContext';
+import { RUNTIME_DOMAINS } from '../../lib/runtimeDomainContracts';
 import { translatePerfectFitText as pfUiT } from '../../lib/i18n';
 import { Calendar, CheckSquare, ListTodo, Plus, Sparkles, Trash2, TrendingUp, UserCheck } from 'lucide-react';
 
 export default function DynamicProjectManager() {
-  const [projects, setProjects] = useState(() => {
-    try {
-      const saved = runtimeDataStorage.getItem('sartorial_atelier_projects');
-      return saved ? JSON.parse(saved) : INITIAL_PROJECTS;
-    } catch {
-      return INITIAL_PROJECTS;
-    }
-  });
+  const [projects, setProjects] = useRuntimeCollectionState(RUNTIME_DOMAINS.PROJECTS, []);
 
   const [newProjName, setNewProjName] = useState('');
   const [newProjPattern, setNewProjPattern] = useState('Classic Linen Atelier Smock');
@@ -20,9 +13,6 @@ export default function DynamicProjectManager() {
 
   const saveProjects = (updated) => {
     setProjects(updated);
-    try {
-      runtimeDataStorage.setItem('sartorial_atelier_projects', JSON.stringify(updated));
-    } catch {}
   };
 
   const handleAddProject = (e) => {

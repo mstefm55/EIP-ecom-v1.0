@@ -1,4 +1,3 @@
-import { COLLABORATOR_PROJECT_SEED as INITIAL_PROJECTS, COLLABORATOR_INVENTORY_SEED as INITIAL_INVENTORY, SUPPLIER_SEED as INITIAL_SUPPLIERS } from '../../data/runtimeSeeds';
 import { runtimeDataStorage } from '../../lib/runtimeDataGateway';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { translatePerfectFitText as pfUiT } from '../../lib/i18n';
@@ -22,7 +21,9 @@ import {
   slugifyCatalogValue
 } from '../../data/catalogTaxonomy';
 import { UI_LAYERS } from '../../lib/uiLayers';
-import { MASTER_SIZING_TABLE, SEWING_PATTERNS } from '../../data.js';
+import { MASTER_SIZING_TABLE } from '../../data.js';
+import { useRuntimeCollectionState } from '../../context/RuntimeDataContext';
+import { RUNTIME_DOMAINS } from '../../lib/runtimeDomainContracts';
 import SewingSessionTimer from '../SewingSessionTimer.jsx';
 import MannequinGuide from '../MannequinGuide.jsx';
 import IndustrialTechPack from '../IndustrialTechPack.jsx';
@@ -57,11 +58,12 @@ const PATTERN_STEPS = {
 };
 
 export default function CollaboratorWorkspace() {
+  const [catalogProducts] = useRuntimeCollectionState(RUNTIME_DOMAINS.CATALOG_PRODUCTS, []);
   const [activeTab, setActiveTab] = useState('projects'); // 'projects' | 'timer' | 'supply' | 'measurements' | 'techpacks'
   const [workspaceRecommendedSize, setWorkspaceRecommendedSize] = useState('8');
 
   // --- TECH PACKS & COLLABORATOR SECRETS STATE ---
-  const [selectedTechPackPatternId, setSelectedTechPackPatternId] = useState(() => SEWING_PATTERNS[0]?.id || 'sartorial-01');
+  const [selectedTechPackPatternId, setSelectedTechPackPatternId] = useState('');
   const [techPackSubTab, setTechPackSubTab] = useState('specs'); // 'specs' | 'flats' | 'industrial' | 'secrets'
   const [showTokenModal, setShowTokenModal] = useState(false);
   const [tokenGenerated, setTokenGenerated] = useState('');
@@ -70,20 +72,15 @@ export default function CollaboratorWorkspace() {
   const [secretNotesMap, setSecretNotesMap] = useState(() => {
     try {
       const saved = runtimeDataStorage.getItem('sartorial_collaborator_secrets');
-      return saved ? JSON.parse(saved) : {
-        'sartorial-01': '• Seam Allowance Secret: Cut front waist ties with 1/2" extra length for adjustable knot tension.\n• Pattern Alteration: Grade bust dart by -2mm when constructing in heavy linen.\n• Secret Stitch Technique: Use 70/10 Microtex needle for French seam edge finishing.',
-        'sartorial-02': '• Interfacing Secret: Fuse 2.5cm horsehair interlining in lapel collar to maintain crisp rolled lapel fold.\n• Trench Sleeve Notch: Shift armhole pitch notch forward by 3mm for better mobility.',
-        'sartorial-03': '• Trouser Drape Secret: Add lightweight stay tape along biased front pocket opening to prevent sagging.\n• Hem Secret: Blind-stitch lower hem using silk thread to eliminate exterior stitches.',
-        'sartorial-04': '• Sari Silk Secret: Stabilize neck curve with narrow tissue paper during lockstitching to avoid stretching.'
-      };
+      return saved ? JSON.parse(saved) : {};
     } catch {
       return {};
     }
   });
 
   const selectedTechPackPattern = useMemo(() => {
-    return SEWING_PATTERNS.find(p => p.id === selectedTechPackPatternId) || SEWING_PATTERNS[0];
-  }, [selectedTechPackPatternId]);
+    return catalogProducts.find(p => p.id === selectedTechPackPatternId) || catalogProducts[0] || null;
+  }, [catalogProducts, selectedTechPackPatternId]);
 
   const handleSaveSecretNote = (patternId, text) => {
     const updated = { ...secretNotesMap, [patternId]: text };
@@ -112,14 +109,7 @@ export default function CollaboratorWorkspace() {
   const [sewingTimerForceViewMode, setSewingTimerForceViewMode] = useState(null);
 
   // --- PROJECTS WORKSPACE STATE ---
-  const [projects, setProjects] = useState(() => {
-    try {
-      const saved = runtimeDataStorage.getItem('sartorial_atelier_projects');
-      return saved ? JSON.parse(saved) : INITIAL_PROJECTS;
-    } catch {
-      return INITIAL_PROJECTS;
-    }
-  });
+  const [projects, setProjects] = useRuntimeCollectionState(RUNTIME_DOMAINS.PROJECTS, []);
   const [newProjName, setNewProjName] = useState('');
   const [newProjPattern, setNewProjPattern] = useState('Trench');
   const [selectedProjectId, setSelectedProjectId] = useState('proj-1');
@@ -437,64 +427,24 @@ const handleSubmitProductForReview = (e) => {
 
 
   // --- MATERIALS, SUPPLIERS, & CONTACTS STATE ---
-  const [inventory, setInventory] = useState(() => {
-    try {
-      const saved = runtimeDataStorage.getItem('sartorial_atelier_inventory');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        return parsed.map(item => ({
-          ...item,
-          tags: item.tags || (item.name ? item.name.split(' ').slice(-2) : ['Fabric', 'Textile'])
-        }));
-      }
-      return INITIAL_INVENTORY;
-    } catch {
-      return INITIAL_INVENTORY;
-    }
-  });
-
-  const [suppliers, setSuppliers] = useState(() => {
-    try {
-      const saved = runtimeDataStorage.getItem('sartorial_atelier_suppliers');
-      return saved ? JSON.parse(saved) : INITIAL_SUPPLIERS;
-    } catch {
-      return INITIAL_SUPPLIERS;
-    }
-  });
+  const [inventory, setInventory] = useRuntimeCollectionState(RUNTIME_DOMAINS.INVENTORY, []);
+  const [suppliers, setSuppliers] = useRuntimeCollectionState(RUNTIME_DOMAINS.SUPPLIERS, []);
 
   const [materialsTab, setMaterialsTab] = useState('inventory'); // 'inventory' | 'suppliers' | 'orders'
 
   // Restock order logs
-  const [supplyOrders, setSupplyOrders] = useState(() => {
-    try {
-      const saved = runtimeDataStorage.getItem('sartorial_supply_orders');
-      return saved ? JSON.parse(saved) : [
-        { id: 'po-1', materialName: 'British Fine Merino Tweed', supplierName: 'Merino & Tweed Heritage Mills', qty: 25, totalCost: 737.50, status: 'In Transit', orderDate: 'Jul 15, 2026' }
-      ];
-    } catch {
-      return [];
-    }
-  });
+  const [supplyOrders, setSupplyOrders] = useRuntimeCollectionState(RUNTIME_DOMAINS.SUPPLY_ORDERS, []);
 
   const saveInventory = (updated) => {
     setInventory(updated);
-    try {
-      runtimeDataStorage.setItem('sartorial_atelier_inventory', JSON.stringify(updated));
-    } catch {}
   };
 
   const saveSuppliers = (updated) => {
     setSuppliers(updated);
-    try {
-      runtimeDataStorage.setItem('sartorial_atelier_suppliers', JSON.stringify(updated));
-    } catch {}
   };
 
   const saveSupplyOrders = (updated) => {
     setSupplyOrders(updated);
-    try {
-      runtimeDataStorage.setItem('sartorial_supply_orders', JSON.stringify(updated));
-    } catch {}
   };
 
   // Add material
@@ -1405,7 +1355,7 @@ const handleSubmitProductForReview = (e) => {
                       onChange={(e) => setSelectedTechPackPatternId(e.target.value)}
                       className="bg-stone-800 text-amber-100 border border-stone-700 px-3 py-2 rounded-xl text-xs font-sans focus:outline-none focus:border-clay-500 cursor-pointer"
                     >
-                      {SEWING_PATTERNS.map(p => (
+                      {catalogProducts.map(p => (
                         <option key={p.id} value={p.id}>
                           {p.name} ({p.category || 'Pattern'})
                         </option>
@@ -1601,7 +1551,7 @@ const handleSubmitProductForReview = (e) => {
               className="animate-fadeIn"
               id="timer-tab-viewport"
             >
-              <SewingSessionTimer patterns={SEWING_PATTERNS} forceViewMode={sewingTimerForceViewMode} />
+              <SewingSessionTimer patterns={catalogProducts} forceViewMode={sewingTimerForceViewMode} />
             </motion.div>
           )}
 

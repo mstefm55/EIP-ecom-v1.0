@@ -647,10 +647,12 @@ export default function MyOrdersSection({
               <p className="text-xs text-bark-500 max-w-[340px] mx-auto leading-relaxed font-sans">{pfUiT("ui.components.myorderssection.f34d8a2018")}</p>
             </div>
             <div className="flex items-center justify-center gap-3 pt-2">
-              <button
-                onClick={onLoadDemoOrders}
-                className="bg-[#FAF8F5] hover:bg-sand-100 text-bark-850 border border-sand-250 text-xs font-semibold px-4 py-2 rounded-lg transition-colors cursor-pointer shadow-3xs"
-              >{pfUiT("ui.components.myorderssection.749f63ceef")}</button>
+              {onLoadDemoOrders && (
+                <button
+                  onClick={onLoadDemoOrders}
+                  className="bg-[#FAF8F5] hover:bg-sand-100 text-bark-850 border border-sand-250 text-xs font-semibold px-4 py-2 rounded-lg transition-colors cursor-pointer shadow-3xs"
+                >{pfUiT("ui.components.myorderssection.749f63ceef")}</button>
+              )}
               <a
                 href="#gallery-section"
                 className="inline-flex items-center gap-1 bg-bark-900 hover:bg-bark-955 text-sand-50 text-xs font-semibold px-4 py-2 rounded-lg transition-colors cursor-pointer shadow-3xs"

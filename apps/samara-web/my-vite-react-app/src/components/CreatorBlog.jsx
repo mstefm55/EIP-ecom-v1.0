@@ -1,4 +1,3 @@
-import { BLOG_POST_SEED as PRESET_POSTS } from '../data/runtimeSeeds';
 import { createClientRecordId } from '../lib/runtimeDataGateway';
 import { useRuntimeCollectionState } from '../context/RuntimeDataContext';
 import { RUNTIME_DOMAINS } from '../lib/runtimeDomainContracts';
@@ -25,7 +24,7 @@ import { UI_LAYERS } from '../lib/uiLayers';
 export default function CreatorBlog() {
   const [posts, setPosts] = useRuntimeCollectionState(
     RUNTIME_DOMAINS.BLOG_POSTS,
-    PRESET_POSTS
+    []
   );
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [activeCommentPostId, setActiveCommentPostId] = useState(null);

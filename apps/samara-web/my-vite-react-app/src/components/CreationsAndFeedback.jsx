@@ -1,4 +1,3 @@
-import { COMMUNITY_POST_SEED as DEFAULT_SHOWROOM_POSTS } from '../data/runtimeSeeds';
 import { createClientRecordId } from '../lib/runtimeDataGateway';
 import { useRuntimeCollectionState } from '../context/RuntimeDataContext';
 import { RUNTIME_DOMAINS } from '../lib/runtimeDomainContracts';
@@ -86,7 +85,7 @@ export default function CreationsAndFeedback({
   // Community records are repository-driven; authored content remains in its source language.
   const [posts, setPosts] = useRuntimeCollectionState(
     RUNTIME_DOMAINS.COMMUNITY_POSTS,
-    DEFAULT_SHOWROOM_POSTS
+    []
   );
 
   // Consolidated Spotlight Carousel Logic (Atelier Creations in the Wild)

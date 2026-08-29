@@ -15,8 +15,6 @@ import {
   Lock, Unlock, Calendar, Archive
 } from 'lucide-react';
 import CatalogSidebarNavigator from './components/CatalogSidebarNavigator';
-import { SEWING_PATTERNS } from './data.js';
-import { CATALOG_PRODUCT_SEED, PRODUCT_REVIEW_SEED, createDemoOrderSeed } from './data/runtimeSeeds';
 import { slugifyCatalogValue } from './data/catalogTaxonomy';
 import PatternCard from './components/PatternCard';
 import PatternImageGallery from './components/PatternImageGallery';
@@ -57,7 +55,8 @@ import Workspace from './components/Workspace';
 import WorkspaceMedia, { loadMediaFile } from './components/workspace/WorkspaceMedia';
 import { perfectFitMetadata } from './config/perfectFitMetadata';
 import { usePerfectFitLanguage } from './context/LanguageContext';
-import { useRuntimeState } from './context/RuntimeDataContext';
+import { useRuntimeCollectionState, useRuntimeState } from './context/RuntimeDataContext';
+import { createOptInDemoOrderSeed, isDemoRuntimeDataEnabled } from './lib/runtimeRepositoryBootstrap';
 import { RUNTIME_DOMAINS } from './lib/runtimeDomainContracts';
 import { clientPreferences } from './lib/clientPreferences';
 import { ProjectFocusWindow } from './components/workspace/ProjectJournal';
@@ -646,7 +645,7 @@ Workspace: (section) => (
         currentUser={currentUser}
         guestOrders={guestOrders}
         onOpenAuthModal={() => setIsAuthModalOpen(true)}
-        onLoadDemoOrders={handleLoadDemoOrders}
+        onLoadDemoOrders={isDemoRuntimeDataEnabled() ? handleLoadDemoOrders : undefined}
       />
     </motion.div>
   ),
@@ -843,7 +842,7 @@ Workspace: (section) => (
   };
 
   const handleLoadDemoOrders = () => {
-    const demoOrdersList = createDemoOrderSeed();
+    const demoOrdersList = createOptInDemoOrderSeed();
 
     if (currentUser) {
       setCurrentUser(prev => ({
@@ -860,9 +859,9 @@ Workspace: (section) => (
   };
 
   // Catalogue runtime data comes through the repository boundary.
-  const [patterns, setPatterns] = useRuntimeState(
+  const [patterns, setPatterns, patternsRepositoryState] = useRuntimeCollectionState(
     RUNTIME_DOMAINS.CATALOG_PRODUCTS,
-    CATALOG_PRODUCT_SEED
+    []
   );
 
   const [workspaceProductPresentations, setWorkspaceProductPresentations] = useState([]);
@@ -1438,9 +1437,7 @@ const handleCatalogRatingToggle = (ratingId) => {
   // User sizing preference from the calculator (or default)
 
   // Currently active focused pattern (for detailed product description view)
-  const [activePatternId, setActivePatternId] = useState(
-    () => CATALOG_PRODUCT_SEED[0]?.id || SEWING_PATTERNS[0]?.id || ''
-  );
+  const [activePatternId, setActivePatternId] = useState('');
 
   // Detail tab state for OrbitCarousel details panel
   const [featuredDetailTab, setFeaturedDetailTab] = useState('specs');
@@ -1471,16 +1468,18 @@ const handleCatalogRatingToggle = (ratingId) => {
       const token = params.get('token');
       const patternId = params.get('pattern');
       if (token) {
-        const matchedPattern = SEWING_PATTERNS.find(p => p.id === patternId || (token && token.includes(p.id))) || SEWING_PATTERNS[0];
+        const matchedPattern = productPresentationPatterns.find(
+          (pattern) => pattern.id === patternId || token.includes(pattern.id)
+        );
         setSharedTokenAccess({
           token,
-          pattern: matchedPattern
+          pattern: matchedPattern || null
         });
       }
     } catch (err) {
       console.error("Error reading token URL parameter:", err);
     }
-  }, []);
+  }, [productPresentationPatterns]);
 
   // Sync active focused pattern when presentation list changes
   useEffect(() => {
@@ -1495,7 +1494,7 @@ const handleCatalogRatingToggle = (ratingId) => {
   // Reviews remain authored/runtime content; only their surrounding UI is translated.
   const [reviews, setReviews] = useRuntimeState(
     RUNTIME_DOMAINS.PRODUCT_REVIEWS,
-    PRODUCT_REVIEW_SEED
+    {}
   );
 
   // Submit a new review handler
@@ -2683,6 +2682,8 @@ id="gallery-section"
                       ) : (
                         <DynamicGallery
                           patterns={filteredPatterns}
+                          loading={patternsRepositoryState.loading}
+                          error={patternsRepositoryState.error}
                           catalogColumns={isCatalogSidebarCollapsed ? 4 : 3}
                           onAddToCart={handleAddToCart}
                           activeRecommendedSize={DEFAULT_LEGACY_PATTERN_SIZE}
@@ -2720,7 +2721,7 @@ id="gallery-section"
                     currentUser={currentUser}
                     guestOrders={guestOrders}
                     onOpenAuthModal={() => setIsAuthModalOpen(true)}
-                    onLoadDemoOrders={handleLoadDemoOrders}
+                    onLoadDemoOrders={isDemoRuntimeDataEnabled() ? handleLoadDemoOrders : undefined}
                   />
                 </motion.div>
               );

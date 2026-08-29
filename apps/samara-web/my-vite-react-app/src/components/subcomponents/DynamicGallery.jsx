@@ -1,4 +1,3 @@
-import { DYNAMIC_GALLERY_PRODUCT_SEED as SEWING_PATTERNS } from '../../data/runtimeSeeds';
 import { runtimeDataStorage } from '../../lib/runtimeDataGateway';
 import { clientPreferences, clientSession } from '../../lib/clientPreferences';
 import React, { useState, useMemo, useEffect } from 'react';
@@ -40,6 +39,8 @@ import PatternCard from '../PatternCard';
 
 export default function DynamicGallery({
   patterns: passedPatterns,
+  loading = false,
+  error = null,
   catalogColumns = 4,
   onAddToCart,
   activeRecommendedSize,
@@ -231,7 +232,7 @@ export default function DynamicGallery({
     }
   };
 
-  const activePatterns = passedPatterns || SEWING_PATTERNS;
+  const activePatterns = Array.isArray(passedPatterns) ? passedPatterns : [];
 
   // Filter and sort garments
   const filteredPatterns = useMemo(() => {
@@ -560,12 +561,23 @@ export default function DynamicGallery({
       </div>
 
       {/* Grid List */}
-      {filteredPatterns.length === 0 ? (
+      {loading ? (
+        <div className="text-center py-16 bg-white rounded-xl border border-dashed border-sand-300">
+          <RefreshCw className="w-8 h-8 text-bark-400 animate-spin mx-auto mb-3" />
+          <p className="text-sm font-medium text-bark-900 font-serif">{pfUiT("ui.components.subcomponents.dynamicgallery.runtime.loading")}</p>
+        </div>
+      ) : error ? (
+        <div className="text-center py-16 bg-white rounded-xl border border-dashed border-red-300">
+          <AlertCircle className="w-8 h-8 text-red-500 mx-auto mb-3" />
+          <p className="text-sm font-medium text-bark-900 font-serif">{pfUiT("ui.components.subcomponents.dynamicgallery.runtime.error")}</p>
+          <p className="text-xs text-bark-500 mt-1">{pfUiT("ui.components.subcomponents.dynamicgallery.runtime.errorHelp")}</p>
+        </div>
+      ) : filteredPatterns.length === 0 ? (
         <div className="text-center py-16 bg-white rounded-xl border border-dashed border-sand-300 flex flex-col items-center justify-center space-y-3">
           <AlertCircle className="w-8 h-8 text-bark-400" />
           <div className="space-y-1">
-            <p className="text-sm font-medium text-bark-900 font-serif">{pfUiT("ui.components.subcomponents.dynamicgallery.0e69cd44b2")}</p>
-            <p className="text-xs text-bark-500 max-w-sm">{pfUiT("ui.components.subcomponents.dynamicgallery.2b7f025861")}</p>
+            <p className="text-sm font-medium text-bark-900 font-serif">{pfUiT("ui.components.subcomponents.dynamicgallery.runtime.empty")}</p>
+            <p className="text-xs text-bark-500 max-w-sm">{pfUiT("ui.components.subcomponents.dynamicgallery.runtime.emptyHelp")}</p>
           </div>
           <button
             onClick={() => { setSearchQuery(''); setSelectedDifficulty('All'); setSelectedCategory('All'); }}
@@ -590,13 +602,7 @@ export default function DynamicGallery({
               >
                 <PatternCard
                   viewMode={viewMode}
-                  pattern={{
-                    ...pattern,
-                    fabric: pattern.fabric || (Array.isArray(pattern.fabricSuggestions) ? pattern.fabricSuggestions.join(', ') : 'Premium apparel textiles.'),
-                    rating: pattern.rating || 4.8,
-                    reviewsCount: pattern.reviews || 12,
-                    time: pattern.time || pattern.duration || '8 hours'
-                  }}
+                  pattern={pattern}
                   onAddToCart={onAddToCart}
                   activeRecommendedSize={activeRecommendedSize}
                   reviews={reviews}

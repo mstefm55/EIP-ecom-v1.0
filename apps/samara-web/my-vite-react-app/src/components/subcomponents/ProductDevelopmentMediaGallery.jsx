@@ -21,8 +21,7 @@ import {
   MEDIA_TYPES,
   getPatternSwatches,
   addPatternSwatchItem,
-  deletePatternSwatchItem,
-  DEFAULT_FABRIC_SWATCHES
+  deletePatternSwatchItem
 } from '../../lib/patternMediaManager';
 import { UI_LAYERS } from '../../lib/uiLayers';
 

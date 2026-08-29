@@ -7,27 +7,20 @@ import {
   MapPin, CreditCard, ChevronRight, CheckCircle, Download, FileText, Printer, Scissors,
   Plus, Minus, Tag, Check, Award, Flame, Coins, Sparkles, ChevronLeft, RefreshCw, AlertCircle
 } from 'lucide-react';
-import { SEWING_PATTERNS, MASTER_SIZING_TABLE } from '../../data.js';
+import { MASTER_SIZING_TABLE } from '../../data.js';
+import { useRuntimeCollectionState } from '../../context/RuntimeDataContext';
+import { RUNTIME_DOMAINS } from '../../lib/runtimeDomainContracts';
 
 export default function CheckoutStore() {
   // Use first 8 patterns as the store items for curated choices
-  const storePatterns = SEWING_PATTERNS.slice(0, 8);
+  const [catalogProducts] = useRuntimeCollectionState(RUNTIME_DOMAINS.CATALOG_PRODUCTS, []);
+  const storePatterns = catalogProducts.slice(0, 8);
 
   // Core Mock Cart State
   const [cart, setCart] = useState(() => {
     try {
       const saved = runtimeDataStorage.getItem('sartorial_mock_store_cart');
-      return saved ? JSON.parse(saved) : [
-        // Seed with one default item to look initialized and gorgeous immediately
-        {
-          id: 'sartorial-01-PDF',
-          pattern: SEWING_PATTERNS[0],
-          format: 'PDF',
-          sizePreference: '8',
-          price: SEWING_PATTERNS[0].pricePDF,
-          quantity: 1
-        }
-      ];
+      return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
     }
@@ -52,7 +45,7 @@ export default function CheckoutStore() {
 
   // Form states
   const [formData, setFormData] = useState({
-    email: 'couture.sewer@atelier.com',
+    email: '',
     firstName: 'Margot',
     lastName: 'Leone',
     address: '142 Rue de l\'Atelier',

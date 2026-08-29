@@ -1,4 +1,3 @@
-import { TESTIMONIAL_SEED as INITIAL_TESTIMONIALS } from '../data/runtimeSeeds';
 import { createClientRecordId } from '../lib/runtimeDataGateway';
 import { useRuntimeCollectionState } from '../context/RuntimeDataContext';
 import { RUNTIME_DOMAINS } from '../lib/runtimeDomainContracts';
@@ -18,7 +17,7 @@ subtitle = 'Brought to life by the meticulous hands of our community members.'
 })  {
   const [testimonials, setTestimonials] = useRuntimeCollectionState(
     RUNTIME_DOMAINS.TESTIMONIALS,
-    INITIAL_TESTIMONIALS
+    []
   );
 
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -168,7 +167,18 @@ subtitle = 'Brought to life by the meticulous hands of our community members.'
       </div>
 
       <AnimatePresence mode="wait">
-        {!showAddForm ? (
+        {!showAddForm && !activeTestimonial ? (
+          <motion.div
+            key="empty"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="rounded-lg border border-dashed border-sand-300 bg-white px-6 py-14 text-center"
+          >
+            <Quote className="mx-auto mb-3 h-8 w-8 text-bark-300" />
+            <p className="font-serif text-lg text-bark-900">{pfUiT("ui.components.testimonialcarousel.runtime.empty")}</p>
+            <p className="mt-1 text-xs text-bark-500">{pfUiT("ui.components.testimonialcarousel.runtime.emptyHelp")}</p>
+          </motion.div>
+        ) : !showAddForm ? (
           <motion.div
             key="carousel"
             initial={{ opacity: 0, y: 10 }}

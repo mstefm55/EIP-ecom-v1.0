@@ -1,27 +1,12 @@
-import { DYNAMIC_INVENTORY_SEED as INITIAL_INVENTORY } from '../../data/runtimeSeeds';
-import { runtimeDataStorage } from '../../lib/runtimeDataGateway';
 import React, { useState } from 'react';
+import { useRuntimeCollectionState } from '../../context/RuntimeDataContext';
+import { RUNTIME_DOMAINS } from '../../lib/runtimeDomainContracts';
 import { translatePerfectFitText as pfUiT } from '../../lib/i18n';
 import { Layers, Plus, RotateCw, AlertTriangle, Scale, DollarSign, Package, Trash2, Edit2, Download, Tag } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 
 export default function DynamicInventory() {
-  const [inventory, setInventory] = useState(() => {
-    try {
-      const saved = runtimeDataStorage.getItem('perfectfit_bureau_inventory');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        // Migrate legacy data by adding default tags if they don't exist
-        return parsed.map(item => ({
-          ...item,
-          tags: item.tags || (item.name ? item.name.split(' ').slice(-2) : ['Fabric', 'Textile'])
-        }));
-      }
-      return INITIAL_INVENTORY;
-    } catch {
-      return INITIAL_INVENTORY;
-    }
-  });
+  const [inventory, setInventory] = useRuntimeCollectionState(RUNTIME_DOMAINS.INVENTORY, []);
 
   const [newName, setNewName] = useState('');
   const [newColor, setNewColor] = useState('Off-White');
@@ -32,9 +17,6 @@ export default function DynamicInventory() {
 
   const saveInventory = (updated) => {
     setInventory(updated);
-    try {
-      runtimeDataStorage.setItem('perfectfit_bureau_inventory', JSON.stringify(updated));
-    } catch {}
   };
 
   const handleAddMaterial = (e) => {

@@ -1496,6 +1496,24 @@ export const MEMBER_DEMO_ACCOUNTS = Object.freeze({
   administrator: DEMO_ADMIN_ACCOUNT
 });
 
+export const COLLABORATOR_SALES_DEMO_TEMPLATES = Object.freeze({
+  standard: [
+    { id: 'TXN-901', date: '2026-06-28', buyer: 'Julien Sorel', patternName: 'Aurelia Wrap Dress (Atelier Mod)', format: 'PDF', gross: 14.00, commission: 2.10, net: 11.90, erpStatus: 'payout_processed' },
+    { id: 'TXN-902', date: '2026-06-25', buyer: 'Eleanor Vance', patternName: 'Renaissance Pleated Bodice', format: 'Printed', gross: 25.00, commission: 3.75, net: 21.25, erpStatus: 'payout_processed' },
+    { id: 'TXN-903', date: '2026-06-20', buyer: 'Julien Sorel', patternName: 'Renaissance Pleated Bodice', format: 'PDF', gross: 15.00, commission: 2.25, net: 12.75, erpStatus: 'payout_processed' },
+    { id: 'TXN-904', date: '2026-06-18', buyer: 'Thérèse Raquin', patternName: 'Aurelia Wrap Dress (Atelier Mod)', format: 'Printed', gross: 24.00, commission: 3.60, net: 20.40, erpStatus: 'payout_pending' },
+    { id: 'TXN-905', date: '2026-06-10', buyer: 'Genevieve Vane', patternName: 'Chantilly Silk Slip Dress', format: 'PDF', gross: 12.00, commission: 1.80, net: 10.20, erpStatus: 'payout_processed' },
+    { id: 'TXN-906', date: '2026-06-03', buyer: 'Clara Oswald', patternName: 'Renaissance Pleated Bodice', format: 'PDF', gross: 15.00, commission: 2.25, net: 12.75, erpStatus: 'payout_processed' }
+  ],
+  highValue: [
+    { id: 'ERP-HV-01', date: '2026-07-03', buyer: 'Amélie Poulain', patternName: 'Milan Structured Duster Coat', format: 'Printed', gross: 34.00, commission: 5.10, net: 28.90, erpStatus: 'payout_pending' },
+    { id: 'ERP-HV-02', date: '2026-07-01', buyer: 'Sebastian Valmont', patternName: 'Milan Structured Duster Coat', format: 'Printed', gross: 34.00, commission: 5.10, net: 28.90, erpStatus: 'payout_pending' },
+    { id: 'ERP-HV-03', date: '2026-06-29', buyer: 'Cosette Fauchelevent', patternName: 'Renaissance Pleated Bodice', format: 'Printed', gross: 25.00, commission: 3.75, net: 21.25, erpStatus: 'payout_processed' },
+    { id: 'ERP-HV-04', date: '2026-06-24', buyer: 'Jean Valjean', patternName: 'Milan Structured Duster Coat', format: 'PDF', gross: 18.00, commission: 2.70, net: 15.30, erpStatus: 'payout_processed' }
+  ],
+  empty: []
+});
+
 
 // Source snapshot: former perfectFitMetadata.workspace.mockData.
 // Runtime development fallback only; never authoritative UI metadata.

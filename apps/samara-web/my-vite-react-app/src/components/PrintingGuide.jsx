@@ -4,7 +4,6 @@ import { perfectFitMetadata } from '../config/perfectFitMetadata';
 import { localizeMetadataTree } from '../lib/localizedMetadata';
 import { useRuntimeState } from '../context/RuntimeDataContext';
 import { RUNTIME_DOMAINS } from '../lib/runtimeDomainContracts';
-import { PRINTING_GUIDE_SEED } from '../data/runtimeSeeds';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Printer, Scissors, Layers, Check, RefreshCw, Ruler,
@@ -18,9 +17,9 @@ export default function PrintingGuide({
   initialFormat = "Letter",
   onAssemblyComplete
 }) {
-  const [printingGuideData] = useRuntimeState(RUNTIME_DOMAINS.PRINTING_GUIDES, PRINTING_GUIDE_SEED);
-  const PATTERN_PATHS = printingGuideData?.patternPaths || PRINTING_GUIDE_SEED.patternPaths;
-  const PATTERNS_DB = printingGuideData?.patterns || PRINTING_GUIDE_SEED.patterns;
+  const [printingGuideData] = useRuntimeState(RUNTIME_DOMAINS.PRINTING_GUIDES, null);
+  const PATTERN_PATHS = printingGuideData?.patternPaths || {};
+  const PATTERNS_DB = printingGuideData?.patterns || {};
   const stepMetadata = localizeMetadataTree(
     perfectFitMetadata.componentUi.printingGuide.steps,
     'component.printingGuide.steps',
@@ -73,7 +72,13 @@ export default function PrintingGuide({
 
   // Pre-configured sewing pattern blueprints
   
-  const activePatternDetails = PATTERNS_DB[selectedPattern] || PATTERNS_DB["Aurelia Wrap Dress"];
+  const activePatternDetails = PATTERNS_DB[selectedPattern] || Object.values(PATTERNS_DB)[0] || {
+    cols: 0,
+    rows: 0,
+    pieces: [],
+    difficulty: '',
+    estTime: ''
+  };
 
   // 2. Calculated Scaling adjustment
   const scalingAnalysis = useMemo(() => {

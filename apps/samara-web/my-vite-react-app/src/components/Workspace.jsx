@@ -48,7 +48,6 @@ import TechPackWorkspace from './workspace/TechPackWorkspace';
 import { ProjectJournalModule as ProjectJournalModuleView } from './workspace/ProjectJournal';
 import TimeAndMotionStudy from './subcomponents/TimeAndMotionStudy';
 import IndustrialTechPack from './IndustrialTechPack';
-import { CATALOG_PRODUCT_SEED, WORKSPACE_SEED } from '../data/runtimeSeeds';
 import { WORKSPACE_PRESENTATION_UPDATED_EVENT } from '../lib/workspaceProductPresentation';
 import { buildWorkspaceFitSpecificationSnapshot } from '../lib/fitRecommendation';
 import { isWorkspaceNodeVisible } from '../config/surfaceVisibilityMetadata';
@@ -1094,7 +1093,13 @@ function loadWorkspaceData(metadata) {
     }
   } catch {}
 
-  return reconcileWorkspaceModules(cloneValue(WORKSPACE_SEED)).data;
+  return reconcileWorkspaceModules({
+    version: metadata.version,
+    selectedLocale: metadata.defaultLocale,
+    projects: [],
+    auditLog: [],
+    collaboration: { grants: [] }
+  }).data;
 }
 
 function findNodeById(nodes = [], nodeId) {
@@ -4750,38 +4755,6 @@ function ArchivedSizeSetFilePrototype({
   );
 }
 
-function inferLegacyPatternIdFromWorkspace({
-  style,
-  variant,
-  project
-}) {
-  const searchable = [
-    style?.values?.['product.style_name'],
-    style?.values?.['product.category'],
-    style?.values?.['product.fit_silhouette'],
-    variant?.values?.['variant.name'],
-    variant?.values?.['variant.code'],
-    project?.values?.['project.name']
-  ]
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase();
-
-  if (searchable.includes('trench') || searchable.includes('coat') || searchable.includes('outerwear')) {
-    return 'sartorial-02';
-  }
-
-  if (searchable.includes('trouser') || searchable.includes('pant') || searchable.includes('palazzo')) {
-    return 'sartorial-03';
-  }
-
-  if (searchable.includes('blouse') || searchable.includes('top') || searchable.includes('sari')) {
-    return 'sartorial-04';
-  }
-
-  return 'sartorial-01';
-}
-
 function buildWorkspaceLegacyPattern({
   metadata,
   variant,
@@ -4789,37 +4762,31 @@ function buildWorkspaceLegacyPattern({
   project,
   t
 }) {
-  const legacyId = inferLegacyPatternIdFromWorkspace({ style, variant, project });
-  const legacyReference = CATALOG_PRODUCT_SEED.find((pattern) => pattern.id === legacyId) || CATALOG_PRODUCT_SEED[0] || {};
+  const workspaceId = variant?.id || variant?.values?.['variant.code'] || style?.id || '';
   const sizeNode = variant?.children?.find((child) => child.nodeType === 'sizeSet');
   const styleValues = style?.values || {};
   const variantValues = variant?.values || {};
   const measurementChart = normalizeMeasurementChartValues(sizeNode?.values || {}, variantValues, metadata, styleValues);
   const category =
     getDropdownLabel(metadata, 'GARMENT_CATEGORY', styleValues['product.category'], t) ||
-    legacyReference.category ||
     'Pattern';
   const difficulty =
     getDropdownLabel(metadata, 'DIFFICULTY_LEVEL', styleValues['product.difficulty'], t) ||
-    legacyReference.difficulty ||
     'Intermediate';
   const name =
     styleValues['product.style_name'] ||
     variantValues['variant.name'] ||
     project?.values?.['project.name'] ||
-    legacyReference.name ||
     'Workspace Pattern';
   const description =
     styleValues['product.description'] ||
-    legacyReference.description ||
     'Workspace-linked sewing and technical development pattern.';
   const sizes = getDisplaySizeReferences(measurementChart, measurementChart.displaySystem).length
     ? getDisplaySizeReferences(measurementChart, measurementChart.displaySystem)
-    : legacyReference.sizes || ['XS', 'S', 'M', 'L', 'XL'];
+    : [];
 
   return {
-    ...legacyReference,
-    id: legacyId,
+    id: workspaceId,
     workspaceVariantId: variant?.id,
     name,
     category,
@@ -4833,9 +4800,9 @@ function buildWorkspaceLegacyPattern({
       measurementChart.displaySystem,
       variantValues['variant.base_reference_size']
     ),
-    price: legacyReference.pricePDF || legacyReference.price || 0,
-    fabricSuggestions: legacyReference.fabricSuggestions || [],
-    yardageInfo: legacyReference.yardageInfo || {}
+    price: Number(styleValues['product.price'] || 0),
+    fabricSuggestions: [],
+    yardageInfo: {}
   };
 }
 
@@ -7165,9 +7132,7 @@ export default function Workspace({
       });
     };
 
-    collect(
-      WORKSPACE_SEED?.projects || []
-    );
+    collect(loadWorkspaceData(metadata).projects || []);
 
     return ids;
   });

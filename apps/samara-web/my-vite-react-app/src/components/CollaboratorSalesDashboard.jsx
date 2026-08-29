@@ -1,4 +1,5 @@
 import { runtimeDataStorage } from '../lib/runtimeDataGateway';
+import { getOptInDemoSalesTemplates, isDemoRuntimeDataEnabled } from '../lib/runtimeRepositoryBootstrap';
 import React, { useState, useMemo, useEffect } from 'react';
 import { translatePerfectFitText as pfUiT } from '../lib/i18n';
 import {
@@ -67,27 +68,11 @@ export default function CollaboratorSalesDashboard({
   const [formatFilter, setFormatFilter] = useState('All'); // 'All' | 'PDF' | 'Printed'
   const [minAmountFilter, setMinAmountFilter] = useState('All'); // 'All' | '15' | '20'
 
-  // Pre-configured ERP templates for simulation
-  const erpTemplates = {
-    standard: [
-      { id: 'TXN-901', date: '2026-06-28', buyer: 'Julien Sorel', patternName: 'Aurelia Wrap Dress (Atelier Mod)', format: 'PDF', gross: 14.00, commission: 2.10, net: 11.90, erpStatus: 'payout_processed' },
-      { id: 'TXN-902', date: '2026-06-25', buyer: 'Eleanor Vance', patternName: 'Renaissance Pleated Bodice', format: 'Printed', gross: 25.00, commission: 3.75, net: 21.25, erpStatus: 'payout_processed' },
-      { id: 'TXN-903', date: '2026-06-20', buyer: 'Julien Sorel', patternName: 'Renaissance Pleated Bodice', format: 'PDF', gross: 15.00, commission: 2.25, net: 12.75, erpStatus: 'payout_processed' },
-      { id: 'TXN-904', date: '2026-06-18', buyer: 'Thérèse Raquin', patternName: 'Aurelia Wrap Dress (Atelier Mod)', format: 'Printed', gross: 24.00, commission: 3.60, net: 20.40, erpStatus: 'payout_pending' },
-      { id: 'TXN-905', date: '2026-06-10', buyer: 'Genevieve Vane', patternName: 'Chantilly Silk Slip Dress', format: 'PDF', gross: 12.00, commission: 1.80, net: 10.20, erpStatus: 'payout_processed' },
-      { id: 'TXN-906', date: '2026-06-03', buyer: 'Clara Oswald', patternName: 'Renaissance Pleated Bodice', format: 'PDF', gross: 15.00, commission: 2.25, net: 12.75, erpStatus: 'payout_processed' }
-    ],
-    highValue: [
-      { id: 'ERP-HV-01', date: '2026-07-03', buyer: 'Amélie Poulain', patternName: 'Milan Structured Duster Coat', format: 'Printed', gross: 34.00, commission: 5.10, net: 28.90, erpStatus: 'payout_pending' },
-      { id: 'ERP-HV-02', date: '2026-07-01', buyer: 'Sebastian Valmont', patternName: 'Milan Structured Duster Coat', format: 'Printed', gross: 34.00, commission: 5.10, net: 28.90, erpStatus: 'payout_pending' },
-      { id: 'ERP-HV-03', date: '2026-06-29', buyer: 'Cosette Fauchelevent', patternName: 'Renaissance Pleated Bodice', format: 'Printed', gross: 25.00, commission: 3.75, net: 21.25, erpStatus: 'payout_processed' },
-      { id: 'ERP-HV-04', date: '2026-06-24', buyer: 'Jean Valjean', patternName: 'Milan Structured Duster Coat', format: 'PDF', gross: 18.00, commission: 2.70, net: 15.30, erpStatus: 'payout_processed' }
-    ],
-    empty: []
-  };
+  const erpTemplates = getOptInDemoSalesTemplates();
 
   const loadTemplate = (key) => {
     const list = erpTemplates[key];
+    if (!Array.isArray(list)) return;
     setSalesRecords(list);
     try {
       runtimeDataStorage.setItem('sartorial_erp_sales_history', JSON.stringify(list));
@@ -162,6 +147,7 @@ export default function CollaboratorSalesDashboard({
       data-erp-record-count={salesRecords.length}
     >
       {/* Dev Controller Row: for manual live simulation with the ERP Mapping tool */}
+      {isDemoRuntimeDataEnabled() && (
       <div className="bg-sand-50/70 border border-sand-200/60 p-3.5 rounded-[4px] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs" id="erp-dev-pilot-bar">
         <div className="flex items-center gap-2">
           <Layers className="w-4 h-4 text-clay-600" />
@@ -203,6 +189,7 @@ export default function CollaboratorSalesDashboard({
           </button>
         </div>
       </div>
+      )}
 
       {/* Visual Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" id="erp-summary-cards">

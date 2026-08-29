@@ -9379,6 +9379,15 @@ const autoEnglish = {
   "ui.components.subcomponents.dynamicgallery.07165bd0b9": "of",
   "ui.components.subcomponents.dynamicgallery.075b4bc011": "Garment Style / Category",
   "ui.components.subcomponents.dynamicgallery.0e69cd44b2": "No pattern blueprints found",
+  "ui.components.subcomponents.dynamicgallery.runtime.loading": "Loading pattern catalogue…",
+  "ui.components.subcomponents.dynamicgallery.runtime.error": "The pattern catalogue could not be loaded",
+  "ui.components.subcomponents.dynamicgallery.runtime.errorHelp": "Check the repository connection and try again.",
+  "ui.components.subcomponents.dynamicgallery.runtime.empty": "No patterns are available yet",
+  "ui.components.subcomponents.dynamicgallery.runtime.emptyHelp": "Create or publish a pattern to make it available in the catalogue.",
+  "ui.components.industrialtechpack.runtime.empty": "No industrial tech pack is available",
+  "ui.components.industrialtechpack.runtime.emptyHelp": "Add manufacturing data to this product before opening its industrial pack.",
+  "ui.components.testimonialcarousel.runtime.empty": "No community creations have been shared yet",
+  "ui.components.testimonialcarousel.runtime.emptyHelp": "Be the first maker to add a finished project and review.",
   "ui.components.subcomponents.dynamicgallery.19abfef504": "Grainline Layout Matcher",
   "ui.components.subcomponents.dynamicgallery.1f851fadb8": "✦ Alphabetical",
   "ui.components.subcomponents.dynamicgallery.1fc1c3c512": "You are now registered for high-precision design updates. Use this welcome code at checkout to receive",
@@ -10345,7 +10354,7 @@ COMPONENT_UI_METADATA.trackOrder = {
 const RUNTIME_DATA_DOMAINS = Object.freeze({
   catalogProducts: {
     entity: 'catalogProduct',
-    shape: 'document',
+    shape: 'collection',
     storageKey: 'perfectfit_erp_patterns',
     legacyKeys: ['sartorial_erp_patterns', 'sartorial_atelier_imported_patterns'],
     authority: 'EIP'

@@ -305,13 +305,13 @@ export function getAllPatternSwatches() {
     if (saved) {
       const parsed = JSON.parse(saved);
       if (parsed && typeof parsed === 'object') {
-        return { ...DEFAULT_FABRIC_SWATCHES, ...parsed };
+        return parsed;
       }
     }
   } catch (e) {
     console.error("Error loading pattern swatch library:", e);
   }
-  return DEFAULT_FABRIC_SWATCHES;
+  return {};
 }
 
 export function getPatternSwatches(patternId) {
@@ -319,21 +319,7 @@ export function getPatternSwatches(patternId) {
   if (allSwatches[patternId]) {
     return allSwatches[patternId];
   }
-  return [
-    {
-      id: `sw-${patternId}-default`,
-      name: 'Atelier Core Belgian Linen 280gsm',
-      colorName: 'White Sand / Oatmeal',
-      colorHex: '#DBCCB5',
-      pantoneName: 'White Sand',
-      pantoneCode: '13-0002-TCX',
-      composition: '100% Organic Flax',
-      stockMeters: 120.0,
-      supplier: 'Atelier Stock Reserve',
-      imageUrl: 'https://images.unsplash.com/photo-1584100936595-c0654b55a2e2?auto=format&fit=crop&w=800&q=80',
-      notes: 'Core fabric swatch for this pattern design.'
-    }
-  ];
+  return [];
 }
 
 export function savePatternSwatches(patternId, swatchList) {
@@ -375,13 +361,13 @@ export function getAllPatternMedia() {
     if (saved) {
       const parsed = JSON.parse(saved);
       if (parsed && typeof parsed === 'object') {
-        return { ...DEFAULT_MEDIA_GALLERY, ...parsed };
+        return parsed;
       }
     }
   } catch (e) {
     console.error("Error loading pattern media gallery:", e);
   }
-  return DEFAULT_MEDIA_GALLERY;
+  return {};
 }
 
 /**
@@ -392,7 +378,8 @@ export function getPatternMedia(patternId) {
   if (allMedia[patternId]) {
     return allMedia[patternId];
   }
-  // Generic fallback if pattern is dynamically generated
+  return [];
+  // Legacy demo fallback retained below for explicit development migration reference only.
   return [
     {
       id: `m-${patternId}-default`,

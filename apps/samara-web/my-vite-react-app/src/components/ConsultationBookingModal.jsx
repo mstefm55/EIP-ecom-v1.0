@@ -1,4 +1,3 @@
-import { CONSULTATION_EXPERT_SEED } from '../data/runtimeSeeds';
 import { createClientRecordId } from '../lib/runtimeDataGateway';
 import { useRuntimeCollectionState } from '../context/RuntimeDataContext';
 import { RUNTIME_DOMAINS } from '../lib/runtimeDomainContracts';
@@ -32,7 +31,7 @@ export default function ConsultationBookingModal({
 }) {
   const [consultationExperts] = useRuntimeCollectionState(
     RUNTIME_DOMAINS.CONSULTATION_EXPERTS,
-    CONSULTATION_EXPERT_SEED
+    []
   );
   const [appointments, setAppointments] = useRuntimeCollectionState(
     RUNTIME_DOMAINS.CONSULTATION_BOOKINGS,
@@ -40,7 +39,7 @@ export default function ConsultationBookingModal({
   );
 
   const [currentView, setCurrentView] = useState('book'); // 'book' | 'list'
-  const [selectedExpert, setSelectedExpert] = useState(CONSULTATION_EXPERT_SEED[0]);
+  const [selectedExpert, setSelectedExpert] = useState(null);
   const [currentDate, setCurrentDate] = useState(new Date(2026, 6, 18)); // Starting post-July 17, 2026
   const [selectedDate, setSelectedDate] = useState(null);
   const [selectedTimeSlot, setSelectedTimeSlot] = useState('');
@@ -52,6 +51,13 @@ export default function ConsultationBookingModal({
   const [userEmail, setUserEmail] = useState('');
   const [bookingSuccess, setBookingSuccess] = useState(false);
   const [newlyBookedId, setNewlyBookedId] = useState(null);
+
+  // Sync user email on load
+  useEffect(() => {
+    if (!selectedExpert && consultationExperts.length > 0) {
+      setSelectedExpert(consultationExperts[0]);
+    }
+  }, [consultationExperts, selectedExpert]);
 
   // Sync user email on load
   useEffect(() => {
@@ -130,6 +136,10 @@ export default function ConsultationBookingModal({
   // Handle Book consultation action
   const handleBookConsultation = (e) => {
     e.preventDefault();
+    if (!selectedExpert) {
+      window.showToast?.("No consultation expert is currently available.", "error", "Availability Error");
+      return;
+    }
     if (!selectedDate) {
       if (window.showToast) {
         window.showToast("Please choose a date from the calendar widget first.", "error", "Selection Error");
@@ -143,7 +153,7 @@ export default function ConsultationBookingModal({
       return;
     }
 
-    const emailToUse = userEmail.trim() || currentUser?.email || 'mstefm55@gmail.com';
+    const emailToUse = userEmail.trim() || currentUser?.email || '';
 
     // Unique Booking ID
     const clientId = createClientRecordId('consultation');
@@ -174,7 +184,7 @@ export default function ConsultationBookingModal({
 
     if (window.showToast) {
       window.showToast(
-        `15-min briefing with ${selectedExpert.name} scheduled successfully! Check details.`,
+        `15-min briefing with ${selectedExpert?.name || ''} scheduled successfully! Check details.`,
         "success",
         "Consultation Booked"
       );
@@ -315,7 +325,7 @@ export default function ConsultationBookingModal({
 
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                             {consultationExperts.map((exp) => {
-                              const isSelected = selectedExpert.id === exp.id;
+                              const isSelected = selectedExpert?.id === exp.id;
                               return (
                                 <button
                                   key={exp.id}

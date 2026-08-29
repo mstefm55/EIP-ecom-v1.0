@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { useRuntimeState } from '../context/RuntimeDataContext';
 import { RUNTIME_DOMAINS } from '../lib/runtimeDomainContracts';
-import { INDUSTRIAL_TECH_PACK_SEED } from '../data/runtimeSeeds';
 import { translatePerfectFitText as pfUiT } from '../lib/i18n';
 import {
   Building2,
@@ -28,13 +27,21 @@ export default function IndustrialTechPack({ pattern }) {
   const [efficiency, setEfficiency] = useState(85); // % line efficiency
   const [activeSubTab, setActiveSubTab] = useState('bom-boq'); // 'bom-boq' | 'routing' | 'throughput'
 
-  // BOM/routing are runtime manufacturing records. Local seed is only a development fallback;
-  // the future EIP adapter owns authoritative industrial tech-pack records.
   const [industrialTechPacks] = useRuntimeState(
     RUNTIME_DOMAINS.INDUSTRIAL_TECH_PACKS,
-    INDUSTRIAL_TECH_PACK_SEED
+    null
   );
-  const indData = industrialTechPacks?.[pattern?.id] || industrialTechPacks?.default || INDUSTRIAL_TECH_PACK_SEED.default;
+  const indData = industrialTechPacks?.[pattern?.id] || industrialTechPacks?.default || null;
+
+  if (!indData) {
+    return (
+      <section className="rounded-xl border border-dashed border-sand-300 bg-white p-10 text-center">
+        <Database className="mx-auto mb-3 h-8 w-8 text-bark-400" />
+        <h3 className="font-serif text-lg text-bark-950">{pfUiT("ui.components.industrialtechpack.runtime.empty")}</h3>
+        <p className="mt-1 text-sm text-bark-500">{pfUiT("ui.components.industrialtechpack.runtime.emptyHelp")}</p>
+      </section>
+    );
+  }
 
   const patternNum = pattern?.id || 'workspace-pattern';
 

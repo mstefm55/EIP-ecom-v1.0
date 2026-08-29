@@ -1,7 +1,7 @@
-import { PROFESSIONAL_PROJECT_SEED as DEFAULT_PROJECTS, PROFESSIONAL_INVENTORY_SEED as DEFAULT_INVENTORY, TIME_LOG_SEED as DEFAULT_TIME_LOGS } from '../../data/runtimeSeeds';
-import { runtimeDataStorage } from '../../lib/runtimeDataGateway';
 import { clientPreferences } from '../../lib/clientPreferences';
 import React, { useState, useEffect } from 'react';
+import { useRuntimeCollectionState } from '../../context/RuntimeDataContext';
+import { RUNTIME_DOMAINS } from '../../lib/runtimeDomainContracts';
 import { translatePerfectFitText as pfUiT } from '../../lib/i18n';
 import { motion, AnimatePresence } from 'motion/react';
 import { useRole } from '../../context/RoleContext';
@@ -15,33 +15,9 @@ import {
 } from 'lucide-react';
 
 export default function ProfessionalDashboard() {
-  // Load states from matching local storage keys or defaults
-  const [projects, setProjects] = useState(() => {
-    try {
-      const saved = runtimeDataStorage.getItem('sartorial_atelier_projects');
-      return saved ? JSON.parse(saved) : DEFAULT_PROJECTS;
-    } catch {
-      return DEFAULT_PROJECTS;
-    }
-  });
-
-  const [inventory, setInventory] = useState(() => {
-    try {
-      const saved = runtimeDataStorage.getItem('sartorial_atelier_inventory');
-      return saved ? JSON.parse(saved) : DEFAULT_INVENTORY;
-    } catch {
-      return DEFAULT_INVENTORY;
-    }
-  });
-
-  const [timeLogs, setTimeLogs] = useState(() => {
-    try {
-      const saved = runtimeDataStorage.getItem('sartorial_timer_history_logs');
-      return saved ? JSON.parse(saved) : DEFAULT_TIME_LOGS;
-    } catch {
-      return DEFAULT_TIME_LOGS;
-    }
-  });
+  const [projects, setProjects] = useRuntimeCollectionState(RUNTIME_DOMAINS.PROJECTS, []);
+  const [inventory, setInventory] = useRuntimeCollectionState(RUNTIME_DOMAINS.INVENTORY, []);
+  const [timeLogs, setTimeLogs] = useRuntimeCollectionState(RUNTIME_DOMAINS.TIME_LOGS, []);
 
   // Local helper states
   const { role, setRole } = useRole();
@@ -63,20 +39,12 @@ export default function ProfessionalDashboard() {
     } catch {}
   };
 
-  const [accessRequests, setAccessRequests] = useState(() => {
-    try {
-      const saved = runtimeDataStorage.getItem('sartorial_access_requests');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [accessRequests, setAccessRequests] = useRuntimeCollectionState(RUNTIME_DOMAINS.ACCESS_REQUESTS, []);
 
   useEffect(() => {
     const handleSync = () => {
       try {
-        const saved = runtimeDataStorage.getItem('sartorial_access_requests');
-        setAccessRequests(saved ? JSON.parse(saved) : []);
+        setAccessRequests((current) => [...current]);
       } catch {}
     };
     window.addEventListener('sartorial_requests_updated', handleSync);
@@ -93,10 +61,7 @@ export default function ProfessionalDashboard() {
       return req;
     });
     setAccessRequests(updated);
-    try {
-      runtimeDataStorage.setItem('sartorial_access_requests', JSON.stringify(updated));
-      window.dispatchEvent(new Event('sartorial_requests_updated'));
-    } catch {}
+    window.dispatchEvent(new Event('sartorial_requests_updated'));
 
     const req = accessRequests.find(r => r.id === id);
     if (action === 'approve' && req) {
@@ -133,23 +98,14 @@ export default function ProfessionalDashboard() {
   // Sync back to local storage helper
   const syncProjects = (updated) => {
     setProjects(updated);
-    try {
-      runtimeDataStorage.setItem('sartorial_atelier_projects', JSON.stringify(updated));
-    } catch {}
   };
 
   const syncInventory = (updated) => {
     setInventory(updated);
-    try {
-      runtimeDataStorage.setItem('sartorial_atelier_inventory', JSON.stringify(updated));
-    } catch {}
   };
 
   const syncTimeLogs = (updated) => {
     setTimeLogs(updated);
-    try {
-      runtimeDataStorage.setItem('sartorial_timer_history_logs', JSON.stringify(updated));
-    } catch {}
   };
 
   // Calculations

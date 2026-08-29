@@ -1,4 +1,3 @@
-import { FABRIC_STASH_SEED as SAMPLE_MATERIALS } from '../data/runtimeSeeds';
 import { translatePerfectFitText as pfUiT } from '../lib/i18n';
 /**
  * @license
@@ -354,7 +353,7 @@ const getInitialLayout = () => {
 
 export default function FabricStashModal({ isOpen, onClose, pantoneLookup = null }) {
   // MATERIALS_CARD_HYBRID_V4 — V3 preserved + explicit card width + stock issue/consume transactions.
-  const [materials, setMaterials] = useState(() => loadJson(STORAGE_KEY, SAMPLE_MATERIALS).map((item) => normalizeMaterial({ ...item, unit: normalizeUnit(item.unit) })));
+  const [materials, setMaterials] = useState(() => loadJson(STORAGE_KEY, []).map((item) => normalizeMaterial({ ...item, unit: normalizeUnit(item.unit) })));
   const [suppliers, setSuppliers] = useState(loadInitialSuppliers);
   const [incomingMaterials, setIncomingMaterials] = useState(() => loadJson(INCOMING_MATERIALS_KEY, []).map(normalizeIncoming));
   const [goodsReceipts, setGoodsReceipts] = useState(() => loadJson(GOODS_RECEIPTS_KEY, []));

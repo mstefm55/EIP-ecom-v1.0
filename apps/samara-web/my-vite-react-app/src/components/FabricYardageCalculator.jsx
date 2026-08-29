@@ -9,7 +9,6 @@ import {
   ChevronRight, HelpCircle, Layers, Maximize2, Search, ArrowRight, Tag,
   Sliders, X, ClipboardCopy, Pin, Minimize2, ChevronLeft
 } from 'lucide-react';
-import { SEWING_PATTERNS } from '../data.js';
 import {
   getPreferredSizeReference,
   normalizeMeasurementChartValues
@@ -19,7 +18,7 @@ import { UI_LAYERS } from '../lib/uiLayers';
 export default function FabricYardageCalculator({
   selectedSize = '8',
   onApplyYardage,
-  patterns = SEWING_PATTERNS,
+  patterns = [],
   activePatternOverride = null,
   measurementChart = null,
   selectedCanonicalSizeId = '',
@@ -68,7 +67,7 @@ export default function FabricYardageCalculator({
 
   // Find currently active pattern
   const activePattern = useMemo(() => {
-    return activePatternOverride || patterns.find(p => p.id === selectedPatternId) || patterns[0] || SEWING_PATTERNS[0];
+    return activePatternOverride || patterns.find(p => p.id === selectedPatternId) || patterns[0] || null;
   }, [activePatternOverride, patterns, selectedPatternId]);
 
   // Sync lining state based on whether active pattern usually includes a lining requirement

@@ -1,5 +1,4 @@
 import { perfectFitMetadata } from '../config/perfectFitMetadata';
-import { WORKSPACE_SEED } from '../data/runtimeSeeds';
 import { runtimeDataStorage } from './runtimeDataGateway';
 import {
   getCustomerSizeSystems,
@@ -69,7 +68,13 @@ export function loadWorkspacePresentationData(metadata = workspaceMetadata) {
     } catch {}
   }
 
-  return WORKSPACE_SEED;
+  return {
+    version: metadata.version,
+    selectedLocale: metadata.defaultLocale,
+    projects: [],
+    auditLog: [],
+    collaboration: { grants: [] }
+  };
 }
 
 function findChild(node, nodeType) {

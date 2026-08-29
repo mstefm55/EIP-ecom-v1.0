@@ -70,9 +70,20 @@ const findings = [];
 
 for (const file of walk(srcRoot)) {
   const relative = path.relative(root, file).replaceAll('\\', '/');
+  const source = fs.readFileSync(file, 'utf8');
+  if (
+    !/src[\/]lib[\/]runtimeRepositoryBootstrap\.js$/.test(relative) &&
+    /(?:from\s+|import\s*\()['"][^'"]*data\/runtimeSeeds(?:\.js)?['"]/.test(source)
+  ) {
+    findings.push({
+      file: relative,
+      line: source.slice(0, source.search(/data\/runtimeSeeds/)).split(/\r?\n/).length,
+      type: 'direct-demo-seed-import',
+      detail: 'Demo seed data may only enter runtime through the explicit opt-in repository bootstrap.'
+    });
+  }
   if (ALLOWED_INFRA_FILES.some((pattern) => pattern.test(relative))) continue;
 
-  const source = fs.readFileSync(file, 'utf8');
   const kind = file.endsWith('.tsx') ? ts.ScriptKind.TSX : file.endsWith('.ts') ? ts.ScriptKind.TS : file.endsWith('.jsx') ? ts.ScriptKind.JSX : ts.ScriptKind.JS;
   const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, kind);
 

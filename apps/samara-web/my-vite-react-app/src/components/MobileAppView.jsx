@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 
 import SewingSessionTimer from './SewingSessionTimer.jsx';
-import { SEWING_PATTERNS, MASTER_SIZING_TABLE } from '../data.js';
+import { MASTER_SIZING_TABLE } from '../data.js';
 import { MEASUREMENT_POSITIONS } from '../data_positions.js';
 import {
   initAuth,
@@ -51,7 +51,7 @@ export default function MobileAppView({
   onOpenAuthModal,
   reviews,
   onAddReview,
-  patterns = SEWING_PATTERNS
+  patterns = []
 }) {
   // Mobile Active Tab: 'catalog' | 'fitting' | 'academy' | 'profile'
   const [activeTab, setActiveTab] = useState('catalog');

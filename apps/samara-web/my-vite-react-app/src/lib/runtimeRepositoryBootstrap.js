@@ -4,6 +4,7 @@ import {
   CATALOG_PRODUCT_SEED,
   COLLABORATOR_INVENTORY_SEED,
   COLLABORATOR_PROJECT_SEED,
+  COLLABORATOR_SALES_DEMO_TEMPLATES,
   COMMUNITY_POST_SEED,
   CONSULTATION_EXPERT_SEED,
   EDITORIAL_ARTICLE_SEED,
@@ -15,7 +16,8 @@ import {
   SUPPLIER_SEED,
   TESTIMONIAL_SEED,
   TIME_LOG_SEED,
-  WORKSPACE_SEED
+  WORKSPACE_SEED,
+  createDemoOrderSeed
 } from '../data/runtimeSeeds';
 import {
   configureRuntimeRepositories,
@@ -25,7 +27,7 @@ import {
   createRepositoryRegistry
 } from './runtimeDataGateway';
 
-const seeds = {
+const demoSeeds = {
   catalogProducts: CATALOG_PRODUCT_SEED,
   productReviews: PRODUCT_REVIEW_SEED,
   wishlist: [],
@@ -80,9 +82,26 @@ const seeds = {
 
 const browserStorage = () => (typeof window !== 'undefined' ? window.localStorage : null);
 
+export function isDemoRuntimeDataEnabled(env = import.meta.env) {
+  return env?.DEV === true && env?.VITE_PERFECT_FIT_DEMO_DATA === 'true';
+}
+
+export function createOptInDemoOrderSeed(env = import.meta.env) {
+  return isDemoRuntimeDataEnabled(env) ? createDemoOrderSeed() : [];
+}
+
+export function getOptInDemoMemberAccounts(env = import.meta.env) {
+  return isDemoRuntimeDataEnabled(env) ? MEMBER_DEMO_ACCOUNTS : {};
+}
+
+export function getOptInDemoSalesTemplates(env = import.meta.env) {
+  return isDemoRuntimeDataEnabled(env) ? COLLABORATOR_SALES_DEMO_TEMPLATES : {};
+}
+
+const emptyValueFor = (contract) => (contract?.shape === 'collection' ? [] : null);
+
 /** Preserve existing browser records when consolidating legacy storage keys. */
-export function migrateLegacyRuntimeStorage(metadata = perfectFitMetadata) {
-  const storage = browserStorage();
+export function migrateLegacyRuntimeStorage(metadata = perfectFitMetadata, storage = browserStorage()) {
   if (!storage) return [];
   const migrations = [];
 
@@ -103,9 +122,12 @@ export function migrateLegacyRuntimeStorage(metadata = perfectFitMetadata) {
   return migrations;
 }
 
-export function createDefaultRuntimeRepositoryRegistry(metadata = perfectFitMetadata) {
+export function createDefaultRuntimeRepositoryRegistry(
+  metadata = perfectFitMetadata,
+  { enableDemoData = isDemoRuntimeDataEnabled(), storage = browserStorage() } = {}
+) {
   const contracts = metadata.runtimeData?.domains || {};
-  migrateLegacyRuntimeStorage(metadata);
+  migrateLegacyRuntimeStorage(metadata, storage);
   configureRuntimeStorageDomains(contracts);
 
   const repositories = {};
@@ -113,7 +135,10 @@ export function createDefaultRuntimeRepositoryRegistry(metadata = perfectFitMeta
     const common = {
       domain,
       storageKey: contract.storageKey,
-      seed: seeds[domain] ?? (contract.shape === 'collection' ? [] : null)
+      storage,
+      seed: enableDemoData
+        ? (demoSeeds[domain] ?? emptyValueFor(contract))
+        : emptyValueFor(contract)
     };
 
     repositories[domain] =

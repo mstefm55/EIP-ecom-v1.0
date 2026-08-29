@@ -19,7 +19,7 @@ import {
   X
 } from 'lucide-react';
 
-import { MASTER_SIZING_TABLE, SEWING_PATTERNS } from '../data.js';
+import { MASTER_SIZING_TABLE } from '../data.js';
 import { perfectFitMetadata } from '../config/perfectFitMetadata';
 import { runtimeDataStorage } from '../lib/runtimeDataGateway';
 import { clientPreferences } from '../lib/clientPreferences';
@@ -404,7 +404,7 @@ export default function MannequinGuide({
   activeRecommendedSize = '',
   onRecommendedSizeChange,
   onRecommendationApplied,
-  patterns = SEWING_PATTERNS,
+  patterns = [],
   initialPatternId = '',
   lockProductSelection = false,
   locale: localeProp = '',
@@ -573,7 +573,7 @@ export default function MannequinGuide({
   }, []);
 
   const productOptions = useMemo(() => {
-    const sourcePatterns = Array.isArray(patterns) && patterns.length ? patterns : SEWING_PATTERNS;
+    const sourcePatterns = Array.isArray(patterns) ? patterns : [];
     const options = [...sourcePatterns];
     const representedVariantIds = new Set(
       options

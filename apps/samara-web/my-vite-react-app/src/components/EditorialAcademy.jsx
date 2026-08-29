@@ -1,4 +1,3 @@
-import { EDITORIAL_ARTICLE_SEED } from '../data/runtimeSeeds';
 import { useRuntimeCollectionState } from '../context/RuntimeDataContext';
 import { RUNTIME_DOMAINS } from '../lib/runtimeDomainContracts';
 import React, { useState } from 'react';
@@ -11,7 +10,7 @@ import { UI_LAYERS } from '../lib/uiLayers';
 export default function EditorialAcademy({ isLoggedIn, userRole }) {
   const [editorialArticles] = useRuntimeCollectionState(
     RUNTIME_DOMAINS.EDITORIAL_ARTICLES,
-    EDITORIAL_ARTICLE_SEED
+    []
   );
   const [activeTab, setActiveTab] = useState('All');
   const [selectedArticle, setSelectedArticle] = useState(null);

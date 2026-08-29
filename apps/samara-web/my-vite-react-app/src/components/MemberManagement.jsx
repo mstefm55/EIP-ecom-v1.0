@@ -1,4 +1,4 @@
-import { DEMO_COLLABORATOR_ACCOUNT as INITIAL_COLLABORATOR, DEMO_BUYER_ACCOUNT as INITIAL_BUYER, DEMO_ADMIN_ACCOUNT as INITIAL_ADMINISTRATOR } from '../data/runtimeSeeds';
+import { getOptInDemoMemberAccounts, isDemoRuntimeDataEnabled } from '../lib/runtimeRepositoryBootstrap';
 import { runtimeDataStorage } from '../lib/runtimeDataGateway';
 import React, { useState, useEffect } from 'react';
 import { translatePerfectFitText as pfUiT } from '../lib/i18n';
@@ -31,6 +31,10 @@ export default function MemberManagement({
   onOpenAdminConsole,
   patterns = []
 }) {
+  const demoAccounts = getOptInDemoMemberAccounts();
+  const INITIAL_COLLABORATOR = demoAccounts.collaborator || {};
+  const INITIAL_BUYER = demoAccounts.buyer || {};
+  const INITIAL_ADMINISTRATOR = demoAccounts.administrator || {};
   const [isSignUpMode, setIsSignUpMode] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -111,18 +115,17 @@ export default function MemberManagement({
       onLoginSuccess && onLoginSuccess(publicUser);
     };
 
-    // Direct demonstration credentials bypass or custom logins
-    if (email.toLowerCase().includes('admin')) {
+    // Demo persona switching is available only through the explicit development flag.
+    if (isDemoRuntimeDataEnabled() && email.toLowerCase().includes('admin')) {
       completeLogin(INITIAL_ADMINISTRATOR);
-    } else if (email.toLowerCase().includes('atelier') || email.toLowerCase().includes('margot')) {
+    } else if (isDemoRuntimeDataEnabled() && (email.toLowerCase().includes('atelier') || email.toLowerCase().includes('margot'))) {
       // Login as Margot Leone (Collaborator)
       completeLogin(INITIAL_COLLABORATOR);
     } else {
-      // Login as Arthur Dent (Regular Buyer)
       const user = {
-        ...INITIAL_BUYER,
         email: email,
-        fullName: fullName || email.split('@')[0].toUpperCase()
+        fullName: fullName || email.split('@')[0],
+        role: 'buyer'
       };
       completeLogin(user);
     }
@@ -186,6 +189,7 @@ export default function MemberManagement({
   };
 
   const switchDemoAccount = (role) => {
+    if (!isDemoRuntimeDataEnabled()) return;
     const completeLogin = (user) => {
       const publicUser = ensureUserPublicIdentity(user, {
         persist: true,
@@ -345,7 +349,7 @@ export default function MemberManagement({
                   <p className="text-[11px] text-sand-300/80 leading-relaxed mt-2">{pfUiT("ui.components.membermanagement.53785d26b4")}</p>
                 </div>
 
-                {!currentUser && (
+                {!currentUser && isDemoRuntimeDataEnabled() && (
                   <div className="p-4 bg-white/5 border border-white/10 rounded-[4px] space-y-2.5" id="demo-quick-login">
                     <span className="text-[10px] font-mono uppercase text-clay-300 font-bold block tracking-wider">{pfUiT("ui.components.membermanagement.bc71857400")}</span>
                     <p className="text-[10px] text-sand-300 leading-normal">{pfUiT("ui.components.membermanagement.d1f96b4e23")}</p>
