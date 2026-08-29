@@ -1,17 +1,130 @@
-﻿* {
-  box-sizing: border-box;
+
+
+
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500&family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Outfit", system-ui, sans-serif;
+  --font-serif: "Cormorant Garamond", Georgia, serif;
+  --font-mono: "JetBrains Mono", monospace;
+
+  /* Natural Tones organic color palette */
+  --color-sand-50: #FAF8F5;
+  --color-sand-100: #F3ECE1;
+  --color-sand-200: #E7DCCB;
+  --color-sand-300: #D8CCA8;
+  --color-sand-400: #BFB08E;
+  --color-sand-500: #9E8D6B;
+  --color-sand-600: #887857;
+  --color-sand-700: #6D5E44;
+  --color-sand-800: #524733;
+  --color-sand-900: #362E21;
+
+  --color-clay-50: #FDF7F4;
+  --color-clay-100: #FCECE4;
+  --color-clay-200: #F8D6C7;
+  --color-clay-300: #EDB39A;
+  --color-clay-400: #E08562;
+  --color-clay-500: #C26B4A;
+  --color-clay-600: #B25838;
+  --color-clay-700: #924327;
+  --color-clay-800: #78341D;
+  --color-clay-900: #5E2614;
+
+  --color-sage-50: #F6F7F5;
+  --color-sage-100: #E9ECE6;
+  --color-sage-200: #D2DAD1;
+  --color-sage-300: #B1BEB0;
+  --color-sage-400: #8AA189;
+  --color-sage-500: #6B816A;
+  --color-sage-600: #546552;
+  --color-sage-700: #445242;
+  --color-sage-800: #364235;
+  --color-sage-900: #293228;
+
+  --color-bark-50: #FAF8F6;
+  --color-bark-100: #F2EBE5;
+  --color-bark-200: #E3D4C7;
+  --color-bark-300: #CFB8A5;
+  --color-bark-400: #B6977F;
+  --color-bark-500: #9C795F;
+  --color-bark-600: #805E46;
+  --color-bark-700: #664934;
+  --color-bark-800: #4C3525;
+  --color-bark-900: #2D1E15;
+
+  --shadow-bento: 0 4px 20px -2px rgba(136, 120, 87, 0.06), 0 2px 6px -1px rgba(136, 120, 87, 0.04);
+  --shadow-lux: 0 20px 40px -15px rgba(45, 30, 21, 0.08), 0 10px 20px -10px rgba(45, 30, 21, 0.05);
+
+  --radius-xs: 2px;
+  --radius-sm: 3px;
+  --radius: 4px;
+  --radius-md: 4px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-3xl: 24px;
+  --radius-4xl: 32px;
 }
 
-html, body {
-  margin: 0;
-  padding: 0;
-  min-height: 100%;
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: var(--color-sand-50);
+    color: var(--color-bark-900);
+    line-height: 1.6;
+    letter-spacing: -0.01em;
+  }
 }
 
-body {
-  background: #f3ece5;
+/* Custom scrollbar to match the premium natural aesthetic */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
 }
 
-#root {
-  min-height: 100vh;
+::-webkit-scrollbar-track {
+  background: var(--color-sand-100);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-bark-300);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-bark-400);
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.catalog-sidebar-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #d8b9a6 transparent;
+}
+
+.catalog-sidebar-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.catalog-sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.catalog-sidebar-scroll::-webkit-scrollbar-thumb {
+  background: #d8b9a6;
+  border-radius: 999px;
+}
+
+.catalog-sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: #ba8068;
 }

@@ -1,0 +1,60 @@
+/**
+ * Stable runtime domain identifiers.
+ *
+ * These are code contracts only. Display labels belong in perfectFitMetadata.js.
+ * Runtime business records belong behind repositories/adapters.
+ */
+export const RUNTIME_DOMAINS = Object.freeze({
+  CATALOG_PRODUCTS: 'catalogProducts',
+  PRODUCT_REVIEWS: 'productReviews',
+  WISHLIST: 'wishlist',
+  CART: 'cart',
+  ORDERS: 'orders',
+  BLOG_POSTS: 'blogPosts',
+  COMMUNITY_POSTS: 'communityPosts',
+  TESTIMONIALS: 'testimonials',
+  EDITORIAL_ARTICLES: 'editorialArticles',
+  CONSULTATION_EXPERTS: 'consultationExperts',
+  CONSULTATION_BOOKINGS: 'consultationBookings',
+  NEWSLETTER_SUBSCRIPTIONS: 'newsletterSubscriptions',
+  MEMBER_DIRECTORY: 'memberDirectory',
+  USER_PROFILE: 'userProfile',
+  PRODUCT_SUBMISSIONS: 'productSubmissions',
+  ACCESS_REQUESTS: 'accessRequests',
+  PROJECTS: 'projects',
+  ARCHIVED_PROJECTS: 'archivedProjects',
+  PROJECT_COMPANION: 'projectCompanion',
+  INVENTORY: 'inventory',
+  SUPPLIERS: 'suppliers',
+  SALES_HISTORY: 'salesHistory',
+  SUPPLY_ORDERS: 'supplyOrders',
+  TIME_LOGS: 'timeLogs',
+  TIMER_HISTORY: 'timerHistory',
+  IMPORTED_PATTERNS: 'importedPatterns',
+  PATTERN_TAGS: 'patternTags',
+  FABRIC_STASH: 'fabricStash',
+  MATERIALS: 'materials',
+  MESSAGES: 'messages',
+  MESSAGE_DIRECTORY: 'messageDirectory',
+  WORKSPACE: 'workspace',
+  WORKSPACE_PUBLICATION: 'workspacePublication',
+  MEDIA: 'media',
+  NOTIFICATIONS: 'notifications',
+  USER_SIZING_PROFILE: 'userSizingProfile',
+  PROJECT_JOURNAL: 'projectJournal',
+  CUSTOMER_BODY_PROFILE: 'customerBodyProfile',
+  CUSTOMER_FIT_HISTORY: 'customerFitHistory',
+  MEASUREMENT_CALIBRATION: 'measurementCalibration',
+  MEASUREMENT_ADMIN_CONFIG: 'measurementAdminConfig',
+  USERNAME_REGISTRY: 'usernameRegistry',
+  MATERIAL_PURCHASE_REQUIREMENTS: 'materialPurchaseRequirements',
+  MATERIAL_GOODS_RECEIPTS: 'materialGoodsReceipts',
+  MATERIAL_ISSUES: 'materialIssues',
+  SHOPPING_PREFERENCES: 'shoppingPreferences',
+  COLLABORATOR_SECRETS: 'collaboratorSecrets',
+  ANALYTICS_LOGS: 'analyticsLogs',
+  PRINTING_GUIDES: 'printingGuides',
+  INDUSTRIAL_TECH_PACKS: 'industrialTechPacks'
+});
+
+export const RUNTIME_DOMAIN_VALUES = Object.freeze(Object.values(RUNTIME_DOMAINS));

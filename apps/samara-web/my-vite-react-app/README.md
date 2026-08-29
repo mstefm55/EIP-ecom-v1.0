@@ -1,37 +1,35 @@
-# Perfect Fit Bureau Vite Frontend
+<div align="center">
+<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
+</div>
 
-Perfect Fit Bureau is deployed as an external storefront connected to EIP through the public gateway/connection contract. It is not an internal EIP dashboard surface and should not call `/api/eip/*`.
+# Perfect Fit Bureau AI Studio reference app
 
-The production shell uses the Google AI Studio-inspired Perfect Fit Bureau UI across the active routes while preserving the live EIP catalogue, cart, checkout, payment-session, and content integrations.
+This folder contains the Google AI Studio export used as the visual reference for the production Samara / Perfect Fit Bureau storefront.
 
-Alternate catalogue and checkout experiments are preserved but hidden by default behind:
-
-- `VITE_ENABLE_CATALOG_VARIANT`
-- `VITE_ENABLE_CHECKOUT_VARIANT`
-
-## Local commands
-
-```bash
-npm ci
-npm run build
-```
-
-## Railway
+It is intentionally not the production deployment root. The production EIP-connected storefront remains:
 
 ```text
-Root directory: apps/samara-web/my-vite-react-app
-Install command: npm ci
-Build command: npm run build
-Output directory: dist
+apps/samara-web/my-vite-react-app
 ```
 
-## EIP Connection
+The reference app includes beautiful UI patterns, but it also contains local-storage demo commerce, Firebase/Google Drive helpers, and sandbox-style checkout UI. Do not allow those demo flows to replace the EIP-backed catalog, cart, checkout, payment, member, and content APIs in the production app.
 
-Use the plug-and-play values created through EIP Admin > Connections:
+View your app in AI Studio: https://ai.studio/apps/ba7467f3-677d-4170-a709-acb874113c19
 
-- `VITE_EIP_ENDPOINT`
-- `VITE_EIP_API_KEY`
+## Run Locally
 
-The endpoint is the full storefront endpoint copied from Admin > Connections. It already contains the tenant routing details, so Samara does not need a suffix, connection code, verification mode, or manifest settings.
+**Prerequisites:**  Node.js
 
-The deployed origin belongs in API `CORS_ORIGIN_PUBLIC` and in the connection profile `origin_allowlist`, not in internal dashboard `CORS_ORIGIN`.
+1. Install dependencies:
+   `npm install`
+2. Copy `.env.example` to `.env.local` only if optional Firebase/Google Drive helpers are being tested.
+3. Run the app:
+   `npm run dev`
+
+## Production integration notes
+
+- Deployment root: use `apps/samara-web/my-vite-react-app`, not this reference folder.
+- Product data: must come from EIP/Product Studio public commerce APIs.
+- Checkout/payment: must remain EIP-backed and provider-driven.
+- Firebase/Google Drive: disabled unless `VITE_FIREBASE_*` variables are explicitly provided.
+- Secrets: never commit real Firebase, Gemini, OAuth, or provider credentials.

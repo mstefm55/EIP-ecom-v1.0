@@ -1,0 +1,492 @@
+.ws-message-launcher {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 2450;
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 13px;
+  border: 1px solid #272622;
+  border-radius: 999px;
+  background: #272622;
+  color: #fff;
+  box-shadow:
+    0 14px 38px rgba(39, 38, 34, 0.22);
+  cursor: pointer;
+}
+
+.ws-message-launcher svg {
+  width: 15px;
+  height: 15px;
+}
+
+.ws-message-launcher span {
+  font-size: 10px;
+  font-weight: 760;
+}
+
+.ws-message-launcher strong {
+  display: inline-flex;
+  min-width: 20px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #fff;
+  color: #272622;
+  font-size: 8px;
+}
+
+.ws-message-panel {
+  position: fixed;
+  right: 24px;
+  bottom: 76px;
+  z-index: 2451;
+  width: min(720px, calc(100vw - 48px));
+  height: min(560px, calc(100vh - 140px));
+  overflow: hidden;
+  border: 1px solid #d9d5cc;
+  border-radius: 18px;
+  background: #fffdf9;
+  box-shadow:
+    0 28px 90px rgba(39, 38, 34, 0.24);
+}
+
+.ws-message-header {
+  display: flex;
+  min-height: 60px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 11px 14px 11px 17px;
+  border-bottom: 1px solid #e5e2da;
+  background:
+    linear-gradient(
+      180deg,
+      #fffefb 0%,
+      #faf5ee 100%
+    );
+}
+
+.ws-message-kicker {
+  display: block;
+  color: #9a6545;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+}
+
+.ws-message-header h3 {
+  margin: 2px 0 0;
+  color: #272622;
+  font-family:
+    Georgia,
+    "Times New Roman",
+    serif;
+  font-size: 21px;
+  font-weight: 500;
+}
+
+.ws-message-header button {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #d9d5cc;
+  border-radius: 9px;
+  background: #fff;
+  color: #6f6c65;
+  cursor: pointer;
+}
+
+.ws-message-header button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ws-message-content {
+  display: grid;
+  height: calc(100% - 60px);
+  grid-template-columns:
+    205px
+    minmax(0, 1fr);
+}
+
+.ws-message-threads {
+  min-width: 0;
+  overflow-y: auto;
+  border-right: 1px solid #e5e2da;
+  background: #f8f7f3;
+  padding: 8px;
+}
+
+.ws-message-thread {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ws-message-thread + .ws-message-thread {
+  margin-top: 4px;
+}
+
+.ws-message-thread:hover {
+  background: #fff;
+}
+
+.ws-message-thread.is-active {
+  border-color: #d8c5b4;
+  background: #fff;
+  box-shadow:
+    0 6px 16px rgba(60, 40, 27, 0.06);
+}
+
+.ws-message-thread-context {
+  color: #9a6545;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  font-size: 6px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.ws-message-thread strong {
+  max-width: 100%;
+  margin-top: 3px;
+  overflow: hidden;
+  color: #272622;
+  font-size: 9px;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-message-thread small {
+  max-width: 100%;
+  margin-top: 3px;
+  overflow: hidden;
+  color: #918d84;
+  font-size: 7.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-message-thread-empty {
+  padding: 24px 12px;
+  color: #918d84;
+  text-align: center;
+  font-size: 8px;
+}
+
+.ws-message-conversation {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows:
+    auto
+    minmax(0, 1fr)
+    auto;
+  background: #fffdf9;
+}
+
+.ws-message-context {
+  display: flex;
+  min-height: 62px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 13px;
+  border-bottom: 1px solid #e5e2da;
+}
+
+.ws-message-context > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.ws-message-context span {
+  color: #9a6545;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  font-size: 6.5px;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.ws-message-context strong {
+  max-width: 100%;
+  margin-top: 2px;
+  overflow: hidden;
+  color: #272622;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-message-context small {
+  margin-top: 2px;
+  color: #918d84;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  font-size: 7px;
+}
+
+.ws-message-recipient {
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  padding: 0 9px;
+  border: 1px solid #d9d5cc;
+  border-radius: 999px;
+  background: #f4f2ed;
+  color: #6f6c65 !important;
+  font-family: inherit !important;
+  font-size: 7px !important;
+  letter-spacing: 0 !important;
+  text-transform: none !important;
+}
+
+.ws-message-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px;
+  background:
+    radial-gradient(
+      circle at 1px 1px,
+      rgba(118, 96, 79, 0.05) 1px,
+      transparent 1.1px
+    );
+  background-size: 19px 19px;
+}
+
+.ws-message-bubble-row {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.ws-message-bubble-row + .ws-message-bubble-row {
+  margin-top: 9px;
+}
+
+.ws-message-bubble-row.is-own {
+  justify-content: flex-end;
+}
+
+.ws-message-bubble {
+  max-width: min(78%, 390px);
+  padding: 9px 10px;
+  border: 1px solid #ddd4ca;
+  border-radius:
+    11px
+    11px
+    11px
+    3px;
+  background: #fff;
+  box-shadow:
+    0 5px 13px rgba(60, 40, 27, 0.05);
+}
+
+.ws-message-bubble-row.is-own .ws-message-bubble {
+  border-color: #332b25;
+  border-radius:
+    11px
+    11px
+    3px
+    11px;
+  background: #332b25;
+  color: #fff;
+}
+
+.ws-message-bubble span {
+  display: block;
+  color: #9a6545;
+  font-size: 7px;
+  font-weight: 800;
+}
+
+.ws-message-bubble-row.is-own .ws-message-bubble span {
+  color: #e8cdb8;
+}
+
+.ws-message-bubble p {
+  margin: 4px 0 0;
+  color: inherit;
+  font-size: 9px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.ws-message-bubble time {
+  display: block;
+  margin-top: 4px;
+  color: #9b9188;
+  font-size: 6px;
+  text-align: right;
+}
+
+.ws-message-bubble-row.is-own .ws-message-bubble time {
+  color: #c9beb5;
+}
+
+.ws-message-empty,
+.ws-message-no-selection {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  text-align: center;
+}
+
+.ws-message-empty svg,
+.ws-message-no-selection svg {
+  width: 24px;
+  height: 24px;
+  color: #b48c70;
+}
+
+.ws-message-empty strong,
+.ws-message-no-selection strong {
+  margin-top: 8px;
+  color: #272622;
+  font-size: 10px;
+}
+
+.ws-message-empty span,
+.ws-message-no-selection span {
+  max-width: 310px;
+  margin-top: 4px;
+  color: #918d84;
+  font-size: 8px;
+  line-height: 1.5;
+}
+
+.ws-message-compose {
+  display: grid;
+  grid-template-columns:
+    minmax(0, 1fr)
+    auto;
+  gap: 8px;
+  padding: 10px;
+  border-top: 1px solid #e5e2da;
+  background: #fffdf9;
+}
+
+.ws-message-compose textarea {
+  width: 100%;
+  min-height: 42px;
+  resize: none;
+  border: 1px solid #d9d5cc;
+  border-radius: 10px;
+  background: #fff;
+  padding: 9px 10px;
+  color: #272622;
+  font: inherit;
+  font-size: 9px;
+  line-height: 1.4;
+  outline: none;
+}
+
+.ws-message-compose textarea:focus {
+  border-color: #a56542;
+  box-shadow:
+    0 0 0 3px rgba(165, 101, 66, 0.09);
+}
+
+.ws-message-compose button {
+  display: inline-flex;
+  min-width: 78px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid #272622;
+  border-radius: 10px;
+  background: #272622;
+  color: #fff;
+  font-size: 8px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.ws-message-compose button:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.ws-message-compose button svg {
+  width: 13px;
+  height: 13px;
+}
+
+@media (max-width: 720px) {
+  .ws-message-launcher {
+    right: 14px;
+    bottom: 80px;
+    min-width: 42px;
+    justify-content: center;
+    padding: 0 11px;
+  }
+
+  .ws-message-launcher span {
+    display: none;
+  }
+
+  .ws-message-panel {
+    right: 10px;
+    bottom: 132px;
+    width: calc(100vw - 20px);
+    height: min(620px, calc(100vh - 150px));
+  }
+
+  .ws-message-content {
+    grid-template-columns: 1fr;
+  }
+
+  .ws-message-threads {
+    display: flex;
+    max-height: 98px;
+    gap: 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-right: 0;
+    border-bottom: 1px solid #e5e2da;
+  }
+
+  .ws-message-thread {
+    flex: 0 0 170px;
+  }
+
+  .ws-message-conversation {
+    min-height: 0;
+  }
+}
