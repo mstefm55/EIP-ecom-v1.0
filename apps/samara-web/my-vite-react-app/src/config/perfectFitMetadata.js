@@ -4,11 +4,11 @@ import {
   buildCanonicalMeasurementDefinitions
 } from '../lib/metadataDerivations';
 
-import adultFemaleFront from '../assets/find-my-size/Adult_Female_Front.png';
+import adultFemaleFront from '../assets/find-my-size/Adult_Female_front.png';
 
 import adultFemaleSide from '../assets/find-my-size/Adult_Female_Side.png';
 
-import adultFemaleBack from '../assets/find-my-size/Adult_Female_Back.png';
+import adultFemaleBack from '../assets/find-my-size/Adult_Female_back.png';
 
 import adultMaleFront from '../assets/find-my-size/Adult_Male_Front.png';
 
@@ -16,11 +16,11 @@ import adultMaleSide from '../assets/find-my-size/Adult_Male_Side.png';
 
 import adultMaleBack from '../assets/find-my-size/Adult_Male_Back.png';
 
-import teenFemaleFront from '../assets/find-my-size/Teen_Female_Front.png';
+import teenFemaleFront from '../assets/find-my-size/Teen_Female_front.png';
 
 import teenFemaleSide from '../assets/find-my-size/Teen_Female_Side.png';
 
-import teenFemaleBack from '../assets/find-my-size/Teen_Female_Back.png';
+import teenFemaleBack from '../assets/find-my-size/Teen_Female_back.png';
 
 import teenMaleFront from '../assets/find-my-size/Teen_Male_Front.png';
 
@@ -36,7 +36,7 @@ import kidFemaleBack from '../assets/find-my-size/Kid_Female_Back.png';
 
 import kidMaleFront from '../assets/find-my-size/Kid_Male_Front.png';
 
-import kidMaleSide from '../assets/find-my-size/Kid_Male_Side.png';
+import kidMaleSide from '../assets/find-my-size/kid_Male_Side.png';
 
 import kidMaleBack from '../assets/find-my-size/Kid_Male_Back.png';
 
