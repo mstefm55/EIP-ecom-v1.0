@@ -863,6 +863,10 @@ Workspace: (section) => (
     RUNTIME_DOMAINS.CATALOG_PRODUCTS,
     []
   );
+  const [commercialPromotions] = useRuntimeCollectionState(
+    RUNTIME_DOMAINS.COMMERCIAL_PROMOTIONS,
+    []
+  );
 
   const [workspaceProductPresentations, setWorkspaceProductPresentations] = useState([]);
   const [workspacePublicationData, setWorkspacePublicationData] = useState(null);
@@ -1012,6 +1016,10 @@ Workspace: (section) => (
       workspacePublicationData
     ]
   );
+  const displayedWorkspaceProducts = useMemo(
+    () => productPresentationPatterns.filter((pattern) => pattern.presentationSource === 'workspace'),
+    [productPresentationPatterns]
+  );
 
   const cartItemsForCheckout = useMemo(
     () =>
@@ -1064,6 +1072,29 @@ Workspace: (section) => (
         )
     ) ||
     null;
+
+  const handleUndisplayPublishedProduct = (pattern) => {
+    const variantId = pattern?.workspaceVariantId || pattern?.variantId;
+    const transition = findPublicationTransition('UNPUBLISH', 'PUBLISHED');
+    if (!variantId || !transition) {
+      addToast('This product is not linked to an active Workspace publication record.', 'warning', 'Unable to Undisplay');
+      return;
+    }
+
+    const nextWorkspaceData = applyPublicationTransition({
+      workspaceData: loadWorkspacePresentationData(),
+      variantId,
+      transition,
+      actor: currentUser
+    });
+    persistWorkspacePublicationData({
+      workspaceData: nextWorkspaceData,
+      storageKey: getWorkspacePresentationStorageKey(),
+      eventName: WORKSPACE_PRESENTATION_UPDATED_EVENT
+    });
+    setWorkspacePublicationData(nextWorkspaceData);
+    addToast(`"${pattern.name || 'Product'}" is no longer displayed.`, 'success', 'Publication Updated');
+  };
 
   const handleOpenPublicationReview = (
     request
@@ -1980,7 +2011,9 @@ onLogout={() => {
   onOpenAdminConsole={() => {
     goToView("admin");
   }}
-  patterns={productPresentationPatterns}
+  patterns={displayedWorkspaceProducts}
+  commercialPromotions={commercialPromotions}
+  onUndisplayProduct={handleUndisplayPublishedProduct}
 />
       </div>
     );
@@ -2921,6 +2954,7 @@ id="gallery-section"
         onRemoveItem={handleRemoveItem}
         onClearCart={handleClearCart}
         currentUser={currentUser}
+        commercialPromotions={commercialPromotions}
         onOrderSuccess={handleOrderSuccess}
         onTrackOrder={(orderId) => {
           if (!isTrackShipmentEnabled) return;
@@ -3078,7 +3112,9 @@ id="gallery-section"
   onClose={() => setIsAuthModalOpen(false)}
   currentUser={currentUser}
   setCurrentUser={setCurrentUser}
-  patterns={productPresentationPatterns}
+  patterns={displayedWorkspaceProducts}
+  commercialPromotions={commercialPromotions}
+  onUndisplayProduct={handleUndisplayPublishedProduct}
   onOpenAdminConsole={() => {
     goToView("admin");
     setIsAuthModalOpen(false);

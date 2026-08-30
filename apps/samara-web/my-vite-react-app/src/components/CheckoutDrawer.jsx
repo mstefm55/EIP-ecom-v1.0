@@ -13,6 +13,7 @@ import {
   MapPin, CreditCard, ChevronRight, CheckCircle, Download, FileText, Printer, Scissors,
 } from 'lucide-react';
 import { UI_LAYERS } from '../lib/uiLayers';
+import { resolveActivePromotion, resolvePromotionByCode } from '../lib/commercialPromotions';
 
 const CHECKOUT_IMAGE_FIELDS = [
   'image',
@@ -56,6 +57,7 @@ export default function CheckoutDrawer({
   onRemoveItem,
   onClearCart,
   currentUser = null,
+  commercialPromotions = [],
   onOrderSuccess = null,
   onTrackOrder = null
 }) {
@@ -94,7 +96,8 @@ export default function CheckoutDrawer({
   const subtotal = cartItems.reduce((acc, item) => acc + item.price * item.quantity, 0);
 
   // Calculate potential member discount
-  const discountPercent = currentUser?.role === 'buyer' ? (currentUser.discountPercent || 15) : 0;
+  const memberPromotion = resolveActivePromotion(commercialPromotions, currentUser);
+  const discountPercent = memberPromotion?.discountPercent || 0;
   const discountAmount = (subtotal * discountPercent) / 100;
 
   // Calculate potential promo discount
@@ -994,24 +997,16 @@ export default function CheckoutDrawer({
                               setPromoError('Please enter a promo code');
                               return;
                             }
-                            const PROMO_CODES = {
-                              'SARTORIAL20': 20,
-                              'ATELIER30': 30,
-                              'BEGINNER50': 50,
-                              'SEW10': 10,
-                            };
-                            if (PROMO_CODES[trimmed] !== undefined) {
-                              setAppliedPromo({
-                                code: trimmed,
-                                discountPercent: PROMO_CODES[trimmed],
-                              });
+                            const promotion = resolvePromotionByCode(commercialPromotions, trimmed, currentUser);
+                            if (promotion) {
+                              setAppliedPromo(promotion);
                               setPromoCodeInput('');
                               setPromoError('');
                               if (window.showToast) {
-                                window.showToast(`Promo code "${trimmed}" applied successfully!`, "success", `${PROMO_CODES[trimmed]}% Discount`);
+                                window.showToast(`Promo code "${trimmed}" applied successfully!`, "success", `${promotion.discountPercent}% Discount`);
                               }
                             } else {
-                              setPromoError('Invalid promo code. Example: BEGINNER50');
+                              setPromoError('This promo code is invalid, inactive, expired, or unavailable for this account.');
                             }
                           }}
                           className="bg-bark-800 hover:bg-bark-900 text-white font-mono text-[10.5px] font-bold px-3 py-1.5 rounded-lg transition-colors cursor-pointer"

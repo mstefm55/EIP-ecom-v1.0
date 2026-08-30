@@ -2166,6 +2166,23 @@ export function ProjectFocusWindow() {
     });
   };
 
+  if (focus.minimized) {
+    return (
+      <button
+        type="button"
+        onClick={() => patchFocus({ minimized: false, open: true })}
+        className="fixed bottom-24 right-6 z-[1200] inline-flex min-h-14 items-center gap-3 rounded-full border border-[#D9B68E] bg-[#2E241C] px-4 py-2 text-[#FFF8EF] shadow-[0_18px_55px_rgba(46,36,28,0.3)] hover:bg-[#463629]"
+        aria-label={pfUiT('ui.components.workspace.projectjournal.99685a6413')}
+      >
+        <span className={`h-2.5 w-2.5 rounded-full ${timer.status === 'running' ? 'animate-pulse bg-[#E9C85C]' : timer.status === 'paused' ? 'bg-[#D9B68E]' : 'bg-[#A8C8AB]'}`} />
+        <span className="text-left">
+          <span className="block text-[9px] font-bold uppercase tracking-[0.16em] text-[#D9B68E]">{pfUiT('ui.workspace.sessionTimer.launcher')}</span>
+          <span className="block font-mono text-sm font-bold">{formatDuration(elapsed)}</span>
+        </span>
+      </button>
+    );
+  }
+
   return (
     <div
       className="fixed z-[1200] overflow-hidden rounded-[22px] border border-[#D9B68E] bg-[#FFF8EF] text-[#2E241C] shadow-[0_24px_90px_rgba(46,36,28,0.28)]"
@@ -2173,7 +2190,7 @@ export function ProjectFocusWindow() {
         left: focus.x,
         top: focus.y,
         width: focus.width,
-        height: focus.minimized ? 58 : focus.height
+        height: focus.height
       }}
     >
       <div
@@ -2199,8 +2216,7 @@ export function ProjectFocusWindow() {
         </div>
       </div>
 
-      {!focus.minimized && (
-        <div className="flex h-[calc(100%-42px)] flex-col overflow-y-auto p-4">
+      <div className="flex h-[calc(100%-42px)] flex-col overflow-y-auto p-4">
           <div>
             <h3 className="font-serif text-xl text-[#2E241C]">{timer.styleName} / {timer.variantName}</h3>
             <p className="mt-1 text-xs font-semibold uppercase tracking-[0.14em] text-[#A06E46]">{timer.taskLabel}</p>
@@ -2252,10 +2268,8 @@ export function ProjectFocusWindow() {
             )}
           </div>
         </div>
-      )}
 
-      {!focus.minimized && (
-        <button
+      <button
           type="button"
           className="absolute bottom-1 right-1 h-5 w-5 cursor-nwse-resize rounded-br-[18px] border-b-2 border-r-2 border-[#A06E46]"
           aria-label={pfUiT("ui.components.workspace.projectjournal.657101b278")}
@@ -2268,7 +2282,6 @@ export function ProjectFocusWindow() {
             };
           }}
         />
-      )}
     </div>
   );
 }

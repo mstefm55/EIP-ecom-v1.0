@@ -54,7 +54,8 @@ export const RUNTIME_DOMAINS = Object.freeze({
   COLLABORATOR_SECRETS: 'collaboratorSecrets',
   ANALYTICS_LOGS: 'analyticsLogs',
   PRINTING_GUIDES: 'printingGuides',
-  INDUSTRIAL_TECH_PACKS: 'industrialTechPacks'
+  INDUSTRIAL_TECH_PACKS: 'industrialTechPacks',
+  COMMERCIAL_PROMOTIONS: 'commercialPromotions'
 });
 
 export const RUNTIME_DOMAIN_VALUES = Object.freeze(Object.values(RUNTIME_DOMAINS));

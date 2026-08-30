@@ -67,6 +67,12 @@ import {
   normalizeMeasurementChartValues,
   resolveBaseSizeReference
 } from '../lib/measurementChart';
+import {
+  generatePatternFileReference,
+  generateProjectReference,
+  generateStyleReference,
+  generateVariantReference
+} from '../lib/workspaceReferences';
 
 const ICON_REGISTRY = {
   project: Folder,
@@ -463,33 +469,6 @@ function slugify(value) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 48) || 'item';
-}
-
-function acronym(value, fallback = 'PF') {
-  const cleaned = String(value || '').trim();
-  if (!cleaned) return fallback;
-
-  const letters = cleaned
-    .split(/\s+/)
-    .map((part) => part[0])
-    .join('')
-    .replace(/[^a-z0-9]/gi, '')
-    .toUpperCase()
-    .slice(0, 3);
-
-  return letters || fallback;
-}
-
-function nextSequence(existing = [], prefix = '') {
-  const numbers = existing
-    .map((node) => String(node.values?.['product.style_code'] || node.values?.['variant.code'] || node.id || ''))
-    .map((value) => {
-      const match = value.match(/(\d+)(?!.*\d)/);
-      return match ? Number(match[1]) : 0;
-    });
-
-  const next = Math.max(0, ...numbers) + 1;
-  return `${prefix}${String(next).padStart(3, '0')}`;
 }
 
 function getNowIso() {
@@ -1423,7 +1402,10 @@ function makeModuleChildren(variantCode, styleValues = {}) {
 
 function createProjectNode(values = {}, ownerActor = null) {
   const name = values['project.name'] || 'New Project';
-  const designerCode = values['project.designer_code'] || acronym(name);
+  const designerCode = generateProjectReference({
+    name,
+    existingReference: values['project.designer_code']
+  });
 
   return {
     id: `project-${slugify(name)}-${Date.now()}`,
@@ -1452,7 +1434,12 @@ function createProjectNode(values = {}, ownerActor = null) {
 function createStyleNode(parentProject, values = {}) {
   const name = values['product.style_name'] || 'New Style';
   const designerCode = parentProject?.values?.['project.designer_code'] || 'PF';
-  const styleCode = values['product.style_code'] || `${designerCode}-${acronym(name, 'STY')}-${nextSequence(parentProject?.children || [])}`;
+  const styleCode = generateStyleReference({
+    designerReference: designerCode,
+    styleName: name,
+    siblingReferences: (parentProject?.children || []).map((node) => node.values?.['product.style_code']),
+    existingReference: values['product.style_code']
+  });
 
   return {
     id: `product-${slugify(name)}-${Date.now()}`,
@@ -1474,7 +1461,11 @@ function createStyleNode(parentProject, values = {}) {
 function createVariantNode(parentStyle, values = {}) {
   const name = values['variant.name'] || 'Original';
   const styleCode = parentStyle?.values?.['product.style_code'] || 'PF-STY-001';
-  const variantCode = values['variant.code'] || `${styleCode}-V${String((parentStyle?.children || []).filter((child) => child.nodeType === 'variant').length + 1).padStart(2, '0')}`;
+  const variantCode = generateVariantReference({
+    styleReference: styleCode,
+    siblingCount: (parentStyle?.children || []).filter((child) => child.nodeType === 'variant').length,
+    existingReference: values['variant.code']
+  });
 
   return {
     id: `variant-${slugify(variantCode)}-${Date.now()}`,
@@ -2582,8 +2573,10 @@ function PatternLibraryModule({
   };
 
   const createReference = () => {
-    const next = library.files.length + 1;
-    return `${variantCode}-PAT-${String(next).padStart(3, '0')}`;
+    return generatePatternFileReference({
+      variantReference: variantCode,
+      existingReferences: library.files.map((file) => file.reference)
+    });
   };
 
   const handleUpload = async (event) => {
@@ -3041,9 +3034,9 @@ function MeasurementChartModule({
     chart.status || chart.workflow?.status
   );
   const reviewLocked = chartStatus === 'IN_REVIEW';
-  const approvedCurrent = chartStatus === 'APPROVED';
   const [newPomName, setNewPomName] = useState('');
   const [activeChartTab, setActiveChartTab] = useState('measurements');
+  const [activeMeasurementView, setActiveMeasurementView] = useState('body');
   const [fitProfileDraft, setFitProfileDraft] = useState(() => cloneValue(chart.fitProfile || {}));
   const [fitMessage, setFitMessage] = useState('');
   const [garmentDraft, setGarmentDraft] = useState(() => cloneValue(chart.garmentMeasurements || {}));
@@ -3072,7 +3065,6 @@ function MeasurementChartModule({
     nextValues,
     {
       governed = false,
-      alreadyRevision = false,
       revisionReason = 'Measurement Chart technical revision'
     } = {}
   ) => {
@@ -3084,21 +3076,21 @@ function MeasurementChartModule({
       return false;
     }
 
-    let candidate = nextValues;
-
-    if (
-      governed &&
-      approvedCurrent &&
-      !alreadyRevision
-    ) {
-      candidate = createMeasurementChartRevision(
-        chart,
-        {
+    const candidate = governed
+      ? {
           ...nextValues,
-          revisionReason
+          status: 'DRAFT',
+          workflow: {
+            ...(chart.workflow || {}),
+            ...(nextValues.workflow || {}),
+            status: 'DRAFT',
+            hasUnreleasedChanges: true,
+            pendingRevisionReason: revisionReason,
+            basedOnRevisionNumber: chart.revisionNumber,
+            basedOnRevisionLabel: chart.revisionLabel
+          }
         }
-      );
-    }
+      : nextValues;
 
     const normalized = normalizeMeasurementChartValues(
       candidate,
@@ -3329,17 +3321,17 @@ function MeasurementChartModule({
       return;
     }
 
-    const revisedChart = createMeasurementChartRevision(chart, {
+    const nextChart = {
+      ...chart,
       garmentMeasurements: garmentDraft,
-      revisionReason: 'Finished garment measurement revision'
-    });
+    };
 
-    const saved = persistMeasurementChart(revisedChart, {
+    const saved = persistMeasurementChart(nextChart, {
       governed: true,
-      alreadyRevision: true
+      revisionReason: 'Finished garment measurements updated'
     });
     if (saved) {
-      setGarmentMessage(`${revisedChart.revisionLabel} created with finished garment measurements.`);
+      setGarmentMessage('Finished garment measurements saved as unreleased technical changes.');
     }
   };
 
@@ -3390,7 +3382,8 @@ function MeasurementChartModule({
     }
 
     const now = getNowIso();
-    const revisedChart = createMeasurementChartRevision(chart, {
+    const nextChart = {
+      ...chart,
       fitProfile: {
         ...fitTechnicalDraft,
         updatedAt: now,
@@ -3399,16 +3392,15 @@ function MeasurementChartModule({
           name: actor.name,
           login: actor.login
         }
-      },
-      revisionReason: 'Designer Fit Profile revision'
-    });
+      }
+    };
 
-    const saved = persistMeasurementChart(revisedChart, {
+    const saved = persistMeasurementChart(nextChart, {
       governed: true,
-      alreadyRevision: true
+      revisionReason: 'Designer Fit Profile updated'
     });
     if (saved) {
-      setFitMessage(`${revisedChart.revisionLabel} created with the updated Fit Profile.`);
+      setFitMessage('Fit Profile saved as unreleased technical changes.');
     }
   };
 
@@ -3471,23 +3463,23 @@ function MeasurementChartModule({
         : item
     ));
 
-    const revisedChart = createMeasurementChartRevision(chart, {
+    const nextChart = {
+      ...chart,
       fitProfile: {
         ...chart.fitProfile,
         rules: nextRules,
         proposals: nextProposals,
         updatedAt: now,
         updatedBy: decisionMeta.decidedBy
-      },
+      }
+    };
+
+    const saved = persistMeasurementChart(nextChart, {
+      governed: true,
       revisionReason: `Accepted Fit Session proposal ${proposal.fitSessionId || proposal.id}`
     });
-
-    const saved = persistMeasurementChart(revisedChart, {
-      governed: true,
-      alreadyRevision: true
-    });
     if (saved) {
-      setFitMessage(`${revisedChart.revisionLabel} created from fit-session evidence.`);
+      setFitMessage('Fit-session proposal accepted as an unreleased technical change.');
     }
   };
 
@@ -3498,10 +3490,14 @@ function MeasurementChartModule({
   }[source] || source || 'Standard');
 
   const tabs = [
-    { code: 'measurements', label: pfUiT('ui.workspace.measurementTabs.measurements', {}, 'Body measurements') },
-    { code: 'garment', label: pfUiT('ui.workspace.measurementTabs.garment', {}, 'Finished garment') },
+    { code: 'measurements', label: pfUiT('ui.workspace.measurementTabs.measurements', {}, 'Measurements') },
     { code: 'fitProfile', label: pfUiT('ui.workspace.measurementTabs.fitProfile', {}, 'Fit Profile') },
     { code: 'history', label: pfUiT('ui.workspace.measurementTabs.history', {}, 'Revision History') }
+  ];
+  const measurementViews = [
+    { code: 'body', labelKey: 'ui.workspace.measurementViews.body' },
+    { code: 'garment', labelKey: 'ui.workspace.measurementViews.garment' },
+    { code: 'compare', labelKey: 'ui.workspace.measurementViews.compare' }
   ];
 
   return (
@@ -3562,14 +3558,27 @@ function MeasurementChartModule({
             : 'border-[#DCC7B4] bg-[#FBF5ED] text-[#7D5C46]'
       }`}>
         {chartStatus === 'APPROVED'
-          ? `${chart.revisionLabel} is approved. Editing governed fit data creates a new Draft revision while this approved snapshot remains in history.`
+          ? `${chart.revisionLabel} is approved. Editing governed fit data creates unreleased Draft changes; a new technical revision is created only when those changes are explicitly approved.`
           : chartStatus === 'IN_REVIEW'
             ? `${chart.revisionLabel} is in review. Technical fields are locked until the Fit Specification is approved or returned to Draft from Approval & Release.`
             : `${chart.revisionLabel} is the working Draft. Submit the Fit Specification through Approval & Release when body measurements, finished garment dimensions and fit rules are ready.`}
       </div>
 
-      <div className={reviewLocked && activeChartTab !== 'history' ? 'pointer-events-none opacity-60' : ''}>
       {activeChartTab === 'measurements' && (
+        <div className="flex flex-wrap gap-1 rounded-[10px] border border-[#E5E2DA] bg-[#FCFBF8] p-1">
+          {measurementViews.map((view) => (
+            <button
+              key={view.code}
+              type="button"
+              onClick={() => setActiveMeasurementView(view.code)}
+              className={`rounded-[8px] px-3.5 py-2 text-[12px] font-semibold ${activeMeasurementView === view.code ? 'bg-[#272622] text-white' : 'text-[#6F6C65] hover:bg-white'}`}
+            >{pfUiT(view.labelKey)}</button>
+          ))}
+        </div>
+      )}
+
+      <div className={reviewLocked && activeChartTab !== 'history' ? 'pointer-events-none opacity-60' : ''}>
+      {activeChartTab === 'measurements' && activeMeasurementView === 'body' && (
         <>
           <section className="rounded-[12px] border border-[#E5E2DA] bg-[#FCFBF8] p-4">
             <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px_180px]">
@@ -3757,7 +3766,7 @@ function MeasurementChartModule({
         </>
       )}
 
-      {activeChartTab === 'garment' && (
+      {activeChartTab === 'measurements' && activeMeasurementView === 'garment' && (
         <div className="space-y-3">
           <section className="rounded-[12px] border border-[#E5E2DA] bg-[#FCFBF8] p-4">
             <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -3839,6 +3848,52 @@ function MeasurementChartModule({
             </div>
           </section>
         </div>
+      )}
+
+      {activeChartTab === 'measurements' && activeMeasurementView === 'compare' && (
+        <section className="overflow-hidden rounded-[12px] border border-[#E5E2DA] bg-white">
+          <div className="border-b border-[#E5E2DA] bg-[#FCFBF8] px-4 py-3">
+            <h3 className="text-[15px] font-semibold text-[#272622]">{pfUiT('ui.workspace.measurementCompare.title')}</h3>
+            <p className="mt-1 text-[12px] text-[#6F6C65]">{pfUiT('ui.workspace.measurementCompare.description')}</p>
+          </div>
+          <div className="overflow-auto">
+            <table className="min-w-[900px] w-full text-left text-[12px]">
+              <thead className="border-b border-[#E5E2DA] bg-[#FCFBF8] text-[10px] uppercase tracking-[0.12em] text-[#918D84]">
+                <tr>
+                  <th className="min-w-[190px] px-4 py-3 font-semibold">{pfUiT('ui.workspace.measurementCompare.measurement')}</th>
+                  {chart.sizes.map((size) => (
+                    <th key={size.id} className="min-w-[150px] px-3 py-3 text-center font-semibold">{getPreferredSizeReference(size, chart.displaySystem) || size.id}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {garmentMeasurementRules.map((rule) => {
+                  const bodyRow = getBodyMeasurementRow(rule.measurementCode);
+                  return (
+                    <tr key={rule.measurementCode} className="border-b border-[#EEEAE2]">
+                      <td className="px-4 py-3 font-semibold text-[#272622]">{getFitBodyAreaLabel(rule.measurementCode, metadata)}</td>
+                      {chart.sizes.map((size) => {
+                        const bodyRaw = bodyRow?.values?.[size.id];
+                        const garmentRaw = garmentDraft?.[rule.measurementCode]?.[size.id];
+                        const bodyValue = bodyRaw === '' || bodyRaw === null || bodyRaw === undefined ? NaN : Number(bodyRaw);
+                        const garmentValue = garmentRaw === '' || garmentRaw === null || garmentRaw === undefined ? NaN : Number(garmentRaw);
+                        const comparable = Number.isFinite(bodyValue) && Number.isFinite(garmentValue);
+                        const ease = comparable ? garmentValue - bodyValue : null;
+                        return (
+                          <td key={`${rule.measurementCode}-${size.id}-compare`} className="px-3 py-3 text-center">
+                            <div className="text-[10px] text-[#6F6C65]">Body {Number.isFinite(bodyValue) ? `${bodyValue} ${chart.unit}` : '—'}</div>
+                            <div className="text-[10px] text-[#6F6C65]">Garment {Number.isFinite(garmentValue) ? `${garmentValue} ${chart.unit}` : '—'}</div>
+                            <div className="mt-1 font-semibold text-[#272622]">Ease {ease === null ? '—' : `${ease >= 0 ? '+' : ''}${ease.toFixed(1)} ${chart.unit}`}</div>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
       )}
 
       {activeChartTab === 'fitProfile' && (
@@ -4070,10 +4125,32 @@ function ChangeHistoryModule({
   const [activeTab, setActiveTab] =
     useState('activity');
 
-  const formalEntries =
+  const storedFormalEntries =
     Array.isArray(node.values?.entries)
       ? node.values.entries
       : [];
+  const measurementChartNode = (variant?.children || []).find((child) => child.nodeType === 'sizeSet');
+  const measurementChart = measurementChartNode?.values || {};
+  const measurementRevisions = [
+    ...(measurementChart.revisionHistory || []),
+    ...(measurementChart.revisionNumber > 1 && measurementChart.status === 'APPROVED'
+      ? [measurementChart]
+      : [])
+  ].map((revision) => ({
+    id: `measurement-chart-${revision.revisionNumber}`,
+    module: 'MEASUREMENT_CHART',
+    version: revision.revisionLabel || `V${revision.revisionNumber}`,
+    toRevision: revision.revisionLabel || `V${revision.revisionNumber}`,
+    reason: revision.revisionReason || 'Approved Measurement Chart baseline',
+    status: revision.status,
+    createdAt: revision.revisedAt || revision.createdAt
+  }));
+  const formalEntries = Array.from(
+    new Map(
+      [...storedFormalEntries, ...measurementRevisions]
+        .map((entry) => [entry.id || `${entry.module}-${entry.toRevision || entry.version}`, entry])
+    ).values()
+  );
 
   const auditEntries =
     (workspaceData?.auditLog || [])
@@ -4381,8 +4458,10 @@ function ArchivedSizeSetFilePrototype({
   };
 
   const createReference = () => {
-    const next = (library.files || []).length + 1;
-    return `${variantCode}-PAT-${String(next).padStart(3, '0')}`;
+    return generatePatternFileReference({
+      variantReference: variantCode,
+      existingReferences: (library.files || []).map((file) => file.reference)
+    });
   };
 
   const commitSizes = () => {
@@ -8094,10 +8173,27 @@ export default function Workspace({
                   target.kind ===
                   'MEASUREMENT_CHART'
                 ) {
+                  const sourceRecord =
+                    transition.code === 'APPROVE' &&
+                    node.values?.workflow?.hasUnreleasedChanges
+                      ? createMeasurementChartRevision(
+                          node.values || {},
+                          {
+                            revisionReason:
+                              node.values?.workflow?.pendingRevisionReason ||
+                              'Approved Measurement Chart baseline',
+                            workflow: {
+                              ...(node.values?.workflow || {}),
+                              hasUnreleasedChanges: false,
+                              pendingRevisionReason: ''
+                            }
+                          }
+                        )
+                      : node.values || {};
                   const nextRecord =
                     applyApprovalTransitionToRecord({
                       record:
-                        node.values || {},
+                        sourceRecord,
                       statusKey:
                         target.statusKey || 'status',
                       transition,
@@ -8132,6 +8228,11 @@ export default function Workspace({
                       nextRecord.revisionNumber;
                     nextRecord.approvedRevisionLabel =
                       nextRecord.revisionLabel;
+                    nextRecord.workflow = {
+                      ...(nextRecord.workflow || {}),
+                      hasUnreleasedChanges: false,
+                      pendingRevisionReason: ''
+                    };
                   }
 
                   return {

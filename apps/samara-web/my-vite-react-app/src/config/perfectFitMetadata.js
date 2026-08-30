@@ -2664,6 +2664,9 @@ const workspaceMetadata = {
         'text',
 
       allowFreeText:
+        false,
+
+      readOnly:
         true,
 
       usedAsEipParameter:
@@ -2747,6 +2750,9 @@ const workspaceMetadata = {
         'text',
 
       allowFreeText:
+        false,
+
+      readOnly:
         true,
 
       usedAsEipParameter:
@@ -2902,6 +2908,9 @@ const workspaceMetadata = {
         'text',
 
       allowFreeText:
+        false,
+
+      readOnly:
         true,
 
       usedAsEipParameter:
@@ -8291,7 +8300,7 @@ const autoEnglish = {
   "ui.components.membermanagement.9d3e57f31e": "Ready to post",
   "ui.components.membermanagement.9f56b033a8": "Project Caption / Title",
   "ui.components.membermanagement.a46071d88c": "Regular Buyer",
-  "ui.components.membermanagement.a4ef619afd": "Get 15% discount, view orders, and unlock VIP tailoring contents.",
+  "ui.components.membermanagement.a4ef619afd": "View orders and unlock member tailoring content. Active promotions appear only when available.",
   "ui.components.membermanagement.a51a5a586b": "Atelier Portal",
   "ui.components.membermanagement.a528a95dd3": "Mailing Register",
   "ui.components.membermanagement.a875f25091": "Current Avatar",
@@ -8300,7 +8309,19 @@ const autoEnglish = {
   "ui.components.membermanagement.b0ae39f268": "✦ Sent to PayPal automatically",
   "ui.components.membermanagement.b337cb3052": "Delete Photo",
   "ui.components.membermanagement.b3f5709f14": "Net Income",
-  "ui.components.membermanagement.b4c1a0791f": "My Displayed Patterns",
+  "ui.components.membermanagement.b4c1a0791f": "Displayed Products",
+  "ui.member.displayedProducts.title": "Displayed Products",
+  "ui.member.displayedProducts.description": "Products published from Workspace. Use Workspace to prepare and publish new products.",
+  "ui.member.displayedProducts.empty": "No Workspace products are currently displayed.",
+  "ui.member.displayedProducts.status": "Displayed",
+  "ui.member.displayedProducts.undisplay": "Undisplay",
+  "ui.workspace.measurementViews.body": "Body",
+  "ui.workspace.measurementViews.garment": "Finished Garment",
+  "ui.workspace.measurementViews.compare": "Compare",
+  "ui.workspace.measurementCompare.title": "Body / Garment Comparison",
+  "ui.workspace.measurementCompare.description": "Actual ease is derived from finished garment minus body measurement. No third value is stored.",
+  "ui.workspace.measurementCompare.measurement": "Measurement",
+  "ui.workspace.sessionTimer.launcher": "Session",
   "ui.components.membermanagement.bc71857400": "✦ Interactive Demo Bypass ✦",
   "ui.components.membermanagement.bcbb2298c0": "Privileged Buyer Club Active",
   "ui.components.membermanagement.c16ad8bf47": "Upload Custom Portrait",
@@ -8310,12 +8331,12 @@ const autoEnglish = {
   "ui.components.membermanagement.c5ecdcc0b4": "Account Settings",
   "ui.components.membermanagement.c70895ae44": "Pattern Name",
   "ui.components.membermanagement.c787294804": "Paris, France",
-  "ui.components.membermanagement.c90a6b8fa2": "15% Fee",
+  "ui.components.membermanagement.c90a6b8fa2": "Platform share",
   "ui.components.membermanagement.c9ce86e8eb": "Seller Portfolio Stats",
   "ui.components.membermanagement.cda79b065c": "Preview",
   "ui.components.membermanagement.d1f96b4e23": "Click below to instant-login with fully pre-seeded dashboards representing actual users.",
   "ui.components.membermanagement.d37283503b": "Waist Width",
-  "ui.components.membermanagement.d62e49b2c9": "Post own patterns for sales, manage payouts, and track earnings with 15% fee.",
+  "ui.components.membermanagement.d62e49b2c9": "Publish products from Workspace, manage payouts, and track earnings.",
   "ui.components.membermanagement.d6db4cb4b5": "Margot Leone",
   "ui.components.membermanagement.d6f62303cc": "PayPal / Bank Payout Address",
   "ui.components.membermanagement.d76644afd4": "payout.email@domain.com",
@@ -10558,6 +10579,12 @@ const RUNTIME_DATA_DOMAINS = Object.freeze({
     shape: 'document',
     storageKey: 'perfectfit_workspace_publication_v1',
     authority: 'EIP'
+  },
+  commercialPromotions: {
+    entity: 'commercialPromotion',
+    shape: 'collection',
+    storageKey: 'perfectfit_commercial_promotions_v1',
+    authority: 'EIP_COMMERCIAL'
   },
   media: {
     entity: 'mediaAsset',

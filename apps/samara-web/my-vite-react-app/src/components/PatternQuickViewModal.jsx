@@ -289,6 +289,16 @@ export default function PatternQuickViewModal({
 
   if (!pattern) return null;
 
+  // Repository projections intentionally permit sparse optional commerce data.
+  // Normalize collections once at the presentation boundary so an absent
+  // optional section is rendered as empty instead of crashing the modal.
+  const features = Array.isArray(pattern.features) ? pattern.features : [];
+  const fabricSuggestions = Array.isArray(pattern.fabricSuggestions) ? pattern.fabricSuggestions : [];
+  const notions = Array.isArray(pattern.notions) ? pattern.notions : [];
+  const yardageInfo = pattern.yardageInfo && typeof pattern.yardageInfo === 'object'
+    ? pattern.yardageInfo
+    : {};
+
   // Media items state synced with Pattern Media Manager & LocalStorage
   const [mediaGalleryVersion, setMediaGalleryVersion] = useState(0);
 
@@ -1357,9 +1367,9 @@ export default function PatternQuickViewModal({
 
               {/* Tab Panels */}
               <div className="bg-white border border-sand-200/60 rounded-[4px] p-3 shadow-3xs text-[11px] leading-relaxed text-bark-700 min-h-[110px] overflow-x-hidden" id="quick-view-tab-panel">
-                {activeTab === 'features' && (
+                {activeTab === 'features' && features.length > 0 && (
                   <ul className="space-y-1 ml-1">
-                    {pattern.features.map((feat, idx) => (
+                    {features.map((feat, idx) => (
                       <li key={idx} className="flex items-start gap-1.5">
                         <Check className="w-3.5 h-3.5 text-clay-600 shrink-0 mt-0.5" />
                         <span>{feat}</span>
@@ -1367,11 +1377,11 @@ export default function PatternQuickViewModal({
                     ))}
                   </ul>
                 )}
-                {activeTab === 'fabrics' && (
+                {activeTab === 'fabrics' && fabricSuggestions.length > 0 && (
                   <div className="space-y-2">
                     <p className="text-bark-550 font-medium text-[9.5px] uppercase tracking-wider">Recommended textiles for optimum drapery &amp; fit:</p>
                     <div className="flex flex-wrap gap-1.5">
-                      {pattern.fabricSuggestions.map((fab, idx) => (
+                      {fabricSuggestions.map((fab, idx) => (
                         <span key={idx} className="px-2 py-0.5 bg-sand-100 border border-sand-200/60 text-bark-800 rounded font-medium shadow-3xs">
                           {fab}
                         </span>
@@ -1379,20 +1389,20 @@ export default function PatternQuickViewModal({
                     </div>
                   </div>
                 )}
-                {activeTab === 'notions' && (
+                {activeTab === 'notions' && (notions.length > 0 || yardageInfo.width44 || yardageInfo.width60) && (
                   <div className="space-y-2.5">
                     <div>
                       <span className="font-bold uppercase text-[8.5px] text-bark-450 tracking-wider block mb-0.5">{pfUiT("ui.components.patternquickviewmodal.5b082c6d4a")}</span>
-                      <p className="text-bark-600">{pattern.notions.join(', ')}</p>
+                      {notions.length > 0 && <p className="text-bark-600">{notions.join(', ')}</p>}
                     </div>
                     <div className="border-t border-sand-150 pt-2 grid grid-cols-2 gap-2">
                       <div>
                         <span className="font-bold text-[8px] text-bark-450 uppercase tracking-wider block">{pfUiT("ui.components.patternquickviewmodal.438866801e")}</span>
-                        <p className="text-bark-800 font-mono font-medium">{pattern.yardageInfo.width44}</p>
+                        <p className="text-bark-800 font-mono font-medium">{yardageInfo.width44 || '—'}</p>
                       </div>
                       <div>
                         <span className="font-bold text-[8px] text-bark-450 uppercase tracking-wider block">{pfUiT("ui.components.patternquickviewmodal.813fd35a50")}</span>
-                        <p className="text-bark-800 font-mono font-medium">{pattern.yardageInfo.width60}</p>
+                        <p className="text-bark-800 font-mono font-medium">{yardageInfo.width60 || '—'}</p>
                       </div>
                     </div>
                   </div>

@@ -10,8 +10,8 @@ import {
   Camera, UploadCloud, Image, MapPin, Phone
 } from 'lucide-react';
 import CollaboratorSalesDashboard from './CollaboratorSalesDashboard';
-import ErpSyncDashboard from './ErpSyncDashboard';
 import { UI_LAYERS } from '../lib/uiLayers';
+import { resolveActivePromotion } from '../lib/commercialPromotions';
 import {
   ensureUserPublicIdentity,
   formatPublicHandle,
@@ -29,7 +29,9 @@ export default function MemberManagement({
   isOpen,
   onClose,
   onOpenAdminConsole,
-  patterns = []
+  patterns = [],
+  commercialPromotions = [],
+  onUndisplayProduct
 }) {
   const demoAccounts = getOptInDemoMemberAccounts();
   const INITIAL_COLLABORATOR = demoAccounts.collaborator || {};
@@ -45,13 +47,6 @@ export default function MemberManagement({
 
   // Tab within Dashboard
   const [dashboardTab, setDashboardTab] = useState('overview'); // 'overview' | 'listings' | 'sales' | 'profile'
-
-  // New Listing creation form
-  const [newPatternName, setNewPatternName] = useState('');
-  const [newPatternPDFPrice, setNewPatternPDFPrice] = useState('12.00');
-  const [newPatternPrintedPrice, setNewPatternPrintedPrice] = useState('22.00');
-  const [newPatternCategory, setNewPatternCategory] = useState('Dresses');
-  const [newPatternDescription, setNewPatternDescription] = useState('');
 
   // Search/Filter states in sales history
   const [salesSearch, setSalesSearch] = useState('');
@@ -264,56 +259,7 @@ export default function MemberManagement({
   const totalCommission = currentUser?.salesHistory?.reduce((sum, item) => sum + item.commission, 0) || 0;
   const totalNetEarnings = currentUser?.salesHistory?.reduce((sum, item) => sum + item.net, 0) || 0;
 
-  // Add customized pattern
-  const handleAddPattern = (e) => {
-    e.preventDefault();
-    if (!newPatternName) return;
-
-    const newPattern = {
-      id: `collab-p${Date.now()}`,
-      name: newPatternName,
-      pricePDF: parseFloat(newPatternPDFPrice) || 12.0,
-      pricePrinted: parseFloat(newPatternPrintedPrice) || 22.0,
-      salesCount: 0,
-      isListed: true
-    };
-
-    const updatedUser = {
-      ...currentUser,
-      patterns: [newPattern, ...(currentUser.patterns || [])]
-    };
-
-    setCurrentUser(updatedUser);
-    setNewPatternName('');
-    setNewPatternDescription('');
-
-    // Alert nicely
-    if (window.showToast) {
-      window.showToast(`Successfully listed "${newPatternName}" in the Atelier Catalog! It is now active for sales.`, "success", "Design Listed");
-    } else {
-      alert(`Successfully listed "${newPatternName}" in the Atelier Catalog! It is now active for sales.`);
-    }
-  };
-
-  const toggleListingActive = (id) => {
-    const updatedPatterns = currentUser.patterns.map(p =>
-      p.id === id ? { ...p, isListed: !p.isListed } : p
-    );
-    setCurrentUser({
-      ...currentUser,
-      patterns: updatedPatterns
-    });
-  };
-
-  const deleteListing = (id) => {
-    if (window.confirm("Are you sure you want to retract this garment blueprint from the public platform?")) {
-      const updatedPatterns = currentUser.patterns.filter(p => p.id !== id);
-      setCurrentUser({
-        ...currentUser,
-        patterns: updatedPatterns
-      });
-    }
-  };
+  const activePromotion = resolveActivePromotion(commercialPromotions, currentUser);
 
   // Filter sales history
   const filteredSales = currentUser?.salesHistory?.filter(txn => {
@@ -603,13 +549,6 @@ export default function MemberManagement({
                             dashboardTab === 'subscribers' ? 'text-bark-900 border-b-2 border-bark-900 font-bold' : 'text-bark-450 hover:text-bark-900'
                           }`}
                         >{pfUiT("ui.components.membermanagement.a528a95dd3")}</button>
-                        <button
-                          onClick={() => setDashboardTab('erp-sync')}
-                          className={`pb-2.5 text-xs font-semibold uppercase tracking-wider transition-all cursor-pointer ${
-                            dashboardTab === 'erp-sync' ? 'text-bark-900 border-b-2 border-bark-900 font-bold' : 'text-bark-450 hover:text-bark-900'
-                          }`}
-                          id="tab-erp-sync-btn"
-                        >{pfUiT("ui.components.membermanagement.800f0a9d33")}</button>
                       </>
                     ) : (
                       <button
@@ -684,7 +623,7 @@ export default function MemberManagement({
                             <div className="grid grid-cols-2 gap-4 text-xs font-sans text-bark-600">
                               <div>
                                 <span className="text-bark-400 block text-[10px] uppercase font-mono">{pfUiT("ui.components.membermanagement.f47cb3ba76")}</span>
-                                <strong className="text-bark-950 font-semibold">{currentUser.patterns?.length || 0} Listed Items</strong>
+                                <strong className="text-bark-950 font-semibold">{patterns.length} Displayed Products</strong>
                               </div>
                               <div>
                                 <span className="text-bark-400 block text-[10px] uppercase font-mono">{pfUiT("ui.components.membermanagement.824a864fb7")}</span>
@@ -742,20 +681,19 @@ export default function MemberManagement({
                               <h3 className="text-xl font-serif text-white font-medium leading-tight">{pfUiT("ui.components.membermanagement.bcbb2298c0")}</h3>
 
                               <p className="text-xs text-sand-300 max-w-md leading-relaxed">
-                                Welcome back, {currentUser.fullName}! As a regular buyer, you enjoy **{currentUser.discountPercent}% off all pattern purchases**, instant access to premium tutorials, and seasonal sewing handbook directories.
+                                Welcome back, {currentUser.fullName}! Your active membership provides access to premium tutorials and seasonal sewing handbook directories.
+                                {activePromotion && ` The current member promotion provides ${activePromotion.discountPercent}% off eligible purchases.`}
                               </p>
 
-                              <div className="pt-2 flex items-center gap-2">
-                                <span className="text-[10px] font-mono bg-white/10 text-white border border-white/20 px-3 py-1 rounded-lg">{pfUiT("ui.components.membermanagement.7e0afba98a")}<b className="font-mono text-amber-300">{currentUser.couponCode}</b>
-                                </span>
-                                <button
-                                  onClick={() => {
-                                    navigator.clipboard.writeText(currentUser.couponCode);
-                                    alert('Discount promo copied!');
-                                  }}
-                                  className="bg-sand-50 hover:bg-sand-100 text-bark-950 text-[10px] px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer"
-                                >{pfUiT("ui.components.membermanagement.f494737f1c")}</button>
-                              </div>
+                              {activePromotion?.code && (
+                                <div className="pt-2 flex items-center gap-2">
+                                  <span className="text-[10px] font-mono bg-white/10 text-white border border-white/20 px-3 py-1 rounded-lg">{pfUiT("ui.components.membermanagement.7e0afba98a")}<b className="font-mono text-amber-300">{activePromotion.code}</b></span>
+                                  <button
+                                    onClick={() => navigator.clipboard.writeText(activePromotion.code)}
+                                    className="bg-sand-50 hover:bg-sand-100 text-bark-950 text-[10px] px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer"
+                                  >{pfUiT("ui.components.membermanagement.f494737f1c")}</button>
+                                </div>
+                              )}
                             </div>
                           </div>
 
@@ -786,133 +724,39 @@ export default function MemberManagement({
                     </div>
                   )}
 
-                  {/* TAB 2: MY LISTED PATTERNS (COLLABORATORS ONLY) */}
+                  {/* Displayed Products is a projection of Workspace publication state. */}
                   {dashboardTab === 'listings' && currentUser.role === 'collaborator' && (
                     <div className="space-y-6" id="tab-listings-content">
-
-                      {/* Form to Post New Pattern */}
-                      <div className="bg-white border border-sand-250 rounded-[4px] p-5 space-y-4">
-                        <h5 className="text-xs font-bold text-bark-900 uppercase tracking-wider flex items-center gap-2">
-                          <PlusCircle className="w-4 h-4 text-clay-605" />{pfUiT("ui.components.membermanagement.0348b3157a")}</h5>
-
-                        <form onSubmit={handleAddPattern} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                          <div className="space-y-1">
-                            <label className="text-[10px] font-mono text-bark-500 uppercase tracking-wider font-bold">{pfUiT("ui.components.membermanagement.c70895ae44")}</label>
-                            <input
-                              type="text"
-                              required
-                              placeholder={pfUiT("ui.components.membermanagement.68f721192d")}
-                              value={newPatternName}
-                              onChange={(e) => setNewPatternName(e.target.value)}
-                              className="border border-sand-200 rounded-xl px-3 py-2 text-xs w-full focus:outline-none focus:border-clay-500 bg-sand-50/30"
-                            />
-                          </div>
-
-                          <div className="space-y-1">
-                            <label className="text-[10px] font-mono text-bark-500 uppercase tracking-wider font-bold">{pfUiT("ui.components.membermanagement.c2f32e50f4")}</label>
-                            <select
-                              value={newPatternCategory}
-                              onChange={(e) => setNewPatternCategory(e.target.value)}
-                              className="border border-sand-200 rounded-xl px-3 py-2 text-xs w-full focus:outline-none focus:border-clay-500 bg-white"
-                            >
-                              <option>{pfUiT("ui.components.membermanagement.067d2f15e3")}</option>
-                              <option>{pfUiT("ui.components.membermanagement.0d916ea4fa")}</option>
-                              <option>{pfUiT("ui.components.membermanagement.f3fbc03f41")}</option>
-                              <option>{pfUiT("ui.components.membermanagement.255e0074ac")}</option>
-                            </select>
-                          </div>
-
-                          <div className="space-y-1">
-                            <label className="text-[10px] font-mono text-bark-500 uppercase tracking-wider font-bold">PDF Price ($ USD)</label>
-                            <input
-                              type="number"
-                              step="0.01"
-                              placeholder="12.00"
-                              value={newPatternPDFPrice}
-                              onChange={(e) => setNewPatternPDFPrice(e.target.value)}
-                              className="border border-sand-200 rounded-xl px-3 py-2 text-xs w-full focus:outline-none focus:border-clay-500 bg-sand-50/30"
-                            />
-                          </div>
-
-                          <div className="space-y-1">
-                            <label className="text-[10px] font-mono text-bark-500 uppercase tracking-wider font-bold">Printed Pattern Price ($ USD)</label>
-                            <input
-                              type="number"
-                              step="0.01"
-                              placeholder="22.00"
-                              value={newPatternPrintedPrice}
-                              onChange={(e) => setNewPatternPrintedPrice(e.target.value)}
-                              className="border border-sand-200 rounded-xl px-3 py-2 text-xs w-full focus:outline-none focus:border-clay-500 bg-sand-50/30"
-                            />
-                          </div>
-
-                          <div className="sm:col-span-2 space-y-1">
-                            <label className="text-[10px] font-mono text-bark-500 uppercase tracking-wider font-bold">{pfUiT("ui.components.membermanagement.1d0f83074e")}</label>
-                            <textarea
-                              rows={2}
-                              placeholder={pfUiT("ui.components.membermanagement.150575fab7")}
-                              value={newPatternDescription}
-                              onChange={(e) => setNewPatternDescription(e.target.value)}
-                              className="border border-sand-200 rounded-xl px-3 py-2 text-xs w-full focus:outline-none focus:border-clay-500 bg-sand-50/30 font-sans"
-                            />
-                          </div>
-
-                          <div className="sm:col-span-2 pt-2">
-                            <button
-                              type="submit"
-                              className="bg-clay-650 hover:bg-clay-600 text-white px-5 py-2.5 rounded-xl text-xs font-semibold uppercase tracking-wider cursor-pointer transition-colors"
-                            >
-                              Publish to Perfect Fit Shop (15% Referral Fee)
-                            </button>
-                          </div>
-                        </form>
-                      </div>
-
-                      {/* Displayed patterns list */}
                       <div className="space-y-3">
-                        <h6 className="text-xs font-bold text-bark-900 uppercase tracking-wider">{pfUiT("ui.components.membermanagement.9261ff6b6c")}</h6>
+                        <div>
+                          <h6 className="text-xs font-bold text-bark-900 uppercase tracking-wider">{pfUiT('ui.member.displayedProducts.title')}</h6>
+                          <p className="mt-1 text-[10px] text-bark-500">{pfUiT('ui.member.displayedProducts.description')}</p>
+                        </div>
                         <div className="space-y-3" id="active-patterns-catalog">
-                          {currentUser.patterns?.map((pat) => (
+                          {patterns.length === 0 && (
+                            <div className="rounded-[4px] border border-dashed border-sand-250 bg-sand-50/30 p-8 text-center text-xs text-bark-450">
+                              {pfUiT('ui.member.displayedProducts.empty')}
+                            </div>
+                          )}
+                          {patterns.map((pat) => (
                             <div
                               key={pat.id}
-                              className={`p-4 rounded-[4px] border transition-all flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 ${
-                                pat.isListed ? 'bg-white border-sand-200' : 'bg-sand-100/50 border-sand-150 opacity-70'
-                              }`}
+                              className="p-4 rounded-[4px] border border-sand-200 bg-white transition-all flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
                             >
                               <div className="space-y-1">
                                 <div className="flex items-center gap-2">
                                   <strong className="text-xs font-bold text-bark-900 block">{pat.name}</strong>
-                                  <span className={`text-[9px] font-mono px-2 py-0.5 rounded-full ${
-                                    pat.isListed ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-sand-200 text-bark-500'
-                                  }`}>
-                                    {pat.isListed ? 'Listed/Active' : 'Retracted/Draft'}
-                                  </span>
+                                  <span className="text-[9px] font-mono px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">{pfUiT('ui.member.displayedProducts.status')}</span>
                                 </div>
                                 <p className="text-[10px] text-bark-500 font-mono">
-                                  PDF: ${pat.pricePDF.toFixed(2)} | Printed: ${pat.pricePrinted.toFixed(2)} | <b>{pat.salesCount} purchases registered</b>
+                                  {pat.variantCode || pat.workspaceVariantCode || 'Workspace publication'}
                                 </p>
                               </div>
-
-                              <div className="flex items-center gap-2">
-                                <button
-                                  onClick={() => toggleListingActive(pat.id)}
-                                  className={`text-[10px] font-semibold px-2.5 py-1.5 rounded-lg border transition-colors cursor-pointer ${
-                                    pat.isListed
-                                      ? 'bg-sand-50 hover:bg-sand-100 text-bark-750 border-sand-200'
-                                      : 'bg-bark-900 hover:bg-bark-850 text-sand-50 border-bark-900'
-                                  }`}
-                                >
-                                  {pat.isListed ? 'Deactivate' : 'Activate Sale'}
-                                </button>
-
-                                <button
-                                  onClick={() => deleteListing(pat.id)}
-                                  className="p-1.5 text-bark-400 hover:text-clay-650 hover:bg-clay-50 rounded-lg transition-colors cursor-pointer border border-transparent hover:border-clay-100"
-                                  title={pfUiT("ui.components.membermanagement.94480c0437")}
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
+                              <button
+                                type="button"
+                                onClick={() => onUndisplayProduct?.(pat)}
+                                className="text-[10px] font-semibold px-3 py-1.5 rounded-lg border bg-sand-50 hover:bg-sand-100 text-bark-750 border-sand-200 transition-colors cursor-pointer"
+                              >{pfUiT('ui.member.displayedProducts.undisplay')}</button>
                             </div>
                           ))}
                         </div>
@@ -1045,13 +889,6 @@ export default function MemberManagement({
                           </div>
                         )}
                       </div>
-                    </div>
-                  )}
-
-                  {/* TAB: ERP CONTENT SYNC DASHBOARD */}
-                  {dashboardTab === 'erp-sync' && currentUser.role === 'collaborator' && (
-                    <div className="space-y-6" id="tab-erp-sync-content">
-                      <ErpSyncDashboard patterns={patterns} />
                     </div>
                   )}
 

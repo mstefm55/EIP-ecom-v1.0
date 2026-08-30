@@ -77,7 +77,8 @@ const demoSeeds = {
   collaboratorSecrets: {},
   analyticsLogs: [],
   printingGuides: PRINTING_GUIDE_SEED,
-  industrialTechPacks: INDUSTRIAL_TECH_PACK_SEED
+  industrialTechPacks: INDUSTRIAL_TECH_PACK_SEED,
+  commercialPromotions: []
 };
 
 const browserStorage = () => (typeof window !== 'undefined' ? window.localStorage : null);
