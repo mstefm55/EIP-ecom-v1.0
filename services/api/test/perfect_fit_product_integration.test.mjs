@@ -9,10 +9,22 @@ import {
 } from '../src/lib/perfectFitProductIntegration.js';
 
 const ecomRouteSource = readFileSync(new URL('../src/routes/ecom.js', import.meta.url), 'utf8');
+const migrationSource = readFileSync(
+  new URL('../db/migrations/0137_perfect_fit_product_integration.sql', import.meta.url),
+  'utf8'
+);
 const dashboardSource = readFileSync(
   new URL('../../../apps/dashboard/src/components/ecom/EcomProductWorkspace.jsx', import.meta.url),
   'utf8'
 );
+
+test('Perfect Fit integration migration contains valid JSON metadata literals', () => {
+  const jsonLiterals = [...migrationSource.matchAll(/'([^']+)'::jsonb/g)].map((match) => match[1]);
+  assert.ok(jsonLiterals.length > 0);
+  for (const literal of jsonLiterals) {
+    assert.doesNotThrow(() => JSON.parse(literal));
+  }
+});
 
 test('Perfect Fit product linkage requires stable external product and variant IDs', () => {
   assert.equal(normalizePerfectFitIdentity({ pf_product_id: 'pf-1' }).ok, false);

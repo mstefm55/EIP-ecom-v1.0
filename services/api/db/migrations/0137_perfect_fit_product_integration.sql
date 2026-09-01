@@ -18,7 +18,7 @@ SET label = EXCLUDED.label, sort_order = EXCLUDED.sort_order, is_active = true, 
 WITH shared_list AS (
   INSERT INTO eip_core.dropdown_list (tenant_id, module, code, name, version, is_active, attrs)
   VALUES (NULL, 'ecom', 'PERFECT_FIT_SHARED_FIELD', 'Perfect Fit shared product field', 1, true,
-          '{"integration":"perfect_fit","keys_are_codes_not_labels"}'::jsonb)
+          '{"integration":"perfect_fit","keys_are_codes_not_labels":true}'::jsonb)
   ON CONFLICT (tenant_id, module, code, version) DO UPDATE SET is_active = true
   RETURNING id
 )
