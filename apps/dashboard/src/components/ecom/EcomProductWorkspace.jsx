@@ -36,6 +36,7 @@ import {
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
 const ECOM_PREVIEW_BASE_URL = import.meta.env.VITE_ECOM_PREVIEW_BASE_URL || "http://localhost:5174";
+const PERFECT_FIT_BASE_URL = import.meta.env.VITE_PERFECT_FIT_BASE_URL || "https://perfectfitbureau.com/workspace";
 const ASSET_BASE =
   typeof window !== "undefined"
     ? new URL(API_BASE_URL, window.location.origin).origin
@@ -1552,6 +1553,8 @@ export default function EcomProductWorkspace({ node }) {
   const [importing, setImporting] = useState(false);
   const [importNotice, setImportNotice] = useState({ tone: "", message: "" });
   const [draft, setDraft] = useState(defaultDraft());
+  const [perfectFitIntegration, setPerfectFitIntegration] = useState({ loading: false, link: null, error: "" });
+  const [perfectFitCapability, setPerfectFitCapability] = useState({ checked: false, available: false });
   const [detailLoading, setDetailLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
   const [statusTone, setStatusTone] = useState("success");
@@ -4396,6 +4399,108 @@ export default function EcomProductWorkspace({ node }) {
     } catch (err) {
       setStatusTone("error");
       setStatusMessage(formatApiError(err, `Action ${action} failed.`));
+    }
+  };
+
+  const loadPerfectFitIntegration = async (productId = draft?.id) => {
+    if (!productId) {
+      setPerfectFitIntegration({ loading: false, link: null, error: "" });
+      return;
+    }
+    setPerfectFitIntegration((current) => ({ ...current, loading: true, error: "" }));
+    try {
+      const data = await apiFetch(`/api/eip/ecom/products/${productId}/perfect-fit`);
+      setPerfectFitIntegration({ loading: false, link: data?.link || null, error: "" });
+    } catch (err) {
+      setPerfectFitIntegration({ loading: false, link: null, error: formatApiError(err, "Integration status unavailable.") });
+    }
+  };
+
+  useEffect(() => {
+    loadPerfectFitIntegration(draft?.id);
+    // The selected stable EIP product id is the integration status boundary.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft?.id]);
+
+  useEffect(() => {
+    let active = true;
+    apiFetch('/api/eip/ecom/perfect-fit/capability')
+      .then((data) => {
+        if (active) setPerfectFitCapability({ checked: true, ...(data?.capability || {}) });
+      })
+      .catch(() => {
+        if (active) setPerfectFitCapability({ checked: true, available: false });
+      });
+    return () => { active = false; };
+  }, []);
+
+  const openPerfectFitIntent = (intent) => {
+    if (!draft?.id || typeof window === "undefined") return;
+    const url = new URL(PERFECT_FIT_BASE_URL, window.location.origin);
+    url.searchParams.set("eip_intent", intent);
+    url.searchParams.set("eip_product_id", draft.id);
+    window.open(url.toString(), "_blank", "noopener,noreferrer");
+  };
+
+  const handlePerfectFitAction = async (event) => {
+    const action = event.target.value;
+    event.target.value = "";
+    if (!action || !draft?.id) return;
+    if (action === "CREATE") return openPerfectFitIntent("create-workspace");
+    if (action === "LINK") return openPerfectFitIntent("link-existing");
+    if (action === "OPEN") {
+      const target = perfectFitIntegration.link?.perfect_fit?.workspace_url;
+      if (target && typeof window !== "undefined") window.open(target, "_blank", "noopener,noreferrer");
+      else openPerfectFitIntent("open-linked");
+      return;
+    }
+    if (action === "STATUS") {
+      const pf = perfectFitIntegration.link?.perfect_fit;
+      setStatusTone("success");
+      setStatusMessage(
+        pf
+          ? `Perfect Fit linked: ${pf.project_code || pf.project_id || "project"} / ${pf.style_code || pf.style_id || "style"} / ${pf.variant_code || pf.variant_id}.`
+          : "No Perfect Fit product is linked."
+      );
+      return;
+    }
+    if (action === "SYNC") {
+      try {
+        const result = await apiFetch(`/api/eip/ecom/products/${draft.id}/perfect-fit/sync`, {
+          method: "POST",
+          body: { source: "EIP" }
+        });
+        setStatusTone(result?.conflicts?.length ? "error" : "success");
+        setStatusMessage(
+          result?.conflicts?.length
+            ? `Shared metadata needs review: ${result.conflicts.map((item) => item.field).join(", ")}.`
+            : "Shared metadata synchronized without replacing Perfect Fit technical data."
+        );
+        await loadPerfectFitIntegration(draft.id);
+      } catch (err) {
+        setStatusTone("error");
+        setStatusMessage(formatApiError(err, "Perfect Fit sync failed."));
+      }
+      return;
+    }
+    if (action === "UNLINK") {
+      const confirmed = await requestConfirm({
+        title: "Unlink Perfect Fit product",
+        message: "This removes only the integration relationship. Neither product nor its history will be deleted.",
+        confirmLabel: "Unlink",
+        cancelLabel: "Cancel",
+        confirmTone: "danger"
+      });
+      if (!confirmed) return;
+      try {
+        await apiFetch(`/api/eip/ecom/products/${draft.id}/perfect-fit/link`, { method: "DELETE" });
+        setStatusTone("success");
+        setStatusMessage("Perfect Fit relationship removed. Both products remain intact.");
+        await loadPerfectFitIntegration(draft.id);
+      } catch (err) {
+        setStatusTone("error");
+        setStatusMessage(formatApiError(err, "Perfect Fit unlink failed."));
+      }
     }
   };
 
@@ -7580,6 +7685,33 @@ export default function EcomProductWorkspace({ node }) {
                 <FileText className="h-4 w-4" />
                 Trade conditions
               </button>
+              {perfectFitCapability.available ? <label className="relative inline-flex items-center">
+                <span className="sr-only">Perfect Fit integration actions</span>
+                <select
+                  defaultValue=""
+                  onChange={handlePerfectFitAction}
+                  disabled={!draft?.id || perfectFitIntegration.loading}
+                  className="h-8 rounded-full border border-ink-100/70 bg-white/70 px-3 text-[0.65rem] font-semibold uppercase tracking-[0.16em] text-ink-600 disabled:opacity-50"
+                  aria-label="Perfect Fit integration actions"
+                >
+                  <option value="" disabled>
+                    {perfectFitIntegration.loading ? "Perfect Fit…" : "Perfect Fit"}
+                  </option>
+                  {perfectFitIntegration.link ? (
+                    <>
+                      <option value="OPEN">Open Perfect Fit Workspace</option>
+                      {perfectFitCapability.can_sync ? <option value="SYNC">Sync Shared Metadata</option> : null}
+                      <option value="STATUS">View Integration Status</option>
+                      {perfectFitCapability.can_unlink ? <option value="UNLINK">Unlink</option> : null}
+                    </>
+                  ) : (
+                    <>
+                      {perfectFitCapability.can_link ? <option value="CREATE">Create Perfect Fit Workspace</option> : null}
+                      {perfectFitCapability.can_link ? <option value="LINK">Link Existing Perfect Fit Product</option> : null}
+                    </>
+                  )}
+                </select>
+              </label> : null}
               <button
                 type="button"
                 onClick={() => runAction("DRAFT_READY", "Review")}

@@ -12,7 +12,8 @@
     "audit:i18n": "node scripts/audit-hardcoded-ui.mjs",
     "audit:metadata-ui": "node scripts/audit-metadata-ui.mjs",
     "audit:runtime-data": "node scripts/audit-runtime-data.mjs",
-    "test:runtime-repository": "node scripts/verify-runtime-repository-readiness.mjs"
+    "test:runtime-repository": "node scripts/verify-runtime-repository-readiness.mjs",
+    "test:product-integration": "node --test scripts/test-product-integration.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

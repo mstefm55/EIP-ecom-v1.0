@@ -43,6 +43,7 @@ import {
 import { perfectFitMetadata } from '../config/perfectFitMetadata';
 import WorkspaceApprovalCenter from './workspace/WorkspaceApprovalCenter';
 import WorkspaceMessagingWidget from './workspace/WorkspaceMessagingWidget';
+import ProductIntegrationMenu from './ProductIntegrationMenu';
 import { loadMediaFile } from './workspace/WorkspaceMedia';
 import TechPackWorkspace from './workspace/TechPackWorkspace';
 import { ProjectJournalModule as ProjectJournalModuleView } from './workspace/ProjectJournal';
@@ -73,6 +74,10 @@ import {
   generateStyleReference,
   generateVariantReference
 } from '../lib/workspaceReferences';
+import {
+  applyEipSharedPatch,
+  buildEipStarterInput
+} from '../lib/productIntegrationService';
 
 const ICON_REGISTRY = {
   project: Folder,
@@ -7847,6 +7852,69 @@ export default function Workspace({
     );
   };
 
+  const commitIntegrationData = (transform) => {
+    setWorkspaceData((current) => {
+      const nextData = transform(current);
+      persistWorkspaceData(nextData);
+      savedBaselineRef.current = cloneValue(nextData);
+      return nextData;
+    });
+    setIsDirty(false);
+    setSaveState('saved');
+  };
+
+  const handleIntegrationChange = (link, targetVariantId = variantContext?.id) => {
+    if (!targetVariantId) return;
+    commitIntegrationData((current) =>
+      applyEipSharedPatch(current, {
+        variantId: targetVariantId,
+        link: link
+          ? { ...link, status: 'LINKED' }
+          : {
+              eip_product_id: null,
+              link_id: null,
+              status: 'NOT_CONNECTED',
+              shared_snapshot: { updated_at: getNowIso() }
+            }
+      })
+    );
+  };
+
+  const handleApplyIntegrationPatch = (patch, link) => {
+    if (!styleContext?.id || !variantContext?.id) return;
+    commitIntegrationData((current) =>
+      applyEipSharedPatch(current, {
+        styleId: styleContext.id,
+        variantId: variantContext.id,
+        patch,
+        link: { ...link, eip_product_id: variantContext?.integration?.eip?.productId }
+      })
+    );
+  };
+
+  const handleCreateWorkspaceFromEip = (product, eipProductId) => {
+    const starter = buildEipStarterInput(product);
+    const projectNode = createProjectNode(starter.project, workspaceActor);
+    const styleNode = createStyleNode(projectNode, starter.style);
+    const variantNode = createVariantNode(styleNode, starter.variant);
+    const linkedVariant = {
+      ...variantNode,
+      integration: {
+        ...(variantNode.integration || {}),
+        eip: { productId: eipProductId, status: 'PENDING_LINK' }
+      }
+    };
+    const linkedStyle = { ...styleNode, children: [linkedVariant] };
+    const linkedProject = { ...projectNode, children: [linkedStyle] };
+    commitIntegrationData((current) => ({
+      ...current,
+      projects: [...(current.projects || []), linkedProject]
+    }));
+    setSelectedNodeId(linkedVariant.id);
+    setExpandedNodes((current) => new Set([...current, linkedProject.id, linkedStyle.id, linkedVariant.id]));
+    return { project: linkedProject, style: linkedStyle, variant: linkedVariant };
+  };
+
   const openCreateProject = () => {
     setOpenMenuNodeId(null);
     setEntityModal({
@@ -8655,6 +8723,17 @@ export default function Workspace({
                       )}
                     </div>
                     </div>
+
+                    {variantContext && (
+                      <ProductIntegrationMenu
+                        project={projectContext}
+                        style={styleContext}
+                        variant={variantContext}
+                        onApplySharedPatch={handleApplyIntegrationPatch}
+                        onCreateFromEip={handleCreateWorkspaceFromEip}
+                        onIntegrationChange={handleIntegrationChange}
+                      />
+                    )}
 
                     {variantContext && (
                       <div className="ml-auto flex shrink-0 items-center gap-1 xl:hidden">

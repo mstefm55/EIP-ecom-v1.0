@@ -10091,7 +10091,15 @@ const localePacks = {
     ...generatedEnglish,
     ...autoEnglish,
     ...(workspaceMetadata?.localePacks?.en || {}),
-    ...(findMySizeMetadata?.localePacks?.en || {})
+    ...(findMySizeMetadata?.localePacks?.en || {}),
+    'integration.eip.title': 'Enterprise product link',
+    'integration.eip.open': 'Open EIP Product',
+    'integration.eip.sync': 'Sync Shared Metadata',
+    'integration.eip.unlink': 'Unlink',
+    'integration.eip.createPf': 'Create Perfect Fit Workspace',
+    'integration.eip.register': 'Register Product in EIP',
+    'integration.eip.selectExisting': 'Select existing EIP product…',
+    'integration.eip.linkExisting': 'Link Existing EIP Product'
   }
 };
 
