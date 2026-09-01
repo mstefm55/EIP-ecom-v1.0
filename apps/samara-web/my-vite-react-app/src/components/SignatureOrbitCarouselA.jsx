@@ -182,6 +182,8 @@ export default function SignatureOrbitCarouselA({
   subtitle = 'Let Your Uniqueness Take Shape',
   label = 'Version A · Layered Orbit',
   showLabel = false,
+  isLoading = false,
+  onExploreCatalog,
   onQuickView,
   onFocusPattern
 }) {
@@ -195,7 +197,48 @@ export default function SignatureOrbitCarouselA({
 
   const total = safePatterns.length;
 
-  if (!total) return null;
+  if (!total) {
+    return (
+      <section
+        className="relative overflow-hidden bg-[#FAF8F5] px-4 py-16 sm:px-6 lg:px-8"
+        id="signature-orbit-carousel-a"
+        aria-label={title}
+      >
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_42%,rgba(194,107,74,0.055)_0%,rgba(250,248,245,0)_42%)]" />
+        <div className="relative z-10 mx-auto w-full max-w-7xl text-center">
+          <h2 className="font-serif text-[38px] font-light leading-[0.98] tracking-tight text-bark-950 sm:text-5xl lg:text-6xl">{pfUiT("ui.components.signatureorbitcarousela.6b5d85351e")}<span className="italic text-clay-700">{pfUiT("ui.components.signatureorbitcarousela.c64b027470")}</span>{pfUiT("ui.components.signatureorbitcarousela.0ee5bb573d")}</h2>
+          <p className="mt-4 font-serif text-[21px] italic leading-relaxed text-bark-600 sm:text-2xl">{subtitle}</p>
+
+          <div
+            className="mx-auto mt-10 max-w-3xl rounded-[24px] border border-sand-200 bg-white/80 px-6 py-12 shadow-[0_24px_70px_rgba(45,30,21,0.08)] backdrop-blur-sm"
+            id="signature-orbit-empty-state"
+          >
+            <div className={`mx-auto h-20 w-20 rounded-full border border-clay-200 bg-clay-50 ${isLoading ? 'animate-pulse' : ''}`} />
+            <h3 className="mt-6 font-serif text-2xl text-bark-950">
+              {pfUiT(isLoading
+                ? 'ui.components.signatureorbitcarousela.runtime.loading'
+                : 'ui.components.signatureorbitcarousela.runtime.empty')}
+            </h3>
+            <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-bark-500">
+              {pfUiT(isLoading
+                ? 'ui.components.signatureorbitcarousela.runtime.loadingHelp'
+                : 'ui.components.signatureorbitcarousela.runtime.emptyHelp')}
+            </p>
+            {!isLoading && onExploreCatalog ? (
+              <button
+                type="button"
+                onClick={onExploreCatalog}
+                className="mt-7 inline-flex items-center gap-2 rounded-full bg-bark-950 px-6 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-white transition-colors hover:bg-clay-700"
+              >
+                {pfUiT('ui.components.signatureorbitcarousela.runtime.explore')}
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            ) : null}
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   const focusIndex = (index) => {
     const nextIndex = mod(index, total);

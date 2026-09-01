@@ -536,6 +536,8 @@ SignatureOrbitCarouselA: (section) => (
     title={section.title || "Our Signature Collections"}
     subtitle={section.subtitle || "Let Your Uniqueness Take Shape"}
     showLabel={section.showLabel || false}
+    isLoading={patternsRepositoryState.loading}
+    onExploreCatalog={() => goToView("patterns")}
     onQuickView={setQuickViewPattern}
     onFocusPattern={(pattern) => {
       setActivePatternId(pattern.id);
