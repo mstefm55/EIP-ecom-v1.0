@@ -71,6 +71,7 @@ VITE_ENABLE_CHECKOUT_VARIANT=false
 
 ```text
 VITE_EIP_API_BASE_URL=http://localhost:4000
+VITE_EIP_SUFFIX=<local-connection-suffix>
 VITE_EIP_SUFFIX=samara
 ```
 
@@ -84,6 +85,8 @@ https://www.perfectfitbureau.com
 ```
 
 The API must allow the deployed origin in the public commerce connection/CORS configuration. If the API remains on Railway, keep `VITE_EIP_ENDPOINT` pointed at the Railway API until an API subdomain is available.
+
+For product linking, also enable `public_storefront.perfect_fit_enabled` and the `perfect_fit.products.read` / `perfect_fit.products.write` scopes on that connection. See [PERFECT_FIT_PUBLIC_GATEWAY_BOUNDARY.md](./PERFECT_FIT_PUBLIC_GATEWAY_BOUNDARY.md) for the complete member-auth and security contract.
 
 ## What was assimilated
 

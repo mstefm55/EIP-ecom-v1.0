@@ -7037,6 +7037,7 @@ const baseEnglish = {
   'nav.cartWithCount': 'Cart ({count})',
   'nav.toggleMenu': 'Toggle Menu',
   'auth.signIn': 'Sign In',
+  'auth.checkEmail': 'Check your email to complete secure member sign-in.',
   'auth.username.required': 'Username is required',
   'auth.username.format': 'Use 3-30 letters, numbers, . or _',
   'auth.username.reserved': 'This username is reserved',

@@ -275,13 +275,16 @@ function buildProfile(id, overrides = {}) {
       scan_allowed: true,
       loader_enabled: false,
       public_api_enabled: true,
+      perfect_fit_enabled: false,
       google_pay_enabled: false,
       apple_pay_domain_status: "",
       allowed_scan_modes: ["auto", "rendered", "generic", "tagged"],
       scopes: [
         "storefront.mapping.read",
         "storefront.content.read",
-        "storefront.catalog.read"
+        "storefront.catalog.read",
+        "perfect_fit.products.read",
+        "perfect_fit.products.write"
       ]
     },
     audit: {
@@ -412,6 +415,7 @@ function fromApiProfile(profile) {
       scan_allowed: profile.public_storefront?.scan_allowed !== false,
       loader_enabled: profile.public_storefront?.loader_enabled === true,
       public_api_enabled: profile.public_storefront?.public_api_enabled !== false,
+      perfect_fit_enabled: profile.public_storefront?.perfect_fit_enabled === true,
       google_pay_enabled: profile.public_storefront?.google_pay_enabled === true,
       apple_pay_domain_status:
         profile.public_storefront?.apple_pay_domain_status ||
@@ -422,7 +426,7 @@ function fromApiProfile(profile) {
         : ["auto", "rendered", "generic", "tagged"],
       scopes: Array.isArray(profile.public_storefront?.scopes)
         ? profile.public_storefront.scopes
-        : ["storefront.mapping.read", "storefront.content.read", "storefront.catalog.read"]
+        : ["storefront.mapping.read", "storefront.content.read", "storefront.catalog.read", "perfect_fit.products.read", "perfect_fit.products.write"]
     },
     audit: {
       audit_record_type: profile.audit?.audit_record_type || "GATEWAY_AUDIT",
@@ -850,6 +854,7 @@ export default function AdminConnectionsPanelSafe() {
         scan_allowed: false,
         loader_enabled: false,
         public_api_enabled: false,
+        perfect_fit_enabled: false,
         google_pay_enabled: selectedConnection.public_storefront?.google_pay_enabled === true,
         apple_pay_domain_status:
           selectedConnection.public_storefront?.apple_pay_domain_status ||
@@ -1454,6 +1459,7 @@ export default function AdminConnectionsPanelSafe() {
                     <label className="flex items-center gap-2 text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink-400"><input type="checkbox" checked={selectedConnection.public_storefront.scan_allowed} onChange={(e) => updateSection("public_storefront", { scan_allowed: e.target.checked })} />Scanner enabled</label>
                     <label className="flex items-center gap-2 text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink-400"><input type="checkbox" checked={selectedConnection.public_storefront.loader_enabled} onChange={(e) => updateSection("public_storefront", { loader_enabled: e.target.checked })} />Loader script enabled</label>
                     <label className="flex items-center gap-2 text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink-400"><input type="checkbox" checked={selectedConnection.public_storefront.public_api_enabled} onChange={(e) => updateSection("public_storefront", { public_api_enabled: e.target.checked })} />Public API enabled</label>
+                    <label className="flex items-center gap-2 text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-ink-400"><input type="checkbox" checked={selectedConnection.public_storefront.perfect_fit_enabled === true} onChange={(e) => updateSection("public_storefront", { perfect_fit_enabled: e.target.checked })} />Perfect Fit member integration</label>
                   </Grid>
                   <Field label="Allowed scan modes" error={selectedFieldError("public_storefront.allowed_scan_modes")}>
                     <div className="flex flex-wrap gap-2 rounded-lg border border-ink-200/70 bg-white px-3 py-2">
@@ -1467,7 +1473,7 @@ export default function AdminConnectionsPanelSafe() {
                   </Field>
                   <Field label="Public storefront scopes" error={selectedFieldError("public_storefront.scopes")}>
                     <div className="flex flex-wrap gap-2 rounded-lg border border-ink-200/70 bg-white px-3 py-2">
-                      {["storefront.mapping.read", "storefront.content.read", "storefront.catalog.read"].map((scope) => (
+                      {["storefront.mapping.read", "storefront.content.read", "storefront.catalog.read", "perfect_fit.products.read", "perfect_fit.products.write"].map((scope) => (
                         <label key={scope} className="flex items-center gap-1.5 text-[0.62rem] normal-case tracking-normal text-ink-600">
                           <input type="checkbox" checked={selectedConnection.public_storefront.scopes.includes(scope)} onChange={(event) => updateSection("public_storefront", { scopes: event.target.checked ? [...new Set([...selectedConnection.public_storefront.scopes, scope])] : selectedConnection.public_storefront.scopes.filter((item) => item !== scope) })} />
                           {scope}

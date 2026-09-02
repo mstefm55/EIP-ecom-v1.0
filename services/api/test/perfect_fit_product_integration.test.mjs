@@ -9,6 +9,8 @@ import {
 } from '../src/lib/perfectFitProductIntegration.js';
 
 const ecomRouteSource = readFileSync(new URL('../src/routes/ecom.js', import.meta.url), 'utf8');
+const publicCommerceRouteSource = readFileSync(new URL('../src/routes/public_commerce.js', import.meta.url), 'utf8');
+const productGatewaySource = readFileSync(new URL('../src/services/perfectFit/productGateway.js', import.meta.url), 'utf8');
 const migrationSource = readFileSync(
   new URL('../db/migrations/0137_perfect_fit_product_integration.sql', import.meta.url),
   'utf8'
@@ -78,15 +80,22 @@ test('PF to EIP register, existing-link, sync, and capability routes remain expo
   ]) {
     assert.match(ecomRouteSource, new RegExp(route.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
-  assert.match(ecomRouteSource, /PERFECT_FIT_PRODUCT/);
-  assert.match(ecomRouteSource, /INSERT INTO eip_core\.material/);
-  assert.match(ecomRouteSource, /INSERT INTO eip_core\.object_link/);
+  for (const route of [
+    '/commerce/:suffix/perfect-fit/capability',
+    '/commerce/:suffix/perfect-fit/products/register',
+    '/commerce/:suffix/perfect-fit/products/:id/link',
+    '/commerce/:suffix/perfect-fit/products/:id/sync'
+  ]) {
+    assert.match(publicCommerceRouteSource, new RegExp(route.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+  assert.match(productGatewaySource, /PERFECT_FIT_PRODUCT/);
+  assert.match(productGatewaySource, /INSERT INTO eip_core\.material/);
+  assert.match(productGatewaySource, /INSERT INTO eip_core\.object_link/);
 });
 
 test('unlink is soft and preserves both Perfect Fit and EIP product records', () => {
-  const unlinkStart = ecomRouteSource.indexOf('"/products/:id/perfect-fit/link"', ecomRouteSource.indexOf('"/products/:id/perfect-fit/link"') + 1);
-  const unlinkSection = ecomRouteSource.slice(unlinkStart, unlinkStart + 1800);
-  assert.match(ecomRouteSource.slice(Math.max(0, unlinkStart - 20), unlinkStart), /app\.delete\s*\(/);
+  const unlinkStart = productGatewaySource.indexOf('export async function unlinkPerfectFitProduct');
+  const unlinkSection = productGatewaySource.slice(unlinkStart, unlinkStart + 1600);
   assert.match(unlinkSection, /UPDATE eip_core\.object_link SET is_active=false/);
   assert.match(unlinkSection, /records_deleted:\s*false/);
   assert.doesNotMatch(unlinkSection, /DELETE FROM eip_core\.(?:material|info_record)/);

@@ -27,7 +27,9 @@ const STOREFRONT_SCAN_MODES = ["auto", "rendered", "generic", "tagged"];
 const PUBLIC_STOREFRONT_SCOPES = [
   "storefront.mapping.read",
   "storefront.content.read",
-  "storefront.catalog.read"
+  "storefront.catalog.read",
+  "perfect_fit.products.read",
+  "perfect_fit.products.write"
 ];
 const PAYMENT_CONNECTION_TYPES = {
   PAYPAL: {
@@ -409,6 +411,7 @@ function normalizeProfile(raw = {}, fallbackId) {
       scan_allowed: normalizeBool(publicStorefront.scan_allowed, storefrontDefault),
       loader_enabled: normalizeBool(publicStorefront.loader_enabled, false),
       public_api_enabled: normalizeBool(publicStorefront.public_api_enabled, storefrontDefault),
+      perfect_fit_enabled: normalizeBool(publicStorefront.perfect_fit_enabled, false),
       google_pay_enabled: normalizeBool(publicStorefront.google_pay_enabled, false),
       apple_pay_domain_status: normalizeText(
         publicStorefront.apple_pay_domain_status ||
@@ -736,6 +739,7 @@ function connectionAllowsStorefrontCapability(profile, capability) {
   if (capability === "scan") return settings.scan_allowed !== false;
   if (capability === "loader") return settings.loader_enabled === true;
   if (capability === "public_api") return settings.public_api_enabled !== false;
+  if (capability === "perfect_fit") return settings.perfect_fit_enabled === true;
   return false;
 }
 
