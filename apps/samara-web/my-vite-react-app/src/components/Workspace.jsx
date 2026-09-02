@@ -1804,44 +1804,51 @@ function TreeNode({
           <MoreHorizontal className="h-4 w-4" />
         </button>
 
-        {openMenuNodeId === node.id && (
-          <div className="absolute right-0 top-9 z-30 w-44 rounded-[10px] border border-[#E5E2DA] bg-[#FCFBF8] p-1.5 text-[12px] text-[#272622] shadow-[0_14px_34px_rgba(39,38,34,0.12)]">
-            {node.nodeType === 'project' && (
-              <button
-                type="button"
-                onClick={() => onAction('create-style', node)}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-[#EFEEE8]"
-              >
-                <Plus className="h-3.5 w-3.5" />{pfUiT("ui.components.workspace.792d5ca643")}</button>
-            )}
+      </div>
 
-            {node.nodeType === 'product' && (
-              <button
-                type="button"
-                onClick={() => onAction('create-variant', node)}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-[#EFEEE8]"
-              >
-                <Plus className="h-3.5 w-3.5" />{pfUiT("ui.components.workspace.fccc50fffa")}</button>
-            )}
-
+      {openMenuNodeId === node.id && (
+        <div
+          className="relative z-30 mt-1 rounded-[10px] border border-[#E5E2DA] bg-[#FCFBF8] p-1.5 text-[12px] text-[#272622] shadow-[0_14px_34px_rgba(39,38,34,0.12)]"
+          style={{
+            marginLeft: `${depth * 12 + 28}px`
+          }}
+          data-testid="workspace-tree-action-menu"
+        >
+          {node.nodeType === 'project' && (
             <button
               type="button"
-              onClick={() => onAction('edit', node)}
+              onClick={() => onAction('create-style', node)}
               className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-[#EFEEE8]"
             >
-              <Pencil className="h-3.5 w-3.5" /> Edit {t(typeMetadata?.labelKey)}
-            </button>
+              <Plus className="h-3.5 w-3.5" />{pfUiT("ui.components.workspace.792d5ca643")}</button>
+          )}
 
+          {node.nodeType === 'product' && (
             <button
               type="button"
-              onClick={() => onAction('delete', node)}
-              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[#9A3D2F] hover:bg-[#F6EDEA]"
+              onClick={() => onAction('create-variant', node)}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-[#EFEEE8]"
             >
-              <Trash2 className="h-3.5 w-3.5" /> Delete {t(typeMetadata?.labelKey)}
-            </button>
-          </div>
-        )}
-      </div>
+              <Plus className="h-3.5 w-3.5" />{pfUiT("ui.components.workspace.fccc50fffa")}</button>
+          )}
+
+          <button
+            type="button"
+            onClick={() => onAction('edit', node)}
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-[#EFEEE8]"
+          >
+            <Pencil className="h-3.5 w-3.5" /> Edit {t(typeMetadata?.labelKey)}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onAction('delete', node)}
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[#9A3D2F] hover:bg-[#F6EDEA]"
+          >
+            <Trash2 className="h-3.5 w-3.5" /> Delete {t(typeMetadata?.labelKey)}
+          </button>
+        </div>
+      )}
 
       {hasChildren &&
         isExpanded && (
