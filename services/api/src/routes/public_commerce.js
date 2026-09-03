@@ -49,6 +49,16 @@ import {
   paymentLifecycleState,
   transitionPaymentLifecycle
 } from "../services/payments/paymentLifecycle.js";
+import {
+  PERFECT_FIT_SHARED_FIELD_POLICIES,
+  getPerfectFitIntegration,
+  getPerfectFitProduct,
+  linkPerfectFitProduct,
+  listPerfectFitProducts,
+  registerPerfectFitProduct,
+  syncPerfectFitProduct,
+  unlinkPerfectFitProduct
+} from "../services/perfectFit/productGateway.js";
 
 const RATE_LIMIT = { max: 120, timeWindow: "1 minute" };
 const MAX_BODY = 512 * 1024;
@@ -3116,7 +3126,8 @@ export default async function publicCommerceRoutes(app) {
           return reply.send({
             ok: true,
             authenticated: true,
-            member: profile
+            member: profile,
+            csrf_token: csrf
           });
         }
 
@@ -3334,7 +3345,7 @@ export default async function publicCommerceRoutes(app) {
         expires: expiresAt
       });
 
-      return reply.send({ ok: true, member: profile });
+      return reply.send({ ok: true, member: profile, csrf_token: csrf });
     }
   );
 
@@ -3357,7 +3368,19 @@ export default async function publicCommerceRoutes(app) {
         return reply.send({ ok: true, authenticated: false, member: null });
       }
 
-      return reply.send({ ok: true, authenticated: true, member: profile });
+      const csrfToken = normalizeText(req.cookies?.member_csrf);
+      const expectedHash = csrfToken ? sha256Hex(`${csrfToken}:${app.config.CSRF_PEPPER}`) : "";
+      const csrfValid = Boolean(
+        csrfToken &&
+        session.csrf_secret_hash &&
+        timingSafeEqual(expectedHash, session.csrf_secret_hash)
+      );
+      return reply.send({
+        ok: true,
+        authenticated: true,
+        member: profile,
+        csrf_token: csrfValid ? csrfToken : null
+      });
     }
   );
 
@@ -3958,6 +3981,223 @@ export default async function publicCommerceRoutes(app) {
       clearMemberCookies(reply);
       return reply.send({ ok: true });
     }
+  );
+
+  async function resolvePerfectFitMember(req, reply, { write = false } = {}) {
+    const access = await resolveConnection(app, req, reply, ["website_intake", "custom"]);
+    if (!access) return null;
+    const scope = write ? "perfect_fit.products.write" : "perfect_fit.products.read";
+    if (!requireStorefrontRead(access, reply, { capability: "perfect_fit", scope })) return null;
+    const member = await requireMemberSession(access, req, reply);
+    if (!member) return null;
+    if (write && !requireMemberCsrf(member, req, reply)) return null;
+    return { access, member };
+  }
+
+  async function runPerfectFitWrite(req, reply, { action, body, operation }) {
+    const authorization = await resolvePerfectFitMember(req, reply, { write: true });
+    if (!authorization) return;
+    const { access, member } = authorization;
+    let requestBody = body;
+    if (requestBody === undefined) {
+      try {
+        requestBody = parseJsonBody(req);
+      } catch {
+        return reply.code(400).send({ ok: false, error: "INVALID_JSON" });
+      }
+    }
+    if (
+      requestBody &&
+      typeof requestBody === "object" &&
+      ["tenant_id", "tenantId", "tenant_code", "tenantCode"].some((key) => Object.prototype.hasOwnProperty.call(requestBody, key))
+    ) {
+      return reply.code(400).send({ ok: false, error: "TENANT_OVERRIDE_FORBIDDEN" });
+    }
+    const idem = await beginCommerceIdempotency(req, reply, { access, body: requestBody, action });
+    if (!idem || idem.replay) return;
+
+    try {
+      const result = await operation({
+        tenantId: access.tenant.id,
+        actorIdentityId: member.session.identity_id,
+        body: requestBody
+      });
+      await finalizeIdempotency(app.db, {
+        tenantId: access.tenant.id,
+        scope: idem.scope,
+        key: idem.key,
+        response: result,
+        status: result.ok ? "ok" : "error"
+      });
+      auditSecurityEvent(app, `commerce.perfect_fit_${action}`, {
+        category: "public_commerce",
+        source: "public_commerce.perfect_fit",
+        outcome: result.ok ? "success" : "failure",
+        tenantId: access.tenant.id,
+        connectionCode: access.profile.identity?.connection_code,
+        identityId: member.session.identity_id,
+        reason: result.ok ? null : result.error,
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || null
+      });
+      return reply.code(result.status || (result.ok ? 200 : 400)).send(result);
+    } catch (error) {
+      const response = { ok: false, error: `PERFECT_FIT_${action.toUpperCase()}_FAILED` };
+      await finalizeIdempotency(app.db, {
+        tenantId: access.tenant.id,
+        scope: idem.scope,
+        key: idem.key,
+        response,
+        status: "error"
+      });
+      app.log.error({
+        event: "public_perfect_fit_operation_failed",
+        action,
+        tenant_id: access.tenant.id,
+        identity_id: member.session.identity_id,
+        error: error.message
+      });
+      return reply.code(500).send(response);
+    }
+  }
+
+  app.get(
+    "/commerce/:suffix/perfect-fit/capability",
+    { config: { rateLimit: RATE_LIMIT, cors: false } },
+    async (req, reply) => {
+      const access = await resolveConnection(app, req, reply, ["website_intake", "custom"]);
+      if (!access) return;
+      const member = await requireMemberSession(access, req, reply);
+      if (!member) return;
+      const enabled = connectionAllowsStorefrontCapability(access.profile, "perfect_fit");
+      const canRead = enabled && connectionAllowsStorefrontScope(access.profile, "perfect_fit.products.read");
+      const canWrite = enabled && connectionAllowsStorefrontScope(access.profile, "perfect_fit.products.write");
+      reply.header("Cache-Control", "no-store");
+      return reply.send({
+        ok: true,
+        capability: {
+          available: canRead,
+          can_read: canRead,
+          can_register: canWrite,
+          can_link: canWrite,
+          can_sync: canWrite,
+          can_unlink: canWrite,
+          member: {
+            identity_id: member.profile.identity_id,
+            member_code: member.profile.member_code,
+            display_name: member.profile.display_name,
+            username: member.profile.username
+          },
+          connection: {
+            code: access.profile.identity?.connection_code,
+            suffix: normalizeText(req.params?.suffix)
+          },
+          shared_field_policies: PERFECT_FIT_SHARED_FIELD_POLICIES
+        }
+      });
+    }
+  );
+
+  app.get(
+    "/commerce/:suffix/perfect-fit/products",
+    { config: { rateLimit: RATE_LIMIT, cors: false } },
+    async (req, reply) => {
+      const authorization = await resolvePerfectFitMember(req, reply);
+      if (!authorization) return;
+      const items = await listPerfectFitProducts(app.db, {
+        tenantId: authorization.access.tenant.id,
+        query: req.query?.q,
+        limit: req.query?.limit
+      });
+      return reply.send({ ok: true, items });
+    }
+  );
+
+  app.get(
+    "/commerce/:suffix/perfect-fit/products/:id",
+    { config: { rateLimit: RATE_LIMIT, cors: false } },
+    async (req, reply) => {
+      const authorization = await resolvePerfectFitMember(req, reply);
+      if (!authorization) return;
+      const result = await getPerfectFitProduct(app.db, {
+        tenantId: authorization.access.tenant.id,
+        productId: req.params.id
+      });
+      return reply.code(result.status || 200).send(result);
+    }
+  );
+
+  app.get(
+    "/commerce/:suffix/perfect-fit/products/:id/link",
+    { config: { rateLimit: RATE_LIMIT, cors: false } },
+    async (req, reply) => {
+      const authorization = await resolvePerfectFitMember(req, reply);
+      if (!authorization) return;
+      const result = await getPerfectFitIntegration(app.db, {
+        tenantId: authorization.access.tenant.id,
+        productId: req.params.id
+      });
+      return reply.code(result.status || 200).send(result);
+    }
+  );
+
+  app.post(
+    "/commerce/:suffix/perfect-fit/products/register",
+    { config: { rateLimit: RATE_LIMIT, cors: false }, bodyLimit: MAX_BODY },
+    async (req, reply) => runPerfectFitWrite(req, reply, {
+      action: "register",
+      operation: ({ tenantId, actorIdentityId, body }) => registerPerfectFitProduct(app.db, {
+        tenantId,
+        actorIdentityId,
+        perfectFit: body.perfect_fit,
+        sharedMetadata: body.shared_metadata
+      })
+    })
+  );
+
+  app.post(
+    "/commerce/:suffix/perfect-fit/products/:id/link",
+    { config: { rateLimit: RATE_LIMIT, cors: false }, bodyLimit: MAX_BODY },
+    async (req, reply) => runPerfectFitWrite(req, reply, {
+      action: "link",
+      operation: ({ tenantId, actorIdentityId, body }) => linkPerfectFitProduct(app.db, {
+        tenantId,
+        productId: req.params.id,
+        actorIdentityId,
+        perfectFit: body.perfect_fit,
+        sharedMetadata: body.shared_metadata,
+        origin: "PERFECT_FIT"
+      })
+    })
+  );
+
+  app.post(
+    "/commerce/:suffix/perfect-fit/products/:id/sync",
+    { config: { rateLimit: RATE_LIMIT, cors: false }, bodyLimit: MAX_BODY },
+    async (req, reply) => runPerfectFitWrite(req, reply, {
+      action: "sync",
+      operation: ({ tenantId, actorIdentityId, body }) => syncPerfectFitProduct(app.db, {
+        tenantId,
+        productId: req.params.id,
+        actorIdentityId,
+        source: "PERFECT_FIT",
+        perfectFitSharedMetadata: body.perfect_fit_shared_metadata,
+        resolutions: body.resolutions
+      })
+    })
+  );
+
+  app.delete(
+    "/commerce/:suffix/perfect-fit/products/:id/link",
+    { config: { rateLimit: RATE_LIMIT, cors: false }, bodyLimit: MAX_BODY },
+    async (req, reply) => runPerfectFitWrite(req, reply, {
+      action: "unlink",
+      body: {},
+      operation: ({ tenantId }) => unlinkPerfectFitProduct(app.db, {
+        tenantId,
+        productId: req.params.id
+      })
+    })
   );
 
   app.get(

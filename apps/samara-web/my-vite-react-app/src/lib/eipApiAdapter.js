@@ -1,11 +1,28 @@
-const configuredBaseUrl = String(import.meta.env?.VITE_EIP_API_BASE_URL || '').trim().replace(/\/$/, '');
-let csrfToken = '';
+const env = import.meta.env || {};
+const canonicalEndpoint = String(env.VITE_EIP_ENDPOINT || '').trim().replace(/\/+$/, '');
+const legacyDevelopmentEndpoint = env.DEV && env.VITE_EIP_API_BASE_URL && env.VITE_EIP_SUFFIX
+  ? `${String(env.VITE_EIP_API_BASE_URL).trim().replace(/\/+$/, '')}/api/public/commerce/${encodeURIComponent(String(env.VITE_EIP_SUFFIX).trim())}`
+  : '';
+const configuredEndpoint = canonicalEndpoint || legacyDevelopmentEndpoint;
+const connectionApiKey = String(env.VITE_EIP_API_KEY || '').trim();
+let memberCsrfToken = '';
 
-export const isEipApiConfigured = () => Boolean(configuredBaseUrl);
+export const isEipApiConfigured = () => Boolean(configuredEndpoint && connectionApiKey);
+
+function rememberMemberCsrf(payload) {
+  if (payload?.csrf_token) memberCsrfToken = String(payload.csrf_token);
+  if (payload?.authenticated === false) memberCsrfToken = '';
+  return payload;
+}
 
 async function parseResponse(response) {
   const text = await response.text();
-  const payload = text ? JSON.parse(text) : {};
+  let payload = {};
+  try {
+    payload = text ? JSON.parse(text) : {};
+  } catch {
+    payload = { message: text };
+  }
   if (!response.ok) {
     const error = new Error(payload?.message || payload?.error || `EIP request failed (${response.status})`);
     error.code = payload?.error || 'EIP_REQUEST_FAILED';
@@ -13,18 +30,18 @@ async function parseResponse(response) {
     error.payload = payload;
     throw error;
   }
-  return payload;
+  return rememberMemberCsrf(payload);
 }
 
-async function loadCsrf() {
-  if (csrfToken) return csrfToken;
-  const response = await fetch(`${configuredBaseUrl}/api/eip/auth/csrf`, {
+async function refreshMemberSession() {
+  const response = await fetch(`${configuredEndpoint}/member/auth/me`, {
     credentials: 'include',
-    headers: { Accept: 'application/json' }
+    headers: {
+      Accept: 'application/json',
+      'X-API-Key': connectionApiKey
+    }
   });
-  const payload = await parseResponse(response);
-  csrfToken = String(payload?.csrf || '');
-  return csrfToken;
+  return parseResponse(response);
 }
 
 async function request(path, options = {}) {
@@ -34,28 +51,66 @@ async function request(path, options = {}) {
     throw error;
   }
   const method = String(options.method || 'GET').toUpperCase();
-  const headers = { Accept: 'application/json', ...(options.headers || {}) };
-  if (method !== 'GET' && method !== 'HEAD') {
+  const isWrite = method !== 'GET' && method !== 'HEAD';
+  const headers = {
+    Accept: 'application/json',
+    'X-API-Key': connectionApiKey,
+    ...(options.headers || {})
+  };
+  if (isWrite) {
     headers['Content-Type'] = 'application/json';
-    headers['x-csrf'] = await loadCsrf();
+    if (options.memberCsrf !== false) {
+      if (!memberCsrfToken) await refreshMemberSession();
+      if (memberCsrfToken) headers['X-Member-Csrf'] = memberCsrfToken;
+    }
+    if (options.idempotent === true) {
+      headers['X-Event-Id'] = crypto.randomUUID();
+    }
   }
-  const response = await fetch(`${configuredBaseUrl}${path}`, {
+  const response = await fetch(`${configuredEndpoint}${path}`, {
     method,
     credentials: 'include',
     headers,
     body: options.body === undefined ? undefined : JSON.stringify(options.body)
   });
-  if (response.status === 403 && method !== 'GET' && method !== 'HEAD') csrfToken = '';
+  if (response.status === 401) memberCsrfToken = '';
   return parseResponse(response);
 }
 
+export const eipMemberAuth = Object.freeze({
+  start: ({ credential, password, mode = 'signin', email, name, username, role } = {}) => request('/member/auth/start', {
+    method: 'POST',
+    memberCsrf: false,
+    body: {
+      credential,
+      password,
+      mode,
+      email,
+      name,
+      username,
+      metadata: { username, requested_role: role }
+    }
+  }),
+  verify: ({ challengeId, token } = {}) => request('/member/auth/verify', {
+    method: 'POST',
+    memberCsrf: false,
+    body: { challenge_id: challengeId, token }
+  }),
+  me: () => refreshMemberSession(),
+  logout: async () => {
+    const result = await request('/member/auth/logout', { method: 'POST' });
+    memberCsrfToken = '';
+    return result;
+  }
+});
+
 export const eipApiAdapter = Object.freeze({
-  getCapability: () => request('/api/eip/ecom/perfect-fit/capability'),
-  listProducts: (query = '') => request(`/api/eip/ecom/products?limit=100&q=${encodeURIComponent(query)}`),
-  getProduct: (productId) => request(`/api/eip/ecom/products/${encodeURIComponent(productId)}`),
-  getIntegration: (productId) => request(`/api/eip/ecom/products/${encodeURIComponent(productId)}/perfect-fit`),
-  registerProduct: (body) => request('/api/eip/ecom/perfect-fit/products/register', { method: 'POST', body }),
-  linkProduct: (productId, body) => request(`/api/eip/ecom/products/${encodeURIComponent(productId)}/perfect-fit/link`, { method: 'POST', body }),
-  syncProduct: (productId, body) => request(`/api/eip/ecom/products/${encodeURIComponent(productId)}/perfect-fit/sync`, { method: 'POST', body }),
-  unlinkProduct: (productId) => request(`/api/eip/ecom/products/${encodeURIComponent(productId)}/perfect-fit/link`, { method: 'DELETE' })
+  getCapability: () => request('/perfect-fit/capability'),
+  listProducts: (query = '') => request(`/perfect-fit/products?limit=100&q=${encodeURIComponent(query)}`),
+  getProduct: (productId) => request(`/perfect-fit/products/${encodeURIComponent(productId)}`),
+  getIntegration: (productId) => request(`/perfect-fit/products/${encodeURIComponent(productId)}/link`),
+  registerProduct: (body) => request('/perfect-fit/products/register', { method: 'POST', body, idempotent: true }),
+  linkProduct: (productId, body) => request(`/perfect-fit/products/${encodeURIComponent(productId)}/link`, { method: 'POST', body, idempotent: true }),
+  syncProduct: (productId, body) => request(`/perfect-fit/products/${encodeURIComponent(productId)}/sync`, { method: 'POST', body, idempotent: true }),
+  unlinkProduct: (productId) => request(`/perfect-fit/products/${encodeURIComponent(productId)}/link`, { method: 'DELETE', idempotent: true })
 });

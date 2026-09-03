@@ -1,6 +1,6 @@
 import { getOptInDemoMemberAccounts, isDemoRuntimeDataEnabled } from '../lib/runtimeRepositoryBootstrap';
 import { runtimeDataStorage } from '../lib/runtimeDataGateway';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { translatePerfectFitText as pfUiT } from '../lib/i18n';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -20,6 +20,22 @@ import {
   registerUsernameForUser,
   validateUsername
 } from '../lib/userIdentity';
+import { eipMemberAuth, isEipApiConfigured } from '../lib/eipApiAdapter';
+
+function toPerfectFitMember(member = {}) {
+  const requestedRole = String(member?.metadata?.requested_role || '').toLowerCase();
+  return {
+    id: member.identity_id,
+    identityId: member.identity_id,
+    email: member.login,
+    login: member.login,
+    username: member.username || '',
+    fullName: member.display_name || member.username || member.login || 'Perfect Fit Member',
+    role: requestedRole === 'collaborator' ? 'collaborator' : 'buyer',
+    memberCode: member.member_code,
+    avatar: member.avatar_url || null
+  };
+}
 
 export default function MemberManagement({
   onLoginSuccess,
@@ -44,6 +60,9 @@ export default function MemberManagement({
   const [username, setUsername] = useState('');
   const [usernameError, setUsernameError] = useState('');
   const [selectedRole, setSelectedRole] = useState('buyer'); // 'buyer' or 'collaborator'
+  const [authStatus, setAuthStatus] = useState('');
+  const [authBusy, setAuthBusy] = useState(false);
+  const remoteSessionRequest = useRef(null);
 
   // Tab within Dashboard
   const [dashboardTab, setDashboardTab] = useState('overview'); // 'overview' | 'listings' | 'sales' | 'profile'
@@ -83,6 +102,48 @@ export default function MemberManagement({
     }
   }, [currentUser, setCurrentUser]);
 
+  useEffect(() => {
+    if (!isEipApiConfigured()) return undefined;
+    if (!remoteSessionRequest.current) {
+      remoteSessionRequest.current = (async () => {
+        const params = new URLSearchParams(window.location.search);
+        const challengeId = params.get('mlc');
+        const token = params.get('mlt');
+        const result = challengeId && token
+          ? await eipMemberAuth.verify({ challengeId, token })
+          : await eipMemberAuth.me();
+        return { result, params, challengeId, token };
+      })();
+    }
+    let active = true;
+    remoteSessionRequest.current
+      .then(({ result, params, challengeId, token }) => {
+        if (!active) return;
+        if (!result?.member || result?.authenticated === false) {
+          setCurrentUser(null);
+          return;
+        }
+        if (challengeId && token) {
+          params.delete('mlc');
+          params.delete('mlt');
+          const query = params.toString();
+          window.history.replaceState({}, '', `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`);
+        }
+        const publicUser = ensureUserPublicIdentity(toPerfectFitMember(result.member), {
+          persist: true,
+          source: 'eip-member-session'
+        });
+        setCurrentUser(publicUser);
+        onLoginSuccess && onLoginSuccess(publicUser);
+      })
+      .catch((error) => {
+        if (active && error?.status !== 401) setAuthStatus(error?.message || error?.code || '');
+      });
+    return () => {
+      active = false;
+    };
+  }, [setCurrentUser]);
+
   const handleDeleteSubscriber = (indexToDelete) => {
     const subToDelete = subscribers[indexToDelete];
     if (window.confirm(`Are you sure you want to retract "${subToDelete.email}" from the Atelier mailing registry?`)) {
@@ -97,7 +158,7 @@ export default function MemberManagement({
   };
 
   // Load user status or sync
-  const handleSignIn = (e) => {
+  const handleSignIn = async (e) => {
     e.preventDefault();
     if (!email || !password) return;
 
@@ -110,26 +171,30 @@ export default function MemberManagement({
       onLoginSuccess && onLoginSuccess(publicUser);
     };
 
-    // Demo persona switching is available only through the explicit development flag.
-    if (isDemoRuntimeDataEnabled() && email.toLowerCase().includes('admin')) {
-      completeLogin(INITIAL_ADMINISTRATOR);
-    } else if (isDemoRuntimeDataEnabled() && (email.toLowerCase().includes('atelier') || email.toLowerCase().includes('margot'))) {
-      // Login as Margot Leone (Collaborator)
-      completeLogin(INITIAL_COLLABORATOR);
-    } else {
-      const user = {
-        email: email,
-        fullName: fullName || email.split('@')[0],
-        role: 'buyer'
-      };
-      completeLogin(user);
+    setAuthStatus('');
+    setAuthBusy(true);
+    try {
+      if (isEipApiConfigured()) {
+        const result = await eipMemberAuth.start({ credential: email, email, password, mode: 'signin' });
+        completeLogin(toPerfectFitMember(result.member));
+        // Demo persona switching is available only through the explicit development flag.
+      } else if (isDemoRuntimeDataEnabled() && email.toLowerCase().includes('admin')) {
+        completeLogin(INITIAL_ADMINISTRATOR);
+      } else if (isDemoRuntimeDataEnabled() && (email.toLowerCase().includes('atelier') || email.toLowerCase().includes('margot'))) {
+        completeLogin(INITIAL_COLLABORATOR);
+      } else {
+        completeLogin({ email, fullName: fullName || email.split('@')[0], role: 'buyer' });
+      }
+      setEmail('');
+      setPassword('');
+    } catch (error) {
+      setAuthStatus(error?.message || error?.code || '');
+    } finally {
+      setAuthBusy(false);
     }
-    // reset form
-    setEmail('');
-    setPassword('');
   };
 
-  const handleSignUp = (e) => {
+  const handleSignUp = async (e) => {
     e.preventDefault();
     const userId = getStableUserId({
       email,
@@ -140,6 +205,34 @@ export default function MemberManagement({
     setUsernameError(usernameValidation.message);
 
     if (!email || !fullName || !usernameValidation.valid) return;
+
+    setAuthStatus('');
+    setAuthBusy(true);
+    if (isEipApiConfigured()) {
+      try {
+        await eipMemberAuth.start({
+          credential: email,
+          email,
+          password,
+          mode: 'signup',
+          name: fullName,
+          username: usernameValidation.username,
+          role: selectedRole
+        });
+        setAuthStatus(pfUiT('auth.checkEmail'));
+        setIsSignUpMode(false);
+        setEmail('');
+        setPassword('');
+        setFullName('');
+        setUsername('');
+        setUsernameError('');
+      } catch (error) {
+        setAuthStatus(error?.message || error?.code || '');
+      } finally {
+        setAuthBusy(false);
+      }
+      return;
+    }
 
     let newUser = {};
     if (selectedRole === 'collaborator') {
@@ -181,6 +274,7 @@ export default function MemberManagement({
     setFullName('');
     setUsername('');
     setUsernameError('');
+    setAuthBusy(false);
   };
 
   const switchDemoAccount = (role) => {
@@ -496,10 +590,14 @@ export default function MemberManagement({
 
                     <button
                       type="submit"
+                      disabled={authBusy}
                       className="w-full bg-bark-900 hover:bg-bark-850 text-sand-50 py-3 rounded-xl text-xs font-semibold tracking-wider uppercase transition-colors cursor-pointer shadow-3xs"
                     >
                       {isSignUpMode ? 'Register Member Profile' : 'Authenticate Workspace'}
                     </button>
+                    {authStatus && (
+                      <p className="text-xs text-clay-700" role="status">{authStatus}</p>
+                    )}
                   </form>
 
                   <div className="text-center pt-2">
@@ -1272,7 +1370,14 @@ export default function MemberManagement({
                       {/* Logout option */}
                       <div className="pt-4 border-t border-sand-200 flex justify-end">
                         <button
-                          onClick={() => {
+                          onClick={async () => {
+                            if (isEipApiConfigured()) {
+                              try {
+                                await eipMemberAuth.logout();
+                              } catch (error) {
+                                console.error(error);
+                              }
+                            }
                             setCurrentUser(null);
                             onLogout && onLogout();
                             onClose();

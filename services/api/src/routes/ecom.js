@@ -39,15 +39,13 @@ import {
 } from "../services/translation/providerClient.js";
 import { auditSecurityEvent } from "../lib/securityAudit.js";
 import {
-  PERFECT_FIT_LINK_RECORD_TYPE,
-  PERFECT_FIT_LINK_RELATION,
   PERFECT_FIT_SHARED_FIELD_POLICIES,
-  buildPerfectFitLinkPayload,
-  extractEipSharedMetadata,
-  normalizePerfectFitIdentity,
-  normalizeSharedMetadata,
-  reconcileSharedMetadata
-} from "../lib/perfectFitProductIntegration.js";
+  getPerfectFitIntegration,
+  linkPerfectFitProduct,
+  registerPerfectFitProduct,
+  syncPerfectFitProduct,
+  unlinkPerfectFitProduct
+} from "../services/perfectFit/productGateway.js";
 
 const MAX_LIMIT = 200;
 const MATERIAL_TYPE = "PRODUCT";
@@ -2573,141 +2571,6 @@ async function requireWrite(app, req, reply, permCode) {
   return s.session;
 }
 
-async function loadPerfectFitProductLink(client, tenantId, materialId) {
-  const result = await client.query(
-    `
-    SELECT ol.id AS link_id,
-           ol.attrs AS link_attrs,
-           ol.created_at AS link_created_at,
-           ol.updated_at AS link_updated_at,
-           ir.id AS info_record_id,
-           ir.payload,
-           ir.created_at,
-           ir.updated_at
-    FROM eip_core.object_link ol
-    JOIN eip_core.info_record ir
-      ON ir.tenant_id = ol.tenant_id
-     AND ir.id = ol.dst_id
-     AND ir.record_type = $5
-     AND ir.is_active = true
-    WHERE ol.tenant_id = $1
-      AND ol.src_kind = $2
-      AND ol.src_id = $3
-      AND ol.dst_kind = $4
-      AND ol.relation_type = $6
-      AND ol.is_active = true
-    ORDER BY ol.updated_at DESC
-    LIMIT 1
-    `,
-    [tenantId, "material", materialId, "info_record", PERFECT_FIT_LINK_RECORD_TYPE, PERFECT_FIT_LINK_RELATION]
-  );
-  return result.rows[0] || null;
-}
-
-function serializePerfectFitLink(row) {
-  if (!row) return null;
-  return {
-    link_id: row.link_id,
-    info_record_id: row.info_record_id,
-    ...(row.payload && typeof row.payload === "object" ? row.payload : {}),
-    created_at: row.created_at || row.link_created_at || null,
-    updated_at: row.updated_at || row.link_updated_at || null
-  };
-}
-
-async function attachPerfectFitProductLink(client, {
-  tenantId,
-  materialId,
-  identity,
-  sharedMetadata,
-  origin,
-  actorIdentityId
-}) {
-  const duplicate = await client.query(
-    `
-    SELECT ir.id, ol.src_id AS material_id
-    FROM eip_core.info_record ir
-    JOIN eip_core.object_link ol
-      ON ol.tenant_id = ir.tenant_id
-     AND ol.dst_kind = 'info_record'
-     AND ol.dst_id = ir.id
-     AND ol.relation_type = $3
-     AND ol.is_active = true
-    WHERE ir.tenant_id = $1
-      AND ir.record_type = $2
-      AND ir.is_active = true
-      AND ir.payload->'perfect_fit'->>'pf_product_id' = $4
-    LIMIT 1
-    `,
-    [tenantId, PERFECT_FIT_LINK_RECORD_TYPE, PERFECT_FIT_LINK_RELATION, identity.pf_product_id]
-  );
-  if (duplicate.rowCount && String(duplicate.rows[0].material_id) !== String(materialId)) {
-    return { ok: false, error: "PERFECT_FIT_PRODUCT_ALREADY_LINKED" };
-  }
-
-  const existing = await loadPerfectFitProductLink(client, tenantId, materialId);
-  if (existing) {
-    const existingPfId = existing.payload?.perfect_fit?.pf_product_id;
-    if (existingPfId && existingPfId !== identity.pf_product_id) {
-      return { ok: false, error: "EIP_PRODUCT_ALREADY_LINKED" };
-    }
-    const payload = buildPerfectFitLinkPayload({
-      identity,
-      sharedMetadata,
-      origin,
-      actorIdentityId,
-      existing: existing.payload || {}
-    });
-    await client.query(
-      `UPDATE eip_core.info_record SET title=$3, payload=$4::jsonb, updated_at=now()
-       WHERE tenant_id=$1 AND id=$2`,
-      [tenantId, existing.info_record_id, identity.style_code || identity.variant_code || identity.pf_product_id, JSON.stringify(payload)]
-    );
-    return { ok: true, link: serializePerfectFitLink({ ...existing, payload }) };
-  }
-
-  const payload = buildPerfectFitLinkPayload({ identity, sharedMetadata, origin, actorIdentityId });
-  const info = await client.query(
-    `
-    INSERT INTO eip_core.info_record (tenant_id, record_type, title, payload, attrs)
-    VALUES ($1,$2,$3,$4::jsonb,$5::jsonb)
-    RETURNING id, created_at, updated_at
-    `,
-    [
-      tenantId,
-      PERFECT_FIT_LINK_RECORD_TYPE,
-      identity.style_code || identity.variant_code || identity.pf_product_id,
-      JSON.stringify(payload),
-      JSON.stringify({ authority: "PERFECT_FIT_PRODUCT_DEVELOPMENT", contains_private_technical_data: false })
-    ]
-  );
-  const link = await client.query(
-    `
-    INSERT INTO eip_core.object_link
-      (tenant_id, src_kind, src_id, dst_kind, dst_id, relation_type, attrs)
-    VALUES ($1,'material',$2,'info_record',$3,$4,$5::jsonb)
-    RETURNING id, created_at, updated_at
-    `,
-    [
-      tenantId,
-      materialId,
-      info.rows[0].id,
-      PERFECT_FIT_LINK_RELATION,
-      JSON.stringify({ delete_behavior: "UNLINK_ONLY", perfect_fit_private_data_access: false })
-    ]
-  );
-  return {
-    ok: true,
-    link: serializePerfectFitLink({
-      link_id: link.rows[0].id,
-      info_record_id: info.rows[0].id,
-      payload,
-      created_at: info.rows[0].created_at,
-      updated_at: info.rows[0].updated_at
-    })
-  };
-}
-
 function normalizeReviewStatus(value, fallback = "pending_review") {
   const status = normalizeText(value).toLowerCase();
   if (!status) return fallback;
@@ -3878,19 +3741,11 @@ export default async function ecomRoutes(app) {
     async (req, reply) => {
       const session = await requirePerm(app, req, reply, "ECOM_PRODUCT_READ");
       if (!session) return;
-      const product = await app.db.query(
-        `SELECT id, code, name AS title, attrs FROM eip_core.material
-         WHERE tenant_id=$1 AND id=$2 AND material_type=$3`,
-        [session.tenant_id, req.params.id, MATERIAL_TYPE]
-      );
-      if (!product.rowCount) return reply.code(404).send({ ok: false, error: "NOT_FOUND" });
-      const link = await loadPerfectFitProductLink(app.db, session.tenant_id, req.params.id);
-      return reply.send({
-        ok: true,
-        product: { ...product.rows[0], shared_metadata: extractEipSharedMetadata(product.rows[0]) },
-        link: serializePerfectFitLink(link),
-        shared_field_policies: PERFECT_FIT_SHARED_FIELD_POLICIES
+      const result = await getPerfectFitIntegration(app.db, {
+        tenantId: session.tenant_id,
+        productId: req.params.id
       });
+      return reply.code(result.status || 200).send(result);
     }
   );
 
@@ -3914,44 +3769,19 @@ export default async function ecomRoutes(app) {
     async (req, reply) => {
       const session = await requireWrite(app, req, reply, "ECOM_PRODUCT_WRITE");
       if (!session) return;
-      const normalized = normalizePerfectFitIdentity(req.body?.perfect_fit);
-      if (!normalized.ok) return reply.code(400).send(normalized);
-      const client = await app.db.connect();
       try {
-        await client.query("BEGIN");
-        const material = await client.query(
-          `SELECT id, code, name AS title, attrs FROM eip_core.material
-           WHERE tenant_id=$1 AND id=$2 AND material_type=$3 FOR UPDATE`,
-          [session.tenant_id, req.params.id, MATERIAL_TYPE]
-        );
-        if (!material.rowCount) {
-          await client.query("ROLLBACK");
-          return reply.code(404).send({ ok: false, error: "NOT_FOUND" });
-        }
-        const shared = normalizeSharedMetadata({
-          ...extractEipSharedMetadata(material.rows[0]),
-          ...(req.body?.shared_metadata || {})
-        });
-        const attached = await attachPerfectFitProductLink(client, {
+        const result = await linkPerfectFitProduct(app.db, {
           tenantId: session.tenant_id,
-          materialId: req.params.id,
-          identity: normalized.identity,
-          sharedMetadata: shared,
+          productId: req.params.id,
+          perfectFit: req.body?.perfect_fit,
+          sharedMetadata: req.body?.shared_metadata,
           origin: req.body?.origin || "LINKED",
           actorIdentityId: session.identity_id
         });
-        if (!attached.ok) {
-          await client.query("ROLLBACK");
-          return reply.code(409).send(attached);
-        }
-        await client.query("COMMIT");
-        return reply.send({ ok: true, link: attached.link });
+        return reply.code(result.status || 200).send(result);
       } catch (err) {
-        await client.query("ROLLBACK");
         app.log.error({ event: "perfect_fit_product_link_failed", tenant_id: session.tenant_id, error: err.message });
         return reply.code(500).send({ ok: false, error: "PERFECT_FIT_LINK_FAILED" });
-      } finally {
-        client.release();
       }
     }
   );
@@ -3974,59 +3804,17 @@ export default async function ecomRoutes(app) {
     async (req, reply) => {
       const session = await requireWrite(app, req, reply, "ECOM_PRODUCT_WRITE");
       if (!session) return;
-      const normalized = normalizePerfectFitIdentity(req.body?.perfect_fit);
-      if (!normalized.ok) return reply.code(400).send(normalized);
-      const shared = normalizeSharedMetadata(req.body?.shared_metadata);
-      if (!shared.product_name) return reply.code(400).send({ ok: false, error: "PRODUCT_NAME_REQUIRED" });
-      const client = await app.db.connect();
       try {
-        await client.query("BEGIN");
-        const existing = await client.query(
-          `SELECT ol.src_id AS material_id
-           FROM eip_core.info_record ir
-           JOIN eip_core.object_link ol ON ol.tenant_id=ir.tenant_id AND ol.dst_id=ir.id
-           WHERE ir.tenant_id=$1 AND ir.record_type=$2 AND ir.is_active=true
-             AND ol.relation_type=$3 AND ol.is_active=true
-             AND ir.payload->'perfect_fit'->>'pf_product_id'=$4 LIMIT 1`,
-          [session.tenant_id, PERFECT_FIT_LINK_RECORD_TYPE, PERFECT_FIT_LINK_RELATION, normalized.identity.pf_product_id]
-        );
-        if (existing.rowCount) {
-          await client.query("COMMIT");
-          return reply.send({ ok: true, reused: true, product_id: existing.rows[0].material_id });
-        }
-        const code = await generateProductCode(client, session.tenant_id);
-        const attrs = {
-          content: { summary: shared.description },
-          taxonomy: { brand: shared.brand },
-          workflow: { integration_origin: "PERFECT_FIT" },
-          integration: { perfect_fit: { registered_at: new Date().toISOString() } }
-        };
-        const material = await client.query(
-          `INSERT INTO eip_core.material (tenant_id, material_type, code, name, attrs)
-           VALUES ($1,$2,$3,$4,$5::jsonb)
-           RETURNING id, code, name AS title, attrs, created_at, updated_at`,
-          [session.tenant_id, MATERIAL_TYPE, code, shared.product_name, JSON.stringify(attrs)]
-        );
-        const attached = await attachPerfectFitProductLink(client, {
+        const result = await registerPerfectFitProduct(app.db, {
           tenantId: session.tenant_id,
-          materialId: material.rows[0].id,
-          identity: normalized.identity,
-          sharedMetadata: shared,
-          origin: "PERFECT_FIT",
+          perfectFit: req.body?.perfect_fit,
+          sharedMetadata: req.body?.shared_metadata,
           actorIdentityId: session.identity_id
         });
-        if (!attached.ok) {
-          await client.query("ROLLBACK");
-          return reply.code(409).send(attached);
-        }
-        await client.query("COMMIT");
-        return reply.code(201).send({ ok: true, item: material.rows[0], link: attached.link });
+        return reply.code(result.status || 200).send(result);
       } catch (err) {
-        await client.query("ROLLBACK");
         app.log.error({ event: "perfect_fit_product_register_failed", tenant_id: session.tenant_id, error: err.message });
         return reply.code(500).send({ ok: false, error: "PERFECT_FIT_REGISTER_FAILED" });
-      } finally {
-        client.release();
       }
     }
   );
@@ -4051,88 +3839,19 @@ export default async function ecomRoutes(app) {
     async (req, reply) => {
       const session = await requireWrite(app, req, reply, "ECOM_PRODUCT_WRITE");
       if (!session) return;
-      const client = await app.db.connect();
       try {
-        await client.query("BEGIN");
-        const material = await client.query(
-          `SELECT id, code, name AS title, attrs FROM eip_core.material
-           WHERE tenant_id=$1 AND id=$2 AND material_type=$3 FOR UPDATE`,
-          [session.tenant_id, req.params.id, MATERIAL_TYPE]
-        );
-        if (!material.rowCount) {
-          await client.query("ROLLBACK");
-          return reply.code(404).send({ ok: false, error: "NOT_FOUND" });
-        }
-        const linkRow = await loadPerfectFitProductLink(client, session.tenant_id, req.params.id);
-        if (!linkRow) {
-          await client.query("ROLLBACK");
-          return reply.code(409).send({ ok: false, error: "PERFECT_FIT_NOT_LINKED" });
-        }
-        const payload = linkRow.payload || {};
-        const pfShared = normalizeSharedMetadata(
-          req.body?.perfect_fit_shared_metadata || payload?.shared_snapshot?.perfect_fit || payload?.shared_snapshot?.accepted || {}
-        );
-        const eipShared = extractEipSharedMetadata(material.rows[0]);
-        const reconciled = reconcileSharedMetadata({
+        const result = await syncPerfectFitProduct(app.db, {
+          tenantId: session.tenant_id,
+          productId: req.params.id,
+          actorIdentityId: session.identity_id,
           source: req.body.source,
-          eip: eipShared,
-          perfectFit: pfShared,
-          lastAccepted: payload?.shared_snapshot?.accepted || {},
+          perfectFitSharedMetadata: req.body?.perfect_fit_shared_metadata,
           resolutions: req.body?.resolutions || {}
         });
-        const nextAttrs = { ...(material.rows[0].attrs || {}) };
-        nextAttrs.content = { ...(nextAttrs.content || {}), summary: reconciled.patch_to_eip.description };
-        nextAttrs.taxonomy = { ...(nextAttrs.taxonomy || {}) };
-        if (reconciled.patch_to_eip.brand) nextAttrs.taxonomy.brand = reconciled.patch_to_eip.brand;
-        nextAttrs.integration = {
-          ...(nextAttrs.integration || {}),
-          perfect_fit: {
-            ...(nextAttrs.integration?.perfect_fit || {}),
-            linked: true,
-            last_sync_at: new Date().toISOString(),
-            last_sync_source: req.body.source,
-            conflicts: reconciled.conflicts.map((item) => item.field)
-          }
-        };
-        await client.query(
-          `UPDATE eip_core.material SET name=COALESCE($3,name), attrs=$4::jsonb, updated_at=now()
-           WHERE tenant_id=$1 AND id=$2`,
-          [session.tenant_id, req.params.id, reconciled.patch_to_eip.product_name, JSON.stringify(nextAttrs)]
-        );
-        const nextPayload = {
-          ...payload,
-          shared_snapshot: {
-            ...(payload.shared_snapshot || {}),
-            perfect_fit: pfShared,
-            eip: eipShared,
-            accepted: reconciled.accepted,
-            conflicts: reconciled.conflicts,
-            unmapped_fields: reconciled.unmapped_fields,
-            updated_at: new Date().toISOString(),
-            updated_by_identity_id: session.identity_id
-          },
-          updated_at: new Date().toISOString()
-        };
-        await client.query(
-          `UPDATE eip_core.info_record SET payload=$3::jsonb, updated_at=now()
-           WHERE tenant_id=$1 AND id=$2`,
-          [session.tenant_id, linkRow.info_record_id, JSON.stringify(nextPayload)]
-        );
-        await client.query("COMMIT");
-        return reply.send({
-          ok: true,
-          patch_to_perfect_fit: reconciled.patch_to_perfect_fit,
-          conflicts: reconciled.conflicts,
-          unmapped_fields: reconciled.unmapped_fields,
-          shared_field_policies: PERFECT_FIT_SHARED_FIELD_POLICIES,
-          link: serializePerfectFitLink({ ...linkRow, payload: nextPayload })
-        });
+        return reply.code(result.status || 200).send(result);
       } catch (err) {
-        await client.query("ROLLBACK");
         app.log.error({ event: "perfect_fit_product_sync_failed", tenant_id: session.tenant_id, error: err.message });
         return reply.code(500).send({ ok: false, error: "PERFECT_FIT_SYNC_FAILED" });
-      } finally {
-        client.release();
       }
     }
   );
@@ -4147,32 +3866,15 @@ export default async function ecomRoutes(app) {
     async (req, reply) => {
       const session = await requireWrite(app, req, reply, "ECOM_PRODUCT_WRITE");
       if (!session) return;
-      const client = await app.db.connect();
       try {
-        await client.query("BEGIN");
-        const link = await loadPerfectFitProductLink(client, session.tenant_id, req.params.id);
-        if (!link) {
-          await client.query("COMMIT");
-          return reply.send({ ok: true, unlinked: false, records_deleted: false });
-        }
-        await client.query(
-          `UPDATE eip_core.object_link SET is_active=false, updated_at=now()
-           WHERE tenant_id=$1 AND id=$2`,
-          [session.tenant_id, link.link_id]
-        );
-        await client.query(
-          `UPDATE eip_core.info_record SET is_active=false, updated_at=now()
-           WHERE tenant_id=$1 AND id=$2`,
-          [session.tenant_id, link.info_record_id]
-        );
-        await client.query("COMMIT");
-        return reply.send({ ok: true, unlinked: true, records_deleted: false });
+        const result = await unlinkPerfectFitProduct(app.db, {
+          tenantId: session.tenant_id,
+          productId: req.params.id
+        });
+        return reply.code(result.status || 200).send(result);
       } catch (err) {
-        await client.query("ROLLBACK");
         app.log.error({ event: "perfect_fit_product_unlink_failed", tenant_id: session.tenant_id, error: err.message });
         return reply.code(500).send({ ok: false, error: "PERFECT_FIT_UNLINK_FAILED" });
-      } finally {
-        client.release();
       }
     }
   );
