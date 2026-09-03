@@ -228,6 +228,12 @@ export function deriveUsername(user = {}, options = {}) {
   return candidate;
 }
 
+function resolvePerfectFitRole(user = {}) {
+  const memberCode = String(user.memberCode || user.member_code || '');
+  if (memberCode.startsWith('PFADMIN:')) return 'administrator';
+  return user.role || '';
+}
+
 export function ensureUserPublicIdentity(user, options = {}) {
   if (!user) return null;
 
@@ -237,6 +243,7 @@ export function ensureUserPublicIdentity(user, options = {}) {
     ...user,
     id,
     username,
+    role: resolvePerfectFitRole(user),
     brandName: user.brandName || user.designerBrand || user.studioName || ''
   };
 

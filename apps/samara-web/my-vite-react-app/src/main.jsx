@@ -2,6 +2,7 @@ import React, { StrictMode, Component } from 'react';
 import { translatePerfectFitText as pfUiT } from './lib/i18n';
 import { createRoot } from 'react-dom/client';
 import App from './App.jsx';
+import AuthRecoveryPortal from './components/AuthRecoveryPortal.jsx';
 import { LanguageProvider } from './context/LanguageContext.jsx';
 import { RuntimeDataProvider } from './context/RuntimeDataContext.jsx';
 import './index.css';
@@ -133,6 +134,7 @@ createRoot(document.getElementById('root')).render(
       <LanguageProvider>
         <RuntimeDataProvider>
           <App />
+          <AuthRecoveryPortal />
         </RuntimeDataProvider>
       </LanguageProvider>
     </ErrorBoundary>
