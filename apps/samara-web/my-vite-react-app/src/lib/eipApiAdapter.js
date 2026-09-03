@@ -33,6 +33,40 @@ async function parseResponse(response) {
   return rememberMemberCsrf(payload);
 }
 
+async function loadPerfectFitContext() {
+  const response = await fetch(`${configuredEndpoint}/member/auth/pf-context`, {
+    credentials: 'include',
+    headers: {
+      Accept: 'application/json',
+      'X-API-Key': connectionApiKey
+    }
+  });
+  if (!response.ok) return null;
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
+async function enrichPerfectFitMember(payload) {
+  if (!payload?.member) return payload;
+  try {
+    const context = await loadPerfectFitContext();
+    if (context?.pf_role === 'administrator') {
+      const currentCode = String(payload.member.member_code || 'MEMBER');
+      payload.member = {
+        ...payload.member,
+        member_code: currentCode.startsWith('PFADMIN:') ? currentCode : `PFADMIN:${currentCode}`,
+        pf_role: 'administrator'
+      };
+    }
+  } catch {
+    // Member authentication remains usable even if PF context enrichment is unavailable.
+  }
+  return payload;
+}
+
 async function refreshMemberSession() {
   const response = await fetch(`${configuredEndpoint}/member/auth/me`, {
     credentials: 'include',
@@ -41,7 +75,8 @@ async function refreshMemberSession() {
       'X-API-Key': connectionApiKey
     }
   });
-  return parseResponse(response);
+  const payload = await parseResponse(response);
+  return enrichPerfectFitMember(payload);
 }
 
 async function request(path, options = {}) {
@@ -78,25 +113,41 @@ async function request(path, options = {}) {
 }
 
 export const eipMemberAuth = Object.freeze({
-  start: ({ credential, password, mode = 'signin', email, name, username, role } = {}) => request('/member/auth/start', {
-    method: 'POST',
-    memberCsrf: false,
-    body: {
-      credential,
-      password,
-      mode,
-      email,
-      name,
-      username,
-      metadata: { username, requested_role: role }
-    }
-  }),
-  verify: ({ challengeId, token } = {}) => request('/member/auth/verify', {
-    method: 'POST',
-    memberCsrf: false,
-    body: { challenge_id: challengeId, token }
-  }),
+  start: async ({ credential, password, mode = 'signin', email, name, username, role } = {}) => {
+    const payload = await request('/member/auth/start', {
+      method: 'POST',
+      memberCsrf: false,
+      body: {
+        credential,
+        password,
+        mode,
+        email,
+        name,
+        username,
+        metadata: { username, requested_role: role }
+      }
+    });
+    return enrichPerfectFitMember(payload);
+  },
+  verify: async ({ challengeId, token } = {}) => {
+    const payload = await request('/member/auth/verify', {
+      method: 'POST',
+      memberCsrf: false,
+      body: { challenge_id: challengeId, token }
+    });
+    return enrichPerfectFitMember(payload);
+  },
   me: () => refreshMemberSession(),
+  forgotPassword: ({ email } = {}) => request('/member/auth/password/forgot', {
+    method: 'POST',
+    memberCsrf: false,
+    body: { email }
+  }),
+  resetPassword: ({ token, password } = {}) => request('/member/auth/password/reset', {
+    method: 'POST',
+    memberCsrf: false,
+    body: { token, password }
+  }),
   logout: async () => {
     const result = await request('/member/auth/logout', { method: 'POST' });
     memberCsrfToken = '';
