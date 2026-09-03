@@ -19,7 +19,6 @@ function ForgotPasswordLink() {
       const result = await eipMemberAuth.forgotPassword({ email });
       setMessage(result?.message || 'If the account exists, a secure reset link has been sent.');
     } catch {
-      // Keep the public response enumeration-safe.
       setMessage('If the account exists, a secure reset link has been sent.');
     } finally {
       setBusy(false);
@@ -28,7 +27,7 @@ function ForgotPasswordLink() {
 
   if (!open) {
     return (
-      <div className="mt-3 text-center" data-pf-auth-recovery>
+      <div className="pt-1 text-center" data-pf-auth-recovery>
         <button
           type="button"
           onClick={() => setOpen(true)}
@@ -41,7 +40,7 @@ function ForgotPasswordLink() {
   }
 
   return (
-    <form onSubmit={submit} className="mt-4 space-y-3 rounded-xl border border-sand-200 bg-sand-50/40 p-4" data-pf-auth-recovery>
+    <form onSubmit={submit} className="space-y-3 rounded-xl border border-sand-200 bg-sand-50/40 p-4" data-pf-auth-recovery>
       <div>
         <div className="text-xs font-bold text-bark-900">Reset Perfect Fit password</div>
         <p className="mt-1 text-[10px] leading-relaxed text-bark-500">
@@ -178,13 +177,7 @@ export default function AuthRecoveryPortal() {
 
   useEffect(() => {
     const findHost = () => {
-      const guest = document.getElementById('auth-guest-view');
-      if (!guest) {
-        setHost(null);
-        return;
-      }
-      const form = guest.querySelector('form');
-      setHost(form || guest);
+      setHost(document.getElementById('auth-guest-view'));
     };
     findHost();
     const observer = new MutationObserver(findHost);
