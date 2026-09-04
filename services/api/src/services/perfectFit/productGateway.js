@@ -3,6 +3,7 @@ import {
   PERFECT_FIT_LINK_RECORD_TYPE,
   PERFECT_FIT_LINK_RELATION,
   PERFECT_FIT_SHARED_FIELD_POLICIES,
+  PERFECT_FIT_STYLE_VARIANT_RELATION,
   buildPerfectFitLinkPayload,
   extractEipSharedMetadata,
   normalizePerfectFitIdentity,
@@ -11,6 +12,19 @@ import {
 } from "../../lib/perfectFitProductIntegration.js";
 
 const MATERIAL_TYPE = "PRODUCT";
+const PRODUCT_LEVEL_STYLE_MASTER = "STYLE_MASTER";
+const PRODUCT_LEVEL_STYLE_VARIANT = "STYLE_VARIANT";
+
+function normalizeProductLevel(value, identity = {}) {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (normalized === PRODUCT_LEVEL_STYLE_MASTER || normalized === "STYLE") {
+    return PRODUCT_LEVEL_STYLE_MASTER;
+  }
+  if (normalized === PRODUCT_LEVEL_STYLE_VARIANT || normalized === "VARIANT") {
+    return PRODUCT_LEVEL_STYLE_VARIANT;
+  }
+  return identity.entity_level === "STYLE" ? PRODUCT_LEVEL_STYLE_MASTER : PRODUCT_LEVEL_STYLE_VARIANT;
+}
 
 async function generateProductCode(client, tenantId) {
   const prefix = "PRD";
@@ -24,6 +38,60 @@ async function generateProductCode(client, tenantId) {
     if (result.rowCount === 0) return candidate;
   }
   return `${prefix}-${Date.now().toString(36).toUpperCase()}`;
+}
+
+async function ensureStyleVariantHierarchyLink(client, {
+  tenantId,
+  parentProductId,
+  childProductId
+}) {
+  if (!parentProductId || !childProductId) return null;
+  if (String(parentProductId) === String(childProductId)) {
+    return { ok: false, error: "STYLE_VARIANT_PARENT_INVALID" };
+  }
+
+  const parent = await client.query(
+    `SELECT id FROM eip_core.material
+     WHERE tenant_id=$1 AND id=$2 AND material_type=$3 LIMIT 1`,
+    [tenantId, parentProductId, MATERIAL_TYPE]
+  );
+  if (!parent.rowCount) return { ok: false, error: "STYLE_MASTER_NOT_FOUND" };
+
+  const existing = await client.query(
+    `SELECT id
+     FROM eip_core.object_link
+     WHERE tenant_id=$1
+       AND src_kind='material'
+       AND src_id=$2
+       AND dst_kind='material'
+       AND dst_id=$3
+       AND relation_type=$4
+       AND is_active=true
+     LIMIT 1`,
+    [tenantId, childProductId, parentProductId, PERFECT_FIT_STYLE_VARIANT_RELATION]
+  );
+  if (existing.rowCount) {
+    return { ok: true, reused: true, link_id: existing.rows[0].id };
+  }
+
+  const link = await client.query(
+    `INSERT INTO eip_core.object_link
+      (tenant_id, src_kind, src_id, dst_kind, dst_id, relation_type, attrs)
+     VALUES ($1,'material',$2,'material',$3,$4,$5::jsonb)
+     RETURNING id`,
+    [
+      tenantId,
+      childProductId,
+      parentProductId,
+      PERFECT_FIT_STYLE_VARIANT_RELATION,
+      JSON.stringify({
+        authority: "PERFECT_FIT_PRODUCT_DEVELOPMENT",
+        hierarchy_level: PRODUCT_LEVEL_STYLE_VARIANT,
+        delete_behavior: "UNLINK_ONLY"
+      })
+    ]
+  );
+  return { ok: true, reused: false, link_id: link.rows[0]?.id || null };
 }
 
 export async function loadPerfectFitProductLink(client, tenantId, materialId) {
@@ -199,6 +267,7 @@ export async function listPerfectFitProducts(db, { tenantId, query = "", limit =
     id: row.id,
     code: row.code,
     title: row.title,
+    product_level: row.attrs?.product_hierarchy?.level || null,
     shared_metadata: extractEipSharedMetadata(row),
     created_at: row.created_at,
     updated_at: row.updated_at
@@ -220,6 +289,7 @@ export async function getPerfectFitProduct(db, { tenantId, productId }) {
       id: row.id,
       code: row.code,
       title: row.title,
+      product_level: row.attrs?.product_hierarchy?.level || null,
       shared_metadata: extractEipSharedMetadata(row),
       created_at: row.created_at,
       updated_at: row.updated_at
@@ -275,12 +345,18 @@ export async function registerPerfectFitProduct(db, {
   tenantId,
   actorIdentityId,
   perfectFit,
-  sharedMetadata
+  sharedMetadata,
+  hierarchy = null
 }) {
   const normalized = normalizePerfectFitIdentity(perfectFit);
   if (!normalized.ok) return { ...normalized, status: 400 };
   const shared = normalizeSharedMetadata(sharedMetadata);
   if (!shared.product_name) return { ok: false, status: 400, error: "PRODUCT_NAME_REQUIRED" };
+  const hierarchyLevel = normalizeProductLevel(hierarchy?.level, normalized.identity);
+  const parentProductId = hierarchyLevel === PRODUCT_LEVEL_STYLE_VARIANT
+    ? hierarchy?.parent_product_id || hierarchy?.parentProductId || null
+    : null;
+
   return withTransaction(db, async (client) => {
     const existing = await client.query(
       `SELECT ol.src_id AS material_id
@@ -292,13 +368,43 @@ export async function registerPerfectFitProduct(db, {
       [tenantId, PERFECT_FIT_LINK_RECORD_TYPE, PERFECT_FIT_LINK_RELATION, normalized.identity.pf_product_id]
     );
     if (existing.rowCount) {
-      return { ok: true, reused: true, product_id: existing.rows[0].material_id };
+      const productId = existing.rows[0].material_id;
+      await client.query(
+        `UPDATE eip_core.material
+         SET attrs = jsonb_set(
+               COALESCE(attrs, '{}'::jsonb),
+               '{product_hierarchy,level}',
+               to_jsonb($3::text),
+               true
+             ),
+             updated_at=now()
+         WHERE tenant_id=$1 AND id=$2 AND material_type=$4`,
+        [tenantId, productId, hierarchyLevel, MATERIAL_TYPE]
+      );
+      let hierarchyLink = null;
+      if (parentProductId) {
+        hierarchyLink = await ensureStyleVariantHierarchyLink(client, {
+          tenantId,
+          parentProductId,
+          childProductId: productId
+        });
+        if (hierarchyLink?.ok === false) return hierarchyLink;
+      }
+      return {
+        ok: true,
+        reused: true,
+        product_id: productId,
+        product_level: hierarchyLevel,
+        hierarchy_link: hierarchyLink
+      };
     }
+
     const code = await generateProductCode(client, tenantId);
     const attrs = {
       content: { summary: shared.description },
       taxonomy: { brand: shared.brand },
       workflow: { integration_origin: "PERFECT_FIT" },
+      product_hierarchy: { level: hierarchyLevel },
       integration: { perfect_fit: { registered_at: new Date().toISOString() } }
     };
     const material = await client.query(
@@ -316,7 +422,107 @@ export async function registerPerfectFitProduct(db, {
       actorIdentityId
     });
     if (!attached.ok) return attached;
-    return { ok: true, status: 201, item: material.rows[0], link: attached.link };
+
+    let hierarchyLink = null;
+    if (parentProductId) {
+      hierarchyLink = await ensureStyleVariantHierarchyLink(client, {
+        tenantId,
+        parentProductId,
+        childProductId: material.rows[0].id
+      });
+      if (hierarchyLink?.ok === false) return hierarchyLink;
+    }
+
+    return {
+      ok: true,
+      status: 201,
+      item: material.rows[0],
+      product_level: hierarchyLevel,
+      hierarchy_link: hierarchyLink,
+      link: attached.link
+    };
+  });
+}
+
+function normalizeSizeVariantRows(sizeVariants = []) {
+  return (Array.isArray(sizeVariants) ? sizeVariants : [])
+    .map((item, index) => {
+      const sourceId = String(item?.id || item?.code || `size-${index + 1}`).trim();
+      const size = String(item?.size || item?.label || item?.code || sourceId).trim();
+      if (!sourceId || !size) return null;
+      return {
+        id: `pf:${sourceId}`,
+        size,
+        active: item?.active !== false,
+        stock_qty: null,
+        price_delta: null,
+        hasData: true
+      };
+    })
+    .filter(Boolean);
+}
+
+export async function syncPerfectFitSizeVariants(db, {
+  tenantId,
+  productId,
+  sizeVariants
+}) {
+  const incoming = normalizeSizeVariantRows(sizeVariants);
+  return withTransaction(db, async (client) => {
+    const material = await client.query(
+      `SELECT id, attrs
+       FROM eip_core.material
+       WHERE tenant_id=$1 AND id=$2 AND material_type=$3
+       FOR UPDATE`,
+      [tenantId, productId, MATERIAL_TYPE]
+    );
+    if (!material.rowCount) return { ok: false, status: 404, error: "NOT_FOUND" };
+
+    const attrs = material.rows[0].attrs && typeof material.rows[0].attrs === "object"
+      ? { ...material.rows[0].attrs }
+      : {};
+    const variants = attrs.variants && typeof attrs.variants === "object"
+      ? { ...attrs.variants }
+      : {};
+    const headers = Array.isArray(variants.headers) ? [...variants.headers] : [];
+    if (!headers.some((header) => String(header?.key || "").toLowerCase() === "size")) {
+      headers.unshift({ key: "size", label: "Size" });
+    }
+
+    const existingItems = Array.isArray(variants.items) ? [...variants.items] : [];
+    const existingById = new Map(existingItems.map((item) => [String(item?.id || ""), item]));
+    const incomingIds = new Set(incoming.map((item) => item.id));
+    const mergedPfItems = incoming.map((item) => {
+      const previous = existingById.get(item.id) || {};
+      return {
+        ...previous,
+        ...item,
+        stock_qty: previous.stock_qty ?? item.stock_qty,
+        price_delta: previous.price_delta ?? item.price_delta,
+        active: previous.active === false ? false : item.active
+      };
+    });
+    const preservedEipItems = existingItems.filter((item) => !incomingIds.has(String(item?.id || "")));
+
+    attrs.variants = {
+      ...variants,
+      enabled: incoming.length > 0 || variants.enabled === true,
+      headers,
+      items: [...mergedPfItems, ...preservedEipItems]
+    };
+
+    await client.query(
+      `UPDATE eip_core.material SET attrs=$3::jsonb, updated_at=now()
+       WHERE tenant_id=$1 AND id=$2`,
+      [tenantId, productId, JSON.stringify(attrs)]
+    );
+
+    return {
+      ok: true,
+      product_id: productId,
+      synced_size_count: incoming.length,
+      preserved_eip_variant_count: preservedEipItems.length
+    };
   });
 }
 
@@ -416,4 +622,8 @@ export async function unlinkPerfectFitProduct(db, { tenantId, productId }) {
   });
 }
 
-export { PERFECT_FIT_SHARED_FIELD_POLICIES };
+export {
+  PERFECT_FIT_SHARED_FIELD_POLICIES,
+  PRODUCT_LEVEL_STYLE_MASTER,
+  PRODUCT_LEVEL_STYLE_VARIANT
+};
