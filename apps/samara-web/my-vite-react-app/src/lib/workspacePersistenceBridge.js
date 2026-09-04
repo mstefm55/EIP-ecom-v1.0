@@ -8,7 +8,6 @@ import {
   eipApiAdapter,
   isEipApiConfigured
 } from './eipApiAdapter';
-import { productIntegrationService } from './productIntegrationService';
 import { buildPerfectFitFieldManifest } from './perfectFitManifest';
 
 const CACHE_OWNER_KEY = 'perfectfit_workspace_cache_owner_v1';
@@ -51,46 +50,6 @@ function emitPersistence(detail) {
   } catch {}
 }
 
-function collectLinkedVariants(workspace) {
-  const linked = [];
-
-  for (const project of workspace?.projects || []) {
-    if (project?.nodeType !== 'project') continue;
-    for (const style of project.children || []) {
-      if (style?.nodeType !== 'product') continue;
-      for (const variant of style.children || []) {
-        if (variant?.nodeType !== 'variant') continue;
-        const productId = variant?.integration?.eip?.productId;
-        if (!productId) continue;
-        linked.push({ productId, project, style, variant });
-      }
-    }
-  }
-
-  return linked;
-}
-
-async function syncLinkedEnterpriseProducts(workspace) {
-  const results = [];
-  for (const item of collectLinkedVariants(workspace)) {
-    try {
-      const result = await productIntegrationService.sync(item.productId, item);
-      results.push({
-        productId: item.productId,
-        ok: true,
-        conflicts: result?.conflicts || []
-      });
-    } catch (error) {
-      results.push({
-        productId: item.productId,
-        ok: false,
-        error: error?.message || String(error)
-      });
-    }
-  }
-  return results;
-}
-
 async function reconcileWorkspaceManifest(workspace) {
   if (!isWorkspaceDocument(workspace) || !isEipApiConfigured()) return null;
   try {
@@ -106,7 +65,7 @@ async function reconcileWorkspaceManifest(workspace) {
     });
     return lastManifestReport;
   } catch (error) {
-    // Mapping discovery must never make the lossless Perfect Fit save fail.
+    // Mapping discovery must never make the lossless Perfect Fit load fail.
     console.error('[PerfectFit manifest coordinator] reconcile failed', error);
     emitPersistence({
       state: 'manifest_warning',
@@ -136,30 +95,41 @@ async function saveWorkspaceRemotely(workspace, { alreadyStaged = false } = {}) 
   emitPersistence({ state: 'saving' });
 
   try {
-    const result = await eipApiAdapter.saveWorkspace(workspace);
+    const clientManifest = buildPerfectFitFieldManifest({
+      metadata: perfectFitMetadata,
+      workspace
+    });
+
+    // EIP performs both the lossless PF snapshot and the governed enterprise
+    // projection. React never chooses a table, column or JSONB path.
+    const result = await eipApiAdapter.saveWorkspace(workspace, clientManifest);
     if (result?.identity_id && typeof window !== 'undefined') {
       window.localStorage.setItem(CACHE_OWNER_KEY, String(result.identity_id));
       window.localStorage.setItem(PENDING_OWNER_KEY, String(result.identity_id));
     }
 
-    // The manifest coordinator translates PF field identities into governed EIP
-    // targets. It is intentionally separate from the lossless workspace snapshot.
-    const manifestReport = await reconcileWorkspaceManifest(workspace);
+    if (result?.manifest_summary) {
+      lastManifestReport = {
+        ...(lastManifestReport || {}),
+        summary: result.manifest_summary
+      };
+    }
 
-    // Transitional projection path for already-linked enterprise products. This
-    // will be replaced by the manifest-driven projection executor in the next wave.
-    const enterpriseSync = await syncLinkedEnterpriseProducts(workspace);
-    const failedSyncs = enterpriseSync.filter((item) => !item.ok);
-    const conflicts = enterpriseSync.flatMap((item) => item.conflicts || []);
+    const projection = result?.enterprise_projection || null;
+    const projectionWarnings = Array.isArray(projection?.products)
+      ? projection.products.filter((item) => !item?.ok)
+      : [];
 
     clearPendingWorkspace();
     emitPersistence({
-      state: failedSyncs.length ? 'saved_with_sync_warning' : 'saved',
+      state: projection?.ok === false && projection?.skipped !== true
+        ? 'saved_with_projection_warning'
+        : 'saved',
       revision: result?.revision || 0,
       savedAt: result?.saved_at || null,
-      failedSyncs,
-      conflicts,
-      manifestSummary: manifestReport?.summary || null
+      manifestSummary: result?.manifest_summary || null,
+      enterpriseProjection: projection,
+      projectionWarnings
     });
     return result;
   } catch (error) {
@@ -231,7 +201,8 @@ async function hydrateWorkspaceFromEip({
         state: 'hydrated',
         revision: result?.revision || 0,
         updatedAt: result?.updated_at || null,
-        manifestSummary: lastManifestReport?.summary || null
+        manifestSummary: lastManifestReport?.summary || null,
+        projectionSummary: result?.projection_summary || null
       });
 
       if (reloadAfterHydrate) {
