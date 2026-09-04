@@ -7,7 +7,16 @@ const configuredEndpoint = canonicalEndpoint || legacyDevelopmentEndpoint;
 const connectionApiKey = String(env.VITE_EIP_API_KEY || '').trim();
 let memberCsrfToken = '';
 
+export const EIP_MEMBER_AUTH_CHANGED_EVENT = 'perfectfit:eip-member-auth-changed';
+
 export const isEipApiConfigured = () => Boolean(configuredEndpoint && connectionApiKey);
+
+function emitMemberAuthChanged(detail = {}) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.dispatchEvent(new CustomEvent(EIP_MEMBER_AUTH_CHANGED_EVENT, { detail }));
+  } catch {}
+}
 
 function rememberMemberCsrf(payload) {
   if (payload?.csrf_token) memberCsrfToken = String(payload.csrf_token);
@@ -127,7 +136,11 @@ export const eipMemberAuth = Object.freeze({
         metadata: { username, requested_role: role }
       }
     });
-    return enrichPerfectFitMember(payload);
+    const enriched = await enrichPerfectFitMember(payload);
+    if (enriched?.member) {
+      emitMemberAuthChanged({ authenticated: true, member: enriched.member });
+    }
+    return enriched;
   },
   verify: async ({ challengeId, token } = {}) => {
     const payload = await request('/member/auth/verify', {
@@ -135,7 +148,11 @@ export const eipMemberAuth = Object.freeze({
       memberCsrf: false,
       body: { challenge_id: challengeId, token }
     });
-    return enrichPerfectFitMember(payload);
+    const enriched = await enrichPerfectFitMember(payload);
+    if (enriched?.member) {
+      emitMemberAuthChanged({ authenticated: true, member: enriched.member });
+    }
+    return enriched;
   },
   me: () => refreshMemberSession(),
   forgotPassword: ({ email } = {}) => request('/member/auth/password/forgot', {
@@ -151,6 +168,7 @@ export const eipMemberAuth = Object.freeze({
   logout: async () => {
     const result = await request('/member/auth/logout', { method: 'POST' });
     memberCsrfToken = '';
+    emitMemberAuthChanged({ authenticated: false });
     return result;
   }
 });
@@ -163,5 +181,11 @@ export const eipApiAdapter = Object.freeze({
   registerProduct: (body) => request('/perfect-fit/products/register', { method: 'POST', body, idempotent: true }),
   linkProduct: (productId, body) => request(`/perfect-fit/products/${encodeURIComponent(productId)}/link`, { method: 'POST', body, idempotent: true }),
   syncProduct: (productId, body) => request(`/perfect-fit/products/${encodeURIComponent(productId)}/sync`, { method: 'POST', body, idempotent: true }),
-  unlinkProduct: (productId) => request(`/perfect-fit/products/${encodeURIComponent(productId)}/link`, { method: 'DELETE', idempotent: true })
+  unlinkProduct: (productId) => request(`/perfect-fit/products/${encodeURIComponent(productId)}/link`, { method: 'DELETE', idempotent: true }),
+  loadWorkspace: () => request('/perfect-fit/workspace'),
+  saveWorkspace: (workspace) => request('/perfect-fit/workspace', {
+    method: 'PUT',
+    body: { workspace },
+    idempotent: true
+  })
 });
