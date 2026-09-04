@@ -8,7 +8,7 @@ import {
   eipApiAdapter,
   isEipApiConfigured
 } from './eipApiAdapter';
-import { buildPerfectFitFieldContract } from './perfectFitFieldContract';
+import { buildPerfectFitManifestContract } from './perfectFitFieldContract';
 
 const CACHE_OWNER_KEY = 'perfectfit_workspace_cache_owner_v1';
 const PENDING_WORKSPACE_KEY = 'perfectfit_workspace_remote_pending_v1';
@@ -69,8 +69,8 @@ async function saveWorkspaceRemotely(workspace, { alreadyStaged = false } = {}) 
   emitPersistence({ state: 'saving' });
 
   try {
-    const fieldContract = buildPerfectFitFieldContract(perfectFitMetadata);
-    const result = await eipApiAdapter.saveWorkspace(workspace, fieldContract);
+    const manifestContract = buildPerfectFitManifestContract(perfectFitMetadata);
+    const result = await eipApiAdapter.saveWorkspace(workspace, manifestContract);
     if (result?.identity_id && typeof window !== 'undefined') {
       window.localStorage.setItem(CACHE_OWNER_KEY, String(result.identity_id));
       window.localStorage.setItem(PENDING_OWNER_KEY, String(result.identity_id));
@@ -89,6 +89,7 @@ async function saveWorkspaceRemotely(workspace, { alreadyStaged = false } = {}) 
       revision: result?.revision || 0,
       savedAt: result?.saved_at || null,
       enterpriseProjection: projection,
+      manifestAudit: result?.manifest_audit || null,
       fieldResolution: projection?.field_resolution?.summary || null,
       projectionWarnings
     });
