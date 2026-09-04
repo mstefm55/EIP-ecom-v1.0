@@ -8,7 +8,7 @@ import {
   eipApiAdapter,
   isEipApiConfigured
 } from './eipApiAdapter';
-import { productIntegrationService } from './productIntegrationService';
+import { buildPerfectFitFieldContract } from './perfectFitFieldContract';
 
 const CACHE_OWNER_KEY = 'perfectfit_workspace_cache_owner_v1';
 const PENDING_WORKSPACE_KEY = 'perfectfit_workspace_remote_pending_v1';
@@ -49,46 +49,6 @@ function emitPersistence(detail) {
   } catch {}
 }
 
-function collectLinkedVariants(workspace) {
-  const linked = [];
-
-  for (const project of workspace?.projects || []) {
-    if (project?.nodeType !== 'project') continue;
-    for (const style of project.children || []) {
-      if (style?.nodeType !== 'product') continue;
-      for (const variant of style.children || []) {
-        if (variant?.nodeType !== 'variant') continue;
-        const productId = variant?.integration?.eip?.productId;
-        if (!productId) continue;
-        linked.push({ productId, project, style, variant });
-      }
-    }
-  }
-
-  return linked;
-}
-
-async function syncLinkedEnterpriseProducts(workspace) {
-  const results = [];
-  for (const item of collectLinkedVariants(workspace)) {
-    try {
-      const result = await productIntegrationService.sync(item.productId, item);
-      results.push({
-        productId: item.productId,
-        ok: true,
-        conflicts: result?.conflicts || []
-      });
-    } catch (error) {
-      results.push({
-        productId: item.productId,
-        ok: false,
-        error: error?.message || String(error)
-      });
-    }
-  }
-  return results;
-}
-
 function stagePendingWorkspace(workspace) {
   if (typeof window === 'undefined' || !isWorkspaceDocument(workspace)) return;
   window.localStorage.setItem(PENDING_WORKSPACE_KEY, JSON.stringify(workspace));
@@ -109,23 +69,28 @@ async function saveWorkspaceRemotely(workspace, { alreadyStaged = false } = {}) 
   emitPersistence({ state: 'saving' });
 
   try {
-    const result = await eipApiAdapter.saveWorkspace(workspace);
+    const fieldContract = buildPerfectFitFieldContract(perfectFitMetadata);
+    const result = await eipApiAdapter.saveWorkspace(workspace, fieldContract);
     if (result?.identity_id && typeof window !== 'undefined') {
       window.localStorage.setItem(CACHE_OWNER_KEY, String(result.identity_id));
       window.localStorage.setItem(PENDING_OWNER_KEY, String(result.identity_id));
     }
 
-    const enterpriseSync = await syncLinkedEnterpriseProducts(workspace);
-    const failedSyncs = enterpriseSync.filter((item) => !item.ok);
-    const conflicts = enterpriseSync.flatMap((item) => item.conflicts || []);
+    const projection = result?.enterprise_projection || null;
+    const projectionWarnings = Array.isArray(projection?.products)
+      ? projection.products.filter((item) => item?.ok !== true)
+      : [];
 
     clearPendingWorkspace();
     emitPersistence({
-      state: failedSyncs.length ? 'saved_with_sync_warning' : 'saved',
+      state: projection?.ok === false && projection?.skipped !== true
+        ? 'saved_with_projection_warning'
+        : 'saved',
       revision: result?.revision || 0,
       savedAt: result?.saved_at || null,
-      failedSyncs,
-      conflicts
+      enterpriseProjection: projection,
+      fieldResolution: projection?.field_resolution?.summary || null,
+      projectionWarnings
     });
     return result;
   } catch (error) {
