@@ -187,5 +187,10 @@ export const eipApiAdapter = Object.freeze({
     method: 'PUT',
     body: { workspace },
     idempotent: true
+  }),
+  getPerfectFitManifest: () => request('/perfect-fit/manifest'),
+  reconcilePerfectFitManifest: (manifest) => request('/perfect-fit/manifest/reconcile', {
+    method: 'POST',
+    body: { manifest }
   })
 });
