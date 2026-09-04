@@ -69,9 +69,10 @@ test("public preflight registers the Perfect Fit workspace routes", () => {
   assert.doesNotMatch(preflightSource, /registerPublicPerfectFitManifestRoutes/);
 });
 
-test("browser adapter persists workspace only through the public gateway", () => {
+test("browser adapter persists workspace and metadata contract only through the public gateway", () => {
   assert.match(adapterSource, /loadWorkspace:\s*\(\)\s*=>\s*request\('\/perfect-fit\/workspace'\)/);
   assert.match(adapterSource, /saveWorkspace:[\s\S]*request\('\/perfect-fit\/workspace'/);
+  assert.match(adapterSource, /manifest_contract/);
   assert.match(adapterSource, /field_contract/);
   assert.doesNotMatch(adapterSource, /\/api\/eip\//);
 });
@@ -81,14 +82,19 @@ test("workspace bridge hydrates before render and keeps a replayable pending sna
   assert.match(bridgeSource, /PENDING_WORKSPACE_KEY/);
   assert.match(bridgeSource, /saveWorkspaceRemotely/);
   assert.match(bridgeSource, /domain !== 'workspace'/);
-  assert.match(bridgeSource, /buildPerfectFitFieldContract/);
+  assert.match(bridgeSource, /buildPerfectFitManifestContract/);
   assert.doesNotMatch(bridgeSource, /syncLinkedEnterpriseProducts/);
 });
 
-test("field contract is serialized from existing PF metadata without DB storage knowledge", () => {
-  assert.match(fieldContractSource, /workspace\.fields/);
+test("manifest contract is derived from existing PF metadata without DB storage knowledge", () => {
+  assert.match(fieldContractSource, /buildPerfectFitManifestContract/);
+  assert.match(fieldContractSource, /collectDeclaredFields/);
+  assert.match(fieldContractSource, /workspace\?\.dropdowns/);
+  assert.match(fieldContractSource, /workspace\?\.structure/);
   assert.match(fieldContractSource, /field\?\.eipV1Target/);
   assert.match(fieldContractSource, /field\?\.governanceList/);
+  assert.match(fieldContractSource, /STYLE_VARIANT/);
+  assert.match(fieldContractSource, /SIZE_VARIANT/);
   assert.doesNotMatch(fieldContractSource, /eip_core\./);
   assert.doesNotMatch(fieldContractSource, /material\.name/);
 });
