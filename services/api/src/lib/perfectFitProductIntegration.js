@@ -1,5 +1,6 @@
 export const PERFECT_FIT_LINK_RECORD_TYPE = "PERFECT_FIT_PRODUCT_LINK";
 export const PERFECT_FIT_LINK_RELATION = "PERFECT_FIT_PRODUCT";
+export const PERFECT_FIT_STYLE_VARIANT_RELATION = "STYLE_VARIANT_OF";
 
 export const PERFECT_FIT_SHARED_FIELD_POLICIES = Object.freeze({
   product_name: "LATEST_ACCEPTED",
@@ -20,12 +21,22 @@ function optionalText(value, maxLength = 5000) {
   return normalized ? normalized.slice(0, maxLength) : null;
 }
 
+function normalizeEntityLevel(value, variantId) {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (normalized === "STYLE" || normalized === "STYLE_MASTER") return "STYLE";
+  if (normalized === "STYLE_VARIANT" || normalized === "VARIANT") return "STYLE_VARIANT";
+  return variantId ? "STYLE_VARIANT" : "STYLE";
+}
+
 export function normalizePerfectFitIdentity(input = {}) {
+  const variantId = optionalText(input.variant_id, 240);
+  const entityLevel = normalizeEntityLevel(input.entity_level, variantId);
   const identity = {
+    entity_level: entityLevel,
     pf_product_id: optionalText(input.pf_product_id, 240),
     project_id: optionalText(input.project_id, 240),
     style_id: optionalText(input.style_id, 240),
-    variant_id: optionalText(input.variant_id, 240),
+    variant_id: variantId,
     project_code: optionalText(input.project_code, 160),
     style_code: optionalText(input.style_code, 160),
     variant_code: optionalText(input.variant_code, 160),
@@ -34,8 +45,14 @@ export function normalizePerfectFitIdentity(input = {}) {
       : [],
     workspace_url: optionalText(input.workspace_url, 2000)
   };
-  if (!identity.pf_product_id || !identity.variant_id) {
+  if (!identity.pf_product_id) {
     return { ok: false, error: "PERFECT_FIT_STABLE_ID_REQUIRED" };
+  }
+  if (entityLevel === "STYLE" && !identity.style_id) {
+    return { ok: false, error: "PERFECT_FIT_STYLE_ID_REQUIRED" };
+  }
+  if (entityLevel === "STYLE_VARIANT" && !identity.variant_id) {
+    return { ok: false, error: "PERFECT_FIT_VARIANT_ID_REQUIRED" };
   }
   return { ok: true, identity };
 }
@@ -132,7 +149,7 @@ export function buildPerfectFitLinkPayload({ identity, sharedMetadata, origin, a
   const now = new Date().toISOString();
   return {
     ...existing,
-    schema_version: 1,
+    schema_version: 2,
     origin: String(origin || existing.origin || "LINKED").toUpperCase(),
     perfect_fit: { ...identity },
     shared_snapshot: {
