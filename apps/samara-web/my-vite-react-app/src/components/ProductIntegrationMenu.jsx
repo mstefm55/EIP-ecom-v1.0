@@ -41,13 +41,23 @@ export default function ProductIntegrationMenu({
   }, []);
 
   const handledIntentRef = useRef('');
-  const storedProductId = variant?.integration?.eip?.productId || '';
 
   useEffect(() => {
     let active = true;
 
     const run = async () => {
-      if (!variant || !productIntegrationService.isConfigured()) return;
+      if (
+        !variant ||
+        !queryIntent.intent ||
+        !queryIntent.productId ||
+        !productIntegrationService.isConfigured()
+      ) {
+        return;
+      }
+
+      const intentKey = `${queryIntent.intent}:${queryIntent.productId}`;
+      if (handledIntentRef.current === intentKey) return;
+      handledIntentRef.current = intentKey;
 
       let capability;
       try {
@@ -55,38 +65,10 @@ export default function ProductIntegrationMenu({
       } catch {
         return;
       }
-      if (!active || !capability?.available) return;
-
-      // Restore a known link silently. Save-time synchronization is handled by
-      // workspacePersistenceBridge, so there is no manual Sync action here.
-      if (storedProductId && capability.can_read) {
-        try {
-          const data = await productIntegrationService.getIntegration(storedProductId);
-          if (active && data?.link) {
-            onIntegrationChange?.({
-              ...data.link,
-              eip_product_id: storedProductId,
-              status: data.link.status || 'LINKED'
-            });
-          }
-        } catch {
-          // A missing/retired enterprise link must not block Perfect Fit editing.
-        }
-      }
-
-      const intentKey = `${queryIntent.intent}:${queryIntent.productId}`;
-      if (
-        !queryIntent.intent ||
-        !queryIntent.productId ||
-        handledIntentRef.current === intentKey
-      ) {
-        return;
-      }
-      handledIntentRef.current = intentKey;
+      if (!active || !capability?.available || !capability.can_link) return;
 
       try {
         if (queryIntent.intent === 'create-workspace') {
-          if (!capability.can_link) return;
           const productResult = await productIntegrationService.getIntegration(
             queryIntent.productId
           );
@@ -116,7 +98,6 @@ export default function ProductIntegrationMenu({
         }
 
         if (queryIntent.intent === 'link-existing') {
-          if (!capability.can_link) return;
           const linked = await productIntegrationService.link(
             queryIntent.productId,
             { project, style, variant },
@@ -143,7 +124,6 @@ export default function ProductIntegrationMenu({
     project,
     style,
     variant,
-    storedProductId,
     queryIntent.intent,
     queryIntent.productId,
     onCreateFromEip,
