@@ -88,7 +88,6 @@ async function loadDropdownGovernance(db, tenantId, dropdowns) {
            dl.version,
            dl.tenant_id,
            dv.code AS value_code,
-           dv.parent_id,
            dv.sort_order
     FROM eip_core.dropdown_list dl
     LEFT JOIN eip_core.dropdown_value dv
