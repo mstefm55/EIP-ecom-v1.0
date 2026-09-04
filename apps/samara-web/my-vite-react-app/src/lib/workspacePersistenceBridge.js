@@ -9,6 +9,7 @@ import {
   isEipApiConfigured
 } from './eipApiAdapter';
 import { productIntegrationService } from './productIntegrationService';
+import { buildPerfectFitFieldManifest } from './perfectFitManifest';
 
 const CACHE_OWNER_KEY = 'perfectfit_workspace_cache_owner_v1';
 const PENDING_WORKSPACE_KEY = 'perfectfit_workspace_remote_pending_v1';
@@ -16,6 +17,7 @@ const PENDING_OWNER_KEY = 'perfectfit_workspace_remote_pending_owner_v1';
 const PERSISTENCE_EVENT = 'perfectfit:workspace-persistence';
 let initialized = false;
 let hydrating = false;
+let lastManifestReport = null;
 
 function workspaceStorageKey() {
   return (
@@ -89,6 +91,31 @@ async function syncLinkedEnterpriseProducts(workspace) {
   return results;
 }
 
+async function reconcileWorkspaceManifest(workspace) {
+  if (!isWorkspaceDocument(workspace) || !isEipApiConfigured()) return null;
+  try {
+    const clientManifest = buildPerfectFitFieldManifest({
+      metadata: perfectFitMetadata,
+      workspace
+    });
+    const result = await eipApiAdapter.reconcilePerfectFitManifest(clientManifest);
+    lastManifestReport = result?.manifest || null;
+    emitPersistence({
+      state: 'manifest_reconciled',
+      manifestSummary: lastManifestReport?.summary || null
+    });
+    return lastManifestReport;
+  } catch (error) {
+    // Mapping discovery must never make the lossless Perfect Fit save fail.
+    console.error('[PerfectFit manifest coordinator] reconcile failed', error);
+    emitPersistence({
+      state: 'manifest_warning',
+      error: error?.message || String(error)
+    });
+    return null;
+  }
+}
+
 function stagePendingWorkspace(workspace) {
   if (typeof window === 'undefined' || !isWorkspaceDocument(workspace)) return;
   window.localStorage.setItem(PENDING_WORKSPACE_KEY, JSON.stringify(workspace));
@@ -115,6 +142,12 @@ async function saveWorkspaceRemotely(workspace, { alreadyStaged = false } = {}) 
       window.localStorage.setItem(PENDING_OWNER_KEY, String(result.identity_id));
     }
 
+    // The manifest coordinator translates PF field identities into governed EIP
+    // targets. It is intentionally separate from the lossless workspace snapshot.
+    const manifestReport = await reconcileWorkspaceManifest(workspace);
+
+    // Transitional projection path for already-linked enterprise products. This
+    // will be replaced by the manifest-driven projection executor in the next wave.
     const enterpriseSync = await syncLinkedEnterpriseProducts(workspace);
     const failedSyncs = enterpriseSync.filter((item) => !item.ok);
     const conflicts = enterpriseSync.flatMap((item) => item.conflicts || []);
@@ -125,7 +158,8 @@ async function saveWorkspaceRemotely(workspace, { alreadyStaged = false } = {}) 
       revision: result?.revision || 0,
       savedAt: result?.saved_at || null,
       failedSyncs,
-      conflicts
+      conflicts,
+      manifestSummary: manifestReport?.summary || null
     });
     return result;
   } catch (error) {
@@ -192,10 +226,12 @@ async function hydrateWorkspaceFromEip({
     if (isWorkspaceDocument(remoteWorkspace)) {
       window.localStorage.setItem(key, JSON.stringify(remoteWorkspace));
       if (identityId) window.localStorage.setItem(CACHE_OWNER_KEY, identityId);
+      await reconcileWorkspaceManifest(remoteWorkspace);
       emitPersistence({
         state: 'hydrated',
         revision: result?.revision || 0,
-        updatedAt: result?.updated_at || null
+        updatedAt: result?.updated_at || null,
+        manifestSummary: lastManifestReport?.summary || null
       });
 
       if (reloadAfterHydrate) {
@@ -267,6 +303,7 @@ export async function initializePerfectFitWorkspacePersistence() {
       window.localStorage.removeItem(workspaceStorageKey());
       window.localStorage.removeItem(CACHE_OWNER_KEY);
       clearPendingWorkspace();
+      lastManifestReport = null;
       emitPersistence({ state: 'signed_out' });
       return;
     }
@@ -276,6 +313,10 @@ export async function initializePerfectFitWorkspacePersistence() {
       reloadAfterHydrate: true
     }).catch(() => {});
   });
+}
+
+export function getPerfectFitManifestReport() {
+  return lastManifestReport;
 }
 
 export { PERSISTENCE_EVENT as PERFECT_FIT_WORKSPACE_PERSISTENCE_EVENT };
