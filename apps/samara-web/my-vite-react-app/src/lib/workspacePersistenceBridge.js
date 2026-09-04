@@ -11,6 +11,8 @@ import {
 import { productIntegrationService } from './productIntegrationService';
 
 const CACHE_OWNER_KEY = 'perfectfit_workspace_cache_owner_v1';
+const PENDING_WORKSPACE_KEY = 'perfectfit_workspace_remote_pending_v1';
+const PENDING_OWNER_KEY = 'perfectfit_workspace_remote_pending_owner_v1';
 const PERSISTENCE_EVENT = 'perfectfit:workspace-persistence';
 let initialized = false;
 let hydrating = false;
@@ -87,20 +89,37 @@ async function syncLinkedEnterpriseProducts(workspace) {
   return results;
 }
 
-async function saveWorkspaceRemotely(workspace) {
+function stagePendingWorkspace(workspace) {
+  if (typeof window === 'undefined' || !isWorkspaceDocument(workspace)) return;
+  window.localStorage.setItem(PENDING_WORKSPACE_KEY, JSON.stringify(workspace));
+  const owner = String(window.localStorage.getItem(CACHE_OWNER_KEY) || '');
+  if (owner) window.localStorage.setItem(PENDING_OWNER_KEY, owner);
+}
+
+function clearPendingWorkspace() {
+  if (typeof window === 'undefined') return;
+  window.localStorage.removeItem(PENDING_WORKSPACE_KEY);
+  window.localStorage.removeItem(PENDING_OWNER_KEY);
+}
+
+async function saveWorkspaceRemotely(workspace, { alreadyStaged = false } = {}) {
   if (!isWorkspaceDocument(workspace) || !isEipApiConfigured()) return null;
 
+  if (!alreadyStaged) stagePendingWorkspace(workspace);
   emitPersistence({ state: 'saving' });
+
   try {
     const result = await eipApiAdapter.saveWorkspace(workspace);
     if (result?.identity_id && typeof window !== 'undefined') {
       window.localStorage.setItem(CACHE_OWNER_KEY, String(result.identity_id));
+      window.localStorage.setItem(PENDING_OWNER_KEY, String(result.identity_id));
     }
 
     const enterpriseSync = await syncLinkedEnterpriseProducts(workspace);
     const failedSyncs = enterpriseSync.filter((item) => !item.ok);
     const conflicts = enterpriseSync.flatMap((item) => item.conflicts || []);
 
+    clearPendingWorkspace();
     emitPersistence({
       state: failedSyncs.length ? 'saved_with_sync_warning' : 'saved',
       revision: result?.revision || 0,
@@ -110,6 +129,9 @@ async function saveWorkspaceRemotely(workspace) {
     });
     return result;
   } catch (error) {
+    // Keep the pending snapshot in localStorage. The next authenticated page load
+    // replays it before accepting an older remote snapshot, preventing a reload
+    // immediately after Save from discarding the designer's latest work.
     emitPersistence({
       state: 'error',
       error: error?.message || String(error)
@@ -139,6 +161,33 @@ async function hydrateWorkspaceFromEip({
     const remoteWorkspace = result?.workspace;
     const localWorkspace = safeParse(window.localStorage.getItem(key));
     const cachedOwner = String(window.localStorage.getItem(CACHE_OWNER_KEY) || '');
+    const pendingWorkspace = safeParse(
+      window.localStorage.getItem(PENDING_WORKSPACE_KEY)
+    );
+    const pendingOwner = String(
+      window.localStorage.getItem(PENDING_OWNER_KEY) || ''
+    );
+
+    if (
+      isWorkspaceDocument(pendingWorkspace) &&
+      (!pendingOwner || !identityId || pendingOwner === identityId)
+    ) {
+      const replayed = await saveWorkspaceRemotely(pendingWorkspace, {
+        alreadyStaged: true
+      });
+      window.localStorage.setItem(key, JSON.stringify(pendingWorkspace));
+      if (identityId) window.localStorage.setItem(CACHE_OWNER_KEY, identityId);
+      emitPersistence({
+        state: 'replayed',
+        revision: replayed?.revision || 0
+      });
+      if (reloadAfterHydrate) window.location.reload();
+      return { hydrated: true, source: 'pending-local', result: replayed };
+    }
+
+    if (pendingOwner && identityId && pendingOwner !== identityId) {
+      clearPendingWorkspace();
+    }
 
     if (isWorkspaceDocument(remoteWorkspace)) {
       window.localStorage.setItem(key, JSON.stringify(remoteWorkspace));
@@ -217,6 +266,7 @@ export async function initializePerfectFitWorkspacePersistence() {
     if (!authenticated) {
       window.localStorage.removeItem(workspaceStorageKey());
       window.localStorage.removeItem(CACHE_OWNER_KEY);
+      clearPendingWorkspace();
       emitPersistence({ state: 'signed_out' });
       return;
     }
