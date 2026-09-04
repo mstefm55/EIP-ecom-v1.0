@@ -24,6 +24,13 @@ const bridgeSource = readFileSync(
   ),
   "utf8"
 );
+const fieldContractSource = readFileSync(
+  new URL(
+    "../../../apps/samara-web/my-vite-react-app/src/lib/perfectFitFieldContract.js",
+    import.meta.url
+  ),
+  "utf8"
+);
 const integrationMenuSource = readFileSync(
   new URL(
     "../../../apps/samara-web/my-vite-react-app/src/components/ProductIntegrationMenu.jsx",
@@ -59,11 +66,13 @@ test("workspace persistence uses existing kernel info_record instead of a PF tab
 test("public preflight registers the Perfect Fit workspace routes", () => {
   assert.match(preflightSource, /registerPublicPerfectFitWorkspaceRoutes/);
   assert.match(preflightSource, /await registerPublicPerfectFitWorkspaceRoutes\(app\)/);
+  assert.doesNotMatch(preflightSource, /registerPublicPerfectFitManifestRoutes/);
 });
 
 test("browser adapter persists workspace only through the public gateway", () => {
   assert.match(adapterSource, /loadWorkspace:\s*\(\)\s*=>\s*request\('\/perfect-fit\/workspace'\)/);
   assert.match(adapterSource, /saveWorkspace:[\s\S]*request\('\/perfect-fit\/workspace'/);
+  assert.match(adapterSource, /field_contract/);
   assert.doesNotMatch(adapterSource, /\/api\/eip\//);
 });
 
@@ -72,7 +81,16 @@ test("workspace bridge hydrates before render and keeps a replayable pending sna
   assert.match(bridgeSource, /PENDING_WORKSPACE_KEY/);
   assert.match(bridgeSource, /saveWorkspaceRemotely/);
   assert.match(bridgeSource, /domain !== 'workspace'/);
-  assert.match(bridgeSource, /syncLinkedEnterpriseProducts/);
+  assert.match(bridgeSource, /buildPerfectFitFieldContract/);
+  assert.doesNotMatch(bridgeSource, /syncLinkedEnterpriseProducts/);
+});
+
+test("field contract is serialized from existing PF metadata without DB storage knowledge", () => {
+  assert.match(fieldContractSource, /workspace\.fields/);
+  assert.match(fieldContractSource, /field\?\.eipV1Target/);
+  assert.match(fieldContractSource, /field\?\.governanceList/);
+  assert.doesNotMatch(fieldContractSource, /eip_core\./);
+  assert.doesNotMatch(fieldContractSource, /material\.name/);
 });
 
 test("manual EIP integration button is removed from designer workflow", () => {

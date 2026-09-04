@@ -1,13 +1,13 @@
 import { extractProfiles } from "../services/gateway/connectionProfile.js";
 import { hydrateConnectionProfileSecrets } from "../services/gateway/secretStore.js";
 import { connectionAllowsOrigin, verifyConnectionRequest } from "../services/gateway/verification.js";
-import { buildPerfectFitCoordinatorManifest } from "../services/perfectFit/manifestCoordinator.js";
-import { projectPerfectFitWorkspace } from "../services/perfectFit/workspaceProjection.js";
+import { projectPerfectFitWorkspaceProducts } from "../services/perfectFit/workspaceProductProjection.js";
 
 const RATE_LIMIT = { max: 60, timeWindow: "1 minute" };
 const WORKSPACE_RECORD_TYPE = "PERFECT_FIT_WORKSPACE";
 const MAX_WORKSPACE_BYTES = 900 * 1024;
-const MAX_MANIFEST_BYTES = 512 * 1024;
+const MAX_FIELD_CONTRACT_BYTES = 128 * 1024;
+const MAX_FIELD_CONTRACT_FIELDS = 500;
 
 function normalizeText(value) {
   return String(value || "").trim();
@@ -155,10 +155,15 @@ function normalizeWorkspace(value) {
   return value;
 }
 
-function normalizeClientManifest(value) {
+function normalizeFieldContract(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   if (!Array.isArray(value.fields)) return null;
-  return value;
+  if (value.fields.length > MAX_FIELD_CONTRACT_FIELDS) return null;
+  return {
+    application: normalizeText(value.application) || null,
+    version: normalizeText(value.version) || null,
+    fields: value.fields
+  };
 }
 
 async function loadWorkspaceRecord(db, tenantId, identityId) {
@@ -249,7 +254,7 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
         });
       }
 
-      const clientManifest = normalizeClientManifest(req.body?.manifest);
+      const fieldContract = normalizeFieldContract(req.body?.field_contract);
       const serializedWorkspace = JSON.stringify(workspace);
       if (Buffer.byteLength(serializedWorkspace, "utf8") > MAX_WORKSPACE_BYTES) {
         return reply.code(413).send({
@@ -258,13 +263,13 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
           max_bytes: MAX_WORKSPACE_BYTES
         });
       }
-      if (clientManifest) {
-        const serializedManifest = JSON.stringify(clientManifest);
-        if (Buffer.byteLength(serializedManifest, "utf8") > MAX_MANIFEST_BYTES) {
+      if (fieldContract) {
+        const serializedContract = JSON.stringify(fieldContract);
+        if (Buffer.byteLength(serializedContract, "utf8") > MAX_FIELD_CONTRACT_BYTES) {
           return reply.code(413).send({
             ok: false,
-            error: "PF_MANIFEST_TOO_LARGE",
-            max_bytes: MAX_MANIFEST_BYTES
+            error: "PF_FIELD_CONTRACT_TOO_LARGE",
+            max_bytes: MAX_FIELD_CONTRACT_BYTES
           });
         }
       }
@@ -371,27 +376,27 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
         client.release();
       }
 
-      // Projection is deliberately outside the snapshot transaction. The rich PF
-      // document remains saved even when a mapping is missing or an enterprise
-      // projection fails. This is the no-downgrade/lossless boundary.
-      let coordinatorManifest = null;
+      // The lossless PF document is committed first. Enterprise projection uses
+      // existing socket aliases/governance and the existing Product Gateway.
+      // Projection failure is reported but never rolls back the designer's save.
       let enterpriseProjection = {
-        ok: false,
+        ok: true,
         skipped: true,
-        reason: clientManifest ? "NOT_RUN" : "CLIENT_MANIFEST_MISSING"
+        reason: "FIELD_CONTRACT_MISSING"
       };
 
-      if (clientManifest) {
+      if (fieldContract) {
         try {
-          coordinatorManifest = await buildPerfectFitCoordinatorManifest(app.db, {
-            tenantId: access.tenant.id,
-            clientManifest
-          });
-          enterpriseProjection = await projectPerfectFitWorkspace(app.db, {
+          enterpriseProjection = await projectPerfectFitWorkspaceProducts(app.db, {
             tenantId: access.tenant.id,
             actorIdentityId: session.identity_id,
             workspace,
-            coordinatorManifest
+            fieldContract,
+            socketCode:
+              access.profile?.routing?.socket_code ||
+              access.profile?.identity?.socket_code ||
+              null,
+            connectionCode: access.profile?.identity?.connection_code || null
           });
         } catch (error) {
           enterpriseProjection = {
@@ -409,15 +414,13 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
       }
 
       const projectionSummary = {
-        manifest: coordinatorManifest?.summary || null,
-        enterprise: {
-          ok: enterpriseProjection?.ok === true,
-          projected_count: Number(enterpriseProjection?.projected_count || 0),
-          failed_count: Number(enterpriseProjection?.failed_count || 0),
-          skipped: enterpriseProjection?.skipped === true,
-          reason: enterpriseProjection?.reason || null,
-          updated_at: new Date().toISOString()
-        }
+        ok: enterpriseProjection?.ok === true,
+        skipped: enterpriseProjection?.skipped === true,
+        reason: enterpriseProjection?.reason || null,
+        projected_count: Number(enterpriseProjection?.projected_count || 0),
+        failed_count: Number(enterpriseProjection?.failed_count || 0),
+        field_resolution: enterpriseProjection?.field_resolution?.summary || null,
+        updated_at: new Date().toISOString()
       };
 
       if (recordId) {
@@ -454,7 +457,6 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
         saved_at: savedAt,
         identity_id: session.identity_id,
         tenant_code: access.tenant.code,
-        manifest_summary: coordinatorManifest?.summary || null,
         enterprise_projection: enterpriseProjection
       });
     }
