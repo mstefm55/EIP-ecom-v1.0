@@ -5,6 +5,7 @@ import App from './App.jsx';
 import AuthRecoveryPortal from './components/AuthRecoveryPortal.jsx';
 import { LanguageProvider } from './context/LanguageContext.jsx';
 import { RuntimeDataProvider } from './context/RuntimeDataContext.jsx';
+import { initializePerfectFitWorkspacePersistence } from './lib/workspacePersistenceBridge.js';
 import './index.css';
 
 // Class-based React ErrorBoundary to catch and diagnose runtime crashes safely
@@ -128,15 +129,23 @@ try {
   console.warn('[Cache] Ignored cache storage clearance due to security sandbox constraints:', e);
 }
 
-createRoot(document.getElementById('root')).render(
-  <StrictMode>
-    <ErrorBoundary>
-      <LanguageProvider>
-        <RuntimeDataProvider>
-          <App />
-          <AuthRecoveryPortal />
-        </RuntimeDataProvider>
-      </LanguageProvider>
-    </ErrorBoundary>
-  </StrictMode>,
-);
+function renderPerfectFit() {
+  createRoot(document.getElementById('root')).render(
+    <StrictMode>
+      <ErrorBoundary>
+        <LanguageProvider>
+          <RuntimeDataProvider>
+            <App />
+            <AuthRecoveryPortal />
+          </RuntimeDataProvider>
+        </LanguageProvider>
+      </ErrorBoundary>
+    </StrictMode>,
+  );
+}
+
+initializePerfectFitWorkspacePersistence()
+  .catch((error) => {
+    console.error('[PerfectFit workspace persistence] bootstrap failed', error);
+  })
+  .finally(renderPerfectFit);
