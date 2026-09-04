@@ -1,10 +1,13 @@
 import { extractProfiles } from "../services/gateway/connectionProfile.js";
 import { hydrateConnectionProfileSecrets } from "../services/gateway/secretStore.js";
 import { connectionAllowsOrigin, verifyConnectionRequest } from "../services/gateway/verification.js";
+import { projectPerfectFitWorkspaceProducts } from "../services/perfectFit/workspaceProductProjection.js";
 
 const RATE_LIMIT = { max: 60, timeWindow: "1 minute" };
 const WORKSPACE_RECORD_TYPE = "PERFECT_FIT_WORKSPACE";
 const MAX_WORKSPACE_BYTES = 900 * 1024;
+const MAX_FIELD_CONTRACT_BYTES = 128 * 1024;
+const MAX_FIELD_CONTRACT_FIELDS = 500;
 
 function normalizeText(value) {
   return String(value || "").trim();
@@ -152,6 +155,17 @@ function normalizeWorkspace(value) {
   return value;
 }
 
+function normalizeFieldContract(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  if (!Array.isArray(value.fields)) return null;
+  if (value.fields.length > MAX_FIELD_CONTRACT_FIELDS) return null;
+  return {
+    application: normalizeText(value.application) || null,
+    version: normalizeText(value.version) || null,
+    fields: value.fields
+  };
+}
+
 async function loadWorkspaceRecord(db, tenantId, identityId) {
   const result = await db.query(
     `
@@ -204,6 +218,7 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
         workspace: payload.workspace || null,
         revision: Number(payload.revision || 0),
         updated_at: row?.updated_at || null,
+        projection_summary: payload.projection_summary || null,
         identity_id: session.identity_id,
         tenant_code: access.tenant.code
       });
@@ -239,6 +254,7 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
         });
       }
 
+      const fieldContract = normalizeFieldContract(req.body?.field_contract);
       const serializedWorkspace = JSON.stringify(workspace);
       if (Buffer.byteLength(serializedWorkspace, "utf8") > MAX_WORKSPACE_BYTES) {
         return reply.code(413).send({
@@ -247,8 +263,21 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
           max_bytes: MAX_WORKSPACE_BYTES
         });
       }
+      if (fieldContract) {
+        const serializedContract = JSON.stringify(fieldContract);
+        if (Buffer.byteLength(serializedContract, "utf8") > MAX_FIELD_CONTRACT_BYTES) {
+          return reply.code(413).send({
+            ok: false,
+            error: "PF_FIELD_CONTRACT_TOO_LARGE",
+            max_bytes: MAX_FIELD_CONTRACT_BYTES
+          });
+        }
+      }
 
       const client = await app.db.connect();
+      let recordId = null;
+      let revision = 0;
+      const savedAt = new Date().toISOString();
       try {
         await client.query("BEGIN");
 
@@ -275,14 +304,14 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
         const currentPayload = current?.payload && typeof current.payload === "object"
           ? current.payload
           : {};
-        const revision = Number(currentPayload.revision || 0) + 1;
-        const savedAt = new Date().toISOString();
+        revision = Number(currentPayload.revision || 0) + 1;
         const payload = {
           workspace,
           revision,
           saved_at: savedAt,
           owner_identity_id: String(session.identity_id),
-          schema_version: workspace?.schemaVersion || workspace?.version || null
+          schema_version: workspace?.schemaVersion || workspace?.version || null,
+          projection_summary: currentPayload.projection_summary || null
         };
         const attrs = {
           application: "perfect_fit",
@@ -291,7 +320,6 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
           contains_private_technical_data: true
         };
 
-        let recordId;
         if (current) {
           const updated = await client.query(
             `
@@ -332,16 +360,6 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
         }
 
         await client.query("COMMIT");
-
-        return reply.send({
-          ok: true,
-          workspace,
-          record_id: recordId,
-          revision,
-          saved_at: savedAt,
-          identity_id: session.identity_id,
-          tenant_code: access.tenant.code
-        });
       } catch (error) {
         await client.query("ROLLBACK");
         app.log.error({
@@ -357,6 +375,90 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
       } finally {
         client.release();
       }
+
+      // The lossless PF document is committed first. Enterprise projection uses
+      // existing socket aliases/governance and the existing Product Gateway.
+      // Projection failure is reported but never rolls back the designer's save.
+      let enterpriseProjection = {
+        ok: true,
+        skipped: true,
+        reason: "FIELD_CONTRACT_MISSING"
+      };
+
+      if (fieldContract) {
+        try {
+          enterpriseProjection = await projectPerfectFitWorkspaceProducts(app.db, {
+            tenantId: access.tenant.id,
+            actorIdentityId: session.identity_id,
+            workspace,
+            fieldContract,
+            socketCode:
+              access.profile?.routing?.socket_code ||
+              access.profile?.identity?.socket_code ||
+              null,
+            connectionCode: access.profile?.identity?.connection_code || null
+          });
+        } catch (error) {
+          enterpriseProjection = {
+            ok: false,
+            skipped: false,
+            error: error?.message || String(error)
+          };
+          app.log.error({
+            event: "perfect_fit_workspace_projection_failed",
+            tenant_id: access.tenant.id,
+            identity_id: session.identity_id,
+            error: error?.message || String(error)
+          });
+        }
+      }
+
+      const projectionSummary = {
+        ok: enterpriseProjection?.ok === true,
+        skipped: enterpriseProjection?.skipped === true,
+        reason: enterpriseProjection?.reason || null,
+        projected_count: Number(enterpriseProjection?.projected_count || 0),
+        failed_count: Number(enterpriseProjection?.failed_count || 0),
+        field_resolution: enterpriseProjection?.field_resolution?.summary || null,
+        updated_at: new Date().toISOString()
+      };
+
+      if (recordId) {
+        try {
+          await app.db.query(
+            `
+            UPDATE eip_core.info_record
+            SET payload = jsonb_set(
+                  COALESCE(payload, '{}'::jsonb),
+                  '{projection_summary}',
+                  $3::jsonb,
+                  true
+                ),
+                updated_at = now()
+            WHERE tenant_id = $1 AND id = $2
+            `,
+            [access.tenant.id, recordId, JSON.stringify(projectionSummary)]
+          );
+        } catch (error) {
+          app.log.warn({
+            event: "perfect_fit_projection_summary_update_failed",
+            tenant_id: access.tenant.id,
+            record_id: recordId,
+            error: error?.message || String(error)
+          });
+        }
+      }
+
+      return reply.send({
+        ok: true,
+        workspace,
+        record_id: recordId,
+        revision,
+        saved_at: savedAt,
+        identity_id: session.identity_id,
+        tenant_code: access.tenant.code,
+        enterprise_projection: enterpriseProjection
+      });
     }
   );
 }
