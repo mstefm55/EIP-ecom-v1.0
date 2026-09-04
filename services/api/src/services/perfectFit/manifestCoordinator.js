@@ -41,6 +41,7 @@ async function loadApprovedMapping(db, tenantId, surfaceCode = DEFAULT_SURFACE_C
     FROM eip_core.ui_surface
     WHERE code = $1
       AND is_active = true
+      AND is_published = true
       AND (tenant_id = $2 OR tenant_id IS NULL)
     ORDER BY (tenant_id IS NULL) ASC, version DESC, updated_at DESC
     LIMIT 1
@@ -232,13 +233,14 @@ function buildTargetCatalogue({ schemas, relationalColumns }) {
 
 function normalizeMappingEntry(value) {
   if (typeof value === "string") {
-    return { target: value, status: "APPROVED" };
+    return { target: value, status: "APPROVED", storage: {} };
   }
   const entry = asObject(value);
   return {
     ...entry,
     target: normalizeText(entry.target || entry.eip_path || entry.path),
-    status: normalizeText(entry.status || "APPROVED").toUpperCase()
+    status: normalizeText(entry.status || "APPROVED").toUpperCase(),
+    storage: asObject(entry.storage)
   };
 }
 
@@ -310,15 +312,21 @@ export async function buildPerfectFitCoordinatorManifest(db, {
     const approvedTarget = approvedEntry?.target
       ? targets.find((target) => target.logical_path === approvedEntry.target)
       : null;
+    const governedStorage = approvedEntry && Object.keys(approvedEntry.storage || {}).length
+      ? approvedEntry.storage
+      : null;
     const dropdown = dropdownResolution(field, dropdowns);
 
     if (approvedEntry?.target) {
       return {
         ...field,
-        status: approvedTarget ? "MAPPED" : "MAPPING_TARGET_MISSING",
+        status: approvedTarget || governedStorage ? "MAPPED" : "MAPPING_TARGET_MISSING",
         mapping_source: "ADMIN_APPROVED",
         approved_mapping: approvedEntry,
-        target: approvedTarget || { logical_path: approvedEntry.target },
+        target: approvedTarget || {
+          logical_path: approvedEntry.target,
+          storage: governedStorage
+        },
         dropdown
       };
     }
@@ -356,6 +364,7 @@ export async function buildPerfectFitCoordinatorManifest(db, {
     coordinator_version: 1,
     surface_code: surfaceCode,
     surface: approved.surface,
+    mapping_meta: approved.mapping_meta,
     client_manifest_version: clientManifest?.version || null,
     summary,
     fields: resolvedFields,
