@@ -183,9 +183,20 @@ export const eipApiAdapter = Object.freeze({
   syncProduct: (productId, body) => request(`/perfect-fit/products/${encodeURIComponent(productId)}/sync`, { method: 'POST', body, idempotent: true }),
   unlinkProduct: (productId) => request(`/perfect-fit/products/${encodeURIComponent(productId)}/link`, { method: 'DELETE', idempotent: true }),
   loadWorkspace: () => request('/perfect-fit/workspace'),
-  saveWorkspace: (workspace, fieldContract = null) => request('/perfect-fit/workspace', {
+  saveWorkspace: (workspace, manifestContract = null) => request('/perfect-fit/workspace', {
     method: 'PUT',
-    body: { workspace, field_contract: fieldContract },
+    body: {
+      workspace,
+      manifest_contract: manifestContract,
+      // Backward compatibility while older API deployments are still possible.
+      field_contract: manifestContract
+        ? {
+            application: manifestContract.application,
+            version: manifestContract.version,
+            fields: manifestContract.fields
+          }
+        : null
+    },
     idempotent: true
   })
 });
