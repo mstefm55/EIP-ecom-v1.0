@@ -5,7 +5,7 @@ import {
   validateGovernedDropdownValue
 } from '../src/services/socket/fieldAliasResolver.js';
 
-function createDb({ aliases = [], manifests = [], dropdownRows = [] } = {}) {
+function createDb({ aliases = [], manifests = [], schemaRows = [], dropdownRows = [] } = {}) {
   return {
     async query(sql) {
       const text = String(sql);
@@ -14,6 +14,9 @@ function createDb({ aliases = [], manifests = [], dropdownRows = [] } = {}) {
       }
       if (text.includes('eip_commerce.socket_manifest')) {
         return { rows: manifests, rowCount: manifests.length };
+      }
+      if (text.includes('eip_core.schema_registry')) {
+        return { rows: schemaRows, rowCount: schemaRows.length };
       }
       if (text.includes('eip_core.dropdown_list')) {
         return { rows: dropdownRows, rowCount: dropdownRows.length };
@@ -89,6 +92,39 @@ test('client canonical hint is only accepted from caller allowlist', async () =>
   assert.equal(result.fields[1].status, 'UNMAPPED');
   assert.equal(result.fields[1].canonical_code, null);
   assert.equal(result.fields[1].reason, 'CANONICAL_HINT_NOT_APPROVED');
+});
+
+test('unmapped fields receive schema-registry candidates for administrator review', async () => {
+  const db = createDb({
+    schemaRows: [{
+      module: 'ecom',
+      object_kind: 'material',
+      object_type: 'product',
+      version: 4,
+      tenant_id: null,
+      schema_json: {
+        type: 'object',
+        properties: {
+          development_stage: { type: 'string' },
+          difficulty: { type: 'string' }
+        }
+      },
+      ui_json: {}
+    }]
+  });
+
+  const result = await resolveSocketFieldAliases(db, {
+    tenantId: 'tenant-1',
+    fields: [{
+      key: 'product.development_stage',
+      canonical_hint: 'attrs.development_stage'
+    }],
+    allowedCanonicalCodes: ['product.name']
+  });
+
+  assert.equal(result.fields[0].status, 'UNMAPPED');
+  assert.equal(result.fields[0].schema_suggestions[0].field_path, 'development_stage');
+  assert.equal(result.fields[0].schema_suggestions[0].confidence, 1);
 });
 
 test('governed dropdown validation uses stable code, not display label', async () => {
