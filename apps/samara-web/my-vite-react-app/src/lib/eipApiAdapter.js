@@ -183,9 +183,9 @@ export const eipApiAdapter = Object.freeze({
   syncProduct: (productId, body) => request(`/perfect-fit/products/${encodeURIComponent(productId)}/sync`, { method: 'POST', body, idempotent: true }),
   unlinkProduct: (productId) => request(`/perfect-fit/products/${encodeURIComponent(productId)}/link`, { method: 'DELETE', idempotent: true }),
   loadWorkspace: () => request('/perfect-fit/workspace'),
-  saveWorkspace: (workspace) => request('/perfect-fit/workspace', {
+  saveWorkspace: (workspace, fieldContract = null) => request('/perfect-fit/workspace', {
     method: 'PUT',
-    body: { workspace },
+    body: { workspace, field_contract: fieldContract },
     idempotent: true
   })
 });
