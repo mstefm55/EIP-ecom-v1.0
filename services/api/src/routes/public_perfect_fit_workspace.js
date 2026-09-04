@@ -1,13 +1,10 @@
 import { extractProfiles } from "../services/gateway/connectionProfile.js";
 import { hydrateConnectionProfileSecrets } from "../services/gateway/secretStore.js";
 import { connectionAllowsOrigin, verifyConnectionRequest } from "../services/gateway/verification.js";
-import { buildPerfectFitCoordinatorManifest } from "../services/perfectFit/manifestCoordinator.js";
-import { projectPerfectFitWorkspace } from "../services/perfectFit/workspaceProjection.js";
 
 const RATE_LIMIT = { max: 60, timeWindow: "1 minute" };
 const WORKSPACE_RECORD_TYPE = "PERFECT_FIT_WORKSPACE";
 const MAX_WORKSPACE_BYTES = 900 * 1024;
-const MAX_MANIFEST_BYTES = 512 * 1024;
 
 function normalizeText(value) {
   return String(value || "").trim();
@@ -155,12 +152,6 @@ function normalizeWorkspace(value) {
   return value;
 }
 
-function normalizeClientManifest(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  if (!Array.isArray(value.fields)) return null;
-  return value;
-}
-
 async function loadWorkspaceRecord(db, tenantId, identityId) {
   const result = await db.query(
     `
@@ -213,7 +204,6 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
         workspace: payload.workspace || null,
         revision: Number(payload.revision || 0),
         updated_at: row?.updated_at || null,
-        projection_summary: payload.projection_summary || null,
         identity_id: session.identity_id,
         tenant_code: access.tenant.code
       });
@@ -249,7 +239,6 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
         });
       }
 
-      const clientManifest = normalizeClientManifest(req.body?.manifest);
       const serializedWorkspace = JSON.stringify(workspace);
       if (Buffer.byteLength(serializedWorkspace, "utf8") > MAX_WORKSPACE_BYTES) {
         return reply.code(413).send({
@@ -258,21 +247,8 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
           max_bytes: MAX_WORKSPACE_BYTES
         });
       }
-      if (clientManifest) {
-        const serializedManifest = JSON.stringify(clientManifest);
-        if (Buffer.byteLength(serializedManifest, "utf8") > MAX_MANIFEST_BYTES) {
-          return reply.code(413).send({
-            ok: false,
-            error: "PF_MANIFEST_TOO_LARGE",
-            max_bytes: MAX_MANIFEST_BYTES
-          });
-        }
-      }
 
       const client = await app.db.connect();
-      let recordId = null;
-      let revision = 0;
-      const savedAt = new Date().toISOString();
       try {
         await client.query("BEGIN");
 
@@ -299,14 +275,14 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
         const currentPayload = current?.payload && typeof current.payload === "object"
           ? current.payload
           : {};
-        revision = Number(currentPayload.revision || 0) + 1;
+        const revision = Number(currentPayload.revision || 0) + 1;
+        const savedAt = new Date().toISOString();
         const payload = {
           workspace,
           revision,
           saved_at: savedAt,
           owner_identity_id: String(session.identity_id),
-          schema_version: workspace?.schemaVersion || workspace?.version || null,
-          projection_summary: currentPayload.projection_summary || null
+          schema_version: workspace?.schemaVersion || workspace?.version || null
         };
         const attrs = {
           application: "perfect_fit",
@@ -315,6 +291,7 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
           contains_private_technical_data: true
         };
 
+        let recordId;
         if (current) {
           const updated = await client.query(
             `
@@ -355,6 +332,16 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
         }
 
         await client.query("COMMIT");
+
+        return reply.send({
+          ok: true,
+          workspace,
+          record_id: recordId,
+          revision,
+          saved_at: savedAt,
+          identity_id: session.identity_id,
+          tenant_code: access.tenant.code
+        });
       } catch (error) {
         await client.query("ROLLBACK");
         app.log.error({
@@ -370,93 +357,6 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
       } finally {
         client.release();
       }
-
-      // Projection is deliberately outside the snapshot transaction. The rich PF
-      // document remains saved even when a mapping is missing or an enterprise
-      // projection fails. This is the no-downgrade/lossless boundary.
-      let coordinatorManifest = null;
-      let enterpriseProjection = {
-        ok: false,
-        skipped: true,
-        reason: clientManifest ? "NOT_RUN" : "CLIENT_MANIFEST_MISSING"
-      };
-
-      if (clientManifest) {
-        try {
-          coordinatorManifest = await buildPerfectFitCoordinatorManifest(app.db, {
-            tenantId: access.tenant.id,
-            clientManifest
-          });
-          enterpriseProjection = await projectPerfectFitWorkspace(app.db, {
-            tenantId: access.tenant.id,
-            actorIdentityId: session.identity_id,
-            workspace,
-            coordinatorManifest
-          });
-        } catch (error) {
-          enterpriseProjection = {
-            ok: false,
-            skipped: false,
-            error: error?.message || String(error)
-          };
-          app.log.error({
-            event: "perfect_fit_workspace_projection_failed",
-            tenant_id: access.tenant.id,
-            identity_id: session.identity_id,
-            error: error?.message || String(error)
-          });
-        }
-      }
-
-      const projectionSummary = {
-        manifest: coordinatorManifest?.summary || null,
-        enterprise: {
-          ok: enterpriseProjection?.ok === true,
-          projected_count: Number(enterpriseProjection?.projected_count || 0),
-          failed_count: Number(enterpriseProjection?.failed_count || 0),
-          skipped: enterpriseProjection?.skipped === true,
-          reason: enterpriseProjection?.reason || null,
-          updated_at: new Date().toISOString()
-        }
-      };
-
-      if (recordId) {
-        try {
-          await app.db.query(
-            `
-            UPDATE eip_core.info_record
-            SET payload = jsonb_set(
-                  COALESCE(payload, '{}'::jsonb),
-                  '{projection_summary}',
-                  $3::jsonb,
-                  true
-                ),
-                updated_at = now()
-            WHERE tenant_id = $1 AND id = $2
-            `,
-            [access.tenant.id, recordId, JSON.stringify(projectionSummary)]
-          );
-        } catch (error) {
-          app.log.warn({
-            event: "perfect_fit_projection_summary_update_failed",
-            tenant_id: access.tenant.id,
-            record_id: recordId,
-            error: error?.message || String(error)
-          });
-        }
-      }
-
-      return reply.send({
-        ok: true,
-        workspace,
-        record_id: recordId,
-        revision,
-        saved_at: savedAt,
-        identity_id: session.identity_id,
-        tenant_code: access.tenant.code,
-        manifest_summary: coordinatorManifest?.summary || null,
-        enterprise_projection: enterpriseProjection
-      });
     }
   );
 }
