@@ -1,13 +1,16 @@
 import { extractProfiles } from "../services/gateway/connectionProfile.js";
 import { hydrateConnectionProfileSecrets } from "../services/gateway/secretStore.js";
 import { connectionAllowsOrigin, verifyConnectionRequest } from "../services/gateway/verification.js";
+import { auditPerfectFitManifestCompleteness } from "../services/perfectFit/manifestCompleteness.js";
 import { projectPerfectFitWorkspaceProducts } from "../services/perfectFit/workspaceProductProjection.js";
 
 const RATE_LIMIT = { max: 60, timeWindow: "1 minute" };
 const WORKSPACE_RECORD_TYPE = "PERFECT_FIT_WORKSPACE";
 const MAX_WORKSPACE_BYTES = 900 * 1024;
 const MAX_FIELD_CONTRACT_BYTES = 128 * 1024;
-const MAX_FIELD_CONTRACT_FIELDS = 500;
+const MAX_MANIFEST_CONTRACT_BYTES = 384 * 1024;
+const MAX_FIELD_CONTRACT_FIELDS = 1000;
+const MAX_MANIFEST_DROPDOWNS = 250;
 
 function normalizeText(value) {
   return String(value || "").trim();
@@ -166,6 +169,24 @@ function normalizeFieldContract(value) {
   };
 }
 
+function normalizeManifestContract(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  if (!Array.isArray(value.fields)) return null;
+  if (value.fields.length > MAX_FIELD_CONTRACT_FIELDS) return null;
+  const dropdowns = Array.isArray(value.dropdowns) ? value.dropdowns : [];
+  if (dropdowns.length > MAX_MANIFEST_DROPDOWNS) return null;
+  return {
+    application: normalizeText(value.application) || null,
+    version: normalizeText(value.version) || null,
+    fields: value.fields,
+    dropdowns,
+    structure:
+      value.structure && typeof value.structure === "object" && !Array.isArray(value.structure)
+        ? value.structure
+        : {}
+  };
+}
+
 async function loadWorkspaceRecord(db, tenantId, identityId) {
   const result = await db.query(
     `
@@ -219,6 +240,7 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
         revision: Number(payload.revision || 0),
         updated_at: row?.updated_at || null,
         projection_summary: payload.projection_summary || null,
+        manifest_summary: payload.manifest_summary || null,
         identity_id: session.identity_id,
         tenant_code: access.tenant.code
       });
@@ -254,7 +276,16 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
         });
       }
 
-      const fieldContract = normalizeFieldContract(req.body?.field_contract);
+      const manifestContract = normalizeManifestContract(req.body?.manifest_contract);
+      const legacyFieldContract = normalizeFieldContract(req.body?.field_contract);
+      const fieldContract = manifestContract
+        ? {
+            application: manifestContract.application,
+            version: manifestContract.version,
+            fields: manifestContract.fields
+          }
+        : legacyFieldContract;
+
       const serializedWorkspace = JSON.stringify(workspace);
       if (Buffer.byteLength(serializedWorkspace, "utf8") > MAX_WORKSPACE_BYTES) {
         return reply.code(413).send({
@@ -270,6 +301,16 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
             ok: false,
             error: "PF_FIELD_CONTRACT_TOO_LARGE",
             max_bytes: MAX_FIELD_CONTRACT_BYTES
+          });
+        }
+      }
+      if (manifestContract) {
+        const serializedManifest = JSON.stringify(manifestContract);
+        if (Buffer.byteLength(serializedManifest, "utf8") > MAX_MANIFEST_CONTRACT_BYTES) {
+          return reply.code(413).send({
+            ok: false,
+            error: "PF_MANIFEST_CONTRACT_TOO_LARGE",
+            max_bytes: MAX_MANIFEST_CONTRACT_BYTES
           });
         }
       }
@@ -311,7 +352,9 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
           saved_at: savedAt,
           owner_identity_id: String(session.identity_id),
           schema_version: workspace?.schemaVersion || workspace?.version || null,
-          projection_summary: currentPayload.projection_summary || null
+          observed_manifest_version: manifestContract?.version || null,
+          projection_summary: currentPayload.projection_summary || null,
+          manifest_summary: currentPayload.manifest_summary || null
         };
         const attrs = {
           application: "perfect_fit",
@@ -376,6 +419,35 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
         client.release();
       }
 
+      const socketCode =
+        access.profile?.routing?.socket_code ||
+        access.profile?.identity?.socket_code ||
+        null;
+      const connectionCode = access.profile?.identity?.connection_code || null;
+
+      let manifestAudit = null;
+      if (manifestContract) {
+        try {
+          manifestAudit = await auditPerfectFitManifestCompleteness(app.db, {
+            tenantId: access.tenant.id,
+            manifestContract,
+            socketCode,
+            connectionCode
+          });
+        } catch (error) {
+          manifestAudit = {
+            ok: false,
+            error: error?.message || String(error)
+          };
+          app.log.warn({
+            event: "perfect_fit_manifest_audit_failed",
+            tenant_id: access.tenant.id,
+            identity_id: session.identity_id,
+            error: error?.message || String(error)
+          });
+        }
+      }
+
       // The lossless PF document is committed first. Enterprise projection uses
       // existing socket aliases/governance and the existing Product Gateway.
       // Projection failure is reported but never rolls back the designer's save.
@@ -392,11 +464,8 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
             actorIdentityId: session.identity_id,
             workspace,
             fieldContract,
-            socketCode:
-              access.profile?.routing?.socket_code ||
-              access.profile?.identity?.socket_code ||
-              null,
-            connectionCode: access.profile?.identity?.connection_code || null
+            socketCode,
+            connectionCode
           });
         } catch (error) {
           enterpriseProjection = {
@@ -422,6 +491,13 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
         field_resolution: enterpriseProjection?.field_resolution?.summary || null,
         updated_at: new Date().toISOString()
       };
+      const manifestSummary = manifestAudit?.summary
+        ? {
+            ...manifestAudit.summary,
+            version: manifestAudit.version || manifestContract?.version || null,
+            updated_at: new Date().toISOString()
+          }
+        : null;
 
       if (recordId) {
         try {
@@ -429,19 +505,29 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
             `
             UPDATE eip_core.info_record
             SET payload = jsonb_set(
-                  COALESCE(payload, '{}'::jsonb),
-                  '{projection_summary}',
-                  $3::jsonb,
+                  jsonb_set(
+                    COALESCE(payload, '{}'::jsonb),
+                    '{projection_summary}',
+                    $3::jsonb,
+                    true
+                  ),
+                  '{manifest_summary}',
+                  $4::jsonb,
                   true
                 ),
                 updated_at = now()
             WHERE tenant_id = $1 AND id = $2
             `,
-            [access.tenant.id, recordId, JSON.stringify(projectionSummary)]
+            [
+              access.tenant.id,
+              recordId,
+              JSON.stringify(projectionSummary),
+              JSON.stringify(manifestSummary)
+            ]
           );
         } catch (error) {
           app.log.warn({
-            event: "perfect_fit_projection_summary_update_failed",
+            event: "perfect_fit_workspace_summary_update_failed",
             tenant_id: access.tenant.id,
             record_id: recordId,
             error: error?.message || String(error)
@@ -457,6 +543,7 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
         saved_at: savedAt,
         identity_id: session.identity_id,
         tenant_code: access.tenant.code,
+        manifest_audit: manifestAudit,
         enterprise_projection: enterpriseProjection
       });
     }
