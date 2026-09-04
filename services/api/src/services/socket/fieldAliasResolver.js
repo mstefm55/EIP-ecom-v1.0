@@ -2,6 +2,13 @@ function normalizeText(value) {
   return String(value || "").trim();
 }
 
+function normalizeToken(value) {
+  return normalizeText(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
 function asObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
@@ -76,12 +83,18 @@ async function loadActiveFieldAliases(db, tenantId) {
 async function loadPublishedSocketManifest(db, tenantId, { socketCode, connectionCode } = {}) {
   const normalizedSocket = normalizeText(socketCode);
   const normalizedConnection = normalizeText(connectionCode);
+  if (!normalizedSocket && !normalizedConnection) return null;
+
   const result = await db.query(
     `
     SELECT id, code, version, manifest, attrs, published_at, updated_at
     FROM eip_commerce.socket_manifest
     WHERE tenant_id = $1
       AND is_published = true
+      AND (
+        ($2 <> '' AND code = $2)
+        OR ($3 <> '' AND attrs->>'connection_code' = $3)
+      )
     ORDER BY
       CASE WHEN $2 <> '' AND code = $2 THEN 0 ELSE 1 END,
       CASE WHEN $3 <> '' AND attrs->>'connection_code' = $3 THEN 0 ELSE 1 END,
@@ -92,6 +105,60 @@ async function loadPublishedSocketManifest(db, tenantId, { socketCode, connectio
     [tenantId, normalizedSocket, normalizedConnection]
   );
   return result.rows?.[0] || null;
+}
+
+function flattenSchemaProperties(properties, prefix = "", output = []) {
+  for (const [key, raw] of Object.entries(asObject(properties))) {
+    const definition = asObject(raw);
+    const path = prefix ? `${prefix}.${key}` : key;
+    if (definition.type === "object" && definition.properties) {
+      flattenSchemaProperties(definition.properties, path, output);
+      continue;
+    }
+    output.push({ path, key, type: definition.type || null });
+  }
+  return output;
+}
+
+async function loadSchemaFieldCatalogue(db, tenantId) {
+  const result = await db.query(
+    `
+    SELECT DISTINCT ON (module, object_kind, object_type)
+      module, object_kind, object_type, version, schema_json, ui_json, tenant_id
+    FROM eip_core.schema_registry
+    WHERE is_active = true
+      AND (tenant_id = $1 OR tenant_id IS NULL)
+    ORDER BY
+      module,
+      object_kind,
+      object_type,
+      (tenant_id IS NULL) ASC,
+      version DESC,
+      updated_at DESC
+    `,
+    [tenantId]
+  );
+
+  const catalogue = [];
+  for (const row of result.rows || []) {
+    const fields = flattenSchemaProperties(asObject(row.schema_json).properties);
+    for (const field of fields) {
+      catalogue.push({
+        module: row.module,
+        object_kind: row.object_kind,
+        object_type: row.object_type,
+        field_path: field.path,
+        field_key: field.key,
+        type: field.type,
+        version: row.version,
+        tenant_id: row.tenant_id,
+        canonical_code: `${row.object_kind}.${row.object_type}.${field.path}`,
+        normalized_leaf: normalizeToken(field.key),
+        normalized_path: normalizeToken(field.path)
+      });
+    }
+  }
+  return catalogue;
 }
 
 function normalizeFieldContract(field) {
@@ -113,6 +180,34 @@ function normalizeAllowedSet(values) {
       .map((value) => normalizeText(value))
       .filter(Boolean)
   );
+}
+
+function suggestSchemaTargets(field, catalogue) {
+  const keyLeaf = normalizeToken(field.key.split('.').pop());
+  const hint = normalizeText(field.canonical_hint);
+  const hintLeaf = normalizeToken(hint.split('.').pop());
+  const hintPath = normalizeToken(hint.replace(/^attrs\./i, ''));
+
+  return (catalogue || [])
+    .map((candidate) => {
+      let score = 0;
+      let reason = null;
+      if (hintPath && candidate.normalized_path === hintPath) {
+        score = 1;
+        reason = "CANONICAL_HINT_PATH";
+      } else if (hintLeaf && candidate.normalized_leaf === hintLeaf) {
+        score = 0.92;
+        reason = "CANONICAL_HINT_LEAF";
+      } else if (keyLeaf && candidate.normalized_leaf === keyLeaf) {
+        score = 0.82;
+        reason = "FIELD_KEY_LEAF";
+      }
+      return score > 0 ? { ...candidate, confidence: score, reason } : null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.confidence - a.confidence)
+    .slice(0, 5)
+    .map(({ normalized_leaf, normalized_path, ...candidate }) => candidate);
 }
 
 function resolveCandidate(field, { aliases, manifestMap, canonicalHintMap, allowed }) {
@@ -174,9 +269,10 @@ export async function resolveSocketFieldAliases(db, {
     ? fields.map(normalizeFieldContract).filter((field) => field.key)
     : [];
 
-  const [aliases, manifestRow] = await Promise.all([
+  const [aliases, manifestRow, schemaCatalogue] = await Promise.all([
     loadActiveFieldAliases(db, tenantId),
-    loadPublishedSocketManifest(db, tenantId, { socketCode, connectionCode })
+    loadPublishedSocketManifest(db, tenantId, { socketCode, connectionCode }),
+    loadSchemaFieldCatalogue(db, tenantId)
   ]);
   const manifestMap = extractManifestFieldMap(manifestRow);
 
@@ -193,7 +289,8 @@ export async function resolveSocketFieldAliases(db, {
       canonical_code: candidate.valid ? candidate.canonical_code : null,
       mapping_source: candidate.source,
       mapping_attrs: candidate.attrs,
-      reason: candidate.reason
+      reason: candidate.reason,
+      schema_suggestions: candidate.valid ? [] : suggestSchemaTargets(field, schemaCatalogue)
     };
   });
 
@@ -210,7 +307,8 @@ export async function resolveSocketFieldAliases(db, {
             version: manifestRow.version,
             published_at: manifestRow.published_at || null
           }
-        : null
+        : null,
+      schema_field_count: schemaCatalogue.length
     },
     summary: {
       total: resolved.length,
