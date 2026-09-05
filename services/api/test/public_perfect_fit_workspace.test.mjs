@@ -10,6 +10,10 @@ const preflightSource = readFileSync(
   new URL("../src/routes/public_commerce_preflight.js", import.meta.url),
   "utf8"
 );
+const metadataServiceSource = readFileSync(
+  new URL("../src/services/perfectFit/metadataManifest.js", import.meta.url),
+  "utf8"
+);
 const adapterSource = readFileSync(
   new URL(
     "../../../apps/samara-web/my-vite-react-app/src/lib/eipApiAdapter.js",
@@ -24,9 +28,9 @@ const bridgeSource = readFileSync(
   ),
   "utf8"
 );
-const fieldContractSource = readFileSync(
+const runtimeMetadataSource = readFileSync(
   new URL(
-    "../../../apps/samara-web/my-vite-react-app/src/lib/perfectFitFieldContract.js",
+    "../../../apps/samara-web/my-vite-react-app/src/lib/perfectFitRuntimeMetadata.js",
     import.meta.url
   ),
   "utf8"
@@ -63,40 +67,48 @@ test("workspace persistence uses existing kernel info_record instead of a PF tab
   assert.match(routeSource, /privacy:\s*"private"/);
 });
 
-test("public preflight registers the Perfect Fit workspace routes", () => {
+test("public preflight registers the Perfect Fit workspace and metadata routes", () => {
   assert.match(preflightSource, /registerPublicPerfectFitWorkspaceRoutes/);
   assert.match(preflightSource, /await registerPublicPerfectFitWorkspaceRoutes\(app\)/);
-  assert.doesNotMatch(preflightSource, /registerPublicPerfectFitManifestRoutes/);
+  assert.match(routeSource, /\/commerce\/:suffix\/perfect-fit\/metadata/);
 });
 
-test("browser adapter persists workspace and metadata contract only through the public gateway", () => {
+test("browser reads DB metadata and sends business workspace only", () => {
+  assert.match(adapterSource, /loadMetadata:\s*\(\)\s*=>\s*request\('\/perfect-fit\/metadata'\)/);
   assert.match(adapterSource, /loadWorkspace:\s*\(\)\s*=>\s*request\('\/perfect-fit\/workspace'\)/);
-  assert.match(adapterSource, /saveWorkspace:[\s\S]*request\('\/perfect-fit\/workspace'/);
-  assert.match(adapterSource, /manifest_contract/);
-  assert.match(adapterSource, /field_contract/);
+  assert.match(adapterSource, /saveWorkspace:\s*\(workspace\)/);
+  assert.match(adapterSource, /body:\s*\{\s*workspace\s*\}/);
+  assert.doesNotMatch(adapterSource, /manifest_contract/);
+  assert.doesNotMatch(adapterSource, /field_contract/);
   assert.doesNotMatch(adapterSource, /\/api\/eip\//);
 });
 
-test("workspace bridge hydrates before render and keeps a replayable pending snapshot", () => {
+test("workspace bridge never rebuilds or uploads a frontend metadata manifest", () => {
   assert.match(bridgeSource, /hydrateWorkspaceFromEip/);
   assert.match(bridgeSource, /PENDING_WORKSPACE_KEY/);
   assert.match(bridgeSource, /saveWorkspaceRemotely/);
   assert.match(bridgeSource, /domain !== 'workspace'/);
-  assert.match(bridgeSource, /buildPerfectFitManifestContract/);
-  assert.doesNotMatch(bridgeSource, /syncLinkedEnterpriseProducts/);
+  assert.doesNotMatch(bridgeSource, /buildPerfectFitManifestContract/);
+  assert.doesNotMatch(bridgeSource, /manifest_contract/);
+  assert.doesNotMatch(bridgeSource, /field_contract/);
 });
 
-test("manifest contract is derived from existing PF metadata without DB storage knowledge", () => {
-  assert.match(fieldContractSource, /buildPerfectFitManifestContract/);
-  assert.match(fieldContractSource, /collectDeclaredFields/);
-  assert.match(fieldContractSource, /workspace\?\.dropdowns/);
-  assert.match(fieldContractSource, /workspace\?\.structure/);
-  assert.match(fieldContractSource, /field\?\.eipV1Target/);
-  assert.match(fieldContractSource, /field\?\.governanceList/);
-  assert.match(fieldContractSource, /STYLE_VARIANT/);
-  assert.match(fieldContractSource, /SIZE_VARIANT/);
-  assert.doesNotMatch(fieldContractSource, /eip_core\./);
-  assert.doesNotMatch(fieldContractSource, /material\.name/);
+test("runtime workspace metadata is hydrated from EIP DB before use", () => {
+  assert.match(runtimeMetadataSource, /eipApiAdapter\.loadMetadata\(\)/);
+  assert.match(runtimeMetadataSource, /source:\s*'EIP_DB'/);
+  assert.match(runtimeMetadataSource, /replaceObjectContents\(target\.fields/);
+  assert.match(runtimeMetadataSource, /replaceObjectContents\(target\.dropdowns/);
+  assert.match(runtimeMetadataSource, /replaceObjectContents\(target\.structure/);
+  assert.match(runtimeMetadataSource, /replaceObjectContents\(target\.referenceConvention/);
+});
+
+test("server metadata loader uses existing EIP governance tables", () => {
+  assert.match(metadataServiceSource, /eip_commerce\.socket_manifest/);
+  assert.match(metadataServiceSource, /eip_core\.dropdown_list/);
+  assert.match(metadataServiceSource, /eip_core\.dropdown_value/);
+  assert.match(metadataServiceSource, /authority:\s*"EIP_DB"/);
+  assert.doesNotMatch(metadataServiceSource, /perfectFitMetadata/);
+  assert.doesNotMatch(metadataServiceSource, /CREATE\s+TABLE/i);
 });
 
 test("manual EIP integration button is removed from designer workflow", () => {
