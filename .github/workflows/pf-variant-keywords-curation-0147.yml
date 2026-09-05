@@ -1,0 +1,63 @@
+name: pf-variant-keywords-curation-0147
+
+on:
+  push:
+    branches:
+      - feat/pf-variant-keywords-curation-0147
+    paths:
+      - tools/patch_pf_variant_keywords_curation_0147.py
+      - .github/workflows/pf-variant-keywords-curation-0147.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/pf-variant-keywords-curation-0147
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Apply guarded patch
+        run: python tools/patch_pf_variant_keywords_curation_0147.py
+
+      - name: Install root workspace
+        run: npm ci
+
+      - name: Targeted API tests
+        run: node --test services/api/test/perfect_fit_variant_seo_tags.test.mjs services/api/test/perfect_fit_variant_keywords_curation.test.mjs
+
+      - name: Install Perfect Fit frontend
+        run: npm ci
+        working-directory: apps/samara-web/my-vite-react-app
+
+      - name: Build Perfect Fit
+        run: npm run build
+        working-directory: apps/samara-web/my-vite-react-app
+
+      - name: Diff guard
+        run: git diff --check
+
+      - name: Commit validated implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/DEVELOPER_MANUAL.md \
+            apps/samara-web/my-vite-react-app/src/components/Workspace.jsx \
+            apps/samara-web/my-vite-react-app/src/components/PatternSEO.jsx \
+            apps/samara-web/my-vite-react-app/src/lib/workspaceProductPresentation.js \
+            services/api/src/services/perfectFit/productGateway.js \
+            services/api/src/services/perfectFit/workspaceProductProjection.js \
+            services/api/db/migrations/0147_perfect_fit_variant_keywords_curation.sql \
+            services/api/test/perfect_fit_variant_keywords_curation.test.mjs
+          git diff --cached --quiet && exit 0
+          git commit -m "feat: separate PF SEO keywords from governed curation"
+          git push origin HEAD:feat/pf-variant-keywords-curation-0147
