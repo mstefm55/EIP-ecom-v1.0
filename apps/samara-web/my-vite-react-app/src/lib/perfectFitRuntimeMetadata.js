@@ -39,6 +39,7 @@ function applyWorkspaceMetadata(runtimeWorkspace) {
   target.fieldGroups ||= {};
   target.structure ||= {};
   target.dropdowns ||= {};
+  target.referenceConvention ||= {};
 
   // These domains are DB-authoritative once a published Perfect Fit manifest exists.
   // Replace rather than merge so missing DB governance cannot be hidden by hardcoded values.
@@ -46,6 +47,7 @@ function applyWorkspaceMetadata(runtimeWorkspace) {
   replaceObjectContents(target.fieldGroups, source.fieldGroups);
   replaceObjectContents(target.structure, source.structure);
   replaceObjectContents(target.dropdowns, source.dropdowns);
+  replaceObjectContents(target.referenceConvention, source.referenceConvention);
 
   target.dropdownBindings = asObject(source.dropdownBindings);
   target.metadataAuthority = {
