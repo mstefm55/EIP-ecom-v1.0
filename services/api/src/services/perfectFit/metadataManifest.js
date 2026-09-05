@@ -258,6 +258,7 @@ export async function loadPerfectFitMetadataBundle(db, {
         fields,
         fieldGroups,
         structure: asObject(workspace.structure),
+        referenceConvention: asObject(workspace.referenceConvention || workspace.reference_convention),
         dropdowns: runtimeDropdowns,
         dropdownBindings: bindings,
         metadataAuthority: {
