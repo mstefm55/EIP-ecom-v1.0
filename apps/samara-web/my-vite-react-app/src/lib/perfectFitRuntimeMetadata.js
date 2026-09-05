@@ -13,6 +13,45 @@ function replaceObjectContents(target, source) {
   Object.assign(target, asObject(source));
 }
 
+function normalizeRuntimeDropdowns(dropdowns) {
+  const source = asObject(dropdowns);
+  const normalized = {};
+
+  perfectFitMetadata.i18n ||= {};
+  perfectFitMetadata.i18n.localePacks ||= {};
+  const defaultLocale = perfectFitMetadata.i18n.defaultLocale || 'en';
+  perfectFitMetadata.i18n.localePacks[defaultLocale] ||= {};
+  const defaultLocalePack = perfectFitMetadata.i18n.localePacks[defaultLocale];
+
+  for (const [listCode, rawOptions] of Object.entries(source)) {
+    const options = Array.isArray(rawOptions) ? rawOptions : [];
+    normalized[listCode] = options.map((rawOption) => {
+      const option = asObject(rawOption);
+      const code = String(option.code || '').trim();
+      const label = String(option.label || option.eipV1Value || code).trim();
+      const existingLabelKey = String(option.labelKey || '').trim();
+      const runtimeLabelKey = existingLabelKey || `runtime.dropdown.${listCode}.${code}`;
+
+      // EIP dropdown_value.label is the governed presentation value. Existing PF
+      // controls still consume labelKey, so register the DB label in the runtime
+      // locale pack rather than recreating/hardcoding dropdown values in React.
+      if (!existingLabelKey && runtimeLabelKey && label) {
+        defaultLocalePack[runtimeLabelKey] = label;
+      }
+
+      return {
+        ...option,
+        code,
+        label,
+        eipV1Value: option.eipV1Value || label,
+        labelKey: runtimeLabelKey
+      };
+    });
+  }
+
+  return normalized;
+}
+
 function applyWorkspaceMetadata(runtimeWorkspace) {
   const source = asObject(runtimeWorkspace);
   const target = perfectFitMetadata.workspace;
@@ -46,7 +85,7 @@ function applyWorkspaceMetadata(runtimeWorkspace) {
   replaceObjectContents(target.fields, source.fields);
   replaceObjectContents(target.fieldGroups, source.fieldGroups);
   replaceObjectContents(target.structure, source.structure);
-  replaceObjectContents(target.dropdowns, source.dropdowns);
+  replaceObjectContents(target.dropdowns, normalizeRuntimeDropdowns(source.dropdowns));
   replaceObjectContents(target.referenceConvention, source.referenceConvention);
 
   target.dropdownBindings = asObject(source.dropdownBindings);
