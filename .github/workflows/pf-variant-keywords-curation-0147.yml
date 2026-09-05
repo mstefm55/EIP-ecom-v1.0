@@ -26,6 +26,19 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Disambiguate WorkspaceField patch anchor
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('tools/patch_pf_variant_keywords_curation_0147.py')
+          text = p.read_text(encoding='utf-8')
+          old = """    if count != 1:\n        raise RuntimeError(f'{path}: expected exactly one anchor, found {count}')\n    target.write_text(text.replace(old, new, 1), encoding='utf-8')\n"""
+          new = """    if count != 1:\n        ambiguous_workspace_multiselect = (\n            path.endswith('Workspace.jsx')\n            and old == \"  if (field.type === 'multiselect') {\\n\"\n            and count == 2\n        )\n        if ambiguous_workspace_multiselect:\n            marker = 'function WorkspaceField({'\n            start = text.find(marker)\n            if start < 0:\n                raise RuntimeError(f'{path}: WorkspaceField marker not found')\n            head, tail = text[:start], text[start:]\n            if old not in tail:\n                raise RuntimeError(f'{path}: WorkspaceField multiselect anchor not found')\n            target.write_text(head + tail.replace(old, new, 1), encoding='utf-8')\n            return\n        raise RuntimeError(f'{path}: expected exactly one anchor, found {count}')\n    target.write_text(text.replace(old, new, 1), encoding='utf-8')\n"""
+          if text.count(old) != 1:
+              raise SystemExit('temporary patch helper anchor changed unexpectedly')
+          p.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+
       - name: Apply guarded patch
         run: python tools/patch_pf_variant_keywords_curation_0147.py
 
