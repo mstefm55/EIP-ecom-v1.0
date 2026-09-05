@@ -28,7 +28,7 @@ The following Pattern Library entries are not `product.category` values and must
 - Curve & Plus Sizes — sizing/market-segment facet.
 - Best Sellers — merchandising/ranking facet.
 
-They may remain visible in the Pattern Library filter, but they are not valid values for the workspace Style Category field.
+They remain visible in the Pattern Library filter, but they are not valid values for the workspace Style Category field.
 
 ## Governed style categories
 
@@ -38,14 +38,14 @@ The governed list mirrors the actual style-category part of the current Pattern 
 |---|---|---|---|
 | DRESS | Dresses | dresses | women |
 | TOP | Tops | tops | women |
-| CORSET | Corsets | corsets | women |
+| CORSETS | Corsets | corsets | women |
 | TROUSER | Pants & Shorts | pants-shorts | women |
 | SKIRT | Skirts | skirts | women |
-| JUMPSUIT | Jumpsuits | jumpsuits | women |
-| JACKET_VEST | Jackets & Vests | jackets-vests | women |
+| JUMPSUITS | Jumpsuits | jumpsuits | women |
+| JACKETS_VESTS | Jackets & Vests | jackets-vests | women |
 | COAT | Coats & Capes | coats-capes | women |
 | EVENING_PARTY | Evening & Party Looks | evening-party | women |
-| ACCESSORY | Accessories | accessories | women |
+| ACCESSORIES | Accessories | accessories | women |
 | LINGERIE | Lingerie | lingerie | women |
 | SWIMWEAR_ACTIVEWEAR | Swimwear & Activewear | swimwear-activewear | men |
 | HOMEWEAR_SLEEPWEAR | Homewear & Sleepwear | homewear-sleepwear | men |
@@ -54,7 +54,7 @@ The governed list mirrors the actual style-category part of the current Pattern 
 | GIRLS | Girls | girls | kids |
 | BOYS | Boys | boys | kids |
 
-Each governed dropdown value carries catalogue mapping attributes (`catalog_category_id`, `catalog_audience`, `catalog_sort_order`, `taxonomy_role`) so catalogue presentation can consume the same authority without hardcoded category translation.
+Each governed dropdown value carries catalogue mapping attributes (`catalog_category_id`, `catalog_audience`, `catalog_sort_order`, `taxonomy_role`) so catalogue presentation can consume the same authority without duplicating the style vocabulary in React.
 
 ## Engine mapping
 
@@ -63,7 +63,7 @@ Each governed dropdown value carries catalogue mapping attributes (`catalog_cate
 - Runtime delivery: existing Perfect Fit metadata endpoint and `metadataManifest.js`.
 - Workspace UI: existing metadata-driven `WorkspaceField` select renderer.
 - Catalogue UI: `catalogTaxonomy.js` reads the hydrated `GARMENT_CATEGORY` values and maps them to Pattern Library audience/category ids from dropdown-value attrs.
-- Workspace-to-catalogue projection: `workspaceProductPresentation.js` uses the governed `catalog_category_id` mapping instead of category-name hardcoding.
+- Pattern Library filter-only facets remain separate from `product.category`; they are not added to the governed style list.
 
 ## Migration policy
 
