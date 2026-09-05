@@ -35,16 +35,18 @@ WITH pf_tenants AS (
 ) AS (
   VALUES
     -- Women: true style/product categories only.
+    -- Existing 0144 stable codes remain unchanged. New codes are chosen so their
+    -- normalized form also matches the existing catalogue category id.
     ('DRESS',                 'Dresses',                 10,  'dresses',                 'women', 10),
     ('TOP',                   'Tops',                    20,  'tops',                    'women', 20),
-    ('CORSET',                'Corsets',                 30,  'corsets',                 'women', 30),
+    ('CORSETS',               'Corsets',                 30,  'corsets',                 'women', 30),
     ('TROUSER',               'Pants & Shorts',          40,  'pants-shorts',            'women', 40),
     ('SKIRT',                 'Skirts',                  50,  'skirts',                  'women', 50),
-    ('JUMPSUIT',              'Jumpsuits',               60,  'jumpsuits',               'women', 60),
-    ('JACKET_VEST',           'Jackets & Vests',         70,  'jackets-vests',           'women', 70),
+    ('JUMPSUITS',             'Jumpsuits',               60,  'jumpsuits',               'women', 60),
+    ('JACKETS_VESTS',         'Jackets & Vests',         70,  'jackets-vests',           'women', 70),
     ('COAT',                  'Coats & Capes',           80,  'coats-capes',             'women', 80),
     ('EVENING_PARTY',         'Evening & Party Looks',   90,  'evening-party',           'women', 90),
-    ('ACCESSORY',             'Accessories',             100, 'accessories',             'women', 100),
+    ('ACCESSORIES',           'Accessories',             100, 'accessories',             'women', 100),
     ('LINGERIE',              'Lingerie',                110, 'lingerie',                'women', 150),
 
     -- Men.
