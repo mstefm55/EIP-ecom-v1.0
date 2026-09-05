@@ -8,7 +8,6 @@ import {
   eipApiAdapter,
   isEipApiConfigured
 } from './eipApiAdapter';
-import { buildPerfectFitManifestContract } from './perfectFitFieldContract';
 
 const CACHE_OWNER_KEY = 'perfectfit_workspace_cache_owner_v1';
 const PENDING_WORKSPACE_KEY = 'perfectfit_workspace_remote_pending_v1';
@@ -69,8 +68,9 @@ async function saveWorkspaceRemotely(workspace, { alreadyStaged = false } = {}) 
   emitPersistence({ state: 'saving' });
 
   try {
-    const manifestContract = buildPerfectFitManifestContract(perfectFitMetadata);
-    const result = await eipApiAdapter.saveWorkspace(workspace, manifestContract);
+    // Runtime metadata is EIP DB authority. Browser Save sends business data only;
+    // the API loads the published manifest/schema/dropdown contract server-side.
+    const result = await eipApiAdapter.saveWorkspace(workspace);
     if (result?.identity_id && typeof window !== 'undefined') {
       window.localStorage.setItem(CACHE_OWNER_KEY, String(result.identity_id));
       window.localStorage.setItem(PENDING_OWNER_KEY, String(result.identity_id));
@@ -90,6 +90,7 @@ async function saveWorkspaceRemotely(workspace, { alreadyStaged = false } = {}) 
       savedAt: result?.saved_at || null,
       enterpriseProjection: projection,
       manifestAudit: result?.manifest_audit || null,
+      metadataSource: result?.manifest_source || null,
       fieldResolution: projection?.field_resolution?.summary || null,
       projectionWarnings
     });
@@ -212,7 +213,7 @@ export async function initializePerfectFitWorkspacePersistence() {
   if (initialized || typeof window === 'undefined') return;
   initialized = true;
 
-  // This also installs the metadata-driven storage-key -> domain mapping before
+  // This installs the metadata-driven storage-key -> domain mapping before
   // the Workspace component performs its first synchronous read.
   ensureDefaultRuntimeRepositories();
 
