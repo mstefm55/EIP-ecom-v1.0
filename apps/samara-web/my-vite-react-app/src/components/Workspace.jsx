@@ -1482,6 +1482,10 @@ function createVariantNode(parentStyle, values = {}) {
       'variant.size_system': values['variant.size_system'] || 'ALPHA',
       'variant.base_reference_size': values['variant.base_reference_size'] || 'M',
       'variant.notes': values['variant.notes'] || '',
+      'variant.seo_title': values['variant.seo_title'] || '',
+      'variant.seo_description': values['variant.seo_description'] || '',
+      'variant.seo_slug': values['variant.seo_slug'] || '',
+      'variant.tags': Array.isArray(values['variant.tags']) ? values['variant.tags'] : [],
       ...values
     },
     children: makeModuleChildren(variantCode, parentStyle?.values || {})
@@ -1901,12 +1905,13 @@ function WorkspaceField({
   t
 }) {
   const label =
-    t(field.labelKey);
+    field.label ||
+    (field.labelKey ? t(field.labelKey) : '') ||
+    field.key;
 
   const help =
-    field.helpKey
-      ? t(field.helpKey)
-      : '';
+    field.help ||
+    (field.helpKey ? t(field.helpKey) : '');
 
   const options =
     field.governanceList
@@ -1917,6 +1922,56 @@ function WorkspaceField({
 
   const baseClass =
     'w-full rounded-[9px] border border-[#E5E2DA] bg-[#FCFBF8] px-3 py-2 text-[13px] text-[#272622] transition-colors focus:border-[#BCA892] focus:outline-none focus:ring-1 focus:ring-[#BCA892]/30 disabled:bg-[#F4F2ED] disabled:text-[#918D84]';
+
+  const optionLabel = (option) =>
+    option?.label ||
+    (option?.labelKey ? t(option.labelKey) : '') ||
+    option?.eipV1Value ||
+    option?.code ||
+    '';
+
+  if (field.type === 'multiselect') {
+    const selected = Array.isArray(value) ? value : [];
+    return (
+      <div className="space-y-2 md:col-span-2">
+        <label className="block text-[10px] font-semibold uppercase tracking-[0.13em] text-bark-500">
+          {label}
+        </label>
+        <div className="flex flex-wrap gap-2 rounded-[9px] border border-[#E5E2DA] bg-[#FCFBF8] p-2.5">
+          {options.map((option) => {
+            const active = selected.includes(option.code);
+            return (
+              <button
+                key={option.code}
+                type="button"
+                disabled={Boolean(field.readOnly)}
+                aria-pressed={active}
+                onClick={() => {
+                  const next = active
+                    ? selected.filter((code) => code !== option.code)
+                    : [...selected, option.code];
+                  onChange(field.key, next);
+                }}
+                className={`rounded-full border px-3 py-1.5 text-[11px] font-medium transition-colors ${
+                  active
+                    ? 'border-[#7B5C49] bg-[#7B5C49] text-white'
+                    : 'border-[#D9D5CC] bg-white text-[#4A4741] hover:border-[#BCA892]'
+                } disabled:cursor-not-allowed disabled:opacity-60`}
+              >
+                {optionLabel(option)}
+              </button>
+            );
+          })}
+          {!options.length && (
+            <span className="text-[11px] text-[#918D84]">No governed options available</span>
+          )}
+        </div>
+        {help && (
+          <p className="text-[10px] leading-relaxed text-bark-400">{help}</p>
+        )}
+      </div>
+    );
+  }
 
   if (field.type === 'select') {
     return (
@@ -1956,9 +2011,7 @@ function WorkspaceField({
                   option.code
                 }
               >
-                {t(
-                  option.labelKey
-                )}
+                {optionLabel(option)}
               </option>
             )
           )}
@@ -2127,12 +2180,10 @@ function MetadataForm({
             key={group.key}
             className="rounded-xl border border-sand-200 bg-white"
           >
-            {group.labelKey && (
+            {(group.label || group.labelKey) && (
               <div className="border-b border-sand-150 px-5 py-4">
                 <h3 className="font-serif text-lg font-medium text-bark-900">
-                  {t(
-                    group.labelKey
-                  )}
+                  {group.label || t(group.labelKey)}
                 </h3>
               </div>
             )}
@@ -2247,6 +2298,9 @@ function OverviewModule({
   const sizeSystem = getDropdownLabel(metadata, 'SIZE_SYSTEM', variantValues['variant.size_system'], t);
   const baseSize = getDropdownLabel(metadata, 'BASE_REFERENCE_SIZE', variantValues['variant.base_reference_size'], t);
   const primaryAssetSource = primaryAsset?.previewUrl || primaryAsset?.url || overviewImageUrl;
+  const discoverySeoGroup = getFieldGroups(metadata, 'variant').find(
+    (group) => group.key === 'variantDiscoverySeo'
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -2380,6 +2434,29 @@ function OverviewModule({
           </div>
         </div>
       </section>
+
+      {discoverySeoGroup && (
+        <section className="rounded-[12px] border border-[#E5E2DA] bg-[#FCFBF8]">
+          <div className="border-b border-[#E5E2DA] px-4 py-3">
+            <h3 className="text-[15px] font-semibold text-[#272622]">
+              {discoverySeoGroup.label ||
+                (discoverySeoGroup.labelKey ? t(discoverySeoGroup.labelKey) : 'Discovery & SEO')}
+            </h3>
+          </div>
+          <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-2">
+            {discoverySeoGroup.fields.map((field) => (
+              <WorkspaceField
+                key={`${variant?.id}-${field.key}`}
+                metadata={metadata}
+                field={field}
+                value={variantValues[field.key]}
+                onChange={handleTargetChange(variant?.id)}
+                t={t}
+              />
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

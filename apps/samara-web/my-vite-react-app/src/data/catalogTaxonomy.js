@@ -111,3 +111,50 @@ export function getCategoryLabel(audienceId, categoryId) {
 export function getAudienceLabel(audienceId) {
   return getAudienceById(audienceId)?.label || audienceId;
 }
+
+export function getGovernedProductTags() {
+  const governed = perfectFitMetadata.workspace?.dropdowns?.VARIANT_TAG;
+  return Array.isArray(governed) ? governed : [];
+}
+
+function getPatternTagTokens(pattern = {}) {
+  const raw = Array.isArray(pattern.collectionTags)
+    ? pattern.collectionTags
+    : Array.isArray(pattern.tags)
+    ? pattern.tags
+    : [];
+  return [...new Set(raw.map((value) => String(value || '').trim()).filter(Boolean))];
+}
+
+export function getGovernedTagOption(tagValue) {
+  const token = String(tagValue || '').trim();
+  if (!token) return null;
+  const normalized = slugifyCatalogValue(token);
+  return getGovernedProductTags().find((option) => {
+    const attrs = option?.attrs || {};
+    return (
+      option?.code === token ||
+      slugifyCatalogValue(option?.code) === normalized ||
+      slugifyCatalogValue(attrs.legacy_tag_id) === normalized
+    );
+  }) || null;
+}
+
+export function isPatternEligibleForSurface(pattern, surfaceTarget) {
+  const target = String(surfaceTarget || '').trim();
+  if (!target) return false;
+  return getPatternTagTokens(pattern).some((tag) => {
+    const option = getGovernedTagOption(tag);
+    const targets = Array.isArray(option?.attrs?.surface_targets)
+      ? option.attrs.surface_targets
+      : [];
+    return targets.includes(target);
+  });
+}
+
+export function selectPatternsForSurface(patterns, surfaceTarget, limit = 8) {
+  const safe = Array.isArray(patterns) ? patterns.filter(Boolean) : [];
+  const eligible = safe.filter((pattern) => isPatternEligibleForSurface(pattern, surfaceTarget));
+  const source = eligible.length ? eligible : safe;
+  return source.slice(0, Math.max(0, Number(limit) || 0));
+}

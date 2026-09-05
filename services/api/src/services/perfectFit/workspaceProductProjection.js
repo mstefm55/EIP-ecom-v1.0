@@ -4,7 +4,8 @@ import {
 import {
   registerPerfectFitProduct,
   syncPerfectFitProduct,
-  syncPerfectFitSizeVariants
+  syncPerfectFitSizeVariants,
+  syncPerfectFitVariantPresentation
 } from "./productGateway.js";
 import {
   resolveSocketFieldAliases,
@@ -50,7 +51,11 @@ const PF_CANONICAL_CODES = Object.freeze([
   "product.category",
   "attrs.product_description",
   "attrs.designer_code",
-  "attrs.variant_code"
+  "attrs.variant_code",
+  "seo.title",
+  "seo.description",
+  "seo.slug",
+  "taxonomy.tags"
 ]);
 
 function sharedFieldForCanonical(code) {
@@ -67,15 +72,96 @@ function identityFieldForCanonical(code) {
   return null;
 }
 
+function presentationFieldForCanonical(code) {
+  if (code === "seo.title") return "seo_title";
+  if (code === "seo.description") return "seo_description";
+  if (code === "seo.slug") return "seo_slug";
+  if (code === "taxonomy.tags") return "tags";
+  return null;
+}
+
+function valueEntryFromContext(context, key) {
+  for (const [scope, values] of [
+    ["variant", context?.variant?.values],
+    ["style", context?.style?.values],
+    ["project", context?.project?.values]
+  ]) {
+    if (values && Object.prototype.hasOwnProperty.call(values, key)) {
+      return { found: true, value: values[key], scope };
+    }
+  }
+  return { found: false, value: undefined, scope: null };
+}
+
 async function resolveContextValues(db, tenantId, context, fieldResolution) {
   const shared = {};
   const identityMapped = {};
+  const presentation = {};
+  const presentationPresence = {};
   const applied = [];
   const rejected = [];
 
   for (const field of fieldResolution.fields || []) {
     if (field.status !== "MAPPED" || !field.canonical_code) continue;
-    const value = valueFromContext(context, field.key);
+    const entry = valueEntryFromContext(context, field.key);
+    if (!entry.found) continue;
+    const value = entry.value;
+
+    const presentationField = presentationFieldForCanonical(field.canonical_code);
+    if (presentationField) {
+      // Variant presentation is owned only by the Style Variant. Do not inherit
+      // SEO/tags from Style or Project values by accident.
+      if (entry.scope !== "variant") continue;
+
+      if (presentationField === "tags") {
+        const values = Array.isArray(value)
+          ? value
+          : value === undefined || value === null || value === ""
+          ? []
+          : [value];
+        const normalizedTags = [...new Set(values.map(normalizeText).filter(Boolean))];
+        let invalid = null;
+        if (field.governance_list) {
+          for (const tag of normalizedTags) {
+            // eslint-disable-next-line no-await-in-loop
+            const governed = await validateGovernedDropdownValue(db, {
+              tenantId,
+              listCode: field.governance_list,
+              value: tag
+            });
+            if (!governed.ok) {
+              invalid = { tag, reason: governed.reason };
+              break;
+            }
+          }
+        }
+        if (invalid) {
+          rejected.push({
+            key: field.key,
+            canonical_code: field.canonical_code,
+            reason: invalid.reason,
+            governance_list: field.governance_list,
+            value: invalid.tag
+          });
+          continue;
+        }
+        presentation.tags = normalizedTags;
+        presentationPresence.tags = true;
+      } else {
+        presentation[presentationField] =
+          value === undefined || value === null ? "" : normalizeText(value);
+        presentationPresence[presentationField] = true;
+      }
+
+      applied.push({
+        key: field.key,
+        canonical_code: field.canonical_code,
+        target: `material.attrs.${field.canonical_code}`,
+        source: field.mapping_source
+      });
+      continue;
+    }
+
     if (value === undefined || value === null || value === "") continue;
 
     if (field.governance_list) {
@@ -120,7 +206,14 @@ async function resolveContextValues(db, tenantId, context, fieldResolution) {
     }
   }
 
-  return { shared, identityMapped, applied, rejected };
+  return {
+    shared,
+    identityMapped,
+    presentation,
+    presentationPresence,
+    applied,
+    rejected
+  };
 }
 
 function projectCode(project, identityMapped = {}) {
@@ -423,6 +516,19 @@ export async function projectPerfectFitWorkspaceProducts(db, {
           sharedMetadata: variantSharedMetadata
         });
 
+        let presentationSync = null;
+        if (
+          variantProductId &&
+          Object.keys(variantValues.presentationPresence || {}).length
+        ) {
+          presentationSync = await syncPerfectFitVariantPresentation(db, {
+            tenantId,
+            productId: variantProductId,
+            presentation: variantValues.presentation,
+            presence: variantValues.presentationPresence
+          });
+        }
+
         let sizeSync = null;
         const sizes = extractSizeVariants(variant);
         if (variantProductId && sizes.length) {
@@ -435,6 +541,7 @@ export async function projectPerfectFitWorkspaceProducts(db, {
 
         const variantOk =
           (variantSync ? variantSync.ok !== false : true) &&
+          (presentationSync ? presentationSync.ok !== false : true) &&
           (sizeSync ? sizeSync.ok !== false : true);
         if (variantOk) {
           styleVariantCount += 1;
@@ -456,6 +563,7 @@ export async function projectPerfectFitWorkspaceProducts(db, {
           rejected_fields: variantValues.rejected,
           conflicts: variantSync?.conflicts || [],
           unmapped_fields: variantSync?.unmapped_fields || [],
+          presentation_sync: presentationSync,
           size_sync: sizeSync
         });
       } catch (error) {
