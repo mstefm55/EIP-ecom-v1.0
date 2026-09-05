@@ -55,6 +55,7 @@ const PF_CANONICAL_CODES = Object.freeze([
   "seo.title",
   "seo.description",
   "seo.slug",
+  "seo.keywords",
   "taxonomy.tags"
 ]);
 
@@ -76,6 +77,7 @@ function presentationFieldForCanonical(code) {
   if (code === "seo.title") return "seo_title";
   if (code === "seo.description") return "seo_description";
   if (code === "seo.slug") return "seo_slug";
+  if (code === "seo.keywords") return "seo_keywords";
   if (code === "taxonomy.tags") return "tags";
   return null;
 }
@@ -113,7 +115,17 @@ async function resolveContextValues(db, tenantId, context, fieldResolution) {
       // SEO/tags from Style or Project values by accident.
       if (entry.scope !== "variant") continue;
 
-      if (presentationField === "tags") {
+      if (presentationField === "seo_keywords") {
+        const values = Array.isArray(value)
+          ? value
+          : value === undefined || value === null || value === ""
+          ? []
+          : [value];
+        presentation.seo_keywords = [
+          ...new Set(values.map(normalizeText).filter(Boolean))
+        ];
+        presentationPresence.seo_keywords = true;
+      } else if (presentationField === "tags") {
         const values = Array.isArray(value)
           ? value
           : value === undefined || value === null || value === ""

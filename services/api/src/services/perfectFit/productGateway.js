@@ -532,7 +532,7 @@ export async function syncPerfectFitVariantPresentation(db, {
   presentation = {},
   presence = {}
 }) {
-  const ownedKeys = ["seo_title", "seo_description", "seo_slug", "tags"];
+  const ownedKeys = ["seo_title", "seo_description", "seo_slug", "seo_keywords", "tags"];
   const hasOwnedPatch = ownedKeys.some((key) => presence?.[key] === true);
   if (!hasOwnedPatch) {
     return { ok: true, skipped: true, product_id: productId };
@@ -552,7 +552,7 @@ export async function syncPerfectFitVariantPresentation(db, {
       ? { ...material.rows[0].attrs }
       : {};
 
-    if (presence.seo_title || presence.seo_description || presence.seo_slug) {
+    if (presence.seo_title || presence.seo_description || presence.seo_slug || presence.seo_keywords) {
       const nextSeo = nextAttrs.seo && typeof nextAttrs.seo === "object"
         ? { ...nextAttrs.seo }
         : {};
@@ -564,6 +564,13 @@ export async function syncPerfectFitVariantPresentation(db, {
       if (presence.seo_title) applySeoValue("title", presentation.seo_title);
       if (presence.seo_description) applySeoValue("description", presentation.seo_description);
       if (presence.seo_slug) applySeoValue("slug", presentation.seo_slug);
+      if (presence.seo_keywords) {
+        const keywords = Array.isArray(presentation.seo_keywords)
+          ? [...new Set(presentation.seo_keywords.map((item) => String(item || "").trim()).filter(Boolean))]
+          : [];
+        if (keywords.length) nextSeo.keywords = keywords;
+        else delete nextSeo.keywords;
+      }
       if (Object.keys(nextSeo).length) nextAttrs.seo = nextSeo;
       else delete nextAttrs.seo;
     }
