@@ -1,0 +1,43 @@
+name: pf-variant-seo-tags-patch-v2
+
+on:
+  push:
+    branches:
+      - feat/pf-variant-seo-tags-orbit-governance
+    paths:
+      - tools/run_pf_variant_seo_tags_patch.py
+      - .github/workflows/pf-variant-seo-tags-patch-v2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/pf-variant-seo-tags-orbit-governance
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply guarded source patch
+        run: python tools/run_pf_variant_seo_tags_patch.py
+      - name: Commit patched sources
+        run: |
+          if git diff --quiet; then
+            echo "No patch changes detected"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add services/api/src/services/perfectFit/workspaceProductProjection.js \
+                  services/api/src/services/perfectFit/productGateway.js \
+                  apps/samara-web/my-vite-react-app/src/components/Workspace.jsx \
+                  apps/samara-web/my-vite-react-app/src/lib/workspaceProductPresentation.js \
+                  apps/samara-web/my-vite-react-app/src/data/catalogTaxonomy.js \
+                  apps/samara-web/my-vite-react-app/src/App.jsx \
+                  apps/samara-web/my-vite-react-app/src/components/PatternSEO.jsx
+          git commit -m "feat: wire PF variant SEO tags and Orbit governance [pf-seo-tags-patched]"
+          git push origin HEAD:feat/pf-variant-seo-tags-orbit-governance
