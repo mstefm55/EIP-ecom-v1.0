@@ -14,26 +14,62 @@ const resolver = readFileSync(
   new URL('../src/services/socket/fieldAliasResolver.js', import.meta.url),
   'utf8'
 );
-const contract = readFileSync(
-  new URL('../../../apps/samara-web/my-vite-react-app/src/lib/perfectFitFieldContract.js', import.meta.url),
+const metadataManifest = readFileSync(
+  new URL('../src/services/perfectFit/metadataManifest.js', import.meta.url),
+  'utf8'
+);
+const manifestAudit = readFileSync(
+  new URL('../src/services/perfectFit/manifestCompleteness.js', import.meta.url),
+  'utf8'
+);
+const productGateway = readFileSync(
+  new URL('../src/services/perfectFit/productGateway.js', import.meta.url),
+  'utf8'
+);
+const metadataMigration = readFileSync(
+  new URL('../db/migrations/0144_perfect_fit_db_metadata_manifest.sql', import.meta.url),
   'utf8'
 );
 
-test('lossless workspace commit happens before enterprise projection', () => {
+test('lossless workspace commit happens before DB manifest audit and enterprise projection', () => {
+  const metadataIndex = route.indexOf('const metadataBundle = await safeLoadMetadataBundle');
   const commitIndex = route.indexOf('await client.query("COMMIT")');
-  const projectionIndex = route.indexOf('projectPerfectFitWorkspaceProducts');
-  assert.ok(commitIndex > 0);
-  assert.ok(projectionIndex > commitIndex);
-  assert.match(route, /Projection failure is reported but never rolls back/);
+  const auditIndex = route.indexOf('auditPerfectFitManifestCompleteness(app.db');
+  const projectionIndex = route.indexOf('projectPerfectFitWorkspaceProducts(app.db');
+  assert.ok(metadataIndex > 0);
+  assert.ok(commitIndex > metadataIndex);
+  assert.ok(auditIndex > commitIndex);
+  assert.ok(projectionIndex > auditIndex);
+  assert.match(route, /browser never supplies the/);
+  assert.match(route, /DB_METADATA_MANIFEST_MISSING/);
 });
 
 test('PF projection reuses socket resolver and existing product gateway', () => {
   assert.match(projection, /resolveSocketFieldAliases/);
   assert.match(projection, /registerPerfectFitProduct/);
   assert.match(projection, /syncPerfectFitProduct/);
+  assert.match(projection, /syncPerfectFitSizeVariants/);
   assert.doesNotMatch(projection, /INSERT\s+INTO\s+eip_core\.material/i);
   assert.doesNotMatch(projection, /UPDATE\s+eip_core\.material/i);
   assert.doesNotMatch(projection, /eip_core\.ui_surface/);
+});
+
+test('PF product hierarchy preserves Style, Style Variant, and existing size-variant level', () => {
+  assert.match(projection, /collectStyleContexts/);
+  assert.match(projection, /entity_level:\s*"STYLE"/);
+  assert.match(projection, /entity_level:\s*"STYLE_VARIANT"/);
+  assert.match(projection, /level:\s*"STYLE_MASTER"/);
+  assert.match(projection, /level:\s*"STYLE_VARIANT"/);
+  assert.match(projection, /relation_type:\s*"STYLE_VARIANT_OF"/);
+  assert.match(projection, /node\?\.nodeType === "sizeSet"/);
+  assert.doesNotMatch(projection, /collectVariantContexts/);
+
+  assert.match(productGateway, /PERFECT_FIT_STYLE_VARIANT_RELATION/);
+  assert.match(productGateway, /STYLE_VARIANT_OF/);
+  assert.match(productGateway, /product_hierarchy/);
+  assert.match(productGateway, /attrs\.variants/);
+  assert.match(productGateway, /headers/);
+  assert.match(productGateway, /items/);
 });
 
 test('generic resolver uses existing SmartSocket and dropdown governance tables', () => {
@@ -44,16 +80,46 @@ test('generic resolver uses existing SmartSocket and dropdown governance tables'
   assert.doesNotMatch(resolver, /CREATE\s+TABLE/i);
 });
 
-test('frontend contract derives from existing Perfect Fit metadata and knows no DB storage', () => {
-  assert.match(contract, /workspace\.fields/);
-  assert.match(contract, /eipV1Target/);
-  assert.match(contract, /governanceList/);
-  assert.doesNotMatch(contract, /eip_core\./);
-  assert.doesNotMatch(contract, /socket_alias_map/);
-  assert.doesNotMatch(contract, /material\.attrs/);
+test('Perfect Fit runtime manifest is loaded from EIP DB and never from frontend metadata', () => {
+  assert.match(metadataManifest, /PERFECT_FIT_MANIFEST_CODE = "PERFECT_FIT"/);
+  assert.match(metadataManifest, /eip_commerce\.socket_manifest/);
+  assert.match(metadataManifest, /eip_core\.dropdown_list/);
+  assert.match(metadataManifest, /metadataAuthority/);
+  assert.match(metadataManifest, /source:\s*"EIP_DB"/);
+  assert.doesNotMatch(metadataManifest, /perfectFitMetadata/);
+  assert.doesNotMatch(metadataManifest, /eipV1Target/);
 });
 
-test('unexecuted duplicate 0143 migration is removed from rework branch', () => {
+test('manifest completeness audit accounts for fields and DB dropdown governance', () => {
+  assert.match(manifestAudit, /ENTERPRISE_MAPPED/);
+  assert.match(manifestAudit, /WORKSPACE_ONLY/);
+  assert.match(manifestAudit, /VALUE_MAPPING_REQUIRED/);
+  assert.match(manifestAudit, /OBJECT_MAPPING_REQUIRED/);
+  assert.match(manifestAudit, /ADMIN_REVIEW/);
+  assert.match(manifestAudit, /fields_unaccounted/);
+  assert.match(manifestAudit, /governed_code/);
+  assert.match(manifestAudit, /eip_core\.dropdown_list/);
+  assert.match(manifestAudit, /eip_core\.dropdown_value/);
+  assert.match(manifestAudit, /STYLE_MASTER_PRODUCT/);
+  assert.match(manifestAudit, /STYLE_VARIANT_PRODUCT/);
+  assert.doesNotMatch(manifestAudit, /CREATE\s+TABLE/i);
+  assert.doesNotMatch(manifestAudit, /dv\.parent_id/);
+});
+
+test('0144 seeds metadata into existing governance structures without new tables', () => {
+  assert.match(metadataMigration, /eip_commerce\.socket_manifest/);
+  assert.match(metadataMigration, /eip_commerce\.socket_alias_map/);
+  assert.match(metadataMigration, /eip_core\.dropdown_list/);
+  assert.match(metadataMigration, /eip_core\.dropdown_value/);
+  assert.match(metadataMigration, /"STYLE_VARIANT"/);
+  assert.match(metadataMigration, /"SIZE_VARIANT"/);
+  assert.match(metadataMigration, /STYLE_VARIANT_OF/);
+  assert.match(metadataMigration, /PF_PROJECT_STATUS/);
+  assert.doesNotMatch(metadataMigration, /CREATE\s+TABLE/i);
+  assert.doesNotMatch(metadataMigration, /ui_surface/i);
+});
+
+test('unexecuted duplicate 0143 migration remains removed', () => {
   const migrationUrl = new URL('../db/migrations/0143_perfect_fit_manifest_surface.sql', import.meta.url);
   assert.equal(existsSync(migrationUrl), false);
 });

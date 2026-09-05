@@ -3,7 +3,8 @@ import {
 } from "../../lib/perfectFitProductIntegration.js";
 import {
   registerPerfectFitProduct,
-  syncPerfectFitProduct
+  syncPerfectFitProduct,
+  syncPerfectFitSizeVariants
 } from "./productGateway.js";
 import {
   resolveSocketFieldAliases,
@@ -27,16 +28,17 @@ function valueFromContext(context, key) {
   return undefined;
 }
 
-function collectVariantContexts(workspace) {
+function collectStyleContexts(workspace) {
   const output = [];
   for (const project of workspace?.projects || []) {
     if (project?.nodeType !== "project") continue;
     for (const style of project.children || []) {
       if (style?.nodeType !== "product") continue;
-      for (const variant of style.children || []) {
-        if (variant?.nodeType !== "variant") continue;
-        output.push({ project, style, variant });
-      }
+      output.push({
+        project,
+        style,
+        variants: (style.children || []).filter((node) => node?.nodeType === "variant")
+      });
     }
   }
   return output;
@@ -121,21 +123,48 @@ async function resolveContextValues(db, tenantId, context, fieldResolution) {
   return { shared, identityMapped, applied, rejected };
 }
 
-function buildIdentity(context, identityMapped) {
+function projectCode(project, identityMapped = {}) {
+  return (
+    identityMapped.project_code ||
+    normalizeText(project?.values?.["project.designer_code"]) ||
+    null
+  );
+}
+
+function styleCode(style, identityMapped = {}) {
+  return (
+    identityMapped.style_code ||
+    normalizeText(style?.values?.["product.style_code"]) ||
+    null
+  );
+}
+
+function buildStyleIdentity(context, identityMapped) {
+  const { project, style } = context;
+  return {
+    entity_level: "STYLE",
+    pf_product_id: normalizeText(style?.id),
+    project_id: normalizeText(project?.id) || null,
+    style_id: normalizeText(style?.id) || null,
+    variant_id: null,
+    project_code: projectCode(project, identityMapped),
+    style_code: styleCode(style, identityMapped),
+    variant_code: null,
+    pattern_references: [],
+    workspace_url: null
+  };
+}
+
+function buildStyleVariantIdentity(context, identityMapped) {
   const { project, style, variant } = context;
   return {
+    entity_level: "STYLE_VARIANT",
     pf_product_id: normalizeText(variant?.id),
     project_id: normalizeText(project?.id) || null,
     style_id: normalizeText(style?.id) || null,
     variant_id: normalizeText(variant?.id) || null,
-    project_code:
-      identityMapped.project_code ||
-      normalizeText(project?.values?.["project.designer_code"]) ||
-      null,
-    style_code:
-      identityMapped.style_code ||
-      normalizeText(style?.values?.["product.style_code"]) ||
-      null,
+    project_code: projectCode(project, identityMapped),
+    style_code: styleCode(style, identityMapped),
     variant_code:
       identityMapped.variant_code ||
       normalizeText(variant?.values?.["variant.code"]) ||
@@ -163,6 +192,64 @@ function policyFilteredSharedMetadata(shared) {
   return output;
 }
 
+function styleVariantProductName(style, variant, baseName) {
+  const styleName = normalizeText(baseName || style?.values?.["product.style_name"] || style?.title);
+  const variantName = normalizeText(variant?.values?.["variant.name"] || variant?.title);
+  if (!variantName) return styleName;
+  if (!styleName) return variantName;
+  return `${styleName} — ${variantName}`;
+}
+
+function extractSizeVariants(variant) {
+  const measurementNode = (variant?.children || []).find((node) => node?.nodeType === "sizeSet");
+  const chart = measurementNode?.values && typeof measurementNode.values === "object"
+    ? measurementNode.values
+    : {};
+  const displaySystem = normalizeText(chart.displaySystem || chart.display_system || "ALPHA").toUpperCase();
+
+  return (Array.isArray(chart.sizes) ? chart.sizes : [])
+    .map((size, index) => {
+      const references = size?.references && typeof size.references === "object"
+        ? size.references
+        : {};
+      const label = normalizeText(
+        references[displaySystem] ||
+        size?.label ||
+        size?.code ||
+        references.ALPHA ||
+        size?.id
+      );
+      const id = normalizeText(size?.id || size?.code || `size-${index + 1}`);
+      if (!id || !label) return null;
+      return {
+        id,
+        code: normalizeText(size?.code) || null,
+        label,
+        size: label,
+        references,
+        active: size?.active !== false
+      };
+    })
+    .filter(Boolean);
+}
+
+async function syncRegisteredProduct(db, {
+  tenantId,
+  productId,
+  actorIdentityId,
+  sharedMetadata
+}) {
+  if (!productId) return null;
+  return syncPerfectFitProduct(db, {
+    tenantId,
+    productId,
+    actorIdentityId,
+    source: "PERFECT_FIT",
+    perfectFitSharedMetadata: sharedMetadata,
+    resolutions: {}
+  });
+}
+
 export async function projectPerfectFitWorkspaceProducts(db, {
   tenantId,
   actorIdentityId,
@@ -181,81 +268,207 @@ export async function projectPerfectFitWorkspaceProducts(db, {
   });
 
   const products = [];
-  for (const context of collectVariantContexts(workspace)) {
-    const values = await resolveContextValues(db, tenantId, context, fieldResolution);
-    const identity = buildIdentity(context, values.identityMapped);
-    const sharedMetadata = policyFilteredSharedMetadata(values.shared);
+  let styleMasterCount = 0;
+  let styleVariantCount = 0;
+  let sizeVariantCount = 0;
 
-    if (!identity.pf_product_id || !identity.variant_id) {
+  for (const styleContext of collectStyleContexts(workspace)) {
+    const styleValues = await resolveContextValues(
+      db,
+      tenantId,
+      { project: styleContext.project, style: styleContext.style, variant: null },
+      fieldResolution
+    );
+    const styleIdentity = buildStyleIdentity(styleContext, styleValues.identityMapped);
+    const styleSharedMetadata = policyFilteredSharedMetadata(styleValues.shared);
+
+    if (!styleIdentity.pf_product_id || !styleIdentity.style_id) {
       products.push({
         ok: false,
-        variant_id: context?.variant?.id || null,
-        error: "PERFECT_FIT_STABLE_ID_REQUIRED",
-        applied_fields: values.applied,
-        rejected_fields: values.rejected
+        entity_level: "STYLE",
+        style_id: styleContext?.style?.id || null,
+        error: "PERFECT_FIT_STYLE_ID_REQUIRED",
+        applied_fields: styleValues.applied,
+        rejected_fields: styleValues.rejected
       });
       continue;
     }
-    if (!normalizeText(sharedMetadata.product_name)) {
+    if (!normalizeText(styleSharedMetadata.product_name)) {
       products.push({
         ok: false,
-        variant_id: identity.variant_id,
+        entity_level: "STYLE",
+        style_id: styleIdentity.style_id,
         error: "PRODUCT_NAME_UNMAPPED",
-        applied_fields: values.applied,
-        rejected_fields: values.rejected
+        applied_fields: styleValues.applied,
+        rejected_fields: styleValues.rejected
       });
       continue;
     }
 
+    let styleRegistration;
     try {
-      const registration = await registerPerfectFitProduct(db, {
+      styleRegistration = await registerPerfectFitProduct(db, {
         tenantId,
         actorIdentityId,
-        perfectFit: identity,
-        sharedMetadata
-      });
-      if (!registration?.ok) {
-        products.push({
-          ok: false,
-          variant_id: identity.variant_id,
-          error: registration?.error || "PRODUCT_REGISTRATION_FAILED",
-          applied_fields: values.applied,
-          rejected_fields: values.rejected
-        });
-        continue;
-      }
-
-      const productId = registration?.item?.id || registration?.product_id;
-      let sync = null;
-      if (productId) {
-        sync = await syncPerfectFitProduct(db, {
-          tenantId,
-          productId,
-          actorIdentityId,
-          source: "PERFECT_FIT",
-          perfectFitSharedMetadata: sharedMetadata,
-          resolutions: {}
-        });
-      }
-
-      products.push({
-        ok: sync ? sync.ok !== false : true,
-        variant_id: identity.variant_id,
-        product_id: productId || null,
-        reused: registration?.reused === true,
-        applied_fields: values.applied,
-        rejected_fields: values.rejected,
-        conflicts: sync?.conflicts || [],
-        unmapped_fields: sync?.unmapped_fields || []
+        perfectFit: styleIdentity,
+        sharedMetadata: styleSharedMetadata,
+        hierarchy: { level: "STYLE_MASTER" }
       });
     } catch (error) {
       products.push({
         ok: false,
-        variant_id: identity.variant_id,
+        entity_level: "STYLE",
+        style_id: styleIdentity.style_id,
         error: error?.message || String(error),
-        applied_fields: values.applied,
-        rejected_fields: values.rejected
+        applied_fields: styleValues.applied,
+        rejected_fields: styleValues.rejected
       });
+      continue;
+    }
+
+    if (!styleRegistration?.ok) {
+      products.push({
+        ok: false,
+        entity_level: "STYLE",
+        style_id: styleIdentity.style_id,
+        error: styleRegistration?.error || "STYLE_MASTER_REGISTRATION_FAILED",
+        applied_fields: styleValues.applied,
+        rejected_fields: styleValues.rejected
+      });
+      continue;
+    }
+
+    const styleProductId = styleRegistration?.item?.id || styleRegistration?.product_id;
+    const styleSync = await syncRegisteredProduct(db, {
+      tenantId,
+      productId: styleProductId,
+      actorIdentityId,
+      sharedMetadata: styleSharedMetadata
+    });
+    const styleOk = styleSync ? styleSync.ok !== false : true;
+    if (styleOk) styleMasterCount += 1;
+    products.push({
+      ok: styleOk,
+      entity_level: "STYLE",
+      style_id: styleIdentity.style_id,
+      product_id: styleProductId || null,
+      product_level: "STYLE_MASTER",
+      reused: styleRegistration?.reused === true,
+      applied_fields: styleValues.applied,
+      rejected_fields: styleValues.rejected,
+      conflicts: styleSync?.conflicts || [],
+      unmapped_fields: styleSync?.unmapped_fields || []
+    });
+
+    if (!styleOk || !styleProductId) continue;
+
+    for (const variant of styleContext.variants) {
+      const variantContext = {
+        project: styleContext.project,
+        style: styleContext.style,
+        variant
+      };
+      const variantValues = await resolveContextValues(db, tenantId, variantContext, fieldResolution);
+      const variantIdentity = buildStyleVariantIdentity(variantContext, variantValues.identityMapped);
+      const variantSharedMetadata = policyFilteredSharedMetadata(variantValues.shared);
+      variantSharedMetadata.product_name = styleVariantProductName(
+        styleContext.style,
+        variant,
+        variantSharedMetadata.product_name || styleSharedMetadata.product_name
+      );
+
+      if (!variantIdentity.pf_product_id || !variantIdentity.variant_id) {
+        products.push({
+          ok: false,
+          entity_level: "STYLE_VARIANT",
+          style_id: styleIdentity.style_id,
+          variant_id: variant?.id || null,
+          error: "PERFECT_FIT_VARIANT_ID_REQUIRED",
+          applied_fields: variantValues.applied,
+          rejected_fields: variantValues.rejected
+        });
+        continue;
+      }
+
+      try {
+        const variantRegistration = await registerPerfectFitProduct(db, {
+          tenantId,
+          actorIdentityId,
+          perfectFit: variantIdentity,
+          sharedMetadata: variantSharedMetadata,
+          hierarchy: {
+            level: "STYLE_VARIANT",
+            parent_product_id: styleProductId
+          }
+        });
+
+        if (!variantRegistration?.ok) {
+          products.push({
+            ok: false,
+            entity_level: "STYLE_VARIANT",
+            style_id: styleIdentity.style_id,
+            variant_id: variantIdentity.variant_id,
+            error: variantRegistration?.error || "STYLE_VARIANT_REGISTRATION_FAILED",
+            applied_fields: variantValues.applied,
+            rejected_fields: variantValues.rejected
+          });
+          continue;
+        }
+
+        const variantProductId = variantRegistration?.item?.id || variantRegistration?.product_id;
+        const variantSync = await syncRegisteredProduct(db, {
+          tenantId,
+          productId: variantProductId,
+          actorIdentityId,
+          sharedMetadata: variantSharedMetadata
+        });
+
+        let sizeSync = null;
+        const sizes = extractSizeVariants(variant);
+        if (variantProductId && sizes.length) {
+          sizeSync = await syncPerfectFitSizeVariants(db, {
+            tenantId,
+            productId: variantProductId,
+            sizeVariants: sizes
+          });
+        }
+
+        const variantOk =
+          (variantSync ? variantSync.ok !== false : true) &&
+          (sizeSync ? sizeSync.ok !== false : true);
+        if (variantOk) {
+          styleVariantCount += 1;
+          sizeVariantCount += Number(sizeSync?.synced_size_count || 0);
+        }
+
+        products.push({
+          ok: variantOk,
+          entity_level: "STYLE_VARIANT",
+          style_id: styleIdentity.style_id,
+          variant_id: variantIdentity.variant_id,
+          product_id: variantProductId || null,
+          parent_product_id: styleProductId,
+          product_level: "STYLE_VARIANT",
+          relation_type: "STYLE_VARIANT_OF",
+          reused: variantRegistration?.reused === true,
+          size_variant_count: Number(sizeSync?.synced_size_count || 0),
+          applied_fields: variantValues.applied,
+          rejected_fields: variantValues.rejected,
+          conflicts: variantSync?.conflicts || [],
+          unmapped_fields: variantSync?.unmapped_fields || [],
+          size_sync: sizeSync
+        });
+      } catch (error) {
+        products.push({
+          ok: false,
+          entity_level: "STYLE_VARIANT",
+          style_id: styleIdentity.style_id,
+          variant_id: variantIdentity.variant_id,
+          error: error?.message || String(error),
+          applied_fields: variantValues.applied,
+          rejected_fields: variantValues.rejected
+        });
+      }
     }
   }
 
@@ -265,6 +478,11 @@ export async function projectPerfectFitWorkspaceProducts(db, {
     field_resolution: fieldResolution,
     projected_count: products.length - failures.length,
     failed_count: failures.length,
+    hierarchy: {
+      style_master_count: styleMasterCount,
+      style_variant_count: styleVariantCount,
+      size_variant_count: sizeVariantCount
+    },
     products
   };
 }
