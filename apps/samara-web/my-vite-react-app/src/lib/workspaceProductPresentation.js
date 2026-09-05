@@ -286,6 +286,19 @@ export function buildWorkspaceProductPresentations(
         const variantCode = variantValues['variant.code'] || variant.id;
         const styleCode = styleValues['product.style_code'] || '';
         const collection = projectValues['project.season'] || '';
+        const variantTagsPresent = Object.prototype.hasOwnProperty.call(variantValues, 'variant.tags');
+        const variantTags = variantTagsPresent
+          ? asArray(variantValues['variant.tags']).map((item) => String(item)).filter(Boolean)
+          : [];
+        const seoTitle = Object.prototype.hasOwnProperty.call(variantValues, 'variant.seo_title')
+          ? String(variantValues['variant.seo_title'] || '')
+          : undefined;
+        const seoDescription = Object.prototype.hasOwnProperty.call(variantValues, 'variant.seo_description')
+          ? String(variantValues['variant.seo_description'] || '')
+          : undefined;
+        const seoSlug = Object.prototype.hasOwnProperty.call(variantValues, 'variant.seo_slug')
+          ? String(variantValues['variant.seo_slug'] || '')
+          : undefined;
         const messagingOwner = resolveWorkspaceMessagingOwner(project, projectValues);
 
         presentations.push({
@@ -326,6 +339,17 @@ export function buildWorkspaceProductPresentations(
             variantValues['variant.notes'] ||
             'Workspace-linked pattern variant.',
           tagline: [variantName, fitLabel, collection].filter(Boolean).join(' · '),
+          variantTagsPresent,
+          collectionTags: variantTags,
+          tags: variantTags,
+          seoTitle,
+          seoDescription,
+          seoSlug,
+          seo: {
+            ...(seoTitle !== undefined ? { title: seoTitle } : {}),
+            ...(seoDescription !== undefined ? { description: seoDescription } : {}),
+            ...(seoSlug !== undefined ? { slug: seoSlug } : {})
+          },
           sizes,
           availableSizes: sizes,
           sizeRangeLabel: formatSizeRange(sizes),
@@ -385,7 +409,25 @@ export function buildWorkspaceProductPresentations(
       stock: commerce?.stock,
       availability: commerce?.availability,
       audience: commerce?.audience || 'women',
-      collectionTags: commerce?.collectionTags || commerce?.tags || [],
+      collectionTags: presentation.variantTagsPresent
+        ? presentation.collectionTags
+        : commerce?.collectionTags || commerce?.tags || [],
+      tags: presentation.variantTagsPresent
+        ? presentation.collectionTags
+        : commerce?.tags || commerce?.collectionTags || [],
+      seoTitle: presentation.seoTitle !== undefined
+        ? presentation.seoTitle
+        : commerce?.seoTitle ?? commerce?.seo?.title ?? '',
+      seoDescription: presentation.seoDescription !== undefined
+        ? presentation.seoDescription
+        : commerce?.seoDescription ?? commerce?.seo?.description ?? '',
+      seoSlug: presentation.seoSlug !== undefined
+        ? presentation.seoSlug
+        : commerce?.seoSlug ?? commerce?.seo?.slug ?? '',
+      seo: {
+        ...(commerce?.seo || {}),
+        ...(presentation.seo || {})
+      },
       image: presentation.image || commerce?.image || '',
       primaryImage: presentation.primaryImage || commerce?.image || '',
       technicalSketchAsset: presentation.technicalSketchAsset || commerce?.technicalSketchAsset || null,
@@ -416,6 +458,8 @@ export function buildWorkspaceProductPresentations(
           'difficulty',
           'fit',
           'description',
+          'seo',
+          'discovery tags',
           'measurement chart',
           'media'
         ],

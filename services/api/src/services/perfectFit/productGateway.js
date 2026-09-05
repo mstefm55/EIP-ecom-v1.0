@@ -526,6 +526,82 @@ export async function syncPerfectFitSizeVariants(db, {
   });
 }
 
+export async function syncPerfectFitVariantPresentation(db, {
+  tenantId,
+  productId,
+  presentation = {},
+  presence = {}
+}) {
+  const ownedKeys = ["seo_title", "seo_description", "seo_slug", "tags"];
+  const hasOwnedPatch = ownedKeys.some((key) => presence?.[key] === true);
+  if (!hasOwnedPatch) {
+    return { ok: true, skipped: true, product_id: productId };
+  }
+
+  return withTransaction(db, async (client) => {
+    const material = await client.query(
+      `SELECT id, attrs
+       FROM eip_core.material
+       WHERE tenant_id=$1 AND id=$2 AND material_type=$3
+       FOR UPDATE`,
+      [tenantId, productId, MATERIAL_TYPE]
+    );
+    if (!material.rowCount) return { ok: false, status: 404, error: "NOT_FOUND" };
+
+    const nextAttrs = material.rows[0].attrs && typeof material.rows[0].attrs === "object"
+      ? { ...material.rows[0].attrs }
+      : {};
+
+    if (presence.seo_title || presence.seo_description || presence.seo_slug) {
+      const nextSeo = nextAttrs.seo && typeof nextAttrs.seo === "object"
+        ? { ...nextAttrs.seo }
+        : {};
+      const applySeoValue = (key, value) => {
+        const normalized = String(value ?? "").trim();
+        if (normalized) nextSeo[key] = normalized;
+        else delete nextSeo[key];
+      };
+      if (presence.seo_title) applySeoValue("title", presentation.seo_title);
+      if (presence.seo_description) applySeoValue("description", presentation.seo_description);
+      if (presence.seo_slug) applySeoValue("slug", presentation.seo_slug);
+      if (Object.keys(nextSeo).length) nextAttrs.seo = nextSeo;
+      else delete nextAttrs.seo;
+    }
+
+    if (presence.tags) {
+      nextAttrs.taxonomy = nextAttrs.taxonomy && typeof nextAttrs.taxonomy === "object"
+        ? { ...nextAttrs.taxonomy }
+        : {};
+      nextAttrs.taxonomy.tags = Array.isArray(presentation.tags)
+        ? [...new Set(presentation.tags.map((item) => String(item || "").trim()).filter(Boolean))]
+        : [];
+    }
+
+    nextAttrs.integration = {
+      ...(nextAttrs.integration || {}),
+      perfect_fit: {
+        ...(nextAttrs.integration?.perfect_fit || {}),
+        variant_presentation_synced_at: new Date().toISOString(),
+        variant_presentation_fields: ownedKeys.filter((key) => presence?.[key] === true)
+      }
+    };
+
+    await client.query(
+      `UPDATE eip_core.material SET attrs=$3::jsonb, updated_at=now()
+       WHERE tenant_id=$1 AND id=$2`,
+      [tenantId, productId, JSON.stringify(nextAttrs)]
+    );
+
+    return {
+      ok: true,
+      product_id: productId,
+      updated_fields: ownedKeys.filter((key) => presence?.[key] === true),
+      tags: presence.tags ? nextAttrs.taxonomy?.tags || [] : undefined,
+      seo: nextAttrs.seo || {}
+    };
+  });
+}
+
 export async function syncPerfectFitProduct(db, {
   tenantId,
   productId,

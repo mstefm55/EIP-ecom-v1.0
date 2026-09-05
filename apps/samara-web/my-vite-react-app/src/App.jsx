@@ -15,7 +15,7 @@ import {
   Lock, Unlock, Calendar, Archive
 } from 'lucide-react';
 import CatalogSidebarNavigator from './components/CatalogSidebarNavigator';
-import { slugifyCatalogValue } from './data/catalogTaxonomy';
+import { selectPatternsForSurface, slugifyCatalogValue } from './data/catalogTaxonomy';
 import PatternCard from './components/PatternCard';
 import PatternImageGallery from './components/PatternImageGallery';
 import PatternQuickViewModal from './components/PatternQuickViewModal';
@@ -532,7 +532,7 @@ const SECTION_RENDERERS = {
 SignatureOrbitCarouselA: (section) => (
   <SignatureOrbitCarouselA
     key={section.id}
-    patterns={productPresentationPatterns.slice(0, 8)}
+    patterns={selectPatternsForSurface(productPresentationPatterns, 'signature-orbit-carousel', 8)}
     title={section.title || "Our Signature Collections"}
     subtitle={section.subtitle || "Let Your Uniqueness Take Shape"}
     showLabel={section.showLabel || false}
@@ -571,7 +571,7 @@ SignaturePerspectiveStackCarouselB: (section) => (
         <OrbitCarouselSkeleton />
       ) : (
         <OrbitCarousel
-          patterns={productPresentationPatterns.slice(0, 4)}
+          patterns={selectPatternsForSurface(productPresentationPatterns, 'orbit-carousel', 4)}
           activePatternId={activePatternId}
           setActivePatternId={setActivePatternId}
           activeRecommendedSize={DEFAULT_LEGACY_PATTERN_SIZE}
@@ -2558,7 +2558,7 @@ onLogout={() => {
                     <OrbitCarouselSkeleton />
                   ) : (
                     <OrbitCarousel
-                      patterns={productPresentationPatterns.slice(0, 4)}
+                      patterns={selectPatternsForSurface(productPresentationPatterns, 'orbit-carousel', 4)}
                       activePatternId={activePatternId}
                       setActivePatternId={setActivePatternId}
                       activeRecommendedSize={DEFAULT_LEGACY_PATTERN_SIZE}

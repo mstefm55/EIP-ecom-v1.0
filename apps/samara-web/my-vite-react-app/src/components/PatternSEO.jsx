@@ -15,13 +15,29 @@ export default function PatternSEO({ pattern, reviews = [], isStandalone = false
     ? (reviews.reduce((acc, r) => acc + r.rating, 0) / reviews.length).toFixed(1)
     : null;
 
+  const seoTitle =
+    pattern?.seoTitle ??
+    pattern?.seo?.title ??
+    `${pattern?.name || 'Premium Sewing Pattern'} - Sewing Pattern Blueprint | Perfect Fit Bureau`;
+  const seoDescription =
+    pattern?.seoDescription ??
+    pattern?.seo?.description ??
+    pattern?.description ??
+    pattern?.tagline ??
+    '';
+  const seoSlug =
+    pattern?.seoSlug ??
+    pattern?.seo?.slug ??
+    pattern?.id ??
+    'pattern';
+
   // JSON-LD structured data object
   const schemaData = {
     "@context": "https://schema.org",
     "@type": "Product",
     "name": pattern?.name || "Premium Sewing Pattern",
     "image": pattern?.image || "",
-    "description": pattern?.description || pattern?.tagline || "",
+    "description": seoDescription,
     "sku": pattern?.id || "perfectfit-patt-001",
     "category": pattern?.category || "Sewing Patterns",
     "offers": {
@@ -84,7 +100,7 @@ export default function PatternSEO({ pattern, reviews = [], isStandalone = false
 
     // 1. Title Tag
     const previousTitle = document.title;
-    document.title = `${pattern.name} - Sewing Pattern Blueprint | Perfect Fit Bureau`;
+    document.title = seoTitle;
 
     // 2. Helper to set/update meta tags in head
     const updateMetaTag = (nameAttr, nameVal, contentVal) => {
@@ -97,20 +113,20 @@ export default function PatternSEO({ pattern, reviews = [], isStandalone = false
       element.setAttribute('content', contentVal);
     };
 
-    updateMetaTag('name', 'description', pattern.description || pattern.tagline);
+    updateMetaTag('name', 'description', seoDescription);
     updateMetaTag('name', 'keywords', `sewing pattern, ${pattern.category}, digital pattern, pdf pattern, printable pattern, couture, tailoring, ${pattern.name}`);
 
     // Open Graph Tags
-    updateMetaTag('property', 'og:title', `${pattern.name} - Professional Sewing Pattern`);
-    updateMetaTag('property', 'og:description', pattern.description || pattern.tagline);
+    updateMetaTag('property', 'og:title', seoTitle);
+    updateMetaTag('property', 'og:description', seoDescription);
     updateMetaTag('property', 'og:image', pattern.image || '');
     updateMetaTag('property', 'og:type', 'product');
     updateMetaTag('property', 'og:url', window.location.href);
 
     // Twitter Tags
     updateMetaTag('name', 'twitter:card', 'summary_large_image');
-    updateMetaTag('name', 'twitter:title', `${pattern.name} - Professional Sewing Pattern`);
-    updateMetaTag('name', 'twitter:description', pattern.description || pattern.tagline);
+    updateMetaTag('name', 'twitter:title', seoTitle);
+    updateMetaTag('name', 'twitter:description', seoDescription);
     updateMetaTag('name', 'twitter:image', pattern.image || '');
 
     // 3. Application JSON-LD Script tag injection
@@ -202,14 +218,14 @@ export default function PatternSEO({ pattern, reviews = [], isStandalone = false
                 <div>
                   <div className="text-xs text-bark-800 font-sans leading-none">Perfect Fit Bureau</div>
                   <div className="text-[10px] text-bark-450 font-sans mt-0.5 leading-none">
-                    https://bureau.perfectfit.com/patterns/{pattern.id}
+                    https://bureau.perfectfit.com/patterns/{seoSlug}
                   </div>
                 </div>
               </div>
 
               {/* Page Title link */}
               <h4 className="text-[15px] text-[#1a0dab] hover:underline font-serif font-semibold leading-tight cursor-pointer" id="google-title">
-                {pattern.name} - Sewing Pattern Blueprint | Perfect Fit Bureau
+                {seoTitle}
               </h4>
 
               {/* Rich snippet review starts and pricing */}
@@ -233,7 +249,7 @@ export default function PatternSEO({ pattern, reviews = [], isStandalone = false
 
               {/* Excerpt */}
               <p className="text-xs text-[#4d5156] leading-relaxed font-sans line-clamp-2">
-                {pattern.description || pattern.tagline} Perfect for {pattern.fabricSuggestions?.slice(0, 3).join(', ')}. Intermediate difficulty sewing blueprint.
+                {seoDescription} Perfect for {pattern.fabricSuggestions?.slice(0, 3).join(', ')}. Intermediate difficulty sewing blueprint.
               </p>
             </div>
 
