@@ -37,6 +37,7 @@ function normalizeDropdown(dropdown) {
   const source = asObject(dropdown);
   return {
     code: normalizeText(source.code),
+    governed_code: normalizeText(source.governed_code || source.governedCode || source.code),
     source: normalizeText(source.source) || null,
     values: (Array.isArray(source.values) ? source.values : [])
       .map((item) => ({
@@ -74,7 +75,7 @@ function normalizeStructure(structure) {
 
 async function loadDropdownGovernance(db, tenantId, dropdowns) {
   const requestedCodes = [...new Set(
-    dropdowns.map((item) => item.code).filter(Boolean)
+    dropdowns.map((item) => item.governed_code).filter(Boolean)
   )];
   if (!requestedCodes.length) {
     return { lists: [], summary: { total: 0, aligned: 0, review_required: 0 } };
@@ -121,16 +122,16 @@ async function loadDropdownGovernance(db, tenantId, dropdowns) {
       });
     }
     const entry = effectiveByCode.get(code);
-    // Ignore rows from a lower-precedence list once an effective list has been chosen.
     if (String(entry.list_id) !== String(row.id)) continue;
     if (row.value_code) entry.values.add(normalizeText(row.value_code));
   }
 
   const lists = dropdowns.map((requested) => {
-    const governed = effectiveByCode.get(requested.code);
+    const governed = effectiveByCode.get(requested.governed_code);
     if (!governed) {
       return {
         code: requested.code,
+        governed_code: requested.governed_code,
         status: "ADMIN_REVIEW",
         reason: "DROPDOWN_LIST_NOT_GOVERNED",
         missing_values: requested.values.map((item) => item.code),
@@ -144,6 +145,7 @@ async function loadDropdownGovernance(db, tenantId, dropdowns) {
 
     return {
       code: requested.code,
+      governed_code: requested.governed_code,
       status: missingValues.length ? "VALUE_MAPPING_REQUIRED" : "ALIGNED",
       reason: missingValues.length ? "DROPDOWN_VALUES_MISSING" : null,
       module: governed.module,
@@ -222,13 +224,6 @@ function classifyField(field, resolvedField, dropdownStatusByCode) {
     return {
       disposition: "OBJECT_MAPPING_REQUIRED",
       reason: "STYLE_VARIANT_HIERARCHY_PENDING"
-    };
-  }
-
-  if (field.scope === "product" && field.canonical_hint) {
-    return {
-      disposition: "ADMIN_REVIEW",
-      reason: resolvedField?.reason || "PRODUCT_FIELD_MAPPING_REQUIRED"
     };
   }
 
