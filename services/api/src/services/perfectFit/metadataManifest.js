@@ -8,15 +8,17 @@ function asObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
-function normalizeFieldDescriptor(key, value) {
+function normalizeFieldDescriptor(key, value, bindings = {}) {
   const source = asObject(value);
   const fieldKey = normalizeText(source.key || key);
+  const logicalGovernance = normalizeText(source.governanceList || source.governance_list);
+  const governedCode = normalizeText(bindings?.[logicalGovernance] || logicalGovernance);
   return {
     key: fieldKey,
     scope: normalizeText(source.scope || fieldKey.split(".")[0]) || null,
     metadata_path: `workspace.fields.${fieldKey}`,
     field_type: normalizeText(source.type || source.field_type) || null,
-    governance_list: normalizeText(source.governanceList || source.governance_list) || null,
+    governance_list: governedCode || null,
     canonical_hint: null,
     used_as_eip_parameter:
       source.usedAsEipParameter === true || source.used_as_eip_parameter === true,
@@ -219,7 +221,7 @@ export async function loadPerfectFitMetadataBundle(db, {
   const structureContract = normalizeStructureForContract(workspace);
 
   const fieldContract = Object.entries(fields)
-    .map(([key, value]) => normalizeFieldDescriptor(key, value))
+    .map(([key, value]) => normalizeFieldDescriptor(key, value, bindings))
     .filter((field) => field.key)
     .sort((a, b) => a.key.localeCompare(b.key));
 
@@ -229,14 +231,15 @@ export async function loadPerfectFitMetadataBundle(db, {
       const dbCode = normalizeText(rawDbCode);
       const governed = governedDropdowns.get(dbCode);
       return {
-        code: logical,
+        code: dbCode,
+        logical_code: logical,
         governed_code: dbCode,
         source: "eip_core.dropdown_list",
         values: (governed?.values || []).map((item) => ({ code: item.code }))
       };
     })
-    .filter((item) => item.code && item.governed_code)
-    .sort((a, b) => a.code.localeCompare(b.code));
+    .filter((item) => item.code && item.logical_code)
+    .sort((a, b) => a.logical_code.localeCompare(b.logical_code));
 
   return {
     ok: true,
