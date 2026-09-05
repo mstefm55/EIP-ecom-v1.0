@@ -1,16 +1,17 @@
-import { extractProfiles } from "../services/gateway/connectionProfile.js";
+import {
+  connectionAllowsStorefrontCapability,
+  connectionAllowsStorefrontScope,
+  extractProfiles
+} from "../services/gateway/connectionProfile.js";
 import { hydrateConnectionProfileSecrets } from "../services/gateway/secretStore.js";
 import { connectionAllowsOrigin, verifyConnectionRequest } from "../services/gateway/verification.js";
 import { auditPerfectFitManifestCompleteness } from "../services/perfectFit/manifestCompleteness.js";
+import { loadPerfectFitMetadataBundle } from "../services/perfectFit/metadataManifest.js";
 import { projectPerfectFitWorkspaceProducts } from "../services/perfectFit/workspaceProductProjection.js";
 
 const RATE_LIMIT = { max: 60, timeWindow: "1 minute" };
 const WORKSPACE_RECORD_TYPE = "PERFECT_FIT_WORKSPACE";
 const MAX_WORKSPACE_BYTES = 900 * 1024;
-const MAX_FIELD_CONTRACT_BYTES = 128 * 1024;
-const MAX_MANIFEST_CONTRACT_BYTES = 384 * 1024;
-const MAX_FIELD_CONTRACT_FIELDS = 1000;
-const MAX_MANIFEST_DROPDOWNS = 250;
 
 function normalizeText(value) {
   return String(value || "").trim();
@@ -112,6 +113,18 @@ async function resolveAccess(app, req, reply) {
   };
 }
 
+function requirePerfectFitScope(access, reply, scope) {
+  if (!connectionAllowsStorefrontCapability(access.profile, "perfect_fit")) {
+    reply.code(403).send({ ok: false, error: "PERFECT_FIT_DISABLED" });
+    return false;
+  }
+  if (!connectionAllowsStorefrontScope(access.profile, scope)) {
+    reply.code(403).send({ ok: false, error: "PERFECT_FIT_SCOPE_REQUIRED" });
+    return false;
+  }
+  return true;
+}
+
 async function loadMemberSession(app, req, tenantId, suffix) {
   const sid = normalizeText(req.cookies?.member_sid);
   if (!sid) return null;
@@ -158,35 +171,6 @@ function normalizeWorkspace(value) {
   return value;
 }
 
-function normalizeFieldContract(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  if (!Array.isArray(value.fields)) return null;
-  if (value.fields.length > MAX_FIELD_CONTRACT_FIELDS) return null;
-  return {
-    application: normalizeText(value.application) || null,
-    version: normalizeText(value.version) || null,
-    fields: value.fields
-  };
-}
-
-function normalizeManifestContract(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  if (!Array.isArray(value.fields)) return null;
-  if (value.fields.length > MAX_FIELD_CONTRACT_FIELDS) return null;
-  const dropdowns = Array.isArray(value.dropdowns) ? value.dropdowns : [];
-  if (dropdowns.length > MAX_MANIFEST_DROPDOWNS) return null;
-  return {
-    application: normalizeText(value.application) || null,
-    version: normalizeText(value.version) || null,
-    fields: value.fields,
-    dropdowns,
-    structure:
-      value.structure && typeof value.structure === "object" && !Array.isArray(value.structure)
-        ? value.structure
-        : {}
-  };
-}
-
 async function loadWorkspaceRecord(db, tenantId, identityId) {
   const result = await db.query(
     `
@@ -204,13 +188,68 @@ async function loadWorkspaceRecord(db, tenantId, identityId) {
   return result.rows[0] || null;
 }
 
+function resolveManifestLookup(access) {
+  return {
+    tenantId: access.tenant.id,
+    socketCode:
+      access.profile?.routing?.socket_code ||
+      access.profile?.identity?.socket_code ||
+      null,
+    connectionCode: access.profile?.identity?.connection_code || null
+  };
+}
+
+async function safeLoadMetadataBundle(app, access) {
+  try {
+    return await loadPerfectFitMetadataBundle(app.db, resolveManifestLookup(access));
+  } catch (error) {
+    app.log.warn({
+      event: "perfect_fit_metadata_load_failed",
+      tenant_id: access.tenant.id,
+      connection_code: access.profile?.identity?.connection_code || null,
+      error: error?.message || String(error)
+    });
+    return {
+      ok: false,
+      error: error?.message || "PERFECT_FIT_METADATA_LOAD_FAILED"
+    };
+  }
+}
+
 export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
+  app.get(
+    "/commerce/:suffix/perfect-fit/metadata",
+    { config: { rateLimit: RATE_LIMIT, cors: false } },
+    async (req, reply) => {
+      const access = await resolveAccess(app, req, reply);
+      if (!access) return;
+      if (!requirePerfectFitScope(access, reply, "perfect_fit.products.read")) return;
+
+      const bundle = await safeLoadMetadataBundle(app, access);
+      if (!bundle?.ok) {
+        return reply.code(404).send({
+          ok: false,
+          error: bundle?.error || "PERFECT_FIT_METADATA_MANIFEST_NOT_PUBLISHED"
+        });
+      }
+
+      reply.header("Cache-Control", "no-store");
+      return reply.send({
+        ok: true,
+        metadata: bundle.runtime_metadata,
+        manifest_source: bundle.source,
+        tenant_code: access.tenant.code
+      });
+    }
+  );
+
   app.get(
     "/commerce/:suffix/perfect-fit/workspace",
     { config: { rateLimit: RATE_LIMIT, cors: false } },
     async (req, reply) => {
       const access = await resolveAccess(app, req, reply);
       if (!access) return;
+      if (!requirePerfectFitScope(access, reply, "perfect_fit.products.read")) return;
 
       const session = await loadMemberSession(
         app,
@@ -253,6 +292,7 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
     async (req, reply) => {
       const access = await resolveAccess(app, req, reply);
       if (!access) return;
+      if (!requirePerfectFitScope(access, reply, "perfect_fit.products.write")) return;
 
       const session = await loadMemberSession(
         app,
@@ -276,16 +316,6 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
         });
       }
 
-      const manifestContract = normalizeManifestContract(req.body?.manifest_contract);
-      const legacyFieldContract = normalizeFieldContract(req.body?.field_contract);
-      const fieldContract = manifestContract
-        ? {
-            application: manifestContract.application,
-            version: manifestContract.version,
-            fields: manifestContract.fields
-          }
-        : legacyFieldContract;
-
       const serializedWorkspace = JSON.stringify(workspace);
       if (Buffer.byteLength(serializedWorkspace, "utf8") > MAX_WORKSPACE_BYTES) {
         return reply.code(413).send({
@@ -294,26 +324,13 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
           max_bytes: MAX_WORKSPACE_BYTES
         });
       }
-      if (fieldContract) {
-        const serializedContract = JSON.stringify(fieldContract);
-        if (Buffer.byteLength(serializedContract, "utf8") > MAX_FIELD_CONTRACT_BYTES) {
-          return reply.code(413).send({
-            ok: false,
-            error: "PF_FIELD_CONTRACT_TOO_LARGE",
-            max_bytes: MAX_FIELD_CONTRACT_BYTES
-          });
-        }
-      }
-      if (manifestContract) {
-        const serializedManifest = JSON.stringify(manifestContract);
-        if (Buffer.byteLength(serializedManifest, "utf8") > MAX_MANIFEST_CONTRACT_BYTES) {
-          return reply.code(413).send({
-            ok: false,
-            error: "PF_MANIFEST_CONTRACT_TOO_LARGE",
-            max_bytes: MAX_MANIFEST_CONTRACT_BYTES
-          });
-        }
-      }
+
+      // Metadata is server-side DB authority. The browser never supplies the
+      // manifest/schema/dropdown contract used for audit or enterprise projection.
+      const metadataBundle = await safeLoadMetadataBundle(app, access);
+      const authoritativeContract = metadataBundle?.ok
+        ? metadataBundle.contract
+        : null;
 
       const client = await app.db.connect();
       let recordId = null;
@@ -352,7 +369,7 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
           saved_at: savedAt,
           owner_identity_id: String(session.identity_id),
           schema_version: workspace?.schemaVersion || workspace?.version || null,
-          observed_manifest_version: manifestContract?.version || null,
+          observed_manifest_version: authoritativeContract?.version || null,
           projection_summary: currentPayload.projection_summary || null,
           manifest_summary: currentPayload.manifest_summary || null
         };
@@ -419,20 +436,14 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
         client.release();
       }
 
-      const socketCode =
-        access.profile?.routing?.socket_code ||
-        access.profile?.identity?.socket_code ||
-        null;
-      const connectionCode = access.profile?.identity?.connection_code || null;
-
       let manifestAudit = null;
-      if (manifestContract) {
+      if (authoritativeContract) {
         try {
           manifestAudit = await auditPerfectFitManifestCompleteness(app.db, {
             tenantId: access.tenant.id,
-            manifestContract,
-            socketCode,
-            connectionCode
+            manifestContract: authoritativeContract,
+            socketCode: resolveManifestLookup(access).socketCode,
+            connectionCode: resolveManifestLookup(access).connectionCode
           });
         } catch (error) {
           manifestAudit = {
@@ -448,24 +459,24 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
         }
       }
 
-      // The lossless PF document is committed first. Enterprise projection uses
-      // existing socket aliases/governance and the existing Product Gateway.
-      // Projection failure is reported but never rolls back the designer's save.
       let enterpriseProjection = {
         ok: true,
         skipped: true,
-        reason: "FIELD_CONTRACT_MISSING"
+        reason: authoritativeContract
+          ? "NO_ENTERPRISE_FIELDS"
+          : "DB_METADATA_MANIFEST_MISSING"
       };
 
-      if (fieldContract) {
+      if (authoritativeContract?.fields?.length) {
         try {
+          const lookup = resolveManifestLookup(access);
           enterpriseProjection = await projectPerfectFitWorkspaceProducts(app.db, {
             tenantId: access.tenant.id,
             actorIdentityId: session.identity_id,
             workspace,
-            fieldContract,
-            socketCode,
-            connectionCode
+            fieldContract: authoritativeContract,
+            socketCode: lookup.socketCode,
+            connectionCode: lookup.connectionCode
           });
         } catch (error) {
           enterpriseProjection = {
@@ -494,10 +505,16 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
       const manifestSummary = manifestAudit?.summary
         ? {
             ...manifestAudit.summary,
-            version: manifestAudit.version || manifestContract?.version || null,
+            version: manifestAudit.version || authoritativeContract?.version || null,
+            authority: "EIP_DB",
             updated_at: new Date().toISOString()
           }
-        : null;
+        : {
+            authority: "EIP_DB",
+            available: false,
+            error: metadataBundle?.error || "PERFECT_FIT_METADATA_MANIFEST_NOT_PUBLISHED",
+            updated_at: new Date().toISOString()
+          };
 
       if (recordId) {
         try {
@@ -543,6 +560,7 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
         saved_at: savedAt,
         identity_id: session.identity_id,
         tenant_code: access.tenant.code,
+        manifest_source: metadataBundle?.ok ? metadataBundle.source : null,
         manifest_audit: manifestAudit,
         enterprise_projection: enterpriseProjection
       });
