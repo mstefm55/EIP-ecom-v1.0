@@ -1,7 +1,8 @@
 import React from 'react';
 import { translatePerfectFitText as pfUiT } from '../lib/i18n';
 import {
-  CATALOG_AUDIENCES
+  CATALOG_AUDIENCES,
+  getCategoriesForAudience
 } from '../data/catalogTaxonomy';
 import { Layers, UserRound, X } from 'lucide-react';
 
@@ -18,6 +19,7 @@ export default function CatalogCategoryNavigator({
   const activeAudience = CATALOG_AUDIENCES.find(
     (audience) => audience.id === selectedAudience
   );
+  const activeCategories = getCategoriesForAudience(selectedAudience);
 
   return (
     <section
@@ -90,7 +92,7 @@ export default function CatalogCategoryNavigator({
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-            {(activeAudience?.categories || []).map((category) => (
+            {activeCategories.map((category) => (
               <button
                 key={category.id}
                 type="button"
