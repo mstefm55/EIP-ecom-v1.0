@@ -175,6 +175,7 @@ export const eipMemberAuth = Object.freeze({
 
 export const eipApiAdapter = Object.freeze({
   getCapability: () => request('/perfect-fit/capability'),
+  loadMetadata: () => request('/perfect-fit/metadata'),
   listProducts: (query = '') => request(`/perfect-fit/products?limit=100&q=${encodeURIComponent(query)}`),
   getProduct: (productId) => request(`/perfect-fit/products/${encodeURIComponent(productId)}`),
   getIntegration: (productId) => request(`/perfect-fit/products/${encodeURIComponent(productId)}/link`),
@@ -183,20 +184,9 @@ export const eipApiAdapter = Object.freeze({
   syncProduct: (productId, body) => request(`/perfect-fit/products/${encodeURIComponent(productId)}/sync`, { method: 'POST', body, idempotent: true }),
   unlinkProduct: (productId) => request(`/perfect-fit/products/${encodeURIComponent(productId)}/link`, { method: 'DELETE', idempotent: true }),
   loadWorkspace: () => request('/perfect-fit/workspace'),
-  saveWorkspace: (workspace, manifestContract = null) => request('/perfect-fit/workspace', {
+  saveWorkspace: (workspace) => request('/perfect-fit/workspace', {
     method: 'PUT',
-    body: {
-      workspace,
-      manifest_contract: manifestContract,
-      // Backward compatibility while older API deployments are still possible.
-      field_contract: manifestContract
-        ? {
-            application: manifestContract.application,
-            version: manifestContract.version,
-            fields: manifestContract.fields
-          }
-        : null
-    },
+    body: { workspace },
     idempotent: true
   })
 });
