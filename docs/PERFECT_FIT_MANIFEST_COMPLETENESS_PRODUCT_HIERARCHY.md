@@ -1,10 +1,10 @@
 # Perfect Fit ↔ EIP V1 Manifest Completeness and Product Hierarchy
 
 Status: implementation gate
-Date: 2026-09-04
+Date: 2026-09-05
 Scope: EIP V1 only
 
-This document extends `docs/PERFECT_FIT_EIP_KERNEL_ENGINE_REWORK.md` and is the mandatory Plan → Engine Mapping → Code gate for the next Perfect Fit integration wave.
+This document extends `docs/PERFECT_FIT_EIP_KERNEL_ENGINE_REWORK.md` and is the mandatory Plan → Engine Mapping → Code gate for the Perfect Fit integration wave.
 
 ## Architecture baselines re-read before implementation
 
@@ -19,17 +19,22 @@ This document extends `docs/PERFECT_FIT_EIP_KERNEL_ENGINE_REWORK.md` and is the 
 
 No V2 repository/path is touched.
 
-## Canon correction: Perfect Fit has no database
+## Canon: Perfect Fit has no database of its own
 
-Perfect Fit is a browser application. It does not own a separate application database.
+Perfect Fit is a browser-only React/Vite application. EIP V1 is its backend and durable database authority through the public gateway.
 
 Therefore:
 
-- durable Perfect Fit business data is persisted through EIP V1;
-- dynamic metadata must move toward EIP DB authority;
-- frontend metadata files are bootstrap/fallback definitions, not the long-term source of truth;
-- tenant variation must be resolved from EIP schema/dropdown/manifest/UI governance;
+- durable Perfect Fit business data is persisted in EIP V1;
+- **expanded/dynamic Perfect Fit metadata is DB-backed EIP governance, not frontend hardcode**;
+- `eip_commerce.socket_manifest` owns the published PF workspace field/tree/group contract;
+- `eip_core.dropdown_list` / `dropdown_value` own controlled PF vocabularies and display labels;
+- `eip_commerce.socket_alias_map` owns PF logical-field → canonical EIP vocabulary mappings;
+- `schema_registry` / overrides / bundles validate canonical EIP field semantics;
+- the browser does not generate, publish or send the authoritative manifest during Save;
 - browser storage is cache/offline/outbox only and never the durable authority.
+
+`perfectFitMetadata.js` may remain temporarily as a compatibility/bootstrap bundle while DB metadata is rolled out, but it is not governance and must shrink rather than expand. Once a published EIP Perfect Fit manifest exists, DB metadata replaces the dynamic workspace fields, field groups, tree structure, reference convention and dropdowns before React renders.
 
 The lossless `PERFECT_FIT_WORKSPACE` `info_record` remains the durable private document representation while richer technical domains are progressively normalized into governed EIP objects/records.
 
@@ -39,9 +44,7 @@ Perfect Fit has two distinct variant levels and they must not be collapsed.
 
 ### Level 0 — Style
 
-Perfect Fit tree:
-
-`Project → Style`
+Perfect Fit tree: `Project → Style`
 
 EIP representation:
 
@@ -51,9 +54,7 @@ EIP representation:
 
 ### Level 1 — Style Variant
 
-Perfect Fit tree:
-
-`Project → Style → Variant`
+Perfect Fit tree: `Project → Style → Variant`
 
 This is a development/product-definition variant. It can own its own technical modules such as measurement chart, pattern library, sewing, media, fit sessions and tech pack.
 
@@ -78,8 +79,6 @@ Existing EIP V1 Product Studio variant behavior is retained:
 
 This level represents the sellable/size option matrix inside a Style Variant product. It does **not** replace the Perfect Fit Style Variant node.
 
-Target hierarchy:
-
 ```text
 Perfect Fit
 Project
@@ -95,13 +94,11 @@ STYLE_MASTER material
  └─ STYLE_VARIANT material B --attrs.variants--> size/sellable rows
 ```
 
-This preserves Perfect Fit richness and keeps the existing EIP size-variant implementation useful.
-
 ## Manifest completeness rule
 
 "Complete mapping" does not mean forcing every Perfect Fit field into a `material` column or arbitrary JSONB path.
 
-Every metadata-declared Perfect Fit field must have an explicit governed disposition:
+Every DB-published Perfect Fit field must have an explicit governed disposition:
 
 - `ENTERPRISE_MAPPED` — projected to a governed EIP enterprise field/object.
 - `WORKSPACE_ONLY` — durable in the private EIP-backed PF workspace document, with no enterprise projection required.
@@ -111,78 +108,105 @@ Every metadata-declared Perfect Fit field must have an explicit governed disposi
 - `OBJECT_MAPPING_REQUIRED` — the field belongs to an object/domain whose enterprise representation is not yet configured.
 - `ADMIN_REVIEW` — ambiguous mapping requiring EIP administrator decision.
 
-The completeness gate is reached only when **no metadata-declared field is unaccounted for**. `UNACCOUNTED` is not an acceptable final state.
+The completeness gate is reached only when no DB-published field is unaccounted for. Missing or ambiguous enterprise mappings remain visible to EIP Admin instead of being guessed.
 
-## Metadata authority progression
+## Metadata authority
 
-### Current bootstrap
+### Authoritative runtime flow
 
-`perfectFitMetadata.js` provides the complete browser fallback needed to start the application.
+```text
+EIP DB
+  socket_manifest
+  dropdown_list / dropdown_value
+  socket_alias_map
+  schema_registry
+        ↓
+EIP public gateway
+GET /perfect-fit/metadata
+        ↓
+Perfect Fit startup
+replace dynamic workspace metadata before render
+        ↓
+Workspace UI
+```
 
-### Target authority
+### Save flow
 
-Dynamic metadata is progressively published from EIP DB:
+```text
+Perfect Fit Save
+        ↓
+workspace business document only
+        ↓
+EIP Gateway
+        ↓
+server loads published PERFECT_FIT socket_manifest
++ DB dropdown/schema/alias governance
+        ↓
+lossless workspace save
+        ↓
+manifest completeness audit
+        ↓
+enterprise product projection
+```
 
-- field/object schema → `schema_registry` / `schema_override` / `schema_bundle`
-- controlled vocabulary → `dropdown_list` / `dropdown_value`
-- external PF vocabulary mapping → `socket_alias_map`
-- versioned connection manifest → `socket_manifest`
-- EIP Dashboard presentation → `ui_surface`
+The Save request never supplies `manifest_contract`, `field_contract`, storage targets, SQL paths or JSONB paths.
 
-Perfect Fit may keep static fallback metadata for resilience, but when an authenticated published EIP manifest/bundle is available it is authoritative for dynamic fields/options/structure governed by EIP.
+### Bootstrap fallback
 
-The browser cannot auto-publish governance. A PF-provided manifest contract may be compared with EIP governance and may generate suggestions, but only governed EIP configuration is authoritative.
+The legacy frontend metadata bundle is only a temporary resilience path while migration `0144` is not yet applied. If DB metadata exists but is incomplete, the runtime loader must not silently merge hardcoded missing fields back in. DB-owned dynamic domains are replaced so governance gaps stay visible.
 
 ## Plan
 
 ### Objective
 
-1. Inventory all metadata-declared PF fields, vocabularies and hierarchy contracts.
-2. Compare them automatically with EIP SmartSocket/schema/dropdown governance.
-3. Remove unexplained mapping gaps.
-4. Harmonize the two-level PF variant model with EIP without regressing the existing Product Studio size-variant model.
-5. Add an enhanced Product Studio mode later, selected by governed capability/surface metadata, while retaining Standard Product Studio as fallback.
+1. Store the expanded PF workspace metadata contract in existing EIP DB governance.
+2. Load it through the public gateway before PF renders.
+3. Compare DB-published fields automatically with SmartSocket/schema/dropdown governance.
+4. Remove unexplained mapping gaps.
+5. Harmonize the two-level PF variant model with EIP without regressing the existing Product Studio size-variant model.
+6. Add an Enhanced Product Studio mode later, selected by governed capability/surface metadata, while retaining Standard Product Studio as fallback.
 
-### Scope in — first development sequence
+### Scope in — current development sequence
 
-- Extend the PF metadata transport contract beyond six projection fields.
-- Include PF tree/object hierarchy and controlled vocabulary declarations.
-- Add server-side manifest completeness auditing.
-- Report field and dropdown gaps without guessing mappings.
-- Establish `STYLE_MASTER → STYLE_VARIANT → size/sellable rows` as the EIP product hierarchy contract.
-- Keep current PF workspace persistence intact.
+- DB-backed PF workspace fields, field groups, tree hierarchy and reference convention.
+- DB-backed PF workspace controlled vocabularies.
+- Server-side manifest completeness auditing.
+- `STYLE_MASTER → STYLE_VARIANT → size/sellable rows` enterprise hierarchy.
+- Existing private PF workspace persistence.
+- Existing SmartSocket alias mapping for enterprise fields.
 
-### Scope out — first development sequence
+### Scope out — current development sequence
 
 - No media binary migration yet.
 - No new product/variant table.
 - No tenant-code hardcoding.
 - No hardcoded PF-only Product Studio panel.
 - No lifecycle transition bypass.
-- No automatic publication of browser-supplied metadata.
+- No browser publication of governance.
 
 ## Engine Mapping
 
 ### UI Engine
 
 - Perfect Fit remains its own browser UI.
-- EIP Product Studio Standard remains the default/fallback surface.
+- Dynamic PF workspace metadata is fetched from EIP before render.
+- EIP Product Studio Standard remains the fallback surface.
 - A future Product Studio Enhanced view must be descriptor/capability driven through `ui_surface`, never `if (tenant === ...)` code.
 
 ### Manifest / Socket Engine
 
-- PF sends logical metadata keys and structural declarations only.
+- `socket_manifest` is the DB-published PF runtime contract.
 - `socket_alias_map` resolves PF vocabulary to canonical EIP vocabulary.
-- `socket_manifest` is the versioned DB-backed connection manifest.
-- Browser hints are never silently promoted to approved governance.
+- the frontend does not create a second manifest.
+- browser values/hints are never promoted to governance.
 
 ### Schema / Dropdown Engine
 
 - `schema_registry` describes canonical field/object shape.
 - `schema_override` supplies tenant deltas.
-- `schema_bundle` can become the efficient published PF/EIP metadata payload.
-- dropdown values are matched by stable code only.
-- PF local lists that do not exist in EIP are surfaced as governance gaps, not copied silently.
+- `schema_bundle` remains available for efficient effective bundles.
+- PF controlled values live in `dropdown_list` / `dropdown_value` and are matched by stable code only.
+- missing lists/values are surfaced as governance gaps.
 
 ### Kernel
 
@@ -200,19 +224,24 @@ Ordinary draft metadata Save may create/update the governed draft representation
 
 ### System Core
 
-Tenant resolution, session/CSRF, manifest loading, field/dropdown comparison and persistence transport only. No tenant-specific business rules.
+Tenant resolution, session/CSRF, DB manifest loading, field/dropdown comparison and persistence transport only. No tenant-specific business rules.
 
 ## Code sequence
 
-1. Add a complete PF manifest transport builder derived from existing metadata.
-2. Add server manifest-completeness auditor.
-3. Return/persist non-destructive audit summaries with workspace Save.
-4. Add tests for field coverage, dropdown coverage and two-level variant declaration.
-5. Rework enterprise projection to create/reuse `STYLE_MASTER` and linked `STYLE_VARIANT` products.
-6. Map Level-2 size/sellable variants into the existing EIP `attrs.variants` model.
-7. Add governed Enhanced Product Studio descriptor/capability while keeping Standard mode untouched.
-8. Then implement media upload/asset registration against the harmonized IDs.
+1. **DB metadata authority** — migration `0144` seeds existing `socket_manifest`, `dropdown_*` and `socket_alias_map` structures for PF-enabled tenants.
+2. **Runtime metadata loader** — PF loads published DB metadata through `/perfect-fit/metadata` before render.
+3. **Save authority correction** — browser sends workspace only; server reloads DB contract for audit/projection.
+4. **Manifest completeness** — produce field/dropdown/hierarchy gap report from DB authority.
+5. **Product hierarchy** — create/reuse `STYLE_MASTER` and linked `STYLE_VARIANT` products.
+6. **Size variants** — map Measurement Chart sizes into existing EIP `attrs.variants` model without destroying stock/price state.
+7. **Standard Studio compatibility** — keep legacy/non-hierarchical Product Studio behavior available.
+8. **Enhanced Product Studio** — descriptor/capability-driven hierarchical view.
+9. **Media** — upload/asset registration against harmonized IDs.
 
 ## Migration rule
 
-Any DB migration in this sequence must be additive, reusable for arbitrary tenants, and based on existing governance/kernel tables. No migration is executed until reviewed and deployed code is ready.
+- retired `0143` stays absent and unexecuted;
+- `0144` uses existing governance/kernel tables only and creates no PF-specific table;
+- it targets PF-enabled connections generically, not a hardcoded Samara tenant code;
+- it does not overwrite an existing manually-created `PERFECT_FIT` manifest;
+- migration is not executed until code review/validation and deployment readiness are complete.
