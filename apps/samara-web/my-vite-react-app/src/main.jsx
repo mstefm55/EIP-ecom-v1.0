@@ -5,6 +5,7 @@ import App from './App.jsx';
 import AuthRecoveryPortal from './components/AuthRecoveryPortal.jsx';
 import { LanguageProvider } from './context/LanguageContext.jsx';
 import { RuntimeDataProvider } from './context/RuntimeDataContext.jsx';
+import { initializePerfectFitRuntimeMetadata } from './lib/perfectFitRuntimeMetadata.js';
 import { initializePerfectFitWorkspacePersistence } from './lib/workspacePersistenceBridge.js';
 import './index.css';
 
@@ -144,7 +145,11 @@ function renderPerfectFit() {
   );
 }
 
-initializePerfectFitWorkspacePersistence()
+initializePerfectFitRuntimeMetadata()
+  .catch((error) => {
+    console.error('[PerfectFit metadata] bootstrap failed', error);
+  })
+  .then(() => initializePerfectFitWorkspacePersistence())
   .catch((error) => {
     console.error('[PerfectFit workspace persistence] bootstrap failed', error);
   })
