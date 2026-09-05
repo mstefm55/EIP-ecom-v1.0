@@ -1485,6 +1485,7 @@ function createVariantNode(parentStyle, values = {}) {
       'variant.seo_title': values['variant.seo_title'] || '',
       'variant.seo_description': values['variant.seo_description'] || '',
       'variant.seo_slug': values['variant.seo_slug'] || '',
+      'variant.seo_keywords': Array.isArray(values['variant.seo_keywords']) ? values['variant.seo_keywords'] : [],
       'variant.tags': Array.isArray(values['variant.tags']) ? values['variant.tags'] : [],
       ...values
     },
@@ -1922,6 +1923,7 @@ function WorkspaceField({
 
   const baseClass =
     'w-full rounded-[9px] border border-[#E5E2DA] bg-[#FCFBF8] px-3 py-2 text-[13px] text-[#272622] transition-colors focus:border-[#BCA892] focus:outline-none focus:ring-1 focus:ring-[#BCA892]/30 disabled:bg-[#F4F2ED] disabled:text-[#918D84]';
+  const [tagDraft, setTagDraft] = useState('');
 
   const optionLabel = (option) =>
     option?.label ||
@@ -1929,6 +1931,95 @@ function WorkspaceField({
     option?.eipV1Value ||
     option?.code ||
     '';
+
+  if (field.type === 'tagInput') {
+    const selected = Array.isArray(value) ? value : [];
+    const maxItems = Number(field.maxItems) > 0 ? Number(field.maxItems) : 30;
+    const maxItemLength = Number(field.maxItemLength) > 0 ? Number(field.maxItemLength) : 80;
+
+    const addKeywords = (rawValue) => {
+      const incoming = String(rawValue || '')
+        .split(',')
+        .map((item) => item.trim().replace(/\s+/g, ' '))
+        .filter(Boolean)
+        .map((item) => item.slice(0, maxItemLength));
+      if (!incoming.length) return;
+
+      const seen = new Set(selected.map((item) => String(item).trim().toLocaleLowerCase()));
+      const next = [...selected];
+      incoming.forEach((item) => {
+        const normalized = item.toLocaleLowerCase();
+        if (!seen.has(normalized) && next.length < maxItems) {
+          seen.add(normalized);
+          next.push(item);
+        }
+      });
+      onChange(field.key, next);
+      setTagDraft('');
+    };
+
+    return (
+      <div className="space-y-2 md:col-span-2">
+        <label className="block text-[10px] font-semibold uppercase tracking-[0.13em] text-bark-500">
+          {label}
+        </label>
+        <div className="flex min-h-[48px] flex-wrap items-center gap-2 rounded-[11px] border border-[#E5E2DA] bg-[#FCFBF8] px-3 py-2 transition-colors focus-within:border-[#BCA892] focus-within:ring-1 focus-within:ring-[#BCA892]/30">
+          {selected.map((keyword) => (
+            <span
+              key={keyword}
+              className="inline-flex items-center gap-1.5 rounded-full border border-[#DED9D0] bg-white px-2.5 py-1.5 text-[11px] font-medium text-[#4A4741]"
+            >
+              {keyword}
+              {!field.readOnly && (
+                <button
+                  type="button"
+                  aria-label={`Remove ${keyword}`}
+                  onClick={() => onChange(field.key, selected.filter((item) => item !== keyword))}
+                  className="rounded-full p-0.5 text-[#8B867D] transition-colors hover:bg-[#F0EDE7] hover:text-[#4A4741]"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </span>
+          ))}
+          {!field.readOnly && (
+            <div className="flex min-w-[190px] flex-1 items-center gap-1">
+              <input
+                type="text"
+                value={tagDraft}
+                maxLength={maxItemLength}
+                placeholder={field.placeholder || 'Add keyword'}
+                onChange={(event) => setTagDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ',') {
+                    event.preventDefault();
+                    addKeywords(tagDraft);
+                  }
+                }}
+                onBlur={() => {
+                  if (tagDraft.trim()) addKeywords(tagDraft);
+                }}
+                className="min-w-0 flex-1 border-0 bg-transparent px-1 py-1.5 text-[12px] text-[#272622] outline-none placeholder:text-[#A19C92]"
+              />
+              <button
+                type="button"
+                disabled={!tagDraft.trim() || selected.length >= maxItems}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => addKeywords(tagDraft)}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-[#D9D5CC] bg-white text-[#6F6258] transition-colors hover:border-[#BCA892] hover:bg-[#F5F1EB] disabled:cursor-not-allowed disabled:opacity-35"
+                aria-label="Add keyword"
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
+        </div>
+        {help && (
+          <p className="text-[10px] leading-relaxed text-bark-400">{help}</p>
+        )}
+      </div>
+    );
+  }
 
   if (field.type === 'multiselect') {
     const selected = Array.isArray(value) ? value : [];

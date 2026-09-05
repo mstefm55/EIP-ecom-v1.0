@@ -30,6 +30,14 @@ export default function PatternSEO({ pattern, reviews = [], isStandalone = false
     pattern?.seo?.slug ??
     pattern?.id ??
     'pattern';
+  const seoKeywords = Array.isArray(pattern?.seoKeywords)
+    ? pattern.seoKeywords
+    : Array.isArray(pattern?.seo?.keywords)
+    ? pattern.seo.keywords
+    : [];
+  const metaKeywords = seoKeywords.length
+    ? seoKeywords.join(', ')
+    : `sewing pattern, ${pattern?.category || ''}, digital pattern, pdf pattern, printable pattern, couture, tailoring, ${pattern?.name || ''}`;
 
   // JSON-LD structured data object
   const schemaData = {
@@ -114,7 +122,7 @@ export default function PatternSEO({ pattern, reviews = [], isStandalone = false
     };
 
     updateMetaTag('name', 'description', seoDescription);
-    updateMetaTag('name', 'keywords', `sewing pattern, ${pattern.category}, digital pattern, pdf pattern, printable pattern, couture, tailoring, ${pattern.name}`);
+    updateMetaTag('name', 'keywords', metaKeywords);
 
     // Open Graph Tags
     updateMetaTag('property', 'og:title', seoTitle);

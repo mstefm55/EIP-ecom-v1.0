@@ -299,6 +299,10 @@ export function buildWorkspaceProductPresentations(
         const seoSlug = Object.prototype.hasOwnProperty.call(variantValues, 'variant.seo_slug')
           ? String(variantValues['variant.seo_slug'] || '')
           : undefined;
+        const seoKeywordsPresent = Object.prototype.hasOwnProperty.call(variantValues, 'variant.seo_keywords');
+        const seoKeywords = seoKeywordsPresent
+          ? asArray(variantValues['variant.seo_keywords']).map((item) => String(item).trim()).filter(Boolean)
+          : [];
         const messagingOwner = resolveWorkspaceMessagingOwner(project, projectValues);
 
         presentations.push({
@@ -345,10 +349,13 @@ export function buildWorkspaceProductPresentations(
           seoTitle,
           seoDescription,
           seoSlug,
+          seoKeywordsPresent,
+          seoKeywords,
           seo: {
             ...(seoTitle !== undefined ? { title: seoTitle } : {}),
             ...(seoDescription !== undefined ? { description: seoDescription } : {}),
-            ...(seoSlug !== undefined ? { slug: seoSlug } : {})
+            ...(seoSlug !== undefined ? { slug: seoSlug } : {}),
+            ...(seoKeywordsPresent ? { keywords: seoKeywords } : {})
           },
           sizes,
           availableSizes: sizes,
@@ -424,6 +431,9 @@ export function buildWorkspaceProductPresentations(
       seoSlug: presentation.seoSlug !== undefined
         ? presentation.seoSlug
         : commerce?.seoSlug ?? commerce?.seo?.slug ?? '',
+      seoKeywords: presentation.seoKeywordsPresent
+        ? presentation.seoKeywords
+        : commerce?.seoKeywords ?? commerce?.seo?.keywords ?? [],
       seo: {
         ...(commerce?.seo || {}),
         ...(presentation.seo || {})
