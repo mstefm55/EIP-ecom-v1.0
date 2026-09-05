@@ -13,15 +13,29 @@ function replaceObjectContents(target, source) {
   Object.assign(target, asObject(source));
 }
 
-function normalizeRuntimeDropdowns(dropdowns) {
-  const source = asObject(dropdowns);
-  const normalized = {};
+function getRuntimeLabelPacks() {
+  const workspace = perfectFitMetadata.workspace || {};
 
   perfectFitMetadata.i18n ||= {};
   perfectFitMetadata.i18n.localePacks ||= {};
-  const defaultLocale = perfectFitMetadata.i18n.defaultLocale || 'en';
-  perfectFitMetadata.i18n.localePacks[defaultLocale] ||= {};
-  const defaultLocalePack = perfectFitMetadata.i18n.localePacks[defaultLocale];
+  const appDefaultLocale = perfectFitMetadata.i18n.defaultLocale || 'en';
+  perfectFitMetadata.i18n.localePacks[appDefaultLocale] ||= {};
+
+  workspace.localePacks ||= {};
+  const workspaceDefaultLocale = workspace.defaultLocale || appDefaultLocale;
+  workspace.defaultLocale ||= workspaceDefaultLocale;
+  workspace.localePacks[workspaceDefaultLocale] ||= {};
+
+  return {
+    app: perfectFitMetadata.i18n.localePacks[appDefaultLocale],
+    workspace: workspace.localePacks[workspaceDefaultLocale]
+  };
+}
+
+function normalizeRuntimeDropdowns(dropdowns) {
+  const source = asObject(dropdowns);
+  const normalized = {};
+  const runtimeLabelPacks = getRuntimeLabelPacks();
 
   for (const [listCode, rawOptions] of Object.entries(source)) {
     const options = Array.isArray(rawOptions) ? rawOptions : [];
@@ -32,11 +46,14 @@ function normalizeRuntimeDropdowns(dropdowns) {
       const existingLabelKey = String(option.labelKey || '').trim();
       const runtimeLabelKey = existingLabelKey || `runtime.dropdown.${listCode}.${code}`;
 
-      // EIP dropdown_value.label is the governed presentation value. Existing PF
-      // controls still consume labelKey, so register the DB label in the runtime
-      // locale pack rather than recreating/hardcoding dropdown values in React.
+      // EIP dropdown_value.label remains the governed presentation value.
+      // Existing PF workspace controls resolve dropdown labels through
+      // workspace.localePacks, while app-wide controls use i18n.localePacks.
+      // Register the DB-owned label in both runtime resolvers; do not recreate
+      // or hardcode any dropdown values in React.
       if (!existingLabelKey && runtimeLabelKey && label) {
-        defaultLocalePack[runtimeLabelKey] = label;
+        runtimeLabelPacks.app[runtimeLabelKey] = label;
+        runtimeLabelPacks.workspace[runtimeLabelKey] = label;
       }
 
       return {
