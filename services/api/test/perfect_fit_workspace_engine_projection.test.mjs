@@ -14,6 +14,10 @@ const resolver = readFileSync(
   new URL('../src/services/socket/fieldAliasResolver.js', import.meta.url),
   'utf8'
 );
+const metadataManifest = readFileSync(
+  new URL('../src/services/perfectFit/metadataManifest.js', import.meta.url),
+  'utf8'
+);
 const manifestAudit = readFileSync(
   new URL('../src/services/perfectFit/manifestCompleteness.js', import.meta.url),
   'utf8'
@@ -22,19 +26,22 @@ const productGateway = readFileSync(
   new URL('../src/services/perfectFit/productGateway.js', import.meta.url),
   'utf8'
 );
-const contract = readFileSync(
-  new URL('../../../apps/samara-web/my-vite-react-app/src/lib/perfectFitFieldContract.js', import.meta.url),
+const metadataMigration = readFileSync(
+  new URL('../db/migrations/0144_perfect_fit_db_metadata_manifest.sql', import.meta.url),
   'utf8'
 );
 
-test('lossless workspace commit happens before manifest audit and enterprise projection', () => {
+test('lossless workspace commit happens before DB manifest audit and enterprise projection', () => {
+  const metadataIndex = route.indexOf('const metadataBundle = await safeLoadMetadataBundle');
   const commitIndex = route.indexOf('await client.query("COMMIT")');
   const auditIndex = route.indexOf('auditPerfectFitManifestCompleteness(app.db');
   const projectionIndex = route.indexOf('projectPerfectFitWorkspaceProducts(app.db');
-  assert.ok(commitIndex > 0);
+  assert.ok(metadataIndex > 0);
+  assert.ok(commitIndex > metadataIndex);
   assert.ok(auditIndex > commitIndex);
   assert.ok(projectionIndex > auditIndex);
-  assert.match(route, /Projection failure is reported but never rolls back/);
+  assert.match(route, /browser never supplies the/);
+  assert.match(route, /DB_METADATA_MANIFEST_MISSING/);
 });
 
 test('PF projection reuses socket resolver and existing product gateway', () => {
@@ -73,13 +80,24 @@ test('generic resolver uses existing SmartSocket and dropdown governance tables'
   assert.doesNotMatch(resolver, /CREATE\s+TABLE/i);
 });
 
-test('manifest completeness audit accounts for fields and compares DB dropdown governance', () => {
+test('Perfect Fit runtime manifest is loaded from EIP DB and never from frontend metadata', () => {
+  assert.match(metadataManifest, /PERFECT_FIT_MANIFEST_CODE = "PERFECT_FIT"/);
+  assert.match(metadataManifest, /eip_commerce\.socket_manifest/);
+  assert.match(metadataManifest, /eip_core\.dropdown_list/);
+  assert.match(metadataManifest, /metadataAuthority/);
+  assert.match(metadataManifest, /source:\s*"EIP_DB"/);
+  assert.doesNotMatch(metadataManifest, /perfectFitMetadata/);
+  assert.doesNotMatch(metadataManifest, /eipV1Target/);
+});
+
+test('manifest completeness audit accounts for fields and DB dropdown governance', () => {
   assert.match(manifestAudit, /ENTERPRISE_MAPPED/);
   assert.match(manifestAudit, /WORKSPACE_ONLY/);
   assert.match(manifestAudit, /VALUE_MAPPING_REQUIRED/);
   assert.match(manifestAudit, /OBJECT_MAPPING_REQUIRED/);
   assert.match(manifestAudit, /ADMIN_REVIEW/);
   assert.match(manifestAudit, /fields_unaccounted/);
+  assert.match(manifestAudit, /governed_code/);
   assert.match(manifestAudit, /eip_core\.dropdown_list/);
   assert.match(manifestAudit, /eip_core\.dropdown_value/);
   assert.match(manifestAudit, /STYLE_MASTER_PRODUCT/);
@@ -88,17 +106,17 @@ test('manifest completeness audit accounts for fields and compares DB dropdown g
   assert.doesNotMatch(manifestAudit, /dv\.parent_id/);
 });
 
-test('frontend contract derives from existing Perfect Fit metadata and knows no DB storage', () => {
-  assert.match(contract, /buildPerfectFitManifestContract/);
-  assert.match(contract, /collectDeclaredFields/);
-  assert.match(contract, /governanceList/);
-  assert.match(contract, /eipV1Target/);
-  assert.match(contract, /product_hierarchy/);
-  assert.match(contract, /STYLE_VARIANT/);
-  assert.match(contract, /SIZE_VARIANT/);
-  assert.doesNotMatch(contract, /eip_core\./);
-  assert.doesNotMatch(contract, /socket_alias_map/);
-  assert.doesNotMatch(contract, /material\.attrs/);
+test('0144 seeds metadata into existing governance structures without new tables', () => {
+  assert.match(metadataMigration, /eip_commerce\.socket_manifest/);
+  assert.match(metadataMigration, /eip_commerce\.socket_alias_map/);
+  assert.match(metadataMigration, /eip_core\.dropdown_list/);
+  assert.match(metadataMigration, /eip_core\.dropdown_value/);
+  assert.match(metadataMigration, /"STYLE_VARIANT"/);
+  assert.match(metadataMigration, /"SIZE_VARIANT"/);
+  assert.match(metadataMigration, /STYLE_VARIANT_OF/);
+  assert.match(metadataMigration, /PF_PROJECT_STATUS/);
+  assert.doesNotMatch(metadataMigration, /CREATE\s+TABLE/i);
+  assert.doesNotMatch(metadataMigration, /ui_surface/i);
 });
 
 test('unexecuted duplicate 0143 migration remains removed', () => {
