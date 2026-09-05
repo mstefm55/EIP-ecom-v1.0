@@ -42,6 +42,32 @@ jobs:
       - name: Apply guarded patch
         run: python tools/patch_pf_variant_keywords_curation_0147.py
 
+      - name: Diagnose explicit keyword clear
+        run: |
+          node --input-type=module <<'NODE'
+          import { syncPerfectFitVariantPresentation } from './services/api/src/services/perfectFit/productGateway.js';
+          const state = { updatedAttrs: null, queries: [] };
+          const existingAttrs = { seo: { title: 'Keep', keywords: ['old'], robots: 'index' }, taxonomy: { tags: ['BEST_SELLER'] } };
+          const client = {
+            async query(sql, params = []) {
+              state.queries.push({ sql: String(sql).replace(/\s+/g, ' ').trim(), params });
+              if (/SELECT id, attrs/i.test(sql)) return { rowCount: 1, rows: [{ id: 'product-1', attrs: structuredClone(existingAttrs) }] };
+              if (/UPDATE eip_core\.material SET attrs=/i.test(sql)) {
+                state.updatedAttrs = JSON.parse(params[2]);
+                return { rowCount: 1, rows: [] };
+              }
+              return { rowCount: 0, rows: [] };
+            },
+            release() {}
+          };
+          const db = { async connect() { return client; } };
+          const result = await syncPerfectFitVariantPresentation(db, {
+            tenantId: 'tenant-1', productId: 'product-1',
+            presentation: { seo_keywords: [] }, presence: { seo_keywords: true }
+          });
+          console.log(JSON.stringify({ result, updatedAttrs: state.updatedAttrs, queries: state.queries }, null, 2));
+          NODE
+
       - name: Install root workspace
         run: npm ci
 
