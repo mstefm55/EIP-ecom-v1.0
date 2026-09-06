@@ -113,7 +113,10 @@ export function getAudienceLabel(audienceId) {
 }
 
 export function getGovernedProductTags() {
-  const governed = perfectFitMetadata.workspace?.dropdowns?.VARIANT_TAG;
+  const curation = perfectFitMetadata.workspace?.dropdowns?.VARIANT_CURATION;
+  const governed = Array.isArray(curation) && curation.length
+    ? curation
+    : perfectFitMetadata.workspace?.dropdowns?.VARIANT_TAG;
   return Array.isArray(governed) ? governed : [];
 }
 
@@ -122,6 +125,8 @@ function getPatternTagTokens(pattern = {}) {
     ? pattern.collectionTags
     : Array.isArray(pattern.tags)
     ? pattern.tags
+    : Array.isArray(pattern.taxonomy?.tags)
+    ? pattern.taxonomy.tags
     : [];
   return [...new Set(raw.map((value) => String(value || '').trim()).filter(Boolean))];
 }
@@ -138,6 +143,34 @@ export function getGovernedTagOption(tagValue) {
       slugifyCatalogValue(attrs.legacy_tag_id) === normalized
     );
   }) || null;
+}
+
+export function getCatalogFilterIdsForPattern(pattern = {}) {
+  return [
+    ...new Set(
+      getPatternTagTokens(pattern)
+        .map((tag) => getGovernedTagOption(tag)?.attrs?.catalog_filter_id)
+        .map(slugifyCatalogValue)
+        .filter(Boolean)
+    )
+  ];
+}
+
+export function matchesPatternCatalogFilters(pattern = {}, selectedFilters = []) {
+  const selected = (Array.isArray(selectedFilters) ? selectedFilters : [selectedFilters])
+    .map(slugifyCatalogValue)
+    .filter(Boolean);
+
+  if (!selected.length) return true;
+
+  const patternCategory = slugifyCatalogValue(
+    pattern.mainCategory || pattern.category || ''
+  );
+  const governedFacetIds = new Set(getCatalogFilterIdsForPattern(pattern));
+
+  return selected.some(
+    (filterId) => filterId === patternCategory || governedFacetIds.has(filterId)
+  );
 }
 
 export function isPatternEligibleForSurface(pattern, surfaceTarget) {
