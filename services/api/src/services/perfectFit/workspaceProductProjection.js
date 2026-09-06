@@ -55,8 +55,7 @@ const PF_CANONICAL_CODES = Object.freeze([
   "seo.title",
   "seo.description",
   "seo.slug",
-  "seo.keywords",
-  "taxonomy.tags"
+  "seo.keywords"
 ]);
 
 function sharedFieldForCanonical(code) {

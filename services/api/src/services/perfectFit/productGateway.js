@@ -532,7 +532,7 @@ export async function syncPerfectFitVariantPresentation(db, {
   presentation = {},
   presence = {}
 }) {
-  const ownedKeys = ["seo_title", "seo_description", "seo_slug", "seo_keywords", "tags"];
+  const ownedKeys = ["seo_title", "seo_description", "seo_slug", "seo_keywords"];
   const hasOwnedPatch = ownedKeys.some((key) => presence?.[key] === true);
   if (!hasOwnedPatch) {
     return { ok: true, skipped: true, product_id: productId };
@@ -575,14 +575,6 @@ export async function syncPerfectFitVariantPresentation(db, {
       else delete nextAttrs.seo;
     }
 
-    if (presence.tags) {
-      nextAttrs.taxonomy = nextAttrs.taxonomy && typeof nextAttrs.taxonomy === "object"
-        ? { ...nextAttrs.taxonomy }
-        : {};
-      nextAttrs.taxonomy.tags = Array.isArray(presentation.tags)
-        ? [...new Set(presentation.tags.map((item) => String(item || "").trim()).filter(Boolean))]
-        : [];
-    }
 
     nextAttrs.integration = {
       ...(nextAttrs.integration || {}),
@@ -603,8 +595,60 @@ export async function syncPerfectFitVariantPresentation(db, {
       ok: true,
       product_id: productId,
       updated_fields: ownedKeys.filter((key) => presence?.[key] === true),
-      tags: presence.tags ? nextAttrs.taxonomy?.tags || [] : undefined,
       seo: nextAttrs.seo || {}
+    };
+  });
+}
+
+export async function syncPerfectFitAdminCuration(db, {
+  tenantId,
+  productId,
+  tags = [],
+  actorIdentityId = null
+}) {
+  return withTransaction(db, async (client) => {
+    const material = await client.query(
+      `SELECT id, attrs
+       FROM eip_core.material
+       WHERE tenant_id=$1
+         AND id=$2
+         AND material_type=$3
+         AND COALESCE(attrs->'product_hierarchy'->>'level', '')='STYLE_VARIANT'
+       FOR UPDATE`,
+      [tenantId, productId, MATERIAL_TYPE]
+    );
+    if (!material.rowCount) return { ok: false, status: 404, error: "STYLE_VARIANT_NOT_FOUND" };
+
+    const nextAttrs = material.rows[0].attrs && typeof material.rows[0].attrs === "object"
+      ? { ...material.rows[0].attrs }
+      : {};
+    const taxonomy = nextAttrs.taxonomy && typeof nextAttrs.taxonomy === "object"
+      ? { ...nextAttrs.taxonomy }
+      : {};
+    taxonomy.tags = Array.isArray(tags)
+      ? [...new Set(tags.map((item) => String(item || "").trim()).filter(Boolean))]
+      : [];
+    nextAttrs.taxonomy = taxonomy;
+    nextAttrs.integration = {
+      ...(nextAttrs.integration || {}),
+      perfect_fit: {
+        ...(nextAttrs.integration?.perfect_fit || {}),
+        curation_synced_at: new Date().toISOString(),
+        curation_updated_by_identity_id: actorIdentityId || null,
+        curation_authority: "MERCHANDISING_ADMIN"
+      }
+    };
+
+    await client.query(
+      `UPDATE eip_core.material SET attrs=$3::jsonb, updated_at=now()
+       WHERE tenant_id=$1 AND id=$2`,
+      [tenantId, productId, JSON.stringify(nextAttrs)]
+    );
+
+    return {
+      ok: true,
+      product_id: productId,
+      tags: taxonomy.tags
     };
   });
 }

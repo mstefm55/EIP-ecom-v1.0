@@ -25,6 +25,7 @@ import {
 
 import PermissionsOverview from './subcomponents/PermissionsOverview';
 import PerfectFitLayoutController from './PerfectFitLayoutController';
+import PerfectFitCurationAdmin from './admin/PerfectFitCurationAdmin';
 
 export default function AdminControlPanel({
   appLayout,
@@ -621,6 +622,7 @@ export default function AdminControlPanel({
         {[
           { id: 'access', label: pfUiT('ui.admin.tabs.access', {}, '🛡️ Access Control & Permissions'), icon: Users },
           { id: 'publication', label: pfUiT('ui.admin.tabs.publication', {}, '🛍️ Publication Moderation'), icon: Store },
+          { id: 'curation', label: pfUiT('ui.admin.tabs.curation', {}, '🏷️ Product Curation'), icon: Sparkles },
           { id: 'telemetry', label: pfUiT('ui.admin.tabs.telemetry', {}, '📊 System Telemetry & Analytics'), icon: BarChart3 },
           { id: 'config', label: pfUiT('ui.admin.tabs.config', {}, '🧱 Dynamic Layout Configuration'), icon: Sliders }
         ].map(tab => {
@@ -1086,6 +1088,19 @@ export default function AdminControlPanel({
                   })}
                 </div>
               )}
+            </motion.div>
+          )}
+
+          {/* ==================== TAB: PRODUCT CURATION ==================== */}
+          {activeTab === 'curation' && (
+            <motion.div
+              key="curation-tab-content"
+              initial={{ opacity: 0, y: 5 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -5 }}
+              className="space-y-6 text-xs text-bark-800"
+            >
+              <PerfectFitCurationAdmin />
             </motion.div>
           )}
 

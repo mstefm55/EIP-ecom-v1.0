@@ -416,12 +416,8 @@ export function buildWorkspaceProductPresentations(
       stock: commerce?.stock,
       availability: commerce?.availability,
       audience: commerce?.audience || 'women',
-      collectionTags: presentation.variantTagsPresent
-        ? presentation.collectionTags
-        : commerce?.collectionTags || commerce?.tags || [],
-      tags: presentation.variantTagsPresent
-        ? presentation.collectionTags
-        : commerce?.tags || commerce?.collectionTags || [],
+      collectionTags: commerce?.collectionTags || commerce?.tags || [],
+      tags: commerce?.tags || commerce?.collectionTags || [],
       seoTitle: presentation.seoTitle !== undefined
         ? presentation.seoTitle
         : commerce?.seoTitle ?? commerce?.seo?.title ?? '',
@@ -469,7 +465,6 @@ export function buildWorkspaceProductPresentations(
           'fit',
           'description',
           'seo',
-          'discovery tags',
           'measurement chart',
           'media'
         ],
