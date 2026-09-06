@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Check, Loader2, RefreshCw, Search, ShieldCheck, Tag } from 'lucide-react';
 import { perfectFitMetadata } from '../../config/perfectFitMetadata';
 import { eipApiAdapter } from '../../lib/eipApiAdapter';
@@ -16,6 +16,7 @@ export default function PerfectFitCurationAdmin() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [savedMessage, setSavedMessage] = useState('');
+  const requestSequenceRef = useRef(0);
 
   const options = useMemo(() => {
     const workspace = perfectFitMetadata.workspace || {};
@@ -30,11 +31,14 @@ export default function PerfectFitCurationAdmin() {
     [products, selectedId]
   );
 
-  const load = useCallback(async (nextQuery = query) => {
+  const load = useCallback(async (nextQuery = '') => {
+    const normalizedQuery = String(nextQuery || '').trim();
+    const requestSequence = ++requestSequenceRef.current;
     setLoading(true);
     setError('');
     try {
-      const payload = await eipApiAdapter.listAdminCurationProducts(nextQuery);
+      const payload = await eipApiAdapter.listAdminCurationProducts(normalizedQuery);
+      if (requestSequence !== requestSequenceRef.current) return;
       const rows = Array.isArray(payload?.products) ? payload.products : [];
       setProducts(rows);
       setSelectedId((current) => {
@@ -42,17 +46,33 @@ export default function PerfectFitCurationAdmin() {
         return rows[0]?.id || '';
       });
     } catch (err) {
+      if (requestSequence !== requestSequenceRef.current) return;
       setProducts([]);
       setSelectedId('');
       setError(err?.message || 'Unable to load curation products.');
     } finally {
-      setLoading(false);
+      if (requestSequence === requestSequenceRef.current) setLoading(false);
     }
-  }, [query]);
+  }, []);
 
   useEffect(() => {
-    load('');
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    const timer = window.setTimeout(() => {
+      load(query);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [query, load]);
+
+  useEffect(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') load(query);
+    };
+    window.addEventListener('focus', refreshWhenVisible);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    return () => {
+      window.removeEventListener('focus', refreshWhenVisible);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
+  }, [load, query]);
 
   useEffect(() => {
     setDraftTags(Array.isArray(selected?.tags) ? selected.tags : []);
@@ -118,6 +138,12 @@ export default function PerfectFitCurationAdmin() {
         </div>
       </div>
 
+      {error && (
+        <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">
+          {error}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
         <div className="rounded-2xl border border-sand-200 bg-white p-4">
           <form
@@ -164,17 +190,19 @@ export default function PerfectFitCurationAdmin() {
                 );
               })}
             </div>
-          ) : (
+          ) : !error ? (
             <div className="rounded-xl border border-dashed border-sand-250 bg-[#FAF8F5] px-4 py-8 text-center text-[11px] text-bark-450">
-              No Style Variant products found.
+              {query.trim()
+                ? `No Style Variant products found for “${query.trim()}”.`
+                : 'No Style Variant products found.'}
             </div>
-          )}
+          ) : null}
         </div>
 
         <div className="rounded-2xl border border-sand-200 bg-white p-5">
           {!selected ? (
             <div className="flex min-h-[260px] items-center justify-center text-[11px] text-bark-400">
-              Select a Style Variant to manage curation.
+              {error ? 'Resolve the EIP query error shown above, then refresh.' : 'Select a Style Variant to manage curation.'}
             </div>
           ) : (
             <div className="space-y-5">
@@ -215,7 +243,6 @@ export default function PerfectFitCurationAdmin() {
                 </div>
               </div>
 
-              {error && <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">{error}</div>}
               {savedMessage && <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-700">{savedMessage}</div>}
 
               <div className="flex justify-end">
