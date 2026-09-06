@@ -231,11 +231,10 @@ async function ensureCurationStyleVariant(app, tenantId, productId) {
     await app.db.query(
       `
       UPDATE eip_core.material
-      SET attrs = jsonb_set(
-            COALESCE(attrs, '{}'::jsonb),
-            '{product_hierarchy,level}',
-            to_jsonb('STYLE_VARIANT'::text),
-            true
+      SET attrs = COALESCE(attrs, '{}'::jsonb) || jsonb_build_object(
+            'product_hierarchy',
+            COALESCE(attrs->'product_hierarchy', '{}'::jsonb) ||
+              jsonb_build_object('level', 'STYLE_VARIANT')
           ),
           updated_at = now()
       WHERE tenant_id = $1
