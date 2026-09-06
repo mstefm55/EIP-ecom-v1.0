@@ -1,0 +1,114 @@
+name: Apply PF merchandising consumer wiring
+
+on:
+  push:
+    branches:
+      - fix/pf-merchandising-consumers-publication-release
+    paths:
+      - .github/workflows/pf-merchandising-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/pf-merchandising-consumers-publication-release
+          fetch-depth: 0
+
+      - name: Patch storefront and publication consumers
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_exact(path, old, new, count=1):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              actual = text.count(old)
+              if actual != count:
+                  raise SystemExit(f'{path}: expected {count} occurrence(s), found {actual}: {old[:120]!r}')
+              p.write_text(text.replace(old, new, count), encoding='utf-8')
+
+          app = 'apps/samara-web/my-vite-react-app/src/App.jsx'
+          replace_exact(
+              app,
+              "import { selectPatternsForSurface, slugifyCatalogValue } from './data/catalogTaxonomy';",
+              "import { matchesPatternCatalogFilters, selectPatternsForSurface, slugifyCatalogValue } from './data/catalogTaxonomy';"
+          )
+          replace_exact(
+              app,
+              "patterns={productPresentationPatterns.slice(0, 10)}",
+              "patterns={selectPatternsForSurface(productPresentationPatterns, 'signature-orbit-carousel', 10)}"
+          )
+          replace_exact(
+              app,
+              "const patternCategory = slugifyCatalogValue(p.mainCategory || p.category || 'dresses');\nconst patternDesigner = p.designerBrand || 'Perfect Fit Bureau';",
+              "const patternDesigner = p.designerBrand || 'Perfect Fit Bureau';"
+          )
+          replace_exact(
+              app,
+              "const matchesCatalogCategory =\n  selectedCatalogCategories.length === 0 ||\n  selectedCatalogCategories.includes(patternCategory);",
+              "const matchesCatalogCategory =\n  matchesPatternCatalogFilters(p, selectedCatalogCategories);"
+          )
+          replace_exact(
+              app,
+              "      onOpenPublicationReview={handleOpenPublicationReview}\n      onMessagePublicationDesigner={handleOpenModeratorMessage}",
+              "      onOpenPublicationReview={handleOpenPublicationReview}\n      onApprovePublication={handleModeratorApprove}\n      onMessagePublicationDesigner={handleOpenModeratorMessage}"
+          )
+
+          admin = 'apps/samara-web/my-vite-react-app/src/components/AdminControlPanel.jsx'
+          replace_exact(
+              admin,
+              "  onOpenPublicationReview = () => {},\n  onMessagePublicationDesigner = () => {},",
+              "  onOpenPublicationReview = () => {},\n  onApprovePublication = () => {},\n  onMessagePublicationDesigner = () => {},"
+          )
+          replace_exact(
+              admin,
+              '''                          <button
+                            type="button"
+                            onClick={() => onOpenPublicationReview(request)}
+                            disabled={!request.pattern}
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-bark-900 bg-bark-900 px-4 py-2 text-[9px] font-bold text-white shadow-3xs hover:bg-bark-950 disabled:cursor-not-allowed disabled:opacity-35"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            {isPending ? 'Open Customer Quick View' : 'View Customer Projection'}
+                          </button>''',
+              '''                          <div className="flex flex-wrap items-center gap-2">
+                            {isPending && (
+                              <button
+                                type="button"
+                                onClick={() => onApprovePublication(request)}
+                                disabled={!request.pattern}
+                                className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-700 bg-emerald-700 px-4 py-2 text-[9px] font-bold text-white shadow-3xs hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-35"
+                              >
+                                <Check className="w-3.5 h-3.5" />
+                                Approve &amp; Release
+                              </button>
+                            )}
+
+                            <button
+                              type="button"
+                              onClick={() => onOpenPublicationReview(request)}
+                              disabled={!request.pattern}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-bark-900 bg-bark-900 px-4 py-2 text-[9px] font-bold text-white shadow-3xs hover:bg-bark-950 disabled:cursor-not-allowed disabled:opacity-35"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              {isPending ? 'Open Customer Quick View' : 'View Customer Projection'}
+                            </button>
+                          </div>'''
+          )
+
+          Path('.github/workflows/pf-merchandising-fix.yml').unlink()
+
+      - name: Commit applied fixes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/samara-web/my-vite-react-app/src/App.jsx \
+                  apps/samara-web/my-vite-react-app/src/components/AdminControlPanel.jsx \
+                  .github/workflows/pf-merchandising-fix.yml
+          git commit -m "Complete PF merchandising consumers and release action"
+          git push origin HEAD:fix/pf-merchandising-consumers-publication-release
