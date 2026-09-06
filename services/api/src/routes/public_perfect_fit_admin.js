@@ -173,6 +173,81 @@ async function requireAdminSession(app, req, reply, access) {
   return session;
 }
 
+async function ensureCurationStyleVariant(app, tenantId, productId) {
+  const result = await app.db.query(
+    `
+    SELECT m.id,
+           COALESCE(m.attrs->'product_hierarchy'->>'level', '') AS hierarchy_level,
+           pf.perfect_fit
+    FROM eip_core.material m
+    LEFT JOIN LATERAL (
+      SELECT ir.payload->'perfect_fit' AS perfect_fit
+      FROM eip_core.object_link ol
+      JOIN eip_core.info_record ir
+        ON ir.tenant_id = ol.tenant_id
+       AND ir.id = ol.dst_id
+       AND ir.record_type = 'PERFECT_FIT_PRODUCT_LINK'
+       AND ir.is_active = true
+      WHERE ol.tenant_id = m.tenant_id
+        AND ol.src_kind = 'material'
+        AND ol.src_id = m.id
+        AND ol.dst_kind = 'info_record'
+        AND ol.relation_type = 'PERFECT_FIT_PRODUCT'
+        AND ol.is_active = true
+      ORDER BY ol.updated_at DESC
+      LIMIT 1
+    ) pf ON true
+    WHERE m.tenant_id = $1
+      AND m.id = $2
+      AND m.material_type = 'PRODUCT'
+    LIMIT 1
+    `,
+    [tenantId, productId]
+  );
+
+  if (result.rowCount !== 1) {
+    return { ok: false, status: 404, error: "STYLE_VARIANT_NOT_FOUND" };
+  }
+
+  const row = result.rows[0];
+  const hierarchyLevel = normalizeText(row.hierarchy_level).toUpperCase();
+  const perfectFit = row.perfect_fit && typeof row.perfect_fit === "object"
+    ? row.perfect_fit
+    : {};
+  const linkedLevel = normalizeText(perfectFit.entity_level).toUpperCase();
+  const hasVariantIdentity = Boolean(normalizeText(perfectFit.variant_id));
+  const isStyleVariant =
+    hierarchyLevel === "STYLE_VARIANT" ||
+    hierarchyLevel === "VARIANT" ||
+    linkedLevel === "STYLE_VARIANT" ||
+    linkedLevel === "VARIANT" ||
+    hasVariantIdentity;
+
+  if (!isStyleVariant) {
+    return { ok: false, status: 404, error: "STYLE_VARIANT_NOT_FOUND" };
+  }
+
+  if (hierarchyLevel !== "STYLE_VARIANT") {
+    await app.db.query(
+      `
+      UPDATE eip_core.material
+      SET attrs = COALESCE(attrs, '{}'::jsonb) || jsonb_build_object(
+            'product_hierarchy',
+            COALESCE(attrs->'product_hierarchy', '{}'::jsonb) ||
+              jsonb_build_object('level', 'STYLE_VARIANT')
+          ),
+          updated_at = now()
+      WHERE tenant_id = $1
+        AND id = $2
+        AND material_type = 'PRODUCT'
+      `,
+      [tenantId, productId]
+    );
+  }
+
+  return { ok: true };
+}
+
 export default async function registerPublicPerfectFitAdminRoutes(app) {
   app.get(
     "/commerce/:suffix/perfect-fit/admin/curation/products",
@@ -299,6 +374,15 @@ export default async function registerPublicPerfectFitAdminRoutes(app) {
             reason: governed.reason || null
           });
         }
+      }
+
+      const eligible = await ensureCurationStyleVariant(
+        app,
+        access.tenant.id,
+        productId
+      );
+      if (!eligible.ok) {
+        return reply.code(eligible.status || 404).send(eligible);
       }
 
       const result = await syncPerfectFitAdminCuration(app.db, {
