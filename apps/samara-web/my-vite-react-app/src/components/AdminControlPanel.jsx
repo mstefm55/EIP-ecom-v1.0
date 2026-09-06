@@ -36,6 +36,7 @@ export default function AdminControlPanel({
   onTrackShipmentEnabledChange = () => {},
   publicationRequests = [],
   onOpenPublicationReview = () => {},
+  onApprovePublication = () => {},
   onMessagePublicationDesigner = () => {},
   surfaceVisibility = null,
   surfaceVisibilityRegistry = [],
@@ -1073,6 +1074,19 @@ export default function AdminControlPanel({
                           >
                             <MessageCircle className="w-3.5 h-3.5" />{pfUiT("ui.components.admincontrolpanel.0c76b3fd14")}</button>
 
+                          <div className="flex flex-wrap items-center gap-2">
+                            {isPending && (
+                              <button
+                                type="button"
+                                onClick={() => onApprovePublication(request)}
+                                disabled={!request.pattern}
+                                className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-700 bg-emerald-700 px-4 py-2 text-[9px] font-bold text-white shadow-3xs hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-35"
+                              >
+                                <Check className="w-3.5 h-3.5" />
+                                Approve &amp; Release
+                              </button>
+                            )}
+
                           <button
                             type="button"
                             onClick={() => onOpenPublicationReview(request)}
@@ -1082,6 +1096,7 @@ export default function AdminControlPanel({
                             <Eye className="w-3.5 h-3.5" />
                             {isPending ? 'Open Customer Quick View' : 'View Customer Projection'}
                           </button>
+                          </div>
                         </div>
                       </article>
                     );

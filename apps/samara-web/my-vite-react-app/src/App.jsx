@@ -15,7 +15,7 @@ import {
   Lock, Unlock, Calendar, Archive
 } from 'lucide-react';
 import CatalogSidebarNavigator from './components/CatalogSidebarNavigator';
-import { selectPatternsForSurface, slugifyCatalogValue } from './data/catalogTaxonomy';
+import { matchesPatternCatalogFilters, selectPatternsForSurface, slugifyCatalogValue } from './data/catalogTaxonomy';
 import PatternCard from './components/PatternCard';
 import PatternImageGallery from './components/PatternImageGallery';
 import PatternQuickViewModal from './components/PatternQuickViewModal';
@@ -549,7 +549,7 @@ SignatureOrbitCarouselA: (section) => (
 SignaturePerspectiveStackCarouselB: (section) => (
   <SignaturePerspectiveStackCarouselB
     key={section.id}
-    patterns={productPresentationPatterns.slice(0, 10)}
+    patterns={selectPatternsForSurface(productPresentationPatterns, 'signature-orbit-carousel', 10)}
     title={section.title || "Our Signature Collections"}
     subtitle={section.subtitle || "Let Your Uniqueness Take Shape"}
     showLabel={section.showLabel || false}
@@ -752,6 +752,7 @@ Workspace: (section) => (
       onTrackShipmentEnabledChange={setIsTrackShipmentEnabled}
       publicationRequests={publicationReviewRequests}
       onOpenPublicationReview={handleOpenPublicationReview}
+      onApprovePublication={handleModeratorApprove}
       onMessagePublicationDesigner={handleOpenModeratorMessage}
     />
   </motion.section>
@@ -1740,7 +1741,6 @@ const handleCatalogRatingToggle = (ratingId) => {
                           p.difficulty.toLowerCase().includes(searchQuery.toLowerCase());
       const matchFavorites = !showFavoritesOnly || favorites.includes(p.id);
       const patternAudience = slugifyCatalogValue(p.audience || 'women');
-const patternCategory = slugifyCatalogValue(p.mainCategory || p.category || 'dresses');
 const patternDesigner = p.designerBrand || 'Perfect Fit Bureau';
 
 const matchesAudience =
@@ -1748,8 +1748,7 @@ const matchesAudience =
   patternAudience === slugifyCatalogValue(catalogAudienceFilter);
 
 const matchesCatalogCategory =
-  selectedCatalogCategories.length === 0 ||
-  selectedCatalogCategories.includes(patternCategory);
+  matchesPatternCatalogFilters(p, selectedCatalogCategories);
 
 const matchesCatalogDifficulty =
   selectedCatalogDifficulties.length === 0 ||
