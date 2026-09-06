@@ -77,7 +77,6 @@ function presentationFieldForCanonical(code) {
   if (code === "seo.description") return "seo_description";
   if (code === "seo.slug") return "seo_slug";
   if (code === "seo.keywords") return "seo_keywords";
-  if (code === "taxonomy.tags") return "tags";
   return null;
 }
 
@@ -124,40 +123,6 @@ async function resolveContextValues(db, tenantId, context, fieldResolution) {
           ...new Set(values.map(normalizeText).filter(Boolean))
         ];
         presentationPresence.seo_keywords = true;
-      } else if (presentationField === "tags") {
-        const values = Array.isArray(value)
-          ? value
-          : value === undefined || value === null || value === ""
-          ? []
-          : [value];
-        const normalizedTags = [...new Set(values.map(normalizeText).filter(Boolean))];
-        let invalid = null;
-        if (field.governance_list) {
-          for (const tag of normalizedTags) {
-            // eslint-disable-next-line no-await-in-loop
-            const governed = await validateGovernedDropdownValue(db, {
-              tenantId,
-              listCode: field.governance_list,
-              value: tag
-            });
-            if (!governed.ok) {
-              invalid = { tag, reason: governed.reason };
-              break;
-            }
-          }
-        }
-        if (invalid) {
-          rejected.push({
-            key: field.key,
-            canonical_code: field.canonical_code,
-            reason: invalid.reason,
-            governance_list: field.governance_list,
-            value: invalid.tag
-          });
-          continue;
-        }
-        presentation.tags = normalizedTags;
-        presentationPresence.tags = true;
       } else {
         presentation[presentationField] =
           value === undefined || value === null ? "" : normalizeText(value);

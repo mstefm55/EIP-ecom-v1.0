@@ -286,10 +286,6 @@ export function buildWorkspaceProductPresentations(
         const variantCode = variantValues['variant.code'] || variant.id;
         const styleCode = styleValues['product.style_code'] || '';
         const collection = projectValues['project.season'] || '';
-        const variantTagsPresent = Object.prototype.hasOwnProperty.call(variantValues, 'variant.tags');
-        const variantTags = variantTagsPresent
-          ? asArray(variantValues['variant.tags']).map((item) => String(item)).filter(Boolean)
-          : [];
         const seoTitle = Object.prototype.hasOwnProperty.call(variantValues, 'variant.seo_title')
           ? String(variantValues['variant.seo_title'] || '')
           : undefined;
@@ -343,9 +339,6 @@ export function buildWorkspaceProductPresentations(
             variantValues['variant.notes'] ||
             'Workspace-linked pattern variant.',
           tagline: [variantName, fitLabel, collection].filter(Boolean).join(' · '),
-          variantTagsPresent,
-          collectionTags: variantTags,
-          tags: variantTags,
           seoTitle,
           seoDescription,
           seoSlug,
