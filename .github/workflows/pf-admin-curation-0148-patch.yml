@@ -1,0 +1,40 @@
+name: pf-admin-curation-0148-patch
+
+on:
+  push:
+    branches:
+      - fix/pf-admin-curation-ownership-0148
+    paths:
+      - tools/patch_pf_admin_curation_0148.py
+      - .github/workflows/pf-admin-curation-0148-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/pf-admin-curation-ownership-0148
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply guarded patch
+        run: python tools/patch_pf_admin_curation_0148.py
+      - name: Commit patch
+        run: |
+          if git diff --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add services/api/src/services/perfectFit/productGateway.js \
+                  services/api/src/services/perfectFit/workspaceProductProjection.js \
+                  apps/samara-web/my-vite-react-app/src/lib/workspaceProductPresentation.js \
+                  apps/samara-web/my-vite-react-app/src/components/AdminControlPanel.jsx
+          git commit -m "Enforce PF admin curation ownership"
+          git push origin HEAD:fix/pf-admin-curation-ownership-0148
