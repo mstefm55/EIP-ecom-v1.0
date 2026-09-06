@@ -4,13 +4,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { syncPerfectFitVariantPresentation } from '../src/services/perfectFit/productGateway.js';
+import {
+  syncPerfectFitAdminCuration,
+  syncPerfectFitVariantPresentation
+} from '../src/services/perfectFit/productGateway.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '../../..');
 const read = (relative) => fs.readFileSync(path.join(repoRoot, relative), 'utf8');
 
 const migration = read('services/api/db/migrations/0146_perfect_fit_variant_seo_tags.sql');
+const correction = read('services/api/db/migrations/0148_perfect_fit_admin_curation_ownership.sql');
 const projection = read('services/api/src/services/perfectFit/workspaceProductProjection.js');
 const gateway = read('services/api/src/services/perfectFit/productGateway.js');
 const workspace = read('apps/samara-web/my-vite-react-app/src/components/Workspace.jsx');
@@ -49,7 +53,7 @@ function makeDb(existingAttrs = {}) {
   };
 }
 
-test('0146 reuses EIP governance and Product JSONB without PF-specific business tables', () => {
+test('0146 historically introduced governed tags without PF-specific business tables', () => {
   assert.match(migration, /PF_PRODUCT_TAG/);
   assert.match(migration, /eip_core\.dropdown_list/);
   assert.match(migration, /eip_core\.dropdown_value/);
@@ -62,7 +66,7 @@ test('0146 reuses EIP governance and Product JSONB without PF-specific business 
   assert.match(migration, /'variant\.tags', 'taxonomy\.tags'/);
 });
 
-test('0146 governs merchandising tags and Orbit surface behavior separately from category', () => {
+test('0146 stable curation codes remain distinct from garment category', () => {
   for (const code of [
     'NEW_RELEASE',
     'BEST_SELLER',
@@ -82,7 +86,6 @@ test('0146 governs merchandising tags and Orbit surface behavior separately from
   assert.match(migration, /catalog_filter_id.*pattern-of-the-day/);
   assert.match(migration, /catalog_filter_id.*curve-plus/);
 
-  // Guard the 0145 category distinction: these remain filter facets, not garment categories.
   assert.match(categoryMigration, /Catalogue-only facets/);
   assert.doesNotMatch(categoryMigration, /\('BEST_SELLER'/);
   assert.doesNotMatch(categoryMigration, /\('FREE_PATTERN'/);
@@ -90,20 +93,18 @@ test('0146 governs merchandising tags and Orbit surface behavior separately from
   assert.doesNotMatch(categoryMigration, /\('CURVE_PLUS'/);
 });
 
-test('manifest successor adds Variant Discovery & SEO fields and governed multiselect binding', () => {
-  assert.match(migration, /2026-09-05-db-workspace-v2/);
-  assert.match(migration, /dropdownBindings,VARIANT_TAG/);
-  assert.match(migration, /PF_PRODUCT_TAG/);
-  assert.match(migration, /variantDiscoverySeo/);
-  assert.match(migration, /variant\.seo_title/);
-  assert.match(migration, /variant\.seo_description/);
-  assert.match(migration, /variant\.seo_slug/);
-  assert.match(migration, /variant\.tags/);
-  assert.match(migration, /"type":"multiselect"/);
-  assert.match(migration, /"governanceList":"VARIANT_TAG"/);
+test('0148 keeps tags governed but removes them from ordinary Variant Overview ownership', () => {
+  assert.match(correction, /PF_PRODUCT_TAG/);
+  assert.match(correction, /workspace_selectable', false/);
+  assert.match(correction, /admin_selectable', true/);
+  assert.match(correction, /product_studio_selectable', true/);
+  assert.match(correction, /assignment_authority', 'MERCHANDISING_ADMIN'/);
+  assert.match(correction, /"adminOnly":true/);
+  assert.match(correction, /"workspaceEditable":false/);
+  assert.match(correction, /"fields":\["variant\.seo_title","variant\.seo_description","variant\.seo_slug","variant\.seo_keywords"\]/);
 });
 
-test('workspace renderer is metadata driven for governed Variant tags', () => {
+test('workspace renderer stays metadata-driven and retains generic multiselect capability', () => {
   assert.match(workspace, /field\.type === 'multiselect'/);
   assert.match(workspace, /metadata\.dropdowns\?\.\[field\.governanceList\]/);
   assert.match(workspace, /discoverySeoGroup = getFieldGroups\(metadata, 'variant'\)/);
@@ -113,22 +114,20 @@ test('workspace renderer is metadata driven for governed Variant tags', () => {
   assert.doesNotMatch(workspace, /\['ORBIT_FEATURED',\s*'BEST_SELLER'/);
 });
 
-test('workspace projection maps SEO and tags only to the Style Variant presentation path', () => {
+test('ordinary workspace projection maps Variant SEO but excludes taxonomy.tags', () => {
   assert.match(projection, /"seo\.title"/);
   assert.match(projection, /"seo\.description"/);
   assert.match(projection, /"seo\.slug"/);
-  assert.match(projection, /"taxonomy\.tags"/);
+  assert.match(projection, /"seo\.keywords"/);
+  assert.doesNotMatch(projection, /"taxonomy\.tags"/);
   assert.match(projection, /entry\.scope !== "variant"/);
   assert.match(projection, /syncPerfectFitVariantPresentation/);
-  assert.match(projection, /presentationPresence/);
-  assert.match(projection, /validateGovernedDropdownValue/);
-  assert.match(projection, /for \(const tag of normalizedTags\)/);
 });
 
-test('variant presentation sync preserves unrelated EIP attrs and applies explicit PF-owned SEO/tags', async () => {
+test('designer Variant presentation sync preserves unrelated EIP attrs and admin curation tags', async () => {
   const { db, state } = makeDb({
     content: { summary: 'Keep me' },
-    taxonomy: { brand: 'Existing Brand', category: 'Dresses', tags: ['LEGACY'] },
+    taxonomy: { brand: 'Existing Brand', category: 'Dresses', tags: ['ORBIT_FEATURED'] },
     seo: { title: 'Old title', robots: 'index,follow' },
     inventory: { qty: 12 },
     integration: { other_system: { id: 'x' } }
@@ -141,7 +140,7 @@ test('variant presentation sync preserves unrelated EIP attrs and applies explic
       seo_title: 'Variant SEO Title',
       seo_description: 'Variant SEO Description',
       seo_slug: 'variant-seo-slug',
-      tags: ['ORBIT_FEATURED', 'BEST_SELLER', 'ORBIT_FEATURED']
+      tags: ['BEST_SELLER']
     },
     presence: {
       seo_title: true,
@@ -158,7 +157,7 @@ test('variant presentation sync preserves unrelated EIP attrs and applies explic
   assert.equal(state.updatedAttrs.inventory.qty, 12);
   assert.equal(state.updatedAttrs.taxonomy.brand, 'Existing Brand');
   assert.equal(state.updatedAttrs.taxonomy.category, 'Dresses');
-  assert.deepEqual(state.updatedAttrs.taxonomy.tags, ['ORBIT_FEATURED', 'BEST_SELLER']);
+  assert.deepEqual(state.updatedAttrs.taxonomy.tags, ['ORBIT_FEATURED']);
   assert.equal(state.updatedAttrs.seo.title, 'Variant SEO Title');
   assert.equal(state.updatedAttrs.seo.description, 'Variant SEO Description');
   assert.equal(state.updatedAttrs.seo.slug, 'variant-seo-slug');
@@ -166,7 +165,7 @@ test('variant presentation sync preserves unrelated EIP attrs and applies explic
   assert.equal(state.updatedAttrs.integration.other_system.id, 'x');
 });
 
-test('legacy Variant with absent SEO/tag keys does not touch EIP presentation attrs', async () => {
+test('legacy Variant with absent SEO keys does not touch EIP presentation attrs', async () => {
   const { db, state } = makeDb({ seo: { title: 'Existing' }, taxonomy: { tags: ['KEEP'] } });
   const result = await syncPerfectFitVariantPresentation(db, {
     tenantId: 'tenant-1',
@@ -180,7 +179,7 @@ test('legacy Variant with absent SEO/tag keys does not touch EIP presentation at
   assert.equal(state.updatedAttrs, null);
 });
 
-test('explicit empty Variant values clear only PF-owned SEO fields and tags', async () => {
+test('explicit empty designer SEO clears only PF-owned SEO fields, never admin tags', async () => {
   const { db, state } = makeDb({
     seo: { title: 'Old', description: 'Old description', robots: 'index' },
     taxonomy: { brand: 'Keep', tags: ['OLD'] }
@@ -196,12 +195,35 @@ test('explicit empty Variant values clear only PF-owned SEO fields and tags', as
   assert.equal(state.updatedAttrs.seo.description, 'Old description');
   assert.equal(state.updatedAttrs.seo.robots, 'index');
   assert.equal(state.updatedAttrs.taxonomy.brand, 'Keep');
-  assert.deepEqual(state.updatedAttrs.taxonomy.tags, []);
+  assert.deepEqual(state.updatedAttrs.taxonomy.tags, ['OLD']);
 });
 
-test('catalog presentation prefers explicit Variant SEO/tags while retaining legacy overlay fallback', () => {
-  assert.match(presentation, /variantTagsPresent/);
-  assert.match(presentation, /collectionTags: presentation\.variantTagsPresent/);
+test('admin curation helper changes only taxonomy.tags and preserves unrelated Product attrs', async () => {
+  const { db, state } = makeDb({
+    seo: { title: 'Keep' },
+    taxonomy: { category: 'DRESS', brand: 'Keep', tags: ['OLD'] },
+    inventory: { qty: 7 },
+    product_hierarchy: { level: 'STYLE_VARIANT' }
+  });
+  const result = await syncPerfectFitAdminCuration(db, {
+    tenantId: 'tenant-1',
+    productId: 'product-1',
+    tags: ['ORBIT_FEATURED', 'BEST_SELLER', 'ORBIT_FEATURED'],
+    actorIdentityId: 'admin-1'
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(state.updatedAttrs.taxonomy.tags, ['ORBIT_FEATURED', 'BEST_SELLER']);
+  assert.equal(state.updatedAttrs.taxonomy.category, 'DRESS');
+  assert.equal(state.updatedAttrs.taxonomy.brand, 'Keep');
+  assert.equal(state.updatedAttrs.seo.title, 'Keep');
+  assert.equal(state.updatedAttrs.inventory.qty, 7);
+  assert.equal(state.updatedAttrs.integration.perfect_fit.curation_authority, 'MERCHANDISING_ADMIN');
+});
+
+test('catalog presentation takes curation from enterprise commerce overlay while Variant SEO remains PF-owned', () => {
+  assert.doesNotMatch(presentation, /variantTagsPresent/);
+  assert.match(presentation, /collectionTags: commerce\?\.collectionTags \|\| commerce\?\.tags \|\| \[\]/);
+  assert.match(presentation, /tags: commerce\?\.tags \|\| commerce\?\.collectionTags \|\| \[\]/);
   assert.match(presentation, /seoTitle: presentation\.seoTitle !== undefined/);
   assert.match(presentation, /seoDescription: presentation\.seoDescription !== undefined/);
   assert.match(presentation, /seoSlug: presentation\.seoSlug !== undefined/);
@@ -210,7 +232,7 @@ test('catalog presentation prefers explicit Variant SEO/tags while retaining leg
   assert.match(seo, /pattern\?\.seoSlug/);
 });
 
-test('Orbit selection is driven by governed tag attrs with safe first-N fallback', () => {
+test('Orbit selection remains driven by governed tag attrs with safe first-N fallback', () => {
   assert.match(taxonomy, /perfectFitMetadata\.workspace\?\.dropdowns\?\.VARIANT_TAG/);
   assert.match(taxonomy, /option\?\.attrs\?\.surface_targets/);
   assert.match(taxonomy, /const source = eligible\.length \? eligible : safe/);
@@ -220,9 +242,10 @@ test('Orbit selection is driven by governed tag attrs with safe first-N fallback
   assert.doesNotMatch(app, /productPresentationPatterns\.slice\(0, 8\)/);
 });
 
-test('product gateway writes existing material JSONB rather than parallel SEO/tag persistence', () => {
+test('product gateway uses existing material JSONB for both designer SEO and admin curation', () => {
   assert.match(gateway, /nextAttrs\.seo/);
-  assert.match(gateway, /nextAttrs\.taxonomy\.tags/);
+  assert.match(gateway, /syncPerfectFitAdminCuration/);
+  assert.match(gateway, /taxonomy\.tags/);
   assert.match(gateway, /UPDATE eip_core\.material SET attrs=/);
   assert.doesNotMatch(gateway, /INSERT INTO .*seo/i);
   assert.doesNotMatch(gateway, /INSERT INTO .*tag/i);

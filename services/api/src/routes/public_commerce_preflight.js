@@ -9,6 +9,7 @@ import { connectionAllowsOrigin } from "../services/gateway/verification.js";
 import { auditSecurityEvent } from "../lib/securityAudit.js";
 import registerPublicMemberSecurityRoutes from "./public_member_security.js";
 import registerPublicPerfectFitWorkspaceRoutes from "./public_perfect_fit_workspace.js";
+import registerPublicPerfectFitAdminRoutes from "./public_perfect_fit_admin.js";
 
 function normalizeText(value) {
   return String(value || "").trim();
@@ -120,4 +121,5 @@ export default async function publicCommercePreflightRoutes(app) {
 
   await registerPublicMemberSecurityRoutes(app);
   await registerPublicPerfectFitWorkspaceRoutes(app);
+  await registerPublicPerfectFitAdminRoutes(app);
 }
