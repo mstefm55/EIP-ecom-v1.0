@@ -27,8 +27,9 @@ test('PF Admin curation save self-heals legacy hierarchy metadata before the gov
   const syncIndex = route.lastIndexOf('syncPerfectFitAdminCuration(app.db');
   assert.ok(ensureIndex > 0);
   assert.ok(syncIndex > ensureIndex);
-  assert.match(route, /\{product_hierarchy,level\}/);
-  assert.match(route, /to_jsonb\('STYLE_VARIANT'::text\)/);
+  assert.match(route, /jsonb_build_object\(\s*'product_hierarchy'/);
+  assert.match(route, /jsonb_build_object\('level', 'STYLE_VARIANT'\)/);
+  assert.match(route, /COALESCE\(attrs->'product_hierarchy', '\{\}'::jsonb\)/);
   assert.match(route, /if \(!eligible\.ok\)/);
 });
 
