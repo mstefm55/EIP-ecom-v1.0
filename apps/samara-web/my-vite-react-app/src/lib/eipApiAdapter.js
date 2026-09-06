@@ -188,5 +188,11 @@ export const eipApiAdapter = Object.freeze({
     method: 'PUT',
     body: { workspace },
     idempotent: true
+  }),
+  listAdminCurationProducts: (query = '') => request(`/perfect-fit/admin/curation/products?limit=100&q=${encodeURIComponent(query)}`),
+  saveAdminCuration: (productId, tags) => request(`/perfect-fit/admin/curation/products/${encodeURIComponent(productId)}`, {
+    method: 'PUT',
+    body: { tags },
+    idempotent: true
   })
 });
