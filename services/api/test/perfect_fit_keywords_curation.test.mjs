@@ -11,6 +11,7 @@ const repoRoot = path.resolve(here, '../../..');
 const read = (relative) => fs.readFileSync(path.join(repoRoot, relative), 'utf8');
 
 const migration = read('services/api/db/migrations/0147_perfect_fit_keywords_curation.sql');
+const correction = read('services/api/db/migrations/0148_perfect_fit_admin_curation_ownership.sql');
 const workspace = read('apps/samara-web/my-vite-react-app/src/components/Workspace.jsx');
 const projection = read('services/api/src/services/perfectFit/workspaceProductProjection.js');
 const presentation = read('apps/samara-web/my-vite-react-app/src/lib/workspaceProductPresentation.js');
@@ -52,14 +53,20 @@ test('0147 adds free search keywords without creating a second governed keyword 
   assert.doesNotMatch(migration, /CREATE\s+TABLE/i);
 });
 
-test('0147 preserves existing governed curation codes and re-labels their UI role', () => {
-  assert.match(migration, /Perfect Fit Curation & Placement/);
-  assert.match(migration, /CURATION_PLACEMENT/);
-  assert.match(migration, /alias_code = 'variant\.tags'/);
-  assert.match(migration, /canonical_code = 'taxonomy\.tags'/);
+test('0148 corrects curation assignment authority without changing 0147 history', () => {
+  assert.match(correction, /workspace_selectable', false/);
+  assert.match(correction, /admin_selectable', true/);
+  assert.match(correction, /product_studio_selectable', true/);
+  assert.match(correction, /MERCHANDISING_ADMIN/);
+  assert.match(correction, /PF_ADMIN/);
+  assert.match(correction, /EIP_PRODUCT_STUDIO/);
+  assert.match(correction, /2026-09-06-db-workspace-v4/);
+  assert.match(correction, /variantDiscoverySeo/);
+  assert.match(correction, /variant\.seo_keywords/);
+  assert.doesNotMatch(correction, /"fields":\["variant\.seo_title","variant\.seo_description","variant\.seo_slug","variant\.seo_keywords","variant\.tags"\]/);
 });
 
-test('workspace has an EIP-like free keyword chip input with explicit add control', () => {
+test('workspace keeps an EIP-like free keyword chip input with explicit add control', () => {
   assert.match(workspace, /field\.type === 'tagInput'/);
   assert.match(workspace, /Press Enter|event\.key === 'Enter'/);
   assert.match(workspace, /event\.key === ','/);
@@ -68,14 +75,14 @@ test('workspace has an EIP-like free keyword chip input with explicit add contro
   assert.match(workspace, /variant\.seo_keywords/);
 });
 
-test('projection maps free keywords separately from governed curation tags', () => {
+test('ordinary PF projection maps free keywords but not enterprise curation tags', () => {
   assert.match(projection, /"seo\.keywords"/);
   assert.match(projection, /presentationField === "seo_keywords"/);
-  assert.match(projection, /presentationField === "tags"/);
-  assert.match(projection, /validateGovernedDropdownValue/);
+  assert.doesNotMatch(projection, /"taxonomy\.tags"/);
+  assert.doesNotMatch(projection, /presentationField === "tags"/);
 });
 
-test('gateway preserves curation tags and saves keyword array under seo', async () => {
+test('gateway preserves admin curation tags while saving designer keyword array under seo', async () => {
   const { db, state } = makeDb({
     seo: { title: 'Existing title' },
     taxonomy: { category: 'DRESS', tags: ['ORBIT_FEATURED'] },
@@ -86,10 +93,12 @@ test('gateway preserves curation tags and saves keyword array under seo', async 
     tenantId: 'tenant-1',
     productId: 'product-1',
     presentation: {
-      seo_keywords: ['bias cut', 'silk', 'bias cut']
+      seo_keywords: ['bias cut', 'silk', 'bias cut'],
+      tags: ['BEST_SELLER']
     },
     presence: {
-      seo_keywords: true
+      seo_keywords: true,
+      tags: true
     }
   });
 
@@ -100,7 +109,7 @@ test('gateway preserves curation tags and saves keyword array under seo', async 
   assert.equal(state.updatedAttrs.inventory.qty, 4);
 });
 
-test('explicit empty keyword list clears only keywords', async () => {
+test('explicit empty keyword list clears only keywords and preserves admin tags', async () => {
   const { db, state } = makeDb({
     seo: { title: 'Keep', keywords: ['old'] },
     taxonomy: { tags: ['BEST_SELLER'] }
@@ -109,8 +118,8 @@ test('explicit empty keyword list clears only keywords', async () => {
   const result = await syncPerfectFitVariantPresentation(db, {
     tenantId: 'tenant-1',
     productId: 'product-1',
-    presentation: { seo_keywords: [] },
-    presence: { seo_keywords: true }
+    presentation: { seo_keywords: [], tags: [] },
+    presence: { seo_keywords: true, tags: true }
   });
 
   assert.equal(result.ok, true);
@@ -119,9 +128,12 @@ test('explicit empty keyword list clears only keywords', async () => {
   assert.deepEqual(state.updatedAttrs.taxonomy.tags, ['BEST_SELLER']);
 });
 
-test('catalog presentation and SEO component consume Variant keywords without changing curation tags', () => {
+test('catalog presentation consumes Variant keywords while curation comes from commerce overlay', () => {
   assert.match(presentation, /seoKeywordsPresent/);
   assert.match(presentation, /seoKeywords:/);
+  assert.match(presentation, /collectionTags: commerce\?\.collectionTags \|\| commerce\?\.tags \|\| \[\]/);
+  assert.match(presentation, /tags: commerce\?\.tags \|\| commerce\?\.collectionTags \|\| \[\]/);
+  assert.doesNotMatch(presentation, /variantTagsPresent/);
   assert.match(seo, /pattern\?\.seoKeywords/);
   assert.match(seo, /metaKeywords/);
   assert.match(seo, /seoKeywords\.join\(', '\)/);
