@@ -1,0 +1,37 @@
+name: pf-publication-inline-validation
+
+on:
+  push:
+    branches:
+      - feat/pf-publication-inline-approval-curation
+    paths:
+      - apps/samara-web/my-vite-react-app/src/components/AdminControlPanel.jsx
+      - apps/samara-web/my-vite-react-app/src/components/admin/PublicationModerationCuration.jsx
+      - apps/samara-web/my-vite-react-app/src/App.jsx
+      - services/api/src/routes/public_perfect_fit_admin.js
+      - services/api/test/perfect_fit_publication_moderation_controls.test.mjs
+      - .github/workflows/pf-publication-inline-validation.yml
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            apps/samara-web/my-vite-react-app/package-lock.json
+      - name: Install root workspace
+        run: npm ci --ignore-scripts
+      - name: Install Perfect Fit app
+        run: npm ci --ignore-scripts --prefix apps/samara-web/my-vite-react-app
+      - name: Run moderation regression test
+        run: node --test services/api/test/perfect_fit_publication_moderation_controls.test.mjs services/api/test/perfect_fit_admin_curation_ownership.test.mjs
+      - name: Build Perfect Fit
+        run: npm run build --prefix apps/samara-web/my-vite-react-app
