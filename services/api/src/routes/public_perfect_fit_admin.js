@@ -190,13 +190,37 @@ export default async function registerPublicPerfectFitAdminRoutes(app) {
       let searchSql = "";
       if (q) {
         params.push(`%${q}%`);
-        searchSql = `AND (lower(m.name) LIKE $3 OR lower(m.code) LIKE $3)`;
+        searchSql = `AND (
+          lower(m.name) LIKE $3
+          OR lower(m.code) LIKE $3
+          OR lower(COALESCE(pf.perfect_fit->>'variant_code', '')) LIKE $3
+          OR lower(COALESCE(pf.perfect_fit->>'style_code', '')) LIKE $3
+          OR lower(COALESCE(pf.perfect_fit->>'variant_id', '')) LIKE $3
+          OR lower(COALESCE(pf.perfect_fit->>'style_id', '')) LIKE $3
+        )`;
       }
 
       const result = await app.db.query(
         `
-        SELECT m.id, m.code, m.name, m.attrs, m.updated_at
+        SELECT m.id, m.code, m.name, m.attrs, m.updated_at, pf.perfect_fit
         FROM eip_core.material m
+        LEFT JOIN LATERAL (
+          SELECT ir.payload->'perfect_fit' AS perfect_fit
+          FROM eip_core.object_link ol
+          JOIN eip_core.info_record ir
+            ON ir.tenant_id = ol.tenant_id
+           AND ir.id = ol.dst_id
+           AND ir.record_type = 'PERFECT_FIT_PRODUCT_LINK'
+           AND ir.is_active = true
+          WHERE ol.tenant_id = m.tenant_id
+            AND ol.src_kind = 'material'
+            AND ol.src_id = m.id
+            AND ol.dst_kind = 'info_record'
+            AND ol.relation_type = 'PERFECT_FIT_PRODUCT'
+            AND ol.is_active = true
+          ORDER BY ol.updated_at DESC
+          LIMIT 1
+        ) pf ON true
         WHERE m.tenant_id = $1
           AND m.material_type = 'PRODUCT'
           AND COALESCE(m.attrs->'product_hierarchy'->>'level', '') = 'STYLE_VARIANT'
@@ -214,6 +238,14 @@ export default async function registerPublicPerfectFitAdminRoutes(app) {
           code: row.code,
           name: row.name,
           tags: Array.isArray(row.attrs?.taxonomy?.tags) ? row.attrs.taxonomy.tags : [],
+          perfect_fit: row.perfect_fit && typeof row.perfect_fit === 'object'
+            ? {
+                variant_id: row.perfect_fit.variant_id || null,
+                variant_code: row.perfect_fit.variant_code || null,
+                style_id: row.perfect_fit.style_id || null,
+                style_code: row.perfect_fit.style_code || null
+              }
+            : null,
           product_level: row.attrs?.product_hierarchy?.level || null,
           updated_at: row.updated_at
         })),

@@ -26,6 +26,7 @@ import {
 import PermissionsOverview from './subcomponents/PermissionsOverview';
 import PerfectFitLayoutController from './PerfectFitLayoutController';
 import PerfectFitCurationAdmin from './admin/PerfectFitCurationAdmin';
+import PublicationModerationCuration from './admin/PublicationModerationCuration';
 
 export default function AdminControlPanel({
   appLayout,
@@ -36,6 +37,7 @@ export default function AdminControlPanel({
   onTrackShipmentEnabledChange = () => {},
   publicationRequests = [],
   onOpenPublicationReview = () => {},
+  onApprovePublication = () => {},
   onMessagePublicationDesigner = () => {},
   surfaceVisibility = null,
   surfaceVisibilityRegistry = [],
@@ -1065,6 +1067,8 @@ export default function AdminControlPanel({
                           </div>
                         </div>
 
+                        <PublicationModerationCuration request={request} />
+
                         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-sand-150 bg-[#FAF8F5]/55 px-4 py-3">
                           <button
                             type="button"
@@ -1072,6 +1076,21 @@ export default function AdminControlPanel({
                             className="inline-flex items-center gap-1.5 rounded-lg border border-sand-250 bg-white px-3 py-2 text-[9px] font-bold text-bark-700 hover:border-clay-300 hover:text-clay-750"
                           >
                             <MessageCircle className="w-3.5 h-3.5" />{pfUiT("ui.components.admincontrolpanel.0c76b3fd14")}</button>
+
+                          {isPending && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const confirmed = window.confirm(
+                                  `Approve and publish \"${request.styleName || 'this product'}\" to customer-facing catalogue surfaces?`
+                                );
+                                if (confirmed) onApprovePublication(request);
+                              }}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-700 bg-emerald-700 px-4 py-2 text-[9px] font-bold text-white shadow-3xs hover:bg-emerald-800"
+                            >
+                              <Check className="w-3.5 h-3.5" /> Approve &amp; Publish
+                            </button>
+                          )}
 
                           <button
                             type="button"

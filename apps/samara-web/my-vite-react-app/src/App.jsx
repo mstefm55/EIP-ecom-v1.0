@@ -752,6 +752,7 @@ Workspace: (section) => (
       onTrackShipmentEnabledChange={setIsTrackShipmentEnabled}
       publicationRequests={publicationReviewRequests}
       onOpenPublicationReview={handleOpenPublicationReview}
+      onApprovePublication={handleModeratorApprove}
       onMessagePublicationDesigner={handleOpenModeratorMessage}
     />
   </motion.section>
