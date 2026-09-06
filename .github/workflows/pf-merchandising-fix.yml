@@ -23,6 +23,7 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
+          import re
 
           def replace_exact(path, old, new, count=1):
               p = Path(path)
@@ -59,47 +60,53 @@ jobs:
               "      onOpenPublicationReview={handleOpenPublicationReview}\n      onApprovePublication={handleModeratorApprove}\n      onMessagePublicationDesigner={handleOpenModeratorMessage}"
           )
 
-          admin = 'apps/samara-web/my-vite-react-app/src/components/AdminControlPanel.jsx'
-          replace_exact(
-              admin,
-              "  onOpenPublicationReview = () => {},\n  onMessagePublicationDesigner = () => {},",
-              "  onOpenPublicationReview = () => {},\n  onApprovePublication = () => {},\n  onMessagePublicationDesigner = () => {},"
+          admin_path = Path('apps/samara-web/my-vite-react-app/src/components/AdminControlPanel.jsx')
+          admin = admin_path.read_text(encoding='utf-8')
+          old_props = "  onOpenPublicationReview = () => {},\n  onMessagePublicationDesigner = () => {},"
+          if admin.count(old_props) != 1:
+              raise SystemExit('AdminControlPanel: publication callback props anchor changed')
+          admin = admin.replace(
+              old_props,
+              "  onOpenPublicationReview = () => {},\n  onApprovePublication = () => {},\n  onMessagePublicationDesigner = () => {},",
+              1
           )
-          replace_exact(
-              admin,
-              '''                          <button
-                            type="button"
-                            onClick={() => onOpenPublicationReview(request)}
-                            disabled={!request.pattern}
-                            className="inline-flex items-center gap-1.5 rounded-lg border border-bark-900 bg-bark-900 px-4 py-2 text-[9px] font-bold text-white shadow-3xs hover:bg-bark-950 disabled:cursor-not-allowed disabled:opacity-35"
-                          >
-                            <Eye className="w-3.5 h-3.5" />
-                            {isPending ? 'Open Customer Quick View' : 'View Customer Projection'}
-                          </button>''',
-              '''                          <div className="flex flex-wrap items-center gap-2">
-                            {isPending && (
-                              <button
-                                type="button"
-                                onClick={() => onApprovePublication(request)}
-                                disabled={!request.pattern}
-                                className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-700 bg-emerald-700 px-4 py-2 text-[9px] font-bold text-white shadow-3xs hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-35"
-                              >
-                                <Check className="w-3.5 h-3.5" />
-                                Approve &amp; Release
-                              </button>
-                            )}
 
-                            <button
-                              type="button"
-                              onClick={() => onOpenPublicationReview(request)}
-                              disabled={!request.pattern}
-                              className="inline-flex items-center gap-1.5 rounded-lg border border-bark-900 bg-bark-900 px-4 py-2 text-[9px] font-bold text-white shadow-3xs hover:bg-bark-950 disabled:cursor-not-allowed disabled:opacity-35"
-                            >
-                              <Eye className="w-3.5 h-3.5" />
-                              {isPending ? 'Open Customer Quick View' : 'View Customer Projection'}
-                            </button>
-                          </div>'''
+          quick_view_pattern = re.compile(
+              r'(?P<indent>\s*)<button\n'
+              r'(?P=indent)  type="button"\n'
+              r'(?P=indent)  onClick=\{\(\) => onOpenPublicationReview\(request\)\}\n'
+              r'(?P=indent)  disabled=\{!request\.pattern\}\n'
+              r'(?P=indent)  className="inline-flex items-center gap-1\.5 rounded-lg border border-bark-900 bg-bark-900 px-4 py-2 text-\[9px\] font-bold text-white shadow-3xs hover:bg-bark-950 disabled:cursor-not-allowed disabled:opacity-35"\n'
+              r'(?P=indent)>\n'
+              r'(?P=indent)  <Eye className="w-3\.5 h-3\.5" />\n'
+              r"(?P=indent)  \{isPending \? 'Open Customer Quick View' : 'View Customer Projection'\}\n"
+              r'(?P=indent)</button>'
           )
+
+          def add_release(match):
+              i = match.group('indent')
+              quick = match.group(0)
+              return (
+                  f'{i}<div className="flex flex-wrap items-center gap-2">\n'
+                  f'{i}  {{isPending && (\n'
+                  f'{i}    <button\n'
+                  f'{i}      type="button"\n'
+                  f'{i}      onClick={{() => onApprovePublication(request)}}\n'
+                  f'{i}      disabled={{!request.pattern}}\n'
+                  f'{i}      className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-700 bg-emerald-700 px-4 py-2 text-[9px] font-bold text-white shadow-3xs hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-35"\n'
+                  f'{i}    >\n'
+                  f'{i}      <Check className="w-3.5 h-3.5" />\n'
+                  f'{i}      Approve &amp; Release\n'
+                  f'{i}    </button>\n'
+                  f'{i}  )}}\n\n'
+                  f'{quick}\n'
+                  f'{i}</div>'
+              )
+
+          admin, replacements = quick_view_pattern.subn(add_release, admin, count=1)
+          if replacements != 1:
+              raise SystemExit(f'AdminControlPanel: expected one Quick View action, replaced {replacements}')
+          admin_path.write_text(admin, encoding='utf-8')
 
           Path('.github/workflows/pf-merchandising-fix.yml').unlink()
 
@@ -107,8 +114,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add apps/samara-web/my-vite-react-app/src/App.jsx \
-                  apps/samara-web/my-vite-react-app/src/components/AdminControlPanel.jsx \
-                  .github/workflows/pf-merchandising-fix.yml
+          git add -A
           git commit -m "Complete PF merchandising consumers and release action"
           git push origin HEAD:fix/pf-merchandising-consumers-publication-release
