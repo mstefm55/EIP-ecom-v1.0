@@ -93,6 +93,21 @@ test('PF admin curation route is member-session, PF_ADMIN and CSRF guarded', () 
   assert.match(preflight, /await registerPublicPerfectFitAdminRoutes\(app\)/);
 });
 
+test('PF admin curation lookup recognizes canonical PF variant identity as well as hierarchy metadata', () => {
+  assert.match(route, /IN \('STYLE_VARIANT', 'VARIANT'\)/);
+  assert.match(route, /pf\.perfect_fit->>'entity_level'/);
+  assert.match(route, /pf\.perfect_fit->>'variant_id'/);
+  assert.match(route, /pf\.perfect_fit->>'variant_code'/);
+});
+
+test('PF admin curation browser executes typed searches and does not hide API failures as empty results', () => {
+  assert.match(adminUi, /requestSequenceRef/);
+  assert.match(adminUi, /window\.setTimeout\(\(\) => \{\s*load\(query\)/);
+  assert.match(adminUi, /visibilitychange/);
+  assert.match(adminUi, /No Style Variant products found for/);
+  assert.match(adminUi, /Resolve the EIP query error shown above/);
+});
+
 test('PF admin browser uses the public gateway and DB-governed curation options', () => {
   assert.match(adapter, /listAdminCurationProducts/);
   assert.match(adapter, /saveAdminCuration/);
