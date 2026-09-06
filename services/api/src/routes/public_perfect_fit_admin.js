@@ -223,7 +223,11 @@ export default async function registerPublicPerfectFitAdminRoutes(app) {
         ) pf ON true
         WHERE m.tenant_id = $1
           AND m.material_type = 'PRODUCT'
-          AND COALESCE(m.attrs->'product_hierarchy'->>'level', '') = 'STYLE_VARIANT'
+          AND (
+            COALESCE(m.attrs->'product_hierarchy'->>'level', '') IN ('STYLE_VARIANT', 'VARIANT')
+            OR COALESCE(pf.perfect_fit->>'entity_level', '') IN ('STYLE_VARIANT', 'VARIANT')
+            OR COALESCE(pf.perfect_fit->>'variant_id', '') <> ''
+          )
           ${searchSql}
         ORDER BY lower(m.name), lower(m.code)
         LIMIT $2
@@ -243,10 +247,14 @@ export default async function registerPublicPerfectFitAdminRoutes(app) {
                 variant_id: row.perfect_fit.variant_id || null,
                 variant_code: row.perfect_fit.variant_code || null,
                 style_id: row.perfect_fit.style_id || null,
-                style_code: row.perfect_fit.style_code || null
+                style_code: row.perfect_fit.style_code || null,
+                entity_level: row.perfect_fit.entity_level || null
               }
             : null,
-          product_level: row.attrs?.product_hierarchy?.level || null,
+          product_level:
+            row.attrs?.product_hierarchy?.level ||
+            (row.perfect_fit?.variant_id ? 'STYLE_VARIANT' : row.perfect_fit?.entity_level) ||
+            null,
           updated_at: row.updated_at
         })),
         identity_id: session.identity_id,
