@@ -20,6 +20,7 @@ import {
 
 import {
   CATALOG_AUDIENCES,
+  getCatalogFilterIdsForPattern,
   getCategoriesForAudience,
   slugifyCatalogValue
 } from '../data/catalogTaxonomy';
@@ -90,9 +91,16 @@ export default function CatalogSidebarNavigator({
       const audience = slugifyCatalogValue(pattern.audience || 'women');
       const category = slugifyCatalogValue(pattern.mainCategory || pattern.category || 'dresses');
       const designer = pattern.designerBrand || 'Perfect Fit Bureau';
+      const categoryTokens = new Set([
+        category,
+        ...getCatalogFilterIdsForPattern(pattern)
+      ]);
 
       counts.audiences[audience] = (counts.audiences[audience] || 0) + 1;
-      counts.categories[category] = (counts.categories[category] || 0) + 1;
+      categoryTokens.forEach((token) => {
+        if (!token) return;
+        counts.categories[token] = (counts.categories[token] || 0) + 1;
+      });
       counts.designers[designer] = (counts.designers[designer] || 0) + 1;
     });
 
