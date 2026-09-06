@@ -238,7 +238,14 @@ export default async function registerPublicPerfectFitAdminRoutes(app) {
           code: row.code,
           name: row.name,
           tags: Array.isArray(row.attrs?.taxonomy?.tags) ? row.attrs.taxonomy.tags : [],
-          perfect_fit: row.perfect_fit && typeof row.perfect_fit === 'object' ? row.perfect_fit : null,
+          perfect_fit: row.perfect_fit && typeof row.perfect_fit === 'object'
+            ? {
+                variant_id: row.perfect_fit.variant_id || null,
+                variant_code: row.perfect_fit.variant_code || null,
+                style_id: row.perfect_fit.style_id || null,
+                style_code: row.perfect_fit.style_code || null
+              }
+            : null,
           product_level: row.attrs?.product_hierarchy?.level || null,
           updated_at: row.updated_at
         })),
