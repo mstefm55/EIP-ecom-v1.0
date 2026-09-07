@@ -146,7 +146,7 @@ BEGIN
       SET name = EXCLUDED.name,
           is_active = EXCLUDED.is_active,
           graph = EXCLUDED.graph,
-          attrs = COALESCE(eip_core.process_def.attrs, '{}'::jsonb) || EXCLUDED.attrs,
+          attrs = EXCLUDED.attrs,
           updated_at = now()
     RETURNING id INTO v_blog_def_id;
 
@@ -172,8 +172,7 @@ BEGIN
     UPDATE eip_core.process_binding pb
     SET is_active = true,
         priority = 50,
-        attrs = COALESCE(pb.attrs, '{}'::jsonb) ||
-          '{"source":"migration-0149","apply_on_create":true,"surface":"storefront-community"}'::jsonb,
+        attrs = '{"source":"migration-0149","apply_on_create":true,"surface":"storefront-community"}'::jsonb,
         updated_at = now()
     WHERE pb.tenant_id = v_tenant_id
       AND pb.service_object_type = 'blog_post'
