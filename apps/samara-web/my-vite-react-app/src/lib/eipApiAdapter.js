@@ -8,6 +8,7 @@ const connectionApiKey = String(env.VITE_EIP_API_KEY || '').trim();
 let memberCsrfToken = '';
 
 export const EIP_MEMBER_AUTH_CHANGED_EVENT = 'perfectfit:eip-member-auth-changed';
+export const EIP_COMMUNITY_POST_MARKER = 'pf-community-feedback';
 
 export const isEipApiConfigured = () => Boolean(configuredEndpoint && connectionApiKey);
 
@@ -204,13 +205,33 @@ export const eipApiAdapter = Object.freeze({
   })
 });
 
+const itemIsCommunityFeedback = (item = {}) =>
+  Array.isArray(item?.tags) && item.tags.includes(EIP_COMMUNITY_POST_MARKER);
+
 export const eipCommunityApi = Object.freeze({
-  listBlogPosts: ({ q = '', limit = 50, offset = 0 } = {}) => {
+  listBlogPosts: async ({
+    q = '',
+    limit = 50,
+    offset = 0,
+    includeCommunity = false,
+    communityOnly = false
+  } = {}) => {
     const params = new URLSearchParams();
     if (q) params.set('q', String(q));
     params.set('limit', String(Math.max(1, Math.min(100, Number(limit) || 50))));
     params.set('offset', String(Math.max(0, Number(offset) || 0)));
-    return request(`/blog/posts?${params.toString()}`);
+    const payload = await request(`/blog/posts?${params.toString()}`);
+    const items = Array.isArray(payload?.items) ? payload.items : [];
+    const filtered = communityOnly
+      ? items.filter(itemIsCommunityFeedback)
+      : includeCommunity
+        ? items
+        : items.filter((item) => !itemIsCommunityFeedback(item));
+    return {
+      ...payload,
+      items: filtered,
+      filtered_total: filtered.length
+    };
   },
   createBlogPost: (body = {}) => request('/blog/posts', {
     method: 'POST',
