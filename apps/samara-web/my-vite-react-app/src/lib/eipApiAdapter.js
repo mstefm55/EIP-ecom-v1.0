@@ -108,7 +108,13 @@ async function request(path, options = {}) {
   if (isWrite) {
     if (!isFormData) headers['Content-Type'] = 'application/json';
     if (options.memberCsrf !== false) {
-      if (!memberCsrfToken) await refreshMemberSession();
+      if (!memberCsrfToken) {
+        try {
+          await refreshMemberSession();
+        } catch (error) {
+          if (!options.optionalMemberCsrf) throw error;
+        }
+      }
       if (memberCsrfToken) headers['X-Member-Csrf'] = memberCsrfToken;
     }
     if (options.idempotent === true) {
@@ -202,6 +208,22 @@ export const eipApiAdapter = Object.freeze({
     method: 'PUT',
     body: { tags },
     idempotent: true
+  }),
+  listAdminCommunityPosts: ({ filter = 'all', q = '' } = {}) => {
+    const params = new URLSearchParams();
+    params.set('filter', String(filter || 'all'));
+    if (q) params.set('q', String(q));
+    return request(`/perfect-fit/admin/community/posts?${params.toString()}`);
+  },
+  moderateCommunityPost: (postId, body) => request(`/perfect-fit/admin/community/posts/${encodeURIComponent(postId)}`, {
+    method: 'PUT',
+    body,
+    idempotent: true
+  }),
+  deleteCommunityPostPermanently: (postId, body) => request(`/perfect-fit/admin/community/posts/${encodeURIComponent(postId)}`, {
+    method: 'DELETE',
+    body,
+    idempotent: true
   })
 });
 
@@ -246,6 +268,19 @@ export const eipCommunityApi = Object.freeze({
       idempotent: true
     });
   },
+  listCommunityPosts: ({ q = '', limit = 100 } = {}) => {
+    const params = new URLSearchParams();
+    if (q) params.set('q', String(q));
+    params.set('limit', String(Math.max(1, Math.min(100, Number(limit) || 100))));
+    return request(`/community/posts?${params.toString()}`);
+  },
+  createCommunityPost: (body = {}) => request('/community/posts', {
+    method: 'POST',
+    body,
+    idempotent: true,
+    optionalMemberCsrf: true
+  }),
+  listCommunityModerationNotices: () => request('/community/notices'),
   uploadBlogAsset: (file) => {
     if (!file) throw new Error('BLOG_IMAGE_REQUIRED');
     const formData = new FormData();
