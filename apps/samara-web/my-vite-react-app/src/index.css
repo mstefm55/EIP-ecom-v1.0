@@ -128,3 +128,11 @@
 .catalog-sidebar-scroll::-webkit-scrollbar-thumb:hover {
   background: #ba8068;
 }
+
+/* Purchase history must never invent a product photograph. These two URLs are
+   legacy MyOrders visual fallbacks; when no real product image exists the
+   neutral thumbnail container remains visible instead. */
+#my-orders-section img[src*="images.unsplash.com/photo-1515886657613-9f3515b0c78f"],
+#my-orders-section img[src*="images.unsplash.com/photo-1566207274740-0f8cf6b7d5a5"] {
+  display: none;
+}
