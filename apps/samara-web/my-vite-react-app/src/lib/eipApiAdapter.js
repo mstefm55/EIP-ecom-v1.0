@@ -96,13 +96,16 @@ async function request(path, options = {}) {
   }
   const method = String(options.method || 'GET').toUpperCase();
   const isWrite = method !== 'GET' && method !== 'HEAD';
+  const isFormData =
+    typeof FormData !== 'undefined' &&
+    options.body instanceof FormData;
   const headers = {
     Accept: 'application/json',
     'X-API-Key': connectionApiKey,
     ...(options.headers || {})
   };
   if (isWrite) {
-    headers['Content-Type'] = 'application/json';
+    if (!isFormData) headers['Content-Type'] = 'application/json';
     if (options.memberCsrf !== false) {
       if (!memberCsrfToken) await refreshMemberSession();
       if (memberCsrfToken) headers['X-Member-Csrf'] = memberCsrfToken;
@@ -115,7 +118,11 @@ async function request(path, options = {}) {
     method,
     credentials: 'include',
     headers,
-    body: options.body === undefined ? undefined : JSON.stringify(options.body)
+    body: options.body === undefined
+      ? undefined
+      : isFormData
+        ? options.body
+        : JSON.stringify(options.body)
   });
   if (response.status === 401) memberCsrfToken = '';
   return parseResponse(response);
@@ -195,4 +202,34 @@ export const eipApiAdapter = Object.freeze({
     body: { tags },
     idempotent: true
   })
+});
+
+export const eipCommunityApi = Object.freeze({
+  listBlogPosts: ({ q = '', limit = 50, offset = 0 } = {}) => {
+    const params = new URLSearchParams();
+    if (q) params.set('q', String(q));
+    params.set('limit', String(Math.max(1, Math.min(100, Number(limit) || 50))));
+    params.set('offset', String(Math.max(0, Number(offset) || 0)));
+    return request(`/blog/posts?${params.toString()}`);
+  },
+  createBlogPost: (body = {}) => request('/blog/posts', {
+    method: 'POST',
+    body
+  }),
+  deleteBlogPost: (postId) => {
+    const id = String(postId || '').trim();
+    if (!id) throw new Error('BLOG_POST_ID_REQUIRED');
+    return request(`/blog/posts/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    });
+  },
+  uploadBlogAsset: (file) => {
+    if (!file) throw new Error('BLOG_IMAGE_REQUIRED');
+    const formData = new FormData();
+    formData.append('file', file);
+    return request('/member/uploads', {
+      method: 'POST',
+      body: formData
+    });
+  }
 });
