@@ -427,10 +427,14 @@ export function buildWorkspaceProductPresentations(
         ...(commerce?.seo || {}),
         ...(presentation.seo || {})
       },
-      image: presentation.image || commerce?.image || '',
-      primaryImage: presentation.primaryImage || commerce?.image || '',
-      technicalSketchAsset: presentation.technicalSketchAsset || commerce?.technicalSketchAsset || null,
-      technicalSketchUrl: presentation.technicalSketchUrl || commerce?.technicalSketchUrl || '',
+      // Workspace Media is the sole visual authority for Workspace-owned products.
+      // Commerce overlays may provide price/availability metadata, but they must never
+      // manufacture customer-facing media for a variant that has no uploaded media.
+      image: presentation.image || '',
+      primaryImage: presentation.primaryImage || '',
+      technicalSketchAsset: presentation.technicalSketchAsset || null,
+      technicalSketchUrl: presentation.technicalSketchUrl || '',
+      mediaProvenance: presentation.primaryMediaAsset ? 'WORKSPACE_MEDIA' : 'NONE',
       presentationMediaItems: presentation.presentationMediaItems?.length
         ? presentation.presentationMediaItems
         : [],
