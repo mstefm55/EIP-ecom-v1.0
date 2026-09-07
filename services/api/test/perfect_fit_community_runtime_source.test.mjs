@@ -57,3 +57,19 @@ test('EIP member adapter exposes governed blog read/write/upload paths', () => {
   assert.match(adapter, /FormData/);
   assert.match(adapter, /X-Member-Csrf/);
 });
+
+test('Community write actions satisfy the public-commerce idempotency contract', () => {
+  assert.match(adapter, /headers\['X-Event-Id'\] = crypto\.randomUUID\(\)/);
+  assert.match(
+    adapter,
+    /createBlogPost:[\s\S]*?method: 'POST',[\s\S]*?idempotent: true/
+  );
+  assert.match(
+    adapter,
+    /deleteBlogPost:[\s\S]*?method: 'DELETE',[\s\S]*?idempotent: true/
+  );
+  assert.match(
+    adapter,
+    /uploadBlogAsset:[\s\S]*?request\('\/member\/uploads',[\s\S]*?idempotent: true/
+  );
+});
