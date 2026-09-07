@@ -369,6 +369,7 @@ export function buildWorkspaceProductPresentations(
           galleryMediaAssets: media.galleryAssets,
           customerVisibleMediaCount: media.visibleAssets.length,
           workspaceMediaSlots: media.slots,
+          mediaAuthority: 'WORKSPACE',
           image: media.primaryAsset?.url || '',
           primaryImage: media.primaryAsset?.url || '',
           presentationMediaItems: media.galleryAssets
@@ -427,10 +428,11 @@ export function buildWorkspaceProductPresentations(
         ...(commerce?.seo || {}),
         ...(presentation.seo || {})
       },
-      image: presentation.image || commerce?.image || '',
-      primaryImage: presentation.primaryImage || commerce?.image || '',
-      technicalSketchAsset: presentation.technicalSketchAsset || commerce?.technicalSketchAsset || null,
-      technicalSketchUrl: presentation.technicalSketchUrl || commerce?.technicalSketchUrl || '',
+      mediaAuthority: 'WORKSPACE',
+      image: presentation.image || '',
+      primaryImage: presentation.primaryImage || '',
+      technicalSketchAsset: presentation.technicalSketchAsset || null,
+      technicalSketchUrl: presentation.technicalSketchUrl || '',
       presentationMediaItems: presentation.presentationMediaItems?.length
         ? presentation.presentationMediaItems
         : [],
