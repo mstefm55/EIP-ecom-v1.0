@@ -123,10 +123,6 @@ function PatternCard({
             {pattern.name}
           </h4>
 
-          <p className="mt-2 text-xs font-medium tracking-wide text-sand-100/90">
-            Pattern No. {pattern.patternNo || pattern.number || pattern.id || '12'}
-          </p>
-
           <div className="mt-3 h-px w-7 bg-sand-100/80" />
 
           <p className="mt-3 font-mono text-sm font-bold text-sand-50 md:text-base">
