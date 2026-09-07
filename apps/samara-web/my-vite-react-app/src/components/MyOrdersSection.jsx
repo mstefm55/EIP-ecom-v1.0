@@ -368,10 +368,11 @@ export default function MyOrdersSection({
     }
   };
 
-  // Combine currentUser purchase history and guest orders
-  const orders = currentUser?.role === 'buyer'
+  // Purchases belong to the authenticated member identity, regardless of the member's UI role.
+  // Signed-out checkout continues to use the guest order collection.
+  const orders = currentUser
     ? (currentUser.purchaseHistory || [])
-    : (currentUser?.role === 'collaborator' ? [] : guestOrders);
+    : guestOrders;
 
   // Copy order ID helper
   const handleCopyId = (id) => {
@@ -793,6 +794,7 @@ export default function MyOrdersSection({
                         {/* Purchased Items Inside the Order */}
                         <div className="divide-y divide-sand-150/70 px-5">
                           {orderItems.map((item, index) => {
+                            const isPDF = String(item.format || '').toUpperCase().includes('PDF');
                             const isDownloading = downloadingItem === `${item.patternName}-${item.format}`;
 
                             return (
