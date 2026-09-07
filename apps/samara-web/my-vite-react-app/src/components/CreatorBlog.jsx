@@ -7,6 +7,7 @@ import {
   Image as ImageIcon,
   Loader2,
   MessageSquare,
+  Pencil,
   Plus,
   Search,
   Send,
@@ -17,11 +18,26 @@ import {
   Users,
   X
 } from 'lucide-react';
+import ImageAssetStudioModal from './ImageAssetStudioModal';
 import { useRuntimeState } from '../context/RuntimeDataContext';
 import { RUNTIME_DOMAINS } from '../lib/runtimeDomainContracts';
 import { translatePerfectFitText as pfUiT } from '../lib/i18n';
 import { eipCommunityApi, isEipApiConfigured } from '../lib/eipApiAdapter';
 import { UI_LAYERS } from '../lib/uiLayers';
+
+const COMMUNITY_IMAGE_STUDIO_PROFILES = Object.freeze([
+  {
+    id: 'community-post',
+    label: 'Community post',
+    description: 'Shared Atelier feed image.',
+    width: 1600,
+    height: 900,
+    fitMode: 'cover',
+    mimeType: 'image/jpeg',
+    quality: 92,
+    backgroundColor: '#f4f1eb'
+  }
+]);
 
 const normalizeText = (value) => String(value || '').trim();
 
@@ -88,6 +104,9 @@ export default function CreatorBlog() {
   const [newContent, setNewContent] = useState('');
   const [newTags, setNewTags] = useState('');
   const [newImageFile, setNewImageFile] = useState(null);
+  const [newImagePreviewUrl, setNewImagePreviewUrl] = useState('');
+  const [imageStudioOpen, setImageStudioOpen] = useState(false);
+  const [imageStudioSourceFile, setImageStudioSourceFile] = useState(null);
   const [formError, setFormError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [deletingPostId, setDeletingPostId] = useState('');
@@ -123,6 +142,16 @@ export default function CreatorBlog() {
   useEffect(() => {
     loadPosts();
   }, [loadPosts]);
+
+  useEffect(() => {
+    if (!newImageFile) {
+      setNewImagePreviewUrl('');
+      return undefined;
+    }
+    const previewUrl = URL.createObjectURL(newImageFile);
+    setNewImagePreviewUrl(previewUrl);
+    return () => URL.revokeObjectURL(previewUrl);
+  }, [newImageFile]);
 
   const filteredPosts = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -207,7 +236,15 @@ export default function CreatorBlog() {
     setNewContent('');
     setNewTags('');
     setNewImageFile(null);
+    setImageStudioOpen(false);
+    setImageStudioSourceFile(null);
     setFormError('');
+  };
+
+  const closeCreatePostModal = () => {
+    if (submitting) return;
+    resetPostForm();
+    setIsModalOpen(false);
   };
 
   const handleOpenCreatePost = () => {
@@ -217,6 +254,48 @@ export default function CreatorBlog() {
     }
     resetPostForm();
     setIsModalOpen(true);
+  };
+
+  const handleCommunityImageSelection = (event) => {
+    const file = event.target.files?.[0] || null;
+    event.target.value = '';
+    if (!file) return;
+    if (!String(file.type || '').toLowerCase().startsWith('image/')) {
+      setFormError('Choose a valid image file.');
+      return;
+    }
+    setFormError('');
+    setImageStudioSourceFile(file);
+    setImageStudioOpen(true);
+  };
+
+  const handleCommunityImageCancel = () => {
+    setImageStudioOpen(false);
+    setImageStudioSourceFile(null);
+  };
+
+  const handleCommunityImageApply = (result, error) => {
+    if (error) {
+      setFormError(error?.message || 'Unable to prepare this image.');
+      return;
+    }
+    if (!result?.file) return;
+    setNewImageFile(result.file);
+    setImageStudioOpen(false);
+    setImageStudioSourceFile(null);
+    setFormError('');
+  };
+
+  const handleEditCommunityImage = () => {
+    if (!newImageFile) return;
+    setImageStudioSourceFile(newImageFile);
+    setImageStudioOpen(true);
+  };
+
+  const handleRemoveCommunityImage = () => {
+    setNewImageFile(null);
+    setImageStudioSourceFile(null);
+    setImageStudioOpen(false);
   };
 
   const handleCreatePostSubmit = async (event) => {
@@ -534,7 +613,7 @@ export default function CreatorBlog() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              onClick={() => !submitting && setIsModalOpen(false)}
+              onClick={closeCreatePostModal}
               className="absolute inset-0 bg-bark-950/40 backdrop-blur-xs"
             />
 
@@ -554,7 +633,7 @@ export default function CreatorBlog() {
                 <button
                   type="button"
                   disabled={submitting}
-                  onClick={() => setIsModalOpen(false)}
+                  onClick={closeCreatePostModal}
                   className="p-1 text-bark-400 hover:text-bark-700 hover:bg-sand-100 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
                 >
                   <X className="w-5 h-5" />
@@ -604,19 +683,49 @@ export default function CreatorBlog() {
 
                 <div>
                   <label className="block text-[10px] font-bold text-bark-500 uppercase tracking-wider mb-1" htmlFor="input-community-image">Optional image</label>
-                  <label className="border border-dashed border-sand-300 rounded-[4px] p-4 flex items-center gap-3 cursor-pointer hover:bg-sand-50 transition-colors" htmlFor="input-community-image">
-                    <ImageIcon className="w-5 h-5 text-clay-600" />
-                    <div className="min-w-0">
-                      <div className="text-xs font-semibold text-bark-800 truncate">{newImageFile?.name || 'Choose an image from your device'}</div>
-                      <div className="text-[10px] text-bark-450">The file is uploaded through the authenticated EIP member route.</div>
+                  {newImagePreviewUrl ? (
+                    <div className="rounded-[4px] border border-sand-200 overflow-hidden bg-sand-50">
+                      <div className="aspect-[16/9] overflow-hidden bg-sand-100">
+                        <img src={newImagePreviewUrl} alt="Edited community post preview" className="w-full h-full object-cover" />
+                      </div>
+                      <div className="flex items-center justify-between gap-3 p-3">
+                        <div className="min-w-0">
+                          <div className="text-xs font-semibold text-bark-800 truncate">{newImageFile?.name}</div>
+                          <div className="text-[10px] text-bark-450">Prepared in Image Studio; this edited file is what EIP will receive.</div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={handleEditCommunityImage}
+                            className="inline-flex items-center gap-1.5 rounded border border-sand-250 bg-white px-2.5 py-1.5 text-[10px] font-semibold text-bark-700 hover:bg-sand-50"
+                          >
+                            <Pencil className="w-3 h-3" /> Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleRemoveCommunityImage}
+                            className="inline-flex items-center gap-1.5 rounded border border-sand-250 bg-white px-2.5 py-1.5 text-[10px] font-semibold text-bark-700 hover:text-red-700 hover:bg-red-50"
+                          >
+                            <Trash2 className="w-3 h-3" /> Remove
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                  </label>
+                  ) : (
+                    <label className="border border-dashed border-sand-300 rounded-[4px] p-4 flex items-center gap-3 cursor-pointer hover:bg-sand-50 transition-colors" htmlFor="input-community-image">
+                      <ImageIcon className="w-5 h-5 text-clay-600" />
+                      <div className="min-w-0">
+                        <div className="text-xs font-semibold text-bark-800 truncate">Choose an image from your device</div>
+                        <div className="text-[10px] text-bark-450">Your selection opens Image Studio before anything is uploaded to EIP.</div>
+                      </div>
+                    </label>
+                  )}
                   <input
                     id="input-community-image"
                     type="file"
                     accept="image/*"
                     className="sr-only"
-                    onChange={(event) => setNewImageFile(event.target.files?.[0] || null)}
+                    onChange={handleCommunityImageSelection}
                   />
                 </div>
 
@@ -624,14 +733,14 @@ export default function CreatorBlog() {
                   <button
                     type="button"
                     disabled={submitting}
-                    onClick={() => setIsModalOpen(false)}
+                    onClick={closeCreatePostModal}
                     className="px-4 py-2 bg-white border border-sand-250 text-bark-700 rounded-lg text-sm hover:bg-sand-50 cursor-pointer disabled:opacity-50"
                   >
                     {pfUiT('ui.components.creatorblog.df23e3a312')}
                   </button>
                   <button
                     type="submit"
-                    disabled={submitting}
+                    disabled={submitting || imageStudioOpen}
                     className="px-5 py-2 bg-bark-900 hover:bg-bark-800 text-sand-50 rounded-lg text-sm font-semibold cursor-pointer flex items-center gap-1.5 disabled:opacity-60"
                   >
                     {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
@@ -643,6 +752,17 @@ export default function CreatorBlog() {
           </div>
         )}
       </AnimatePresence>
+
+      <ImageAssetStudioModal
+        open={imageStudioOpen}
+        sourceFile={imageStudioSourceFile}
+        sourceUrl=""
+        title="Community post image"
+        presetProfiles={COMMUNITY_IMAGE_STUDIO_PROFILES}
+        defaultProfileId="community-post"
+        onCancel={handleCommunityImageCancel}
+        onApply={handleCommunityImageApply}
+      />
 
       <AnimatePresence>
         {toastMessage && (
