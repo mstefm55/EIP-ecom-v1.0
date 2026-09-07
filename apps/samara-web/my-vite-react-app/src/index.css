@@ -136,3 +136,13 @@
 #my-orders-section img[src*="images.unsplash.com/photo-1566207274740-0f8cf6b7d5a5"] {
   display: none;
 }
+
+/* Community Feedback is the canonical review/feed surface. A submitted creation
+   must render once in the normalized feed card, regardless of whether it was
+   created from the Community menu or the home-page "Share Your Masterpiece"
+   entry point. The large home-page testimonial carousel remains the dedicated
+   showcase surface; suppress the legacy automatic duplicate spotlight inside
+   the Community Feedback board. */
+#atelier-showroom-feedback-section #spotlight-carousel-container {
+  display: none;
+}
