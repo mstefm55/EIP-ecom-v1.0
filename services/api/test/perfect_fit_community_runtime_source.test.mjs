@@ -34,6 +34,22 @@ test('Perfect Fit community production UI is sourced from EIP, not mock profile 
   assert.doesNotMatch(creatorBlog, /contentEditable=\{true\}/);
 });
 
+test('Community image selection is edited before the authenticated EIP upload', () => {
+  assert.match(creatorBlog, /import ImageAssetStudioModal from '\.\/ImageAssetStudioModal'/);
+  assert.match(creatorBlog, /<ImageAssetStudioModal/);
+  assert.match(creatorBlog, /sourceFile=\{imageStudioSourceFile\}/);
+  assert.match(creatorBlog, /onApply=\{handleCommunityImageApply\}/);
+  assert.match(creatorBlog, /onChange=\{handleCommunityImageSelection\}/);
+  assert.match(creatorBlog, /setImageStudioOpen\(true\)/);
+  assert.match(creatorBlog, /setNewImageFile\(result\.file\)/);
+  assert.match(creatorBlog, /defaultProfileId="community-post"/);
+  assert.match(creatorBlog, /eipCommunityApi\.uploadBlogAsset\(newImageFile\)/);
+  assert.doesNotMatch(
+    creatorBlog,
+    /onChange=\{\(event\) => setNewImageFile\(event\.target\.files\?\.\[0\] \|\| null\)\}/
+  );
+});
+
 test('EIP member adapter exposes governed blog read/write/upload paths', () => {
   assert.match(adapter, /export const eipCommunityApi/);
   assert.match(adapter, /request\('\/blog\/posts'/);
