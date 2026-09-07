@@ -119,14 +119,6 @@ function PatternCardContent({
           {pattern.name}
         </h4>
 
-        <p
-          className={`mt-2 font-medium tracking-wide text-sand-100/90 ${
-            mobile ? 'text-sm' : 'text-xs'
-          }`}
-        >
-          Pattern No. {pattern.patternNo || pattern.number || pattern.id || '12'}
-        </p>
-
         <div className={`mt-4 h-px bg-sand-100/80 ${mobile ? 'w-10' : 'w-7'}`} />
 
         <p
