@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, Loader2, RefreshCw, ShieldCheck, Tag } from 'lucide-react';
+import { Ban, Check, Loader2, RefreshCw, ShieldCheck, Tag } from 'lucide-react';
 import { perfectFitMetadata } from '../../config/perfectFitMetadata';
 import { eipApiAdapter } from '../../lib/eipApiAdapter';
 
@@ -104,18 +104,18 @@ export default function PublicationModerationCuration({ request }) {
     setSavedMessage('');
   };
 
-  const save = async () => {
+  const persistTags = async (nextTags, successMessage) => {
     if (!product?.id) return;
     setSaving(true);
     setError('');
     setSavedMessage('');
 
     try {
-      const result = await eipApiAdapter.saveAdminCuration(product.id, draftTags);
-      const tags = Array.isArray(result?.tags) ? result.tags : draftTags;
+      const result = await eipApiAdapter.saveAdminCuration(product.id, nextTags);
+      const tags = Array.isArray(result?.tags) ? result.tags : nextTags;
       setDraftTags(tags);
       setProduct((current) => (current ? { ...current, tags } : current));
-      setSavedMessage('Website curation saved.');
+      setSavedMessage(successMessage);
     } catch (err) {
       setError(err?.message || 'Unable to save website curation.');
     } finally {
@@ -123,8 +123,38 @@ export default function PublicationModerationCuration({ request }) {
     }
   };
 
+  const save = async () => {
+    await persistTags(
+      draftTags,
+      'Curation amendments applied to the published enterprise product.'
+    );
+  };
+
+  const cancelCuration = async () => {
+    if (!product?.id) return;
+    const activeTags = Array.isArray(product?.tags) ? product.tags : [];
+    if (!activeTags.length && !draftTags.length) {
+      setSavedMessage('This product has no active website curation to cancel.');
+      return;
+    }
+    if (
+      typeof window !== 'undefined' &&
+      !window.confirm(
+        'Cancel all website curation for this product? This removes all governed placement tags but keeps the product published.'
+      )
+    ) {
+      return;
+    }
+    await persistTags(
+      [],
+      'Website curation cancelled. All governed placement tags were removed; publication remains active.'
+    );
+  };
+
   const originalTags = Array.isArray(product?.tags) ? product.tags : [];
   const dirty = JSON.stringify([...draftTags].sort()) !== JSON.stringify([...originalTags].sort());
+  const hasCuration = originalTags.length > 0 || draftTags.length > 0;
+  const isPublished = normalize(request?.status) === 'published';
 
   return (
     <div className="border-t border-sand-150 bg-white px-4 py-3">
@@ -136,6 +166,11 @@ export default function PublicationModerationCuration({ request }) {
           <p className="mt-1 max-w-xl text-[9px] leading-relaxed text-bark-450">
             PF Admin authority only. These tags update the enterprise product and do not open or modify the designer&apos;s private Workspace.
           </p>
+          {isPublished && (
+            <p className="mt-1 max-w-xl text-[9px] leading-relaxed text-bark-500">
+              Published products remain editable here: amend placement tags at any time, or cancel curation without unpublishing the product.
+            </p>
+          )}
         </div>
 
         <button
@@ -184,15 +219,26 @@ export default function PublicationModerationCuration({ request }) {
             <span className="font-mono text-[7.5px] uppercase tracking-wider text-bark-350">
               EIP product {product.code || product.id}
             </span>
-            <button
-              type="button"
-              onClick={save}
-              disabled={saving || !dirty}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-clay-750 px-3 py-1.5 text-[8.5px] font-bold text-white hover:bg-clay-850 disabled:cursor-not-allowed disabled:opacity-35"
-            >
-              {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <ShieldCheck className="h-3 w-3" />}
-              Save tags
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={cancelCuration}
+                disabled={saving || !hasCuration}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-[8.5px] font-bold text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-35"
+              >
+                <Ban className="h-3 w-3" />
+                Cancel curation
+              </button>
+              <button
+                type="button"
+                onClick={save}
+                disabled={saving || !dirty}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-clay-750 px-3 py-1.5 text-[8.5px] font-bold text-white hover:bg-clay-850 disabled:cursor-not-allowed disabled:opacity-35"
+              >
+                {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <ShieldCheck className="h-3 w-3" />}
+                Amend curation
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

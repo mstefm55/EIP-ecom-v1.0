@@ -29,6 +29,15 @@ test('publication queue embeds PF-admin curation controls', () => {
   assert.doesNotMatch(inlineCuration, /loadWorkspace|saveWorkspace|runtimeDataStorage|workspacePublicationReview/);
 });
 
+test('published products expose explicit curation amendment and cancellation without unpublishing', () => {
+  assert.match(inlineCuration, /Amend curation/);
+  assert.match(inlineCuration, /Cancel curation/);
+  assert.match(inlineCuration, /saveAdminCuration\(product\.id, nextTags\)/);
+  assert.match(inlineCuration, /persistTags\(\s*\[\]/);
+  assert.match(inlineCuration, /keeps the product published/i);
+  assert.match(inlineCuration, /publication remains active/i);
+});
+
 test('admin curation lookup exposes only linked product identity needed to resolve the submitted variant', () => {
   assert.match(route, /PERFECT_FIT_PRODUCT_LINK/);
   assert.match(route, /ir\.payload->'perfect_fit'/);
