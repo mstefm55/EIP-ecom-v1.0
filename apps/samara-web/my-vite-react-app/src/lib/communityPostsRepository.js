@@ -8,6 +8,7 @@ import { eipCommunityApi, isEipApiConfigured } from './eipApiAdapter';
 export const COMMUNITY_POST_MARKER = 'pf-community-feedback';
 const COMMUNITY_TAG_PREFIX = 'pfcf.';
 const MIGRATABLE_ID_PREFIX = 'community-post-';
+const MODERATION_NOTICE_SEEN_KEY = 'perfectfit_community_moderation_seen';
 
 const normalizeText = (value) => String(value || '').trim();
 const nowIso = () => new Date().toISOString();
@@ -136,6 +137,23 @@ async function ensureEipImageUrl(post = {}) {
   return normalizeText(upload?.asset?.url || upload?.asset?.raw_url);
 }
 
+function authorNameForPost(post = {}) {
+  return normalizeText(post.author).replace(/^@/, '').replace(/([a-z])([A-Z])/g, '$1 $2') || 'Community member';
+}
+
+function showModerationMessage(message, title = 'Community moderation') {
+  if (!message || typeof window === 'undefined') return;
+  if (typeof window.showToast === 'function') {
+    window.showToast(message, 'warning', title);
+    return;
+  }
+  try {
+    window.dispatchEvent(new CustomEvent('perfectfit:community-moderation-message', {
+      detail: { message, title }
+    }));
+  } catch {}
+}
+
 async function createPersistedPost(post = {}) {
   if (!isEipApiConfigured()) {
     throw new RuntimeRepositoryError('EIP community persistence is not configured.', {
@@ -147,9 +165,10 @@ async function createPersistedPost(post = {}) {
   const imageUrl = await ensureEipImageUrl(post);
   const title = normalizeText(post.title || post.caption) || 'Community post';
   const body = normalizeText(post.comment || post.tips) || title;
-  const response = await eipCommunityApi.createBlogPost({
+  const response = await eipCommunityApi.createCommunityPost({
     title,
     body,
+    author_name: authorNameForPost(post),
     image_url: imageUrl || undefined,
     image_urls: imageUrl ? [imageUrl] : [],
     tags: communityPostTags({ ...post, image: imageUrl || post.image })
@@ -160,7 +179,10 @@ async function createPersistedPost(post = {}) {
       operation: 'create'
     });
   }
-  return blogPostToCommunityPost(response.item);
+  return {
+    post: blogPostToCommunityPost(response.item),
+    moderation: response?.moderation || null
+  };
 }
 
 function parseStoredRecords(storage, storageKey) {
@@ -184,6 +206,21 @@ function rewriteStoredRecords(storage, storageKey, records) {
   storage.setItem(storageKey, JSON.stringify(records));
 }
 
+function loadSeenNoticeIds(storage) {
+  if (!storage) return new Set();
+  try {
+    const parsed = JSON.parse(storage.getItem(MODERATION_NOTICE_SEEN_KEY) || '[]');
+    return new Set(Array.isArray(parsed) ? parsed.map(String) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveSeenNoticeIds(storage, ids) {
+  if (!storage) return;
+  storage.setItem(MODERATION_NOTICE_SEEN_KEY, JSON.stringify([...ids].slice(-100)));
+}
+
 export function createCommunityPostsRepository({ storage = null, storageKey = '' } = {}) {
   const channel = createRepositoryChannel();
   let cache = [];
@@ -199,11 +236,31 @@ export function createCommunityPostsRepository({ storage = null, storageKey = ''
     });
   };
 
+  const surfaceModerationNotices = async () => {
+    try {
+      const response = await eipCommunityApi.listCommunityModerationNotices();
+      const notices = Array.isArray(response?.notices) ? response.notices : [];
+      if (!notices.length) return;
+      const seen = loadSeenNoticeIds(storage);
+      let changed = false;
+      for (const notice of [...notices].reverse()) {
+        const id = String(notice?.id || '');
+        if (!id || seen.has(id)) continue;
+        const message = normalizeText(notice?.payload?.message);
+        if (message) showModerationMessage(message, 'Your Community Feedback');
+        seen.add(id);
+        changed = true;
+      }
+      if (changed) saveSeenNoticeIds(storage, seen);
+    } catch (error) {
+      if (Number(error?.status) !== 401) {
+        console.warn('[PerfectFit community moderation notices]', error);
+      }
+    }
+  };
+
   const loadServerPosts = async () => {
-    const response = await eipCommunityApi.listBlogPosts({
-      limit: 100,
-      communityOnly: true
-    });
+    const response = await eipCommunityApi.listCommunityPosts({ limit: 100 });
     return (Array.isArray(response?.items) ? response.items : [])
       .filter(isCommunityBlogPost)
       .map(blogPostToCommunityPost)
@@ -230,10 +287,15 @@ export function createCommunityPostsRepository({ storage = null, storageKey = ''
         continue;
       }
       try {
-        const persisted = await createPersistedPost(localPost);
-        cache = [persisted, ...cache.filter((item) => String(item.id) !== String(persisted.id))];
-        serverIds.add(String(persisted.id));
-        if (persisted.clientId) serverClientIds.add(String(persisted.clientId));
+        const result = await createPersistedPost(localPost);
+        if (result.moderation?.held) {
+          showModerationMessage(result.moderation.message, 'Post held for review');
+        } else {
+          const persisted = result.post;
+          cache = [persisted, ...cache.filter((item) => String(item.id) !== String(persisted.id))];
+          serverIds.add(String(persisted.id));
+          if (persisted.clientId) serverClientIds.add(String(persisted.clientId));
+        }
         migratedIds.add(localId);
       } catch {
         // Keep failed local records available for a later recovery attempt.
@@ -257,13 +319,21 @@ export function createCommunityPostsRepository({ storage = null, storageKey = ''
     }
     cache = await loadServerPosts();
     await migrateBrowserOnlyPosts();
+    await surfaceModerationNotices();
     loaded = true;
     emit('load');
     return cache.map((item) => ({ ...item }));
   };
 
   const create = async (input = {}) => {
-    const persisted = await createPersistedPost(input);
+    const result = await createPersistedPost(input);
+    if (result.moderation?.held) {
+      showModerationMessage(result.moderation.message, 'Post held for review');
+      cache = cache.filter((item) => String(item.id) !== String(input.id || ''));
+      emit('moderation-hold');
+      return { ...result.post, _moderationHeld: true };
+    }
+    const persisted = result.post;
     cache = [persisted, ...cache.filter((item) => String(item.id) !== String(persisted.id))];
     loaded = true;
     emit('create');
@@ -312,7 +382,13 @@ export function createCommunityPostsRepository({ storage = null, storageKey = ''
     writeQueue = writeQueue.catch(() => {}).then(async () => {
       for (const localPost of newRecords) {
         const localId = String(localPost.id || '');
-        const persisted = await createPersistedPost(localPost);
+        const result = await createPersistedPost(localPost);
+        if (result.moderation?.held) {
+          cache = cache.filter((item) => String(item?.id || '') !== localId);
+          showModerationMessage(result.moderation.message, 'Post held for review');
+          continue;
+        }
+        const persisted = result.post;
         cache = cache.map((item) =>
           String(item?.id || '') === localId ? persisted : item
         );
