@@ -67,6 +67,7 @@ export function blogPostToCommunityPost(item = {}) {
   return {
     id: item.id || item.code,
     code: item.code || '',
+    clientId: tagValue(tags, 'clientId') || undefined,
     type,
     source: tagValue(tags, 'source') || 'eip-community',
     targetId: tagValue(tags, 'target') || 'atelier',
@@ -99,6 +100,7 @@ export function blogPostToCommunityPost(item = {}) {
 export function communityPostTags(post = {}) {
   return [
     COMMUNITY_POST_MARKER,
+    makeMetaTag('clientId', post.clientId || post.id, 120),
     makeMetaTag('type', post.type || (post.image ? 'creation' : 'feedback'), 32),
     makeMetaTag('source', post.source || 'community-feedback', 48),
     makeMetaTag('target', post.targetId || 'atelier', 120),
@@ -213,6 +215,7 @@ export function createCommunityPostsRepository({ storage = null, storageKey = ''
     if (!stored.length) return;
 
     const serverIds = new Set(cache.map((item) => String(item.id)));
+    const serverClientIds = new Set(cache.map((item) => String(item.clientId || '')).filter(Boolean));
     const migratable = stored.filter((item) => {
       const id = normalizeText(item?.id);
       return id.startsWith(MIGRATABLE_ID_PREFIX) && item?.source !== 'legacy-testimonial';
@@ -221,15 +224,17 @@ export function createCommunityPostsRepository({ storage = null, storageKey = ''
 
     const migratedIds = new Set();
     for (const localPost of migratable) {
-      if (serverIds.has(String(localPost.id))) {
-        migratedIds.add(String(localPost.id));
+      const localId = String(localPost.id || '');
+      if (serverIds.has(localId) || serverClientIds.has(localId)) {
+        migratedIds.add(localId);
         continue;
       }
       try {
         const persisted = await createPersistedPost(localPost);
         cache = [persisted, ...cache.filter((item) => String(item.id) !== String(persisted.id))];
         serverIds.add(String(persisted.id));
-        migratedIds.add(String(localPost.id));
+        if (persisted.clientId) serverClientIds.add(String(persisted.clientId));
+        migratedIds.add(localId);
       } catch {
         // Keep failed local records available for a later recovery attempt.
       }
@@ -304,7 +309,7 @@ export function createCommunityPostsRepository({ storage = null, storageKey = ''
 
     if (!newRecords.length) return cache.map((item) => ({ ...item }));
 
-    writeQueue = writeQueue.then(async () => {
+    writeQueue = writeQueue.catch(() => {}).then(async () => {
       for (const localPost of newRecords) {
         const localId = String(localPost.id || '');
         const persisted = await createPersistedPost(localPost);
