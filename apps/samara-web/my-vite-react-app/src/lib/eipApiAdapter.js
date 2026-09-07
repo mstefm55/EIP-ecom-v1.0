@@ -214,13 +214,15 @@ export const eipCommunityApi = Object.freeze({
   },
   createBlogPost: (body = {}) => request('/blog/posts', {
     method: 'POST',
-    body
+    body,
+    idempotent: true
   }),
   deleteBlogPost: (postId) => {
     const id = String(postId || '').trim();
     if (!id) throw new Error('BLOG_POST_ID_REQUIRED');
     return request(`/blog/posts/${encodeURIComponent(id)}`, {
-      method: 'DELETE'
+      method: 'DELETE',
+      idempotent: true
     });
   },
   uploadBlogAsset: (file) => {
@@ -229,7 +231,8 @@ export const eipCommunityApi = Object.freeze({
     formData.append('file', file);
     return request('/member/uploads', {
       method: 'POST',
-      body: formData
+      body: formData,
+      idempotent: true
     });
   }
 });
