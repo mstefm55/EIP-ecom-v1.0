@@ -87,6 +87,16 @@ const LEGACY_IMPORTED_PATTERN_DEMO_SIGNATURES = new Map([
   ['IMP-003', 'Etsy Modern Linen Boxy Tee']
 ]);
 
+const WORKSPACE_CART_IMAGE_FIELDS = [
+  'image',
+  'primaryImage',
+  'coverImage',
+  'thumbnail',
+  'thumbnailUrl',
+  'mainImage',
+  'imageUrl'
+];
+
 const browserStorage = () => (typeof window !== 'undefined' ? window.localStorage : null);
 
 export function isDemoRuntimeDataEnabled(env = import.meta.env) {
@@ -129,6 +139,51 @@ export function removeLegacyImportedPatternDemoRecords(records = []) {
   );
 }
 
+const isWorkspacePattern = (pattern = {}) =>
+  pattern?.workspaceOwned === true || pattern?.presentationSource === 'workspace';
+
+const hasWorkspaceCustomerMedia = (pattern = {}) => {
+  if (!isWorkspacePattern(pattern)) return true;
+  if (Number(pattern.customerVisibleMediaCount || 0) > 0) return true;
+  if (pattern.primaryMediaAsset?.id || pattern.primaryMediaAsset?.url) return true;
+  if (Array.isArray(pattern.presentationMediaItems) && pattern.presentationMediaItems.length > 0) return true;
+  if (Array.isArray(pattern.galleryMediaAssets) && pattern.galleryMediaAssets.length > 0) return true;
+  return false;
+};
+
+/**
+ * A Workspace product owns its customer media. Commerce overlays may contribute
+ * price/rating/availability, but an old cart snapshot must never supply a photo
+ * when the Workspace variant has no customer-visible media of its own.
+ */
+export function sanitizeWorkspaceCartMedia(records = []) {
+  let changed = false;
+  const sanitized = (Array.isArray(records) ? records : []).map((item) => {
+    const pattern = item?.pattern;
+    if (!isWorkspacePattern(pattern) || hasWorkspaceCustomerMedia(pattern)) return item;
+
+    const nextPattern = { ...pattern };
+    WORKSPACE_CART_IMAGE_FIELDS.forEach((field) => {
+      if (Object.prototype.hasOwnProperty.call(nextPattern, field) && nextPattern[field]) {
+        changed = true;
+      }
+      delete nextPattern[field];
+    });
+
+    if (nextPattern.mediaProvenance !== 'WORKSPACE_NONE') {
+      nextPattern.mediaProvenance = 'WORKSPACE_NONE';
+      changed = true;
+    }
+
+    return {
+      ...item,
+      pattern: nextPattern
+    };
+  });
+
+  return { records: sanitized, changed };
+}
+
 /**
  * Production repair for the old Atelier-library fallback.
  *
@@ -144,6 +199,7 @@ export function sanitizeProductionPatternStorage(metadata = perfectFitMetadata, 
   const contracts = metadata.runtimeData?.domains || {};
   const importedKey = contracts.importedPatterns?.storageKey;
   const catalogKey = contracts.catalogProducts?.storageKey;
+  const cartKey = contracts.cart?.storageKey;
   const changes = [];
 
   if (importedKey) {
@@ -169,6 +225,18 @@ export function sanitizeProductionPatternStorage(metadata = perfectFitMetadata, 
       if (sanitized.length !== catalogRecords.length) {
         storage.setItem(catalogKey, JSON.stringify(sanitized));
         changes.push({ domain: 'catalogProducts', action: 'remove_legacy_demo_records', key: catalogKey });
+      }
+    }
+  }
+
+  if (cartKey) {
+    const cartRaw = storage.getItem(cartKey);
+    const cartRecords = parseStoredCollection(cartRaw);
+    if (cartRecords) {
+      const { records, changed } = sanitizeWorkspaceCartMedia(cartRecords);
+      if (changed) {
+        storage.setItem(cartKey, JSON.stringify(records));
+        changes.push({ domain: 'cart', action: 'remove_non_workspace_media_fallback', key: cartKey });
       }
     }
   }
