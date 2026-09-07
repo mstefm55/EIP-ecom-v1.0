@@ -26,6 +26,8 @@ import {
   createLocalValueRepository,
   createRepositoryRegistry
 } from './runtimeDataGateway';
+import { createCommunityPostsRepository } from './communityPostsRepository';
+import { isEipApiConfigured } from './eipApiAdapter';
 
 const demoSeeds = {
   catalogProducts: CATALOG_PRODUCT_SEED,
@@ -225,6 +227,14 @@ export function createDefaultRuntimeRepositoryRegistry(
         ? (demoSeeds[domain] ?? emptyValueFor(contract))
         : emptyValueFor(contract)
     };
+
+    if (domain === 'communityPosts' && !enableDemoData && isEipApiConfigured()) {
+      repositories[domain] = createCommunityPostsRepository({
+        storage,
+        storageKey: contract.storageKey
+      });
+      return;
+    }
 
     repositories[domain] =
       contract.shape === 'collection'
