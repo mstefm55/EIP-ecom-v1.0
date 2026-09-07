@@ -7,6 +7,7 @@ export const USERNAME_REGISTRY_STORAGE_KEY = usernamePolicy.storageKey;
 export const USER_PROFILE_STORAGE_KEY = perfectFitMetadata.app.storage.userProfile;
 export const RESERVED_USERNAMES = new Set(usernamePolicy.reservedUsernames || []);
 const USERNAME_PATTERN = new RegExp(usernamePolicy.pattern);
+const GUEST_ORDER_STORAGE_KEY = 'perfectfit_bureau_guest_orders';
 
 const nowIso = () => new Date().toISOString();
 
@@ -27,6 +28,33 @@ const writeJson = (key, value) => {
   try {
     runtimeDataStorage.setItem(key, JSON.stringify(value));
   } catch {}
+};
+
+const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
+
+const orderOwnerEmail = (order = {}) =>
+  normalizeEmail(
+    order?.receipt?.customerDetails?.email ||
+      order?.customerDetails?.email ||
+      order?.buyer?.email ||
+      order?.email ||
+      ''
+  );
+
+const purchaseOrderKey = (order = {}, index = 0) =>
+  String(order?.id || order?.orderId || order?.code || `purchase-${index}`);
+
+const dedupePurchaseHistory = (orders = []) => {
+  const seen = new Set();
+  const merged = [];
+  (Array.isArray(orders) ? orders : []).forEach((order, index) => {
+    if (!order || typeof order !== 'object') return;
+    const key = purchaseOrderKey(order, index);
+    if (seen.has(key)) return;
+    seen.add(key);
+    merged.push(order);
+  });
+  return merged;
 };
 
 export const normalizeUsername = (value) =>
@@ -234,6 +262,35 @@ function resolvePerfectFitRole(user = {}) {
   return user.role || '';
 }
 
+function resolvePurchaseHistory(user = {}, id = '') {
+  const directHistory = Array.isArray(user.purchaseHistory) ? user.purchaseHistory : [];
+  const storedUser = readJson(USER_PROFILE_STORAGE_KEY, null);
+  const storedId = storedUser ? getStableUserId(storedUser) : '';
+  const userEmail = normalizeEmail(user.email || user.login);
+  const storedEmail = normalizeEmail(storedUser?.email || storedUser?.login);
+  const isSameStoredIdentity = Boolean(
+    storedUser &&
+      ((id && storedId && id === storedId) || (userEmail && storedEmail && userEmail === storedEmail))
+  );
+  const storedHistory = isSameStoredIdentity && Array.isArray(storedUser?.purchaseHistory)
+    ? storedUser.purchaseHistory
+    : [];
+
+  // A checkout may finish just before the EIP member session hydrates. In that race the order
+  // is written to the same-browser guest order document. An authenticated member may claim only
+  // guest orders whose checkout email matches the authenticated member email.
+  const guestOrders = readJson(GUEST_ORDER_STORAGE_KEY, []);
+  const claimableGuestOrders = userEmail && Array.isArray(guestOrders)
+    ? guestOrders.filter((order) => orderOwnerEmail(order) === userEmail)
+    : [];
+
+  return dedupePurchaseHistory([
+    ...directHistory,
+    ...storedHistory,
+    ...claimableGuestOrders
+  ]);
+}
+
 export function ensureUserPublicIdentity(user, options = {}) {
   if (!user) return null;
 
@@ -244,7 +301,8 @@ export function ensureUserPublicIdentity(user, options = {}) {
     id,
     username,
     role: resolvePerfectFitRole(user),
-    brandName: user.brandName || user.designerBrand || user.studioName || ''
+    brandName: user.brandName || user.designerBrand || user.studioName || '',
+    purchaseHistory: resolvePurchaseHistory(user, id)
   };
 
   if (options.persist) {
