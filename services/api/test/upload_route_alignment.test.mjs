@@ -126,14 +126,18 @@ test("reusable auth-system upload snapshots carry the same hardened boundary", (
   }
 });
 
-test("API container initializes Railway volume ownership before dropping privileges", () => {
+test("API container initializes persistent Railway volume ownership before dropping privileges", () => {
   const dockerfile = read("services/api/Dockerfile");
   const entrypoint = read("services/api/docker-entrypoint.sh");
+  const resolver = read("services/api/scripts/resolve_asset_storage.mjs");
 
   assert.match(dockerfile, /gosu/);
   assert.match(dockerfile, /ENTRYPOINT \["dumb-init", "--", "\/app\/docker-entrypoint\.sh"\]/);
-  assert.match(entrypoint, /upload_root="\/data\/eip-assets"/);
+  assert.match(entrypoint, /resolve_asset_storage\.mjs/);
   assert.match(entrypoint, /chown -R node:node/);
   assert.match(entrypoint, /exec gosu node "\$@"/);
-  assert.match(entrypoint, /"\/"\|"\/app"\|"\/data"/);
+  assert.match(resolver, /\/data\/eip-assets/);
+  assert.match(resolver, /nodeEnv.*production/s);
+  assert.match(resolver, /mounted persistent volume/);
+  assert.match(resolver, /\/proc\/self\/mountinfo/);
 });
