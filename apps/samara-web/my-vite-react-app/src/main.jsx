@@ -7,7 +7,7 @@ import { LanguageProvider } from './context/LanguageContext.jsx';
 import { RuntimeDataProvider } from './context/RuntimeDataContext.jsx';
 import { initializePerfectFitRuntimeMetadata } from './lib/perfectFitRuntimeMetadata.js';
 import { initializePerfectFitWorkspacePersistence } from './lib/workspacePersistenceBridge.js';
-import './App.css';
+import './index.css';
 
 // Class-based React ErrorBoundary to catch and diagnose runtime crashes safely
 class ErrorBoundary extends Component {
