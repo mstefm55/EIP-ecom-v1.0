@@ -71,14 +71,16 @@ test("outbound timeout remains active while a successful response body is still 
   const server = http.createServer((_req, res) => {
     res.writeHead(200, { "content-type": "text/plain" });
     res.write("partial");
-    setTimeout(() => res.end("-late"), 250);
+    setTimeout(() => res.end("-late"), 1500);
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise((resolve) => server.close(resolve)));
   const address = server.address();
 
+  // Allow enough headroom for shared CI runners to receive response headers;
+  // the timeout still expires well before the body is completed.
   const response = await fetchWithTimeout(`http://127.0.0.1:${address.port}/slow-body`, {
-    timeout_ms: 40
+    timeout_ms: 500
   });
   assert.equal(response.status, 200);
   await assert.rejects(response.text(), (error) => error?.name === "AbortError");
