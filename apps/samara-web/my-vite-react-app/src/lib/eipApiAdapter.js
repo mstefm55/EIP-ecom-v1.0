@@ -135,6 +135,17 @@ async function request(path, options = {}) {
   return parseResponse(response);
 }
 
+function uploadMemberAsset(file) {
+  if (!file) throw new Error('MEMBER_ASSET_REQUIRED');
+  const formData = new FormData();
+  formData.append('file', file);
+  return request('/member/uploads', {
+    method: 'POST',
+    body: formData,
+    idempotent: true
+  });
+}
+
 export const eipMemberAuth = Object.freeze({
   start: async ({ credential, password, mode = 'signin', email, name, username, role } = {}) => {
     const payload = await request('/member/auth/start', {
@@ -191,6 +202,7 @@ export const eipApiAdapter = Object.freeze({
   getCapability: () => request('/perfect-fit/capability'),
   loadMetadata: () => request('/perfect-fit/metadata'),
   listProducts: (query = '') => request(`/perfect-fit/products?limit=100&q=${encodeURIComponent(query)}`),
+  listPublicCatalog: ({ limit = 100 } = {}) => request(`/perfect-fit/catalog?limit=${encodeURIComponent(String(limit))}`),
   getProduct: (productId) => request(`/perfect-fit/products/${encodeURIComponent(productId)}`),
   getIntegration: (productId) => request(`/perfect-fit/products/${encodeURIComponent(productId)}/link`),
   registerProduct: (body) => request('/perfect-fit/products/register', { method: 'POST', body, idempotent: true }),
@@ -201,6 +213,19 @@ export const eipApiAdapter = Object.freeze({
   saveWorkspace: (workspace) => request('/perfect-fit/workspace', {
     method: 'PUT',
     body: { workspace },
+    idempotent: true
+  }),
+  uploadMemberAsset,
+  submitPublicationRequest: (body = {}) => request('/perfect-fit/publication-requests', {
+    method: 'POST',
+    body,
+    idempotent: true
+  }),
+  listMyPublicationRequests: () => request('/perfect-fit/publication-requests/mine'),
+  listAdminPublicationRequests: () => request('/perfect-fit/admin/publication-requests'),
+  moderatePublicationRequest: (requestId, body = {}) => request(`/perfect-fit/admin/publication-requests/${encodeURIComponent(requestId)}/actions`, {
+    method: 'POST',
+    body,
     idempotent: true
   }),
   listAdminCurationProducts: (query = '') => request(`/perfect-fit/admin/curation/products?limit=100&q=${encodeURIComponent(query)}`),
@@ -281,14 +306,5 @@ export const eipCommunityApi = Object.freeze({
     optionalMemberCsrf: true
   }),
   listCommunityModerationNotices: () => request('/community/notices'),
-  uploadBlogAsset: (file) => {
-    if (!file) throw new Error('BLOG_IMAGE_REQUIRED');
-    const formData = new FormData();
-    formData.append('file', file);
-    return request('/member/uploads', {
-      method: 'POST',
-      body: formData,
-      idempotent: true
-    });
-  }
+  uploadBlogAsset: uploadMemberAsset
 });
