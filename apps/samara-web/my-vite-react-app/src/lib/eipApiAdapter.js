@@ -1,3 +1,5 @@
+import { resolveEipAssetReferences } from './eipAssetUrl.js';
+
 const env = import.meta.env || {};
 const canonicalEndpoint = String(env.VITE_EIP_ENDPOINT || '').trim().replace(/\/+$/, '');
 const legacyDevelopmentEndpoint = env.DEV && env.VITE_EIP_API_BASE_URL && env.VITE_EIP_SUFFIX
@@ -40,7 +42,7 @@ async function parseResponse(response) {
     error.payload = payload;
     throw error;
   }
-  return rememberMemberCsrf(payload);
+  return rememberMemberCsrf(resolveEipAssetReferences(payload, configuredEndpoint));
 }
 
 async function loadPerfectFitContext() {
