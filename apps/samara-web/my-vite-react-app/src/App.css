@@ -1,0 +1,8 @@
+/*
+ * Perfect Fit application stylesheet entrypoint.
+ *
+ * Keep the established Tailwind theme/base rules in index.css while exposing
+ * an App-level stylesheet contract for tooling and integration tests. Runtime
+ * styling has a single source: this file only delegates to index.css.
+ */
+@import './index.css';
