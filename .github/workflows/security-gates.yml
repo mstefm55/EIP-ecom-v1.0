@@ -83,3 +83,24 @@ jobs:
 
       - name: Build dashboard
         run: npm --workspace dashboard run build
+
+  perfect-fit-build:
+    name: Perfect Fit build and EIP asset regression
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: apps/samara-web/my-vite-react-app/package-lock.json
+
+      - name: Install Perfect Fit
+        run: npm ci --ignore-scripts --prefix apps/samara-web/my-vite-react-app
+
+      - name: Build Perfect Fit
+        run: npm run build --prefix apps/samara-web/my-vite-react-app
+
+      - name: Verify EIP asset URL boundary
+        run: npm run test:eip-assets --prefix apps/samara-web/my-vite-react-app
