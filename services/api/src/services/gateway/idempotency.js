@@ -10,7 +10,7 @@ function buildRequestHash(rawBody) {
 
 async function ensureIdempotency(client, opts) {
   const { tenantId, scope, key, requestHash } = opts;
-  if (!key) return { ok: true, skip: true };
+  if (!key) return { ok: true, skip: true, scope, key };
 
   try {
     await client.query(
@@ -22,7 +22,7 @@ async function ensureIdempotency(client, opts) {
       `,
       [tenantId, scope, key, requestHash]
     );
-    return { ok: true, created: true };
+    return { ok: true, created: true, scope, key };
   } catch (err) {
     const r = await client.query(
       `
@@ -33,17 +33,21 @@ async function ensureIdempotency(client, opts) {
       `,
       [tenantId, scope, key]
     );
-    if (r.rowCount === 0) return { ok: false, error: "IDEMPOTENCY_LOOKUP_FAILED" };
+    if (r.rowCount === 0) {
+      return { ok: false, error: "IDEMPOTENCY_LOOKUP_FAILED", scope, key };
+    }
 
     const row = r.rows[0];
     if (row.request_hash !== requestHash) {
-      return { ok: false, error: "IDEMPOTENCY_CONFLICT" };
+      return { ok: false, error: "IDEMPOTENCY_CONFLICT", scope, key };
     }
     return {
       ok: true,
       replay: true,
       response: row.response || null,
-      status: row.status || null
+      status: row.status || null,
+      scope,
+      key
     };
   }
 }
