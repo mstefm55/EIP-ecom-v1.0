@@ -5,6 +5,13 @@ import {
 } from "../services/gateway/connectionProfile.js";
 import { hydrateConnectionProfileSecrets } from "../services/gateway/secretStore.js";
 import { connectionAllowsOrigin, verifyConnectionRequest } from "../services/gateway/verification.js";
+import {
+  beginPerfectFitWriteIdempotency,
+  finalizePerfectFitWriteIdempotency,
+  idempotencyErrorHttpStatus,
+  requireSessionBoundMemberCsrf,
+  sendPerfectFitIdempotencyReplay
+} from "../services/perfectFit/writeSecurity.js";
 
 const RATE_LIMIT = { max: 60, timeWindow: "1 minute" };
 const PUBLICATION_RECORD_TYPE = "PERFECT_FIT_PUBLICATION_REQUEST";
@@ -120,7 +127,7 @@ async function loadMemberSession(app, req, tenantId, suffix) {
 
   const result = await app.db.query(
     `
-    SELECT id, tenant_id, identity_id, expires_at, is_revoked, attrs
+    SELECT id, tenant_id, identity_id, expires_at, is_revoked, attrs, csrf_secret_hash
     FROM eip_auth.auth_session
     WHERE id = $1::uuid
     LIMIT 1
@@ -135,16 +142,6 @@ async function loadMemberSession(app, req, tenantId, suffix) {
   if (normalizeUpper(attrs.realm) !== "MEMBER") return null;
   if (normalizeText(attrs.connection_suffix) !== normalizeText(suffix)) return null;
   return session;
-}
-
-function requireMemberCsrf(req, reply) {
-  const csrfCookie = normalizeText(req.cookies?.member_csrf);
-  const csrfHeader = normalizeText(req.headers["x-member-csrf"]);
-  if (!csrfCookie || !csrfHeader || csrfCookie !== csrfHeader) {
-    reply.code(403).send({ ok: false, error: "MEMBER_CSRF_REQUIRED" });
-    return false;
-  }
-  return true;
 }
 
 async function requireMemberSession(app, req, reply, access) {
@@ -707,7 +704,7 @@ export default async function registerPublicPerfectFitPublicationRoutes(app) {
       if (!requirePerfectFitScope(access, reply, "perfect_fit.products.write")) return;
       const session = await requireMemberSession(app, req, reply, access);
       if (!session) return;
-      if (!requireMemberCsrf(req, reply)) return;
+      if (!requireSessionBoundMemberCsrf(app, session, req, reply)) return;
 
       const requestId = normalizeText(req.body?.request_id || req.body?.requestId).slice(0, 160);
       const variantId = normalizeText(req.body?.variant_id || req.body?.variantId).slice(0, 240);
@@ -723,6 +720,7 @@ export default async function registerPublicPerfectFitPublicationRoutes(app) {
       }
 
       const client = await app.db.connect();
+      let idem = null;
       try {
         await client.query("BEGIN");
         const workspace = await loadPrivateOwnerWorkspace(client, access.tenant.id, session.identity_id);
@@ -743,6 +741,26 @@ export default async function registerPublicPerfectFitPublicationRoutes(app) {
           forUpdate: true
         });
 
+        idem = await beginPerfectFitWriteIdempotency(app, req, access, {
+          action: "publication.submit",
+          hashPayload: {
+            request_id: requestId,
+            variant_id: variantId,
+            variant_code: variantCode,
+            body: req.body || {}
+          }
+        });
+        if (!idem.ok) {
+          await client.query("ROLLBACK");
+          return reply
+            .code(idempotencyErrorHttpStatus(idem.error))
+            .send({ ok: false, error: idem.error });
+        }
+        if (idem.replay) {
+          await client.query("ROLLBACK");
+          return sendPerfectFitIdempotencyReplay(reply, idem);
+        }
+
         let serviceObjectId = existing?.service_object_id || null;
         let processInstanceId = existing?.process_instance_id || null;
         const styleName = normalizeText(context.style?.values?.["product.style_name"] || req.body?.style_name || req.body?.styleName || material.name).slice(0, 500);
@@ -759,6 +777,10 @@ export default async function registerPublicPerfectFitPublicationRoutes(app) {
           });
           if (!created.ok) {
             await client.query("ROLLBACK");
+            await finalizePerfectFitWriteIdempotency(app, access, idem, created, {
+              httpStatus: 409,
+              status: "error"
+            });
             return reply.code(409).send(created);
           }
           serviceObjectId = created.service_object_id;
@@ -773,6 +795,10 @@ export default async function registerPublicPerfectFitPublicationRoutes(app) {
         });
         if (!review.ok) {
           await client.query("ROLLBACK");
+          await finalizePerfectFitWriteIdempotency(app, access, idem, review, {
+            httpStatus: 409,
+            status: "error"
+          });
           return reply.code(409).send(review);
         }
         processInstanceId = review.instance_id || processInstanceId;
@@ -816,7 +842,7 @@ export default async function registerPublicPerfectFitPublicationRoutes(app) {
         });
         await client.query("COMMIT");
 
-        return reply.send({
+        const response = {
           ok: true,
           request_id: requestId,
           status: "AWAITING_MODERATOR_RELEASE",
@@ -824,11 +850,23 @@ export default async function registerPublicPerfectFitPublicationRoutes(app) {
           service_object_id: serviceObjectId,
           process_instance_id: processInstanceId,
           privacy: "MODERATION_PROJECTION_ONLY"
+        };
+        await finalizePerfectFitWriteIdempotency(app, access, idem, response, {
+          httpStatus: 200,
+          status: "ok"
         });
+        return reply.send(response);
       } catch (error) {
         await client.query("ROLLBACK");
+        const response = { ok: false, error: "PUBLICATION_SUBMIT_FAILED" };
+        if (idem?.ok && !idem.replay) {
+          await finalizePerfectFitWriteIdempotency(app, access, idem, response, {
+            httpStatus: 500,
+            status: "error"
+          });
+        }
         req.log?.error?.({ event: "perfect_fit_publication_submit_failed", error: error.message });
-        return reply.code(500).send({ ok: false, error: "PUBLICATION_SUBMIT_FAILED" });
+        return reply.code(500).send(response);
       } finally {
         client.release();
       }
@@ -945,7 +983,7 @@ export default async function registerPublicPerfectFitPublicationRoutes(app) {
       if (!requirePerfectFitScope(access, reply, "perfect_fit.products.write")) return;
       const session = await requireAdminSession(app, req, reply, access);
       if (!session) return;
-      if (!requireMemberCsrf(req, reply)) return;
+      if (!requireSessionBoundMemberCsrf(app, session, req, reply)) return;
 
       const requestId = normalizeText(req.params?.requestId).slice(0, 160);
       const action = normalizeUpper(req.body?.action);
@@ -958,6 +996,7 @@ export default async function registerPublicPerfectFitPublicationRoutes(app) {
       }
 
       const client = await app.db.connect();
+      let idem = null;
       try {
         await client.query("BEGIN");
         const row = await loadPublicationRecord(client, access.tenant.id, requestId, { forUpdate: true });
@@ -968,6 +1007,21 @@ export default async function registerPublicPerfectFitPublicationRoutes(app) {
         if (!row.process_instance_id) {
           await client.query("ROLLBACK");
           return reply.code(409).send({ ok: false, error: "PUBLICATION_PROCESS_INSTANCE_REQUIRED" });
+        }
+
+        idem = await beginPerfectFitWriteIdempotency(app, req, access, {
+          action: "publication.admin.action",
+          hashPayload: { request_id: requestId, action, note }
+        });
+        if (!idem.ok) {
+          await client.query("ROLLBACK");
+          return reply
+            .code(idempotencyErrorHttpStatus(idem.error))
+            .send({ ok: false, error: idem.error });
+        }
+        if (idem.replay) {
+          await client.query("ROLLBACK");
+          return sendPerfectFitIdempotencyReplay(reply, idem);
         }
 
         let node = normalizeText(row.cursor_json?.node);
@@ -991,22 +1045,40 @@ export default async function registerPublicPerfectFitPublicationRoutes(app) {
         if (action === "PUBLISH") {
           if (node === "content_published") {
             await client.query("COMMIT");
-            return reply.send({ ok: true, request_id: requestId, status: "PUBLISHED", reused: true });
+            const response = { ok: true, request_id: requestId, status: "PUBLISHED", reused: true };
+            await finalizePerfectFitWriteIdempotency(app, access, idem, response, {
+              httpStatus: 200,
+              status: "ok"
+            });
+            return reply.send(response);
           }
           if (node !== "content_review" && node !== "content_approved") {
             await client.query("ROLLBACK");
-            return reply.code(409).send({ ok: false, error: "PUBLICATION_NOT_AWAITING_MODERATION", node });
+            const response = { ok: false, error: "PUBLICATION_NOT_AWAITING_MODERATION", node };
+            await finalizePerfectFitWriteIdempotency(app, access, idem, response, {
+              httpStatus: 409,
+              status: "error"
+            });
+            return reply.code(409).send(response);
           }
           if (node === "content_review") {
             const approved = await advance("APPROVE", `approve:${row.payload?.submission_revision || 1}`);
             if (!approved.ok) {
               await client.query("ROLLBACK");
+              await finalizePerfectFitWriteIdempotency(app, access, idem, approved, {
+                httpStatus: 409,
+                status: "error"
+              });
               return reply.code(409).send(approved);
             }
           }
           const published = await advance("PUBLISH", `publish:${row.payload?.submission_revision || 1}`);
           if (!published.ok) {
             await client.query("ROLLBACK");
+            await finalizePerfectFitWriteIdempotency(app, access, idem, published, {
+              httpStatus: 409,
+              status: "error"
+            });
             return reply.code(409).send(published);
           }
           await updateMaterialPublicationProjection(client, {
@@ -1019,15 +1091,34 @@ export default async function registerPublicPerfectFitPublicationRoutes(app) {
         } else {
           if (node === "content_rejected") {
             await client.query("COMMIT");
-            return reply.send({ ok: true, request_id: requestId, status: "RETURNED_BY_MODERATOR", reused: true });
+            const response = {
+              ok: true,
+              request_id: requestId,
+              status: "RETURNED_BY_MODERATOR",
+              reused: true
+            };
+            await finalizePerfectFitWriteIdempotency(app, access, idem, response, {
+              httpStatus: 200,
+              status: "ok"
+            });
+            return reply.send(response);
           }
           if (node !== "content_review") {
             await client.query("ROLLBACK");
-            return reply.code(409).send({ ok: false, error: "PUBLICATION_NOT_AWAITING_MODERATION", node });
+            const response = { ok: false, error: "PUBLICATION_NOT_AWAITING_MODERATION", node };
+            await finalizePerfectFitWriteIdempotency(app, access, idem, response, {
+              httpStatus: 409,
+              status: "error"
+            });
+            return reply.code(409).send(response);
           }
           const returned = await advance("REJECT", `return:${row.payload?.submission_revision || 1}`);
           if (!returned.ok) {
             await client.query("ROLLBACK");
+            await finalizePerfectFitWriteIdempotency(app, access, idem, returned, {
+              httpStatus: 409,
+              status: "error"
+            });
             return reply.code(409).send(returned);
           }
           await updateMaterialPublicationProjection(client, {
@@ -1062,17 +1153,29 @@ export default async function registerPublicPerfectFitPublicationRoutes(app) {
         );
         await client.query("COMMIT");
 
-        return reply.send({
+        const response = {
           ok: true,
           request_id: requestId,
           status: action === "PUBLISH" ? "PUBLISHED" : "RETURNED_BY_MODERATOR",
           authority: "EIP_PROCESS_ENGINE",
           private_workspace_access: false
+        };
+        await finalizePerfectFitWriteIdempotency(app, access, idem, response, {
+          httpStatus: 200,
+          status: "ok"
         });
+        return reply.send(response);
       } catch (error) {
         await client.query("ROLLBACK");
+        const response = { ok: false, error: "PUBLICATION_ACTION_FAILED" };
+        if (idem?.ok && !idem.replay) {
+          await finalizePerfectFitWriteIdempotency(app, access, idem, response, {
+            httpStatus: 500,
+            status: "error"
+          });
+        }
         req.log?.error?.({ event: "perfect_fit_publication_action_failed", requestId, action, error: error.message });
-        return reply.code(500).send({ ok: false, error: "PUBLICATION_ACTION_FAILED" });
+        return reply.code(500).send(response);
       } finally {
         client.release();
       }
