@@ -212,9 +212,9 @@ async function buildServer() {
     prefix: "/public/",
     index: 'index.html',
     decorateReply: false,
-    setHeaders: (res, filePath) => {
-      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-      res.setHeader("Cache-Control", "public, max-age=3600");
+    setHeaders: (reply, filePath) => {
+      reply.header("Cross-Origin-Resource-Policy", "cross-origin");
+      reply.header("Cache-Control", "public, max-age=3600");
     },
   });
 
@@ -236,9 +236,9 @@ async function buildServer() {
       root: assetsRoot,
       prefix: "/assets/",
       decorateReply: false,
-      setHeaders: (res) => {
-        res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-        res.setHeader("Cache-Control", "public, max-age=3600");
+      setHeaders: (reply) => {
+        reply.header("Cross-Origin-Resource-Policy", "cross-origin");
+        reply.header("Cache-Control", "public, max-age=3600");
       },
     });
   } else {
