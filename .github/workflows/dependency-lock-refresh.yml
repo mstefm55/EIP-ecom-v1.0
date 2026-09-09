@@ -1,0 +1,43 @@
+name: dependency-lock-refresh
+
+on:
+  push:
+    branches: ["fix/dependency-audit-2026-09"]
+
+permissions:
+  contents: write
+
+jobs:
+  refresh-locks:
+    if: ${{ !contains(github.event.head_commit.message, '[lockbot]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/dependency-audit-2026-09
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Regenerate root workspace lock safely
+        run: |
+          npm install --package-lock-only --ignore-scripts
+          npm audit fix --package-lock-only --omit=dev --ignore-scripts
+
+      - name: Regenerate Perfect Fit lock safely
+        run: |
+          npm install --package-lock-only --ignore-scripts --prefix apps/samara-web/my-vite-react-app
+          npm audit fix --package-lock-only --omit=dev --ignore-scripts --prefix apps/samara-web/my-vite-react-app
+
+      - name: Commit regenerated lockfiles
+        run: |
+          git config user.name "eip-security-lockbot"
+          git config user.email "actions@users.noreply.github.com"
+          git add package-lock.json apps/samara-web/my-vite-react-app/package-lock.json
+          if git diff --cached --quiet; then
+            echo "No lockfile changes required"
+            exit 0
+          fi
+          git commit -m "chore: regenerate patched dependency locks [lockbot]"
+          git push origin HEAD:fix/dependency-audit-2026-09
