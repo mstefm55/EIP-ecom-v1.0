@@ -15,3 +15,5 @@ jobs:
           node-version: "20"
       - name: Validate process alignment
         run: node tools/validate_process_alignment.mjs
+      - name: Validate Perfect Fit responsive shell canon
+        run: node --test services/api/test/perfect_fit_responsive_shell.test.mjs

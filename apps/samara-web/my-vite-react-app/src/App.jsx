@@ -32,7 +32,6 @@ import MemberManagement from './components/MemberManagement';
 import MyOrdersSection from './components/MyOrdersSection';
 import SewingSessionTimer from './components/SewingSessionTimer';
 import CreationsAndFeedback from './components/CreationsAndFeedback';
-import MobileAppView from './components/MobileAppView';
 import DynamicUiEngine from './components/DynamicUiEngine';
 import DynamicLayout from './components/DynamicLayout';
 import { RoleProvider } from './context/RoleContext';
@@ -331,16 +330,8 @@ function resetOutdatedLayoutMetadata() {
 export default function App() {
   const { locale, setLocale, t, languages } = usePerfectFitLanguage();
 
-  // Sizing view state mode: 'desktop' | 'mobile'
-  const [viewMode, setViewMode] = useState(() => {
-    try {
-      const saved = clientPreferences.getItem('perfectfit_view_mode');
-      if (saved === 'desktop' || saved === 'mobile') return saved;
-    } catch {}
-    return window.innerWidth < 1024 ? 'mobile' : 'desktop';
-  });
 const [activeView, setActiveView] = useState("home");
-// Member authentication state is repository-driven; EIP auth can replace the local adapter later.
+// Member profile state is repository-driven; authentication authority is the EIP MEMBER/gateway realm.
   const [currentUser, setCurrentUser] = useRuntimeState(RUNTIME_DOMAINS.USER_PROFILE, null);
   const [catalogAudienceFilter, setCatalogAudienceFilter] = useState('women');
 const [catalogCategoryFilter, setCatalogCategoryFilter] = useState([]);
@@ -758,12 +749,6 @@ Workspace: (section) => (
   </motion.section>
 ),
 };
-  // Keep viewMode state synchronized with localStorage
-  useEffect(() => {
-    try {
-      clientPreferences.setItem('perfectfit_view_mode', viewMode);
-    } catch {}
-  }, [viewMode]);
 
   // Cart is runtime business data, not component/browser authority.
   const [cartItems, setCartItems] = useRuntimeState(RUNTIME_DOMAINS.CART, []);
@@ -1891,56 +1876,6 @@ if (!isMobileViewport) {
   const totalCartCount = cartItems.reduce((acc, item) => acc + item.quantity, 0);
   const totalCartValue = cartItems.reduce((acc, item) => acc + item.price * item.quantity, 0);
 
-  if (viewMode === 'mobile') {
-    return (
-      <div className="min-h-screen bg-[#F5EFEB] flex flex-col justify-start items-center">
-        {/* Style tag same as desktop to share Cormorant / Outfit / Mono font files */}
-        <style>{`
-          @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400&family=Outfit:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
-
-          .font-sans {
-            font-family: 'Outfit', sans-serif;
-          }
-          .font-serif {
-            font-family: 'Cormorant Garamond', serif;
-          }
-          .font-mono {
-            font-family: 'JetBrains Mono', monospace;
-          }
-        `}</style>
-
-        {/* Global utility banner */}
-        <div className="w-full bg-bark-950 text-sand-300 py-2.5 px-4 text-[10px] font-mono flex items-center justify-between border-b border-bark-900 z-50">
-          <span className="flex items-center gap-1.5 font-semibold">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />{pfUiT("ui.app.1653c69999")}</span>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setViewMode('desktop')}
-              className="text-sand-400 hover:text-white transition-colors cursor-pointer text-[10px] font-bold tracking-wider"
-            >{pfUiT("ui.app.b311a4d421")}</button>
-            <span className="text-bark-850">|</span>
-            <span className="text-white font-bold font-mono uppercase tracking-wider">{pfUiT("ui.app.844ff4decc")}</span>
-          </div>
-        </div>
-
-        {/* Mobile Mockup device container (simulating a phone) */}
-        <div className="w-full max-w-md h-[840px] shadow-2xl relative my-4 flex-1 flex flex-col border border-sand-200 bg-white">
-          <MobileAppView
-            patterns={productPresentationPatterns}
-            cartItems={cartItems}
-            onAddToCart={handleAddToCart}
-            onUpdateQuantity={handleUpdateQuantity}
-            onRemoveItem={handleRemoveItem}
-            onClearCart={handleClearCart}
-            currentUser={currentUser}
-            onOpenAuthModal={() => setIsAuthModalOpen(true)}
-            reviews={reviews}
-            onAddReview={handleAddReview}
-          />
-        </div>
-      </div>
-    );
-  }
 
   const isGateActive = isAppLoginDependent && !currentUser;
 

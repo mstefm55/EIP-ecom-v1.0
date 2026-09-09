@@ -23,7 +23,13 @@ test('legacy mobile shell preference is retired in favour of the responsive app 
   assert.match(preferences, /LEGACY_VIEW_MODE_KEY\s*=\s*'perfectfit_view_mode'/);
   assert.match(preferences, /if \(key === LEGACY_VIEW_MODE_KEY\) return 'desktop'/);
   assert.match(preferences, /storage\(\)\?\.setItem\(key, 'desktop'\)/);
+
+  assert.doesNotMatch(app, /MobileAppView/);
+  assert.doesNotMatch(app, /\[viewMode,\s*setViewMode\]/);
   assert.doesNotMatch(app, /setViewMode\('mobile'\)/);
+  assert.doesNotMatch(app, /if \(viewMode === 'mobile'\)/);
+
   assert.match(canon, /one responsive React application shell/i);
   assert.match(canon, /must never restore the legacy `mobile` application shell/i);
+  assert.match(canon, /retired mobile runtime source is not part of the active application/i);
 });
