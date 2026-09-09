@@ -1,0 +1,104 @@
+name: pf-retired-mobile-cleanup
+
+on:
+  push:
+    branches: ["fix/pf-canon-legacy-cleanup"]
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    if: ${{ !contains(github.event.head_commit.message, '[canonbot]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/pf-canon-legacy-cleanup
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Remove unreachable retired mobile application shell
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          app_path = Path('apps/samara-web/my-vite-react-app/src/App.jsx')
+          text = app_path.read_text(encoding='utf-8')
+
+          old_import = "import MobileAppView from './components/MobileAppView';\n"
+          if text.count(old_import) != 1:
+              raise SystemExit(f'expected exactly one MobileAppView import, found {text.count(old_import)}')
+          text = text.replace(old_import, '')
+
+          state_pattern = re.compile(
+              r"\n  // Sizing view state mode: 'desktop' \| 'mobile'\n"
+              r"  const \[viewMode, setViewMode\] = useState\(\(\) => \{.*?\n  \}\);\n",
+              re.S,
+          )
+          text, count = state_pattern.subn('\n', text, count=1)
+          if count != 1:
+              raise SystemExit(f'expected exactly one retired viewMode state block, found {count}')
+
+          old_comment = '// Member authentication state is repository-driven; EIP auth can replace the local adapter later.'
+          new_comment = '// Member profile state is repository-driven; authentication authority is the EIP MEMBER/gateway realm.'
+          if text.count(old_comment) != 1:
+              raise SystemExit(f'expected exactly one stale member-auth comment, found {text.count(old_comment)}')
+          text = text.replace(old_comment, new_comment)
+
+          effect_pattern = re.compile(
+              r"\n  // Keep viewMode state synchronized with localStorage\n"
+              r"  useEffect\(\(\) => \{.*?\n  \}, \[viewMode\]\);\n",
+              re.S,
+          )
+          text, count = effect_pattern.subn('\n', text, count=1)
+          if count != 1:
+              raise SystemExit(f'expected exactly one retired viewMode persistence effect, found {count}')
+
+          mobile_pattern = re.compile(
+              r"\n  if \(viewMode === 'mobile'\) \{.*?\n  \}\n\n  const isGateActive",
+              re.S,
+          )
+          text, count = mobile_pattern.subn('\n\n  const isGateActive', text, count=1)
+          if count != 1:
+              raise SystemExit(f'expected exactly one retired MobileAppView render branch, found {count}')
+
+          forbidden = [
+              'MobileAppView',
+              "if (viewMode === 'mobile')",
+              "setViewMode('mobile')",
+              '[viewMode, setViewMode]',
+          ]
+          for token in forbidden:
+              if token in text:
+                  raise SystemExit(f'retired mobile token still present in App.jsx: {token}')
+
+          app_path.write_text(text, encoding='utf-8')
+          PY
+
+          git rm apps/samara-web/my-vite-react-app/src/components/MobileAppView.jsx
+
+      - name: Install Perfect Fit
+        run: npm ci --ignore-scripts --prefix apps/samara-web/my-vite-react-app
+
+      - name: Build unchanged responsive application shell
+        run: npm run build --prefix apps/samara-web/my-vite-react-app
+
+      - name: Run responsive shell architectural guard
+        run: node --test services/api/test/perfect_fit_responsive_shell.test.mjs
+
+      - name: Run Perfect Fit metadata and runtime audits
+        run: |
+          npm run audit:metadata-ui --prefix apps/samara-web/my-vite-react-app
+          npm run audit:runtime-data --prefix apps/samara-web/my-vite-react-app
+
+      - name: Commit validated cleanup
+        run: |
+          git config user.name "eip-canon-cleanup"
+          git config user.email "actions@users.noreply.github.com"
+          git add apps/samara-web/my-vite-react-app/src/App.jsx apps/samara-web/my-vite-react-app/src/components/MobileAppView.jsx
+          git commit -m "Remove retired Perfect Fit mobile application shell [canonbot]"
+          git push origin HEAD:fix/pf-canon-legacy-cleanup
