@@ -25,6 +25,7 @@ const ALLOWED_INFRA_FILES = [
   /src[\/]config[\/]perfectFitMetadata\.js$/,
   /src[\/]lib[\/]runtimeDataGateway\.js$/,
   /src[\/]lib[\/]runtimeRepositoryBootstrap\.js$/,
+  /src[\/]lib[\/]workspacePersistenceBridge\.js$/,
   /src[\/]lib[\/]materialsRepository\.js$/,
   /src[\/]lib[\/]i18n\.js$/,
   /src[\/]lib[\/]floatingToolLayout\.js$/,
@@ -137,6 +138,7 @@ const result = {
   notes: [
     'This audit targets business/runtime authority, not harmless UI preference persistence.',
     'Runtime records should be consumed through repositories; localStorage/IndexedDB may remain underneath adapters/caches.',
+    'Approved repository/cache adapters are explicitly listed in ALLOWED_INFRA_FILES; adding one requires an architectural review.',
     'Static UI/governance metadata belongs in perfectFitMetadata.js, not in runtime repositories.'
   ]
 };
