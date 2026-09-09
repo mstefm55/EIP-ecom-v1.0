@@ -12,10 +12,30 @@ The historical browser preference key `perfectfit_view_mode` may still exist on 
 
 There is no customer-facing desktop/mobile shell selector. Responsive behavior is automatic through the current application layout.
 
+The retired mobile runtime source is not part of the active application. `App.jsx` must not import, render, or select `MobileAppView`, and must not maintain a desktop/mobile shell state machine.
+
+## Perfect Fit UI preservation rule
+
+EIP governs business meaning, security, persistence, and metadata. Perfect Fit preserves its own richer product experience.
+
+Backend or governance integration must not simplify Perfect Fit controls, layouts, selectors, visual hierarchy, responsive behavior, or workflows merely to match a more generic EIP administrative UI. If governed metadata needs richer capabilities for Perfect Fit, extend the governed metadata contract rather than regress the Perfect Fit interface.
+
+Functional repairs are allowed when an existing Perfect Fit control or workflow is broken. Architectural or visual redesign is outside backend/auth/database repair scope unless explicitly approved.
+
 ## Scope
 
-- No backend change.
-- No database migration.
+- No backend change is required to render the responsive shell.
+- No database migration is required.
 - No duplicate mobile application surface.
 - Existing responsive mobile navigation/search/layout remain part of the current `App.jsx` shell.
-- `MobileAppView.jsx` may remain temporarily as unreachable legacy code until a later cleanup, but runtime navigation must not render it.
+- The historical `perfectfit_view_mode` compatibility key remains browser-safe and resolves only to the responsive shell.
+- The retired dedicated mobile component is not an active runtime dependency.
+
+## Regression guard
+
+`services/api/test/perfect_fit_responsive_shell.test.mjs` is the architectural regression guard. It must verify that:
+
+- the historical compatibility key resolves to `desktop`/responsive-shell mode;
+- `App.jsx` does not import or render `MobileAppView`;
+- `App.jsx` does not restore a desktop/mobile shell state machine;
+- the responsive-shell canon remains explicit.
