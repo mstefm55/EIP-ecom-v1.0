@@ -8,6 +8,13 @@ import { connectionAllowsOrigin, verifyConnectionRequest } from "../services/gat
 import { auditPerfectFitManifestCompleteness } from "../services/perfectFit/manifestCompleteness.js";
 import { loadPerfectFitMetadataBundle } from "../services/perfectFit/metadataManifest.js";
 import { projectPerfectFitWorkspaceProducts } from "../services/perfectFit/workspaceProductProjection.js";
+import {
+  beginPerfectFitWriteIdempotency,
+  finalizePerfectFitWriteIdempotency,
+  idempotencyErrorHttpStatus,
+  requireSessionBoundMemberCsrf,
+  sendPerfectFitIdempotencyReplay
+} from "../services/perfectFit/writeSecurity.js";
 
 const RATE_LIMIT = { max: 60, timeWindow: "1 minute" };
 const WORKSPACE_RECORD_TYPE = "PERFECT_FIT_WORKSPACE";
@@ -131,7 +138,7 @@ async function loadMemberSession(app, req, tenantId, suffix) {
 
   const result = await app.db.query(
     `
-    SELECT id, tenant_id, identity_id, expires_at, is_revoked, attrs
+    SELECT id, tenant_id, identity_id, expires_at, is_revoked, attrs, csrf_secret_hash
     FROM eip_auth.auth_session
     WHERE id = $1::uuid
     LIMIT 1
@@ -153,16 +160,6 @@ async function loadMemberSession(app, req, tenantId, suffix) {
   if (normalizeText(attrs.connection_suffix) !== normalizeText(suffix)) return null;
 
   return session;
-}
-
-function requireMemberCsrf(req, reply) {
-  const csrfCookie = normalizeText(req.cookies?.member_csrf);
-  const csrfHeader = normalizeText(req.headers["x-member-csrf"]);
-  if (!csrfCookie || !csrfHeader || csrfCookie !== csrfHeader) {
-    reply.code(403).send({ ok: false, error: "MEMBER_CSRF_REQUIRED" });
-    return false;
-  }
-  return true;
 }
 
 function normalizeWorkspace(value) {
@@ -306,7 +303,7 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
           error: "MEMBER_UNAUTHENTICATED"
         });
       }
-      if (!requireMemberCsrf(req, reply)) return;
+      if (!requireSessionBoundMemberCsrf(app, session, req, reply)) return;
 
       const workspace = normalizeWorkspace(req.body?.workspace);
       if (!workspace) {
@@ -331,6 +328,17 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
       const authoritativeContract = metadataBundle?.ok
         ? metadataBundle.contract
         : null;
+
+      const idem = await beginPerfectFitWriteIdempotency(app, req, access, {
+        action: "workspace.save",
+        hashPayload: { workspace }
+      });
+      if (!idem.ok) {
+        return reply
+          .code(idempotencyErrorHttpStatus(idem.error))
+          .send({ ok: false, error: idem.error });
+      }
+      if (idem.replay) return sendPerfectFitIdempotencyReplay(reply, idem);
 
       const client = await app.db.connect();
       let recordId = null;
@@ -422,16 +430,21 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
         await client.query("COMMIT");
       } catch (error) {
         await client.query("ROLLBACK");
+        const response = {
+          ok: false,
+          error: "WORKSPACE_SAVE_FAILED"
+        };
+        await finalizePerfectFitWriteIdempotency(app, access, idem, response, {
+          httpStatus: 500,
+          status: "error"
+        });
         app.log.error({
           event: "perfect_fit_workspace_save_failed",
           tenant_id: access.tenant.id,
           identity_id: session.identity_id,
           error: error?.message || String(error)
         });
-        return reply.code(500).send({
-          ok: false,
-          error: "WORKSPACE_SAVE_FAILED"
-        });
+        return reply.code(500).send(response);
       } finally {
         client.release();
       }
@@ -552,7 +565,7 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
         }
       }
 
-      return reply.send({
+      const response = {
         ok: true,
         workspace,
         record_id: recordId,
@@ -563,7 +576,12 @@ export default async function registerPublicPerfectFitWorkspaceRoutes(app) {
         manifest_source: metadataBundle?.ok ? metadataBundle.source : null,
         manifest_audit: manifestAudit,
         enterprise_projection: enterpriseProjection
+      };
+      await finalizePerfectFitWriteIdempotency(app, access, idem, response, {
+        httpStatus: 200,
+        status: "ok"
       });
+      return reply.send(response);
     }
   );
 }
