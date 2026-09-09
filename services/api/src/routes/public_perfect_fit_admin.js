@@ -7,6 +7,13 @@ import { hydrateConnectionProfileSecrets } from "../services/gateway/secretStore
 import { connectionAllowsOrigin, verifyConnectionRequest } from "../services/gateway/verification.js";
 import { validateGovernedDropdownValue } from "../services/socket/fieldAliasResolver.js";
 import { syncPerfectFitAdminCuration } from "../services/perfectFit/productGateway.js";
+import {
+  beginPerfectFitWriteIdempotency,
+  finalizePerfectFitWriteIdempotency,
+  idempotencyErrorHttpStatus,
+  requireSessionBoundMemberCsrf,
+  sendPerfectFitIdempotencyReplay
+} from "../services/perfectFit/writeSecurity.js";
 
 const RATE_LIMIT = { max: 60, timeWindow: "1 minute" };
 const CURATION_LIST_CODE = "PF_PRODUCT_TAG";
@@ -115,7 +122,7 @@ async function loadMemberSession(app, req, tenantId, suffix) {
 
   const result = await app.db.query(
     `
-    SELECT id, tenant_id, identity_id, expires_at, is_revoked, attrs
+    SELECT id, tenant_id, identity_id, expires_at, is_revoked, attrs, csrf_secret_hash
     FROM eip_auth.auth_session
     WHERE id = $1::uuid
     LIMIT 1
@@ -148,16 +155,6 @@ async function requirePfAdmin(app, access, session, reply) {
   );
   if (!role.rowCount) {
     reply.code(403).send({ ok: false, error: "PF_ADMIN_REQUIRED" });
-    return false;
-  }
-  return true;
-}
-
-function requireMemberCsrf(req, reply) {
-  const csrfCookie = normalizeText(req.cookies?.member_csrf);
-  const csrfHeader = normalizeText(req.headers["x-member-csrf"]);
-  if (!csrfCookie || !csrfHeader || csrfCookie !== csrfHeader) {
-    reply.code(403).send({ ok: false, error: "MEMBER_CSRF_REQUIRED" });
     return false;
   }
   return true;
@@ -317,7 +314,7 @@ export default async function registerPublicPerfectFitAdminRoutes(app) {
           code: row.code,
           name: row.name,
           tags: Array.isArray(row.attrs?.taxonomy?.tags) ? row.attrs.taxonomy.tags : [],
-          perfect_fit: row.perfect_fit && typeof row.perfect_fit === 'object'
+          perfect_fit: row.perfect_fit && typeof row.perfect_fit === "object"
             ? {
                 variant_id: row.perfect_fit.variant_id || null,
                 variant_code: row.perfect_fit.variant_code || null,
@@ -328,7 +325,7 @@ export default async function registerPublicPerfectFitAdminRoutes(app) {
             : null,
           product_level:
             row.attrs?.product_hierarchy?.level ||
-            (row.perfect_fit?.variant_id ? 'STYLE_VARIANT' : row.perfect_fit?.entity_level) ||
+            (row.perfect_fit?.variant_id ? "STYLE_VARIANT" : row.perfect_fit?.entity_level) ||
             null,
           updated_at: row.updated_at
         })),
@@ -347,7 +344,7 @@ export default async function registerPublicPerfectFitAdminRoutes(app) {
       if (!requirePerfectFitScope(access, reply, "perfect_fit.products.write")) return;
       const session = await requireAdminSession(app, req, reply, access);
       if (!session) return;
-      if (!requireMemberCsrf(req, reply)) return;
+      if (!requireSessionBoundMemberCsrf(app, session, req, reply)) return;
 
       const productId = normalizeText(req.params?.id);
       const rawTags = Array.isArray(req.body?.tags) ? req.body.tags : null;
@@ -376,30 +373,72 @@ export default async function registerPublicPerfectFitAdminRoutes(app) {
         }
       }
 
-      const eligible = await ensureCurationStyleVariant(
-        app,
-        access.tenant.id,
-        productId
-      );
-      if (!eligible.ok) {
-        return reply.code(eligible.status || 404).send(eligible);
-      }
-
-      const result = await syncPerfectFitAdminCuration(app.db, {
-        tenantId: access.tenant.id,
-        productId,
-        tags,
-        actorIdentityId: session.identity_id
+      const idem = await beginPerfectFitWriteIdempotency(app, req, access, {
+        action: "admin.curation.save",
+        hashPayload: { product_id: productId, tags }
       });
-      if (!result?.ok) {
-        return reply.code(result?.status || 400).send(result);
+      if (!idem.ok) {
+        return reply
+          .code(idempotencyErrorHttpStatus(idem.error))
+          .send({ ok: false, error: idem.error });
       }
+      if (idem.replay) return sendPerfectFitIdempotencyReplay(reply, idem);
 
-      return reply.send({
-        ...result,
-        authority: "MERCHANDISING_ADMIN",
-        tenant_code: access.tenant.code
-      });
+      try {
+        const eligible = await ensureCurationStyleVariant(
+          app,
+          access.tenant.id,
+          productId
+        );
+        if (!eligible.ok) {
+          const httpStatus = eligible.status || 404;
+          await finalizePerfectFitWriteIdempotency(app, access, idem, eligible, {
+            httpStatus,
+            status: "error"
+          });
+          return reply.code(httpStatus).send(eligible);
+        }
+
+        const result = await syncPerfectFitAdminCuration(app.db, {
+          tenantId: access.tenant.id,
+          productId,
+          tags,
+          actorIdentityId: session.identity_id
+        });
+        if (!result?.ok) {
+          const httpStatus = result?.status || 400;
+          await finalizePerfectFitWriteIdempotency(app, access, idem, result, {
+            httpStatus,
+            status: "error"
+          });
+          return reply.code(httpStatus).send(result);
+        }
+
+        const response = {
+          ...result,
+          authority: "MERCHANDISING_ADMIN",
+          tenant_code: access.tenant.code
+        };
+        await finalizePerfectFitWriteIdempotency(app, access, idem, response, {
+          httpStatus: 200,
+          status: "ok"
+        });
+        return reply.send(response);
+      } catch (error) {
+        const response = { ok: false, error: "CURATION_SAVE_FAILED" };
+        await finalizePerfectFitWriteIdempotency(app, access, idem, response, {
+          httpStatus: 500,
+          status: "error"
+        });
+        app.log?.error?.({
+          event: "perfect_fit_admin_curation_save_failed",
+          tenant_id: access.tenant.id,
+          identity_id: session.identity_id,
+          product_id: productId,
+          error: error?.message || String(error)
+        });
+        return reply.code(500).send(response);
+      }
     }
   );
 }
