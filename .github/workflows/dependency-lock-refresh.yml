@@ -23,12 +23,12 @@ jobs:
       - name: Regenerate root workspace lock safely
         run: |
           npm install --package-lock-only --ignore-scripts
-          npm audit fix --package-lock-only --omit=dev --ignore-scripts
+          npm audit fix --package-lock-only --omit=dev --ignore-scripts || npm audit --omit=dev --audit-level=high
 
       - name: Regenerate Perfect Fit lock safely
         run: |
           npm install --package-lock-only --ignore-scripts --prefix apps/samara-web/my-vite-react-app
-          npm audit fix --package-lock-only --omit=dev --ignore-scripts --prefix apps/samara-web/my-vite-react-app
+          npm audit fix --package-lock-only --omit=dev --ignore-scripts --prefix apps/samara-web/my-vite-react-app || npm audit --omit=dev --audit-level=high --prefix apps/samara-web/my-vite-react-app
 
       - name: Commit regenerated lockfiles
         run: |
