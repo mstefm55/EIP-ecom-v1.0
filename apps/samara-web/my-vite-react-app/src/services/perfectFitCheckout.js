@@ -1,39 +1,15 @@
 import { EIP_CONFIG } from '../config/eip';
-
-function cleanUrl(value) {
-  return String(value || '').trim().replace(/\/+$/, '');
-}
+import { buildSuffixAwareCheckoutPath } from './publicCheckoutPath';
 
 function buildCommerceRoot() {
-  const endpoint = cleanUrl(EIP_CONFIG.endpoint);
-  if (!endpoint) {
+  if (!String(EIP_CONFIG.endpoint || '').trim()) {
     throw new Error('Perfect Fit checkout is not connected to the EIP gateway.');
   }
-
-  const parsed = new URL(
-    endpoint,
-    typeof window !== 'undefined' ? window.location.origin : 'http://localhost'
+  return buildSuffixAwareCheckoutPath(
+    EIP_CONFIG.endpoint,
+    '',
+    EIP_CONFIG.connectionCode
   );
-  const marker = '/api/public/commerce/';
-  const markerIndex = parsed.pathname.indexOf(marker);
-
-  if (markerIndex >= 0) {
-    const suffix = decodeURIComponent(
-      parsed.pathname.slice(markerIndex + marker.length).split('/')[0] || ''
-    );
-    if (!suffix) throw new Error('CONNECTION_SUFFIX_REQUIRED');
-    const prefix = parsed.pathname.slice(0, markerIndex);
-    return `${parsed.origin}${prefix}${marker}${encodeURIComponent(suffix)}`;
-  }
-
-  const suffix = String(EIP_CONFIG.connectionCode || '').trim();
-  if (!suffix) throw new Error('CONNECTION_SUFFIX_REQUIRED');
-
-  const publicIndex = parsed.pathname.indexOf('/api/public');
-  const prefix = publicIndex >= 0
-    ? parsed.pathname.slice(0, publicIndex)
-    : parsed.pathname.replace(/\/+$/, '');
-  return `${parsed.origin}${prefix}/api/public/commerce/${encodeURIComponent(suffix)}`;
 }
 
 function eventId(prefix) {

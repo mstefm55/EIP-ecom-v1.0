@@ -68,7 +68,7 @@ const samaraApp = fs.readFileSync(
   "utf8"
 );
 const samaraCss = fs.readFileSync(
-  new URL("../../../apps/samara-web/my-vite-react-app/src/App.css", import.meta.url),
+  new URL("../../../apps/samara-web/my-vite-react-app/src/index.css", import.meta.url),
   "utf8"
 );
 const dashboardSettings = fs.readFileSync(

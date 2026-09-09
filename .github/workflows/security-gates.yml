@@ -63,6 +63,9 @@ jobs:
       - name: Security static checks
         run: npm run security:static
 
+      - name: Current payment foundation contracts
+        run: npm --workspace @eip/core-api run test:payment-foundation-current
+
       - name: API security regression suite
         run: npm --workspace @eip/core-api run test:security
 
