@@ -1,0 +1,60 @@
+name: hotfix-fastify-static-v10
+
+on:
+  push:
+    branches: ["hotfix/fastify-static-v10-headers"]
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-verify:
+    if: ${{ !contains(github.event.head_commit.message, '[static-v10-hotfixbot]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: hotfix/fastify-static-v10-headers
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Apply @fastify/static v10 reply-header compatibility fix
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('services/api/src/server.js')
+          text = path.read_text(encoding='utf-8')
+
+          if text.count('setHeaders: (res') != 2:
+              raise SystemExit(f"expected two legacy setHeaders callbacks, found {text.count('setHeaders: (res')}")
+          if text.count('res.setHeader(') != 4:
+              raise SystemExit(f"expected four legacy res.setHeader calls, found {text.count('res.setHeader(')}")
+
+          text = text.replace('setHeaders: (res', 'setHeaders: (reply')
+          text = text.replace('res.setHeader(', 'reply.header(')
+
+          if 'setHeaders: (res' in text or 'res.setHeader(' in text:
+              raise SystemExit('legacy static header API remains after patch')
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Install workspace
+        run: npm ci --ignore-scripts
+
+      - name: Verify Fastify static header compatibility
+        run: node --test services/api/test/static_headers_fastify_v10.test.mjs
+
+      - name: Verify asset storage regressions
+        run: node --test services/api/test/asset_storage_runtime.test.mjs services/api/test/upload_route_alignment.test.mjs
+
+      - name: Commit verified server hotfix
+        run: |
+          git config user.name "eip-static-v10-hotfix"
+          git config user.email "actions@users.noreply.github.com"
+          git add services/api/src/server.js
+          git commit -m "Fix Fastify static v10 response header API [static-v10-hotfixbot]"
+          git push origin HEAD:hotfix/fastify-static-v10-headers
