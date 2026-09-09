@@ -63,6 +63,12 @@ jobs:
       - name: Security static checks
         run: npm run security:static
 
+      - name: Gateway outbound security contract
+        run: node --test services/api/test/gateway_outbound_security.test.mjs
+
+      - name: Perfect Fit checkout security contract
+        run: node --test services/api/test/payment_checkout_frontend_contract.test.mjs
+
       - name: API security regression suite
         run: npm --workspace @eip/core-api run test:security
 
