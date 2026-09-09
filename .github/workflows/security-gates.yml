@@ -69,6 +69,18 @@ jobs:
       - name: Perfect Fit checkout security contract
         run: node --test services/api/test/payment_checkout_frontend_contract.test.mjs
 
+      - name: Legacy payment foundation without retired PF UI assertion
+        run: >-
+          node --test
+          --test-name-pattern="^(?!payment routes and storefront integration expose governed checkout sessions without raw card collection$).*"
+          services/api/test/payment_checkout_foundation.test.mjs
+
+      - name: Upload and persistent-storage alignment contracts
+        run: >-
+          node --test
+          services/api/test/upload_route_alignment.test.mjs
+          services/api/test/asset_storage_runtime.test.mjs
+
       - name: API security regression suite
         run: npm --workspace @eip/core-api run test:security
 
