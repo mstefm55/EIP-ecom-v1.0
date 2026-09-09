@@ -99,6 +99,6 @@ jobs:
         run: |
           git config user.name "eip-canon-cleanup"
           git config user.email "actions@users.noreply.github.com"
-          git add apps/samara-web/my-vite-react-app/src/App.jsx apps/samara-web/my-vite-react-app/src/components/MobileAppView.jsx
+          git add -A apps/samara-web/my-vite-react-app/src
           git commit -m "Remove retired Perfect Fit mobile application shell [canonbot]"
           git push origin HEAD:fix/pf-canon-legacy-cleanup
