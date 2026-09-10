@@ -16,6 +16,7 @@ const migration = read('services/api/db/migrations/0150_perfect_fit_controlled_v
 const manifestService = read('services/api/src/services/perfectFit/metadataManifest.js');
 const runtimeMetadata = read('apps/samara-web/my-vite-react-app/src/lib/perfectFitRuntimeMetadata.js');
 const checkoutService = read('apps/samara-web/my-vite-react-app/src/services/perfectFitCheckout.js');
+const mannequinGuide = read('apps/samara-web/my-vite-react-app/src/components/MannequinGuide.jsx');
 
 const governedLists = [
   'PF_MEDIA_ASSET_TYPE',
@@ -97,6 +98,17 @@ test('PF runtime consumes each declared controlled vocabulary instead of recreat
     assert.match(runtimeMetadata, new RegExp(logicalCode));
     assert.ok(runtimeMetadata.includes(targetSnippet), `${logicalCode} must hydrate ${targetSnippet}`);
   }
+});
+
+test('Find My Size unit selectors consume the EIP-governed measurement unit vocabulary', () => {
+  assert.match(migration, /\('MEASUREMENT_UNIT','cm','Centimetres'/);
+  assert.match(migration, /\('MEASUREMENT_UNIT','in','Inches'/);
+  assert.match(runtimeMetadata, /perfectFitMetadata\.measurement, 'units'/);
+  assert.match(mannequinGuide, /perfectFitMetadata\.measurement\?\.units/);
+  assert.match(mannequinGuide, /const measurementUnits = getMeasurementUnitOptions\(\)/);
+  assert.match(mannequinGuide, /measurementUnits\.map\(\(option\) =>/);
+  assert.doesNotMatch(mannequinGuide, /\['cm',\s*'in'\]\.map/);
+  assert.match(mannequinGuide, /Legacy bootstrap keeps the UI usable before EIP metadata hydration/);
 });
 
 test('checkout preserves canonical EIP material identity', () => {
