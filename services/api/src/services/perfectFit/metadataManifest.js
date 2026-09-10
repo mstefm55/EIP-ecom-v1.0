@@ -193,6 +193,25 @@ function buildRuntimeDropdowns(bindings, governed) {
   return output;
 }
 
+function buildDropdownContract(bindings, governed, role) {
+  return Object.entries(bindings || {})
+    .map(([logicalCode, rawDbCode]) => {
+      const logical = normalizeText(logicalCode);
+      const dbCode = normalizeText(rawDbCode);
+      const list = governed.get(dbCode);
+      return {
+        code: dbCode,
+        logical_code: logical,
+        governed_code: dbCode,
+        role,
+        source: "eip_core.dropdown_list",
+        values: (list?.values || []).map((item) => ({ code: item.code }))
+      };
+    })
+    .filter((item) => item.code && item.logical_code)
+    .sort((a, b) => a.logical_code.localeCompare(b.logical_code));
+}
+
 export async function loadPerfectFitMetadataBundle(db, {
   tenantId,
   socketCode = null,
@@ -216,8 +235,11 @@ export async function loadPerfectFitMetadataBundle(db, {
   const fields = asObject(workspace.fields);
   const fieldGroups = asObject(workspace.fieldGroups || workspace.field_groups);
   const bindings = asObject(workspace.dropdownBindings || workspace.dropdown_bindings);
-  const governedDropdowns = await loadEffectiveDropdowns(db, tenantId, bindings);
+  const controlledBindings = asObject(workspace.controlledBindings || workspace.controlled_bindings);
+  const allBindings = { ...bindings, ...controlledBindings };
+  const governedDropdowns = await loadEffectiveDropdowns(db, tenantId, allBindings);
   const runtimeDropdowns = buildRuntimeDropdowns(bindings, governedDropdowns);
+  const controlledVocabularies = buildRuntimeDropdowns(controlledBindings, governedDropdowns);
   const structureContract = normalizeStructureForContract(workspace);
 
   const fieldContract = Object.entries(fields)
@@ -225,21 +247,12 @@ export async function loadPerfectFitMetadataBundle(db, {
     .filter((field) => field.key)
     .sort((a, b) => a.key.localeCompare(b.key));
 
-  const dropdownContract = Object.entries(bindings)
-    .map(([logicalCode, rawDbCode]) => {
-      const logical = normalizeText(logicalCode);
-      const dbCode = normalizeText(rawDbCode);
-      const governed = governedDropdowns.get(dbCode);
-      return {
-        code: dbCode,
-        logical_code: logical,
-        governed_code: dbCode,
-        source: "eip_core.dropdown_list",
-        values: (governed?.values || []).map((item) => ({ code: item.code }))
-      };
-    })
-    .filter((item) => item.code && item.logical_code)
-    .sort((a, b) => a.logical_code.localeCompare(b.logical_code));
+  const dropdownContract = buildDropdownContract(bindings, governedDropdowns, "WORKSPACE_FIELD");
+  const controlledContract = buildDropdownContract(
+    controlledBindings,
+    governedDropdowns,
+    "CONTROLLED_VOCABULARY"
+  );
 
   return {
     ok: true,
@@ -261,6 +274,8 @@ export async function loadPerfectFitMetadataBundle(db, {
         referenceConvention: asObject(workspace.referenceConvention || workspace.reference_convention),
         dropdowns: runtimeDropdowns,
         dropdownBindings: bindings,
+        controlledVocabularies,
+        controlledBindings,
         metadataAuthority: {
           source: "EIP_DB",
           manifestId: row.id,
@@ -274,6 +289,7 @@ export async function loadPerfectFitMetadataBundle(db, {
       version: normalizeText(workspace.version) || `db-${row.version}`,
       fields: fieldContract,
       dropdowns: dropdownContract,
+      controlled_vocabularies: controlledContract,
       structure: structureContract
     }
   };
