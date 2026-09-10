@@ -65,6 +65,10 @@ import {
 
 const TOUR_STORAGE_KEY = 'perfectfit_find_my_size_tour_seen_v4';
 const workspaceMetadata = perfectFitMetadata.workspace;
+const LEGACY_MEASUREMENT_UNITS = Object.freeze([
+  { code: 'cm', label: 'Centimetres' },
+  { code: 'in', label: 'Inches' }
+]);
 
 const CORE_INPUT_ORDER = [
   'HIGH_BUST',
@@ -99,6 +103,22 @@ function resolveLocale(locale) {
     return document.documentElement.lang;
   }
   return workspaceMetadata.defaultLocale || 'en';
+}
+
+function getMeasurementUnitOptions() {
+  const governed = Array.isArray(perfectFitMetadata.measurement?.units)
+    ? perfectFitMetadata.measurement.units
+        .map((item) => ({
+          ...item,
+          code: String(item?.code || '').trim()
+        }))
+        .filter((item) => item.code)
+    : [];
+
+  // Legacy bootstrap keeps the UI usable before EIP metadata hydration. Once
+  // the published PF manifest is present, perfectFitRuntimeMetadata replaces
+  // this source with EIP's PF_MEASUREMENT_UNIT controlled vocabulary.
+  return governed.length ? governed : LEGACY_MEASUREMENT_UNITS;
 }
 
 function formatDisplayMeasurement(valueCm, unit) {
@@ -455,6 +475,7 @@ export default function MannequinGuide({
   );
   const categories = useMemo(() => getWorkspaceDropdownOptions('GARMENT_CATEGORY', locale), [locale]);
   const silhouettes = useMemo(() => getWorkspaceDropdownOptions('FIT_SILHOUETTE', locale), [locale]);
+  const measurementUnits = getMeasurementUnitOptions();
 
   const initialProfile = useMemo(() => loadCustomerBodyProfile(), []);
   const savedContext = useMemo(
@@ -462,7 +483,11 @@ export default function MannequinGuide({
     [initialProfile?.selectedProductId]
   );
 
-  const [unit, setUnit] = useState(initialProfile?.unit === 'cm' ? 'cm' : 'in');
+  const [unit, setUnit] = useState(() => {
+    const savedUnit = String(initialProfile?.unit || '').trim();
+    if (measurementUnits.some((option) => option.code === savedUnit)) return savedUnit;
+    return measurementUnits.find((option) => option.code === 'in')?.code || measurementUnits[0]?.code || 'cm';
+  });
   const [measurementsCm, setMeasurementsCm] = useState(initialProfile?.measurementsCm || {});
   const [avatarGender, setAvatarGender] = useState(
     String(initialProfile?.avatarGender || 'FEMALE').toUpperCase() === 'MALE'
@@ -1041,20 +1066,24 @@ export default function MannequinGuide({
                         <div className="mt-0.5 text-[9px] text-[#9A8C81]">{pfUiT("ui.components.mannequinguide.9d6cefa228")}</div>
                       </div>
                       <div className="inline-flex rounded-full border border-[#DDD2C5] bg-white p-1">
-                        {['cm', 'in'].map((nextUnit) => (
-                          <button
-                            key={nextUnit}
-                            type="button"
-                            onClick={() => setUnit(nextUnit)}
-                            className={`rounded-full px-2.5 py-1 text-[8px] font-black uppercase tracking-[0.1em] ${
-                              unit === nextUnit
-                                ? 'bg-[#2E241C] text-white'
-                                : 'text-[#76675C] hover:bg-[#F5EFE8]'
-                            }`}
-                          >
-                            {nextUnit}
-                          </button>
-                        ))}
+                        {measurementUnits.map((option) => {
+                          const nextUnit = option.code;
+                          return (
+                            <button
+                              key={nextUnit}
+                              type="button"
+                              onClick={() => setUnit(nextUnit)}
+                              className={`rounded-full px-2.5 py-1 text-[8px] font-black uppercase tracking-[0.1em] ${
+                                unit === nextUnit
+                                  ? 'bg-[#2E241C] text-white'
+                                  : 'text-[#76675C] hover:bg-[#F5EFE8]'
+                              }`}
+                              title={option.label || nextUnit}
+                            >
+                              {nextUnit}
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
 
@@ -1193,18 +1222,22 @@ export default function MannequinGuide({
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="inline-flex rounded-full border border-[#DDD2C5] bg-white p-1">
-                      {['cm', 'in'].map((nextUnit) => (
-                        <button
-                          key={nextUnit}
-                          type="button"
-                          onClick={() => setUnit(nextUnit)}
-                          className={`rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.1em] transition ${
-                            unit === nextUnit ? 'bg-[#2E241C] text-white' : 'text-[#76675C] hover:bg-[#F5EFE8]'
-                          }`}
-                        >
-                          {nextUnit}
-                        </button>
-                      ))}
+                      {measurementUnits.map((option) => {
+                        const nextUnit = option.code;
+                        return (
+                          <button
+                            key={nextUnit}
+                            type="button"
+                            onClick={() => setUnit(nextUnit)}
+                            className={`rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.1em] transition ${
+                              unit === nextUnit ? 'bg-[#2E241C] text-white' : 'text-[#76675C] hover:bg-[#F5EFE8]'
+                            }`}
+                            title={option.label || nextUnit}
+                          >
+                            {nextUnit}
+                          </button>
+                        );
+                      })}
                     </div>
                     <button
                       type="button"
