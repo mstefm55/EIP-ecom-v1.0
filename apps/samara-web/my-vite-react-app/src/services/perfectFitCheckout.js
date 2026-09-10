@@ -1,5 +1,6 @@
 import { EIP_CONFIG } from '../config/eip';
 import { buildSuffixAwareCheckoutPath } from './publicCheckoutPath';
+import { normalizePerfectFitOrderPayload } from './perfectFitCheckoutIdentity';
 
 function buildCommerceRoot() {
   if (!String(EIP_CONFIG.endpoint || '').trim()) {
@@ -69,7 +70,7 @@ export function fetchPerfectFitPaymentMethods() {
 export function createPerfectFitOrder(payload) {
   return callCommerce('/order', {
     method: 'POST',
-    body: payload,
+    body: normalizePerfectFitOrderPayload(payload),
     idempotencyPrefix: 'perfect-fit-order'
   });
 }
