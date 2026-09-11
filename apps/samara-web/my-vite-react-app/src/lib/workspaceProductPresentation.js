@@ -308,6 +308,8 @@ export function buildWorkspaceProductPresentations(
           workspaceProjectId: project.id,
           workspaceStyleId: style.id,
           workspaceVariantId: variant.id,
+          eipProductId: variant?.integration?.eip?.productId || null,
+          eipIntegrationStatus: variant?.integration?.eip?.status || null,
           ownership: {
             ...(project.ownership || {}),
             ownerIdentityId: messagingOwner.routingId

@@ -46,6 +46,26 @@ test('Workspace purchase snapshots cannot inherit arbitrary commerce fallback me
   assert.match(presentation, /primaryImage:\s*media\.primaryAsset\?\.url\s*\|\|\s*''/);
 });
 
+test('Workspace checkout preserves the governed EIP material identity', () => {
+  const source = read('components/CheckoutDrawer.jsx');
+  const presentation = read('lib/workspaceProductPresentation.js');
+
+  assert.match(presentation, /eipProductId:\s*variant\?\.integration\?\.eip\?\.productId\s*\|\|\s*null/);
+  assert.match(source, /const resolveMaterialIdentity/);
+  assert.match(source, /pattern\.eipProductId/);
+  assert.match(source, /material_id:\s*materialId/);
+  assert.match(source, /!line\.material_id\s*&&\s*!line\.material_code/);
+  assert.doesNotMatch(source, /pattern\.commerceOverlayId/);
+  assert.doesNotMatch(source, /pattern\.legacyPatternId/);
+});
+
+test('Payment step omits the internal gateway authority explainer card', () => {
+  const source = read('components/CheckoutDrawer.jsx');
+
+  assert.doesNotMatch(source, /Payment authority:\s*EIP Gateway/i);
+  assert.doesNotMatch(source, /Select a configured payment provider\. Card numbers and CVC are never collected by Perfect Fit\./i);
+});
+
 test('Checkout never fabricates a downloadable pattern bundle', () => {
   const source = read('components/CheckoutDrawer.jsx');
 
