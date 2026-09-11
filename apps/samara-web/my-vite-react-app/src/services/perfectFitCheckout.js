@@ -63,8 +63,22 @@ async function callCommerce(path, {
   return payload || {};
 }
 
-export function fetchPerfectFitPaymentMethods() {
-  return callCommerce('/checkout/payment-methods');
+function normalizePublicPaymentMethodsPayload(payload = {}) {
+  if (!Array.isArray(payload?.methods)) return payload;
+
+  return {
+    ...payload,
+    methods: payload.methods.map((item) => ({
+      ...item,
+      code: item?.code || item?.methodCode || item?.method || item?.id || '',
+      provider_code: item?.provider_code || item?.providerCode || ''
+    }))
+  };
+}
+
+export async function fetchPerfectFitPaymentMethods() {
+  const payload = await callCommerce('/checkout/payment-methods');
+  return normalizePublicPaymentMethodsPayload(payload);
 }
 
 export function createPerfectFitOrder(payload) {
