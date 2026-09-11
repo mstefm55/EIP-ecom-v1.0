@@ -42,6 +42,17 @@ test('Perfect Fit checkout uses the governed EIP public-commerce transport', () 
   assert.match(checkoutPath, /CONNECTION_SUFFIX_REQUIRED/);
 });
 
+test('Perfect Fit normalizes the EIP public payment-method contract before rendering', () => {
+  assert.match(
+    checkoutTransport,
+    /code:\s*item\?\.code\s*\|\|\s*item\?\.methodCode\s*\|\|\s*item\?\.method\s*\|\|\s*item\?\.id/
+  );
+  assert.match(
+    checkoutTransport,
+    /provider_code:\s*item\?\.provider_code\s*\|\|\s*item\?\.providerCode/
+  );
+});
+
 test('Perfect Fit renders only governed available payment methods and preserves provider identity', () => {
   assert.match(checkoutDrawer, /enabled:\s*item\?\.enabled !== false/);
   assert.match(checkoutDrawer, /available:\s*item\?\.available !== false/);
