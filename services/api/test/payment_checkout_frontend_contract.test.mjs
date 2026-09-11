@@ -69,7 +69,10 @@ test('Perfect Fit renders only governed available payment methods and preserves 
 test('Perfect Fit never collects or submits raw card credentials', () => {
   assert.doesNotMatch(checkoutDrawer, /name=["'](?:cardNumber|card_number|cardCVC|card_cvc|cvc|cvv)["']/i);
   assert.doesNotMatch(checkoutTransport, /\b(?:cardNumber|card_number|cardCVC|card_cvc|cvc|cvv)\b/i);
-  assert.match(checkoutDrawer, /Perfect Fit does not authorize payments or store raw card details/);
+  assert.match(
+    checkoutDrawer,
+    /createPerfectFitPaymentSession\(\{[\s\S]*?method:\s*selected\.code,[\s\S]*?provider_code:\s*selected\.provider_code/
+  );
 });
 
 test('Perfect Fit confirms purchase only from verified EIP payment lifecycle state', () => {

@@ -59,11 +59,13 @@ test('Workspace checkout preserves the governed EIP material identity', () => {
   assert.doesNotMatch(source, /pattern\.legacyPatternId/);
 });
 
-test('Payment step omits the internal gateway authority explainer card', () => {
+test('Checkout omits internal EIP authority explainer cards', () => {
   const source = read('components/CheckoutDrawer.jsx');
 
   assert.doesNotMatch(source, /Payment authority:\s*EIP Gateway/i);
   assert.doesNotMatch(source, /Select a configured payment provider\. Card numbers and CVC are never collected by Perfect Fit\./i);
+  assert.doesNotMatch(source, /Governed EIP checkout/i);
+  assert.doesNotMatch(source, /Prices are recalculated by EIP\. Perfect Fit does not authorize payments or store raw card details\./i);
 });
 
 test('Checkout never fabricates a downloadable pattern bundle', () => {
