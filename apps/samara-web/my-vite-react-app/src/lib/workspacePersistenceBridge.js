@@ -8,10 +8,16 @@ import {
   eipApiAdapter,
   isEipApiConfigured
 } from './eipApiAdapter';
+import {
+  applyEnterpriseProjectionProductIds,
+  workspaceNeedsProjectionIdentityReconciliation
+} from './workspaceProjectionIdentity';
 
 const CACHE_OWNER_KEY = 'perfectfit_workspace_cache_owner_v1';
 const PENDING_WORKSPACE_KEY = 'perfectfit_workspace_remote_pending_v1';
 const PENDING_OWNER_KEY = 'perfectfit_workspace_remote_pending_owner_v1';
+const PROJECTION_RECONCILE_MARKER_KEY = 'perfectfit_workspace_projection_identity_reconciled_v1';
+const WORKSPACE_PRESENTATION_REFRESH_EVENT = 'perfectfit_workspace_product_presentation_updated';
 const PERSISTENCE_EVENT = 'perfectfit:workspace-persistence';
 let initialized = false;
 let hydrating = false;
@@ -48,6 +54,14 @@ function emitPersistence(detail) {
   } catch {}
 }
 
+function publishWorkspaceCache(workspace) {
+  if (typeof window === 'undefined' || !isWorkspaceDocument(workspace)) return;
+  window.localStorage.setItem(workspaceStorageKey(), JSON.stringify(workspace));
+  try {
+    window.dispatchEvent(new CustomEvent(WORKSPACE_PRESENTATION_REFRESH_EVENT));
+  } catch {}
+}
+
 function stagePendingWorkspace(workspace) {
   if (typeof window === 'undefined' || !isWorkspaceDocument(workspace)) return;
   window.localStorage.setItem(PENDING_WORKSPACE_KEY, JSON.stringify(workspace));
@@ -61,6 +75,31 @@ function clearPendingWorkspace() {
   window.localStorage.removeItem(PENDING_OWNER_KEY);
 }
 
+function projectionReconcileMarker() {
+  if (typeof window === 'undefined') return null;
+  return safeParse(window.localStorage.getItem(PROJECTION_RECONCILE_MARKER_KEY));
+}
+
+function projectionReconcileAttempted(identityId, revision) {
+  const marker = projectionReconcileMarker();
+  return Boolean(
+    marker &&
+    String(marker.identityId || '') === String(identityId || '') &&
+    Number(marker.revision || 0) === Number(revision || 0)
+  );
+}
+
+function markProjectionReconciled(identityId, revision) {
+  if (typeof window === 'undefined' || !identityId) return;
+  window.localStorage.setItem(
+    PROJECTION_RECONCILE_MARKER_KEY,
+    JSON.stringify({
+      identityId: String(identityId),
+      revision: Number(revision || 0)
+    })
+  );
+}
+
 async function saveWorkspaceRemotely(workspace, { alreadyStaged = false } = {}) {
   if (!isWorkspaceDocument(workspace) || !isEipApiConfigured()) return null;
 
@@ -70,18 +109,45 @@ async function saveWorkspaceRemotely(workspace, { alreadyStaged = false } = {}) 
   try {
     // Runtime metadata is EIP DB authority. Browser Save sends business data only;
     // the API loads the published manifest/schema/dropdown contract server-side.
-    const result = await eipApiAdapter.saveWorkspace(workspace);
+    let result = await eipApiAdapter.saveWorkspace(workspace);
     if (result?.identity_id && typeof window !== 'undefined') {
       window.localStorage.setItem(CACHE_OWNER_KEY, String(result.identity_id));
       window.localStorage.setItem(PENDING_OWNER_KEY, String(result.identity_id));
     }
 
-    const projection = result?.enterprise_projection || null;
+    let persistedWorkspace = workspace;
+    let projection = result?.enterprise_projection || null;
+    const identityReconciliation = applyEnterpriseProjectionProductIds(
+      workspace,
+      projection,
+      { syncedAt: result?.saved_at || null }
+    );
+
+    // Automatic EIP projection already owns the PF -> material relationship. Persist
+    // the returned material UUID back into the private workspace snapshot so checkout
+    // uses the governed material identity instead of local style/variant references.
+    if (identityReconciliation.changed) {
+      persistedWorkspace = identityReconciliation.workspace;
+      stagePendingWorkspace(persistedWorkspace);
+
+      const reconciledResult = await eipApiAdapter.saveWorkspace(persistedWorkspace);
+      if (reconciledResult?.identity_id && typeof window !== 'undefined') {
+        window.localStorage.setItem(CACHE_OWNER_KEY, String(reconciledResult.identity_id));
+        window.localStorage.setItem(PENDING_OWNER_KEY, String(reconciledResult.identity_id));
+      }
+      result = reconciledResult || result;
+      projection = result?.enterprise_projection || projection;
+      publishWorkspaceCache(persistedWorkspace);
+    }
+
     const projectionWarnings = Array.isArray(projection?.products)
       ? projection.products.filter((item) => item?.ok !== true)
       : [];
 
     clearPendingWorkspace();
+    if (result?.identity_id) {
+      markProjectionReconciled(result.identity_id, result?.revision || 0);
+    }
     emitPersistence({
       state: projection?.ok === false && projection?.skipped !== true
         ? 'saved_with_projection_warning'
@@ -92,9 +158,13 @@ async function saveWorkspaceRemotely(workspace, { alreadyStaged = false } = {}) 
       manifestAudit: result?.manifest_audit || null,
       metadataSource: result?.manifest_source || null,
       fieldResolution: projection?.field_resolution?.summary || null,
-      projectionWarnings
+      projectionWarnings,
+      reconciledProductIdentityCount: identityReconciliation.linkedCount
     });
-    return result;
+    return {
+      ...(result || {}),
+      workspace: persistedWorkspace
+    };
   } catch (error) {
     // Keep the pending snapshot in localStorage. The next authenticated page load
     // replays it before accepting an older remote snapshot, preventing a reload
@@ -142,7 +212,10 @@ async function hydrateWorkspaceFromEip({
       const replayed = await saveWorkspaceRemotely(pendingWorkspace, {
         alreadyStaged: true
       });
-      window.localStorage.setItem(key, JSON.stringify(pendingWorkspace));
+      const replayedWorkspace = isWorkspaceDocument(replayed?.workspace)
+        ? replayed.workspace
+        : pendingWorkspace;
+      publishWorkspaceCache(replayedWorkspace);
       if (identityId) window.localStorage.setItem(CACHE_OWNER_KEY, identityId);
       emitPersistence({
         state: 'replayed',
@@ -157,18 +230,52 @@ async function hydrateWorkspaceFromEip({
     }
 
     if (isWorkspaceDocument(remoteWorkspace)) {
-      window.localStorage.setItem(key, JSON.stringify(remoteWorkspace));
+      let hydratedWorkspace = remoteWorkspace;
+      let hydratedResult = result;
+      const remoteRevision = Number(result?.revision || 0);
+
+      // Older workspace snapshots predate automatic persistence of the material UUID
+      // returned by enterprise projection. Re-run that governed projection once for
+      // this remote revision, then keep the reconciled snapshot as the new EIP source.
+      if (
+        identityId &&
+        workspaceNeedsProjectionIdentityReconciliation(remoteWorkspace) &&
+        !projectionReconcileAttempted(identityId, remoteRevision)
+      ) {
+        try {
+          const reconciled = await saveWorkspaceRemotely(remoteWorkspace);
+          if (isWorkspaceDocument(reconciled?.workspace)) {
+            hydratedWorkspace = reconciled.workspace;
+          }
+          hydratedResult = reconciled || result;
+          markProjectionReconciled(
+            identityId,
+            reconciled?.revision || remoteRevision
+          );
+        } catch (error) {
+          // The private remote snapshot is still valid even when reconciliation fails.
+          // Keep the pending outbox for retry, but do not discard or block hydration.
+          markProjectionReconciled(identityId, remoteRevision);
+          emitPersistence({
+            state: 'projection_identity_reconcile_warning',
+            revision: remoteRevision,
+            error: error?.message || String(error)
+          });
+        }
+      }
+
+      publishWorkspaceCache(hydratedWorkspace);
       if (identityId) window.localStorage.setItem(CACHE_OWNER_KEY, identityId);
       emitPersistence({
         state: 'hydrated',
-        revision: result?.revision || 0,
-        updatedAt: result?.updated_at || null
+        revision: hydratedResult?.revision || remoteRevision,
+        updatedAt: hydratedResult?.updated_at || result?.updated_at || null
       });
 
       if (reloadAfterHydrate) {
         window.location.reload();
       }
-      return { hydrated: true, source: 'eip', result };
+      return { hydrated: true, source: 'eip', result: hydratedResult };
     }
 
     if (cachedOwner && identityId && cachedOwner !== identityId) {
@@ -185,6 +292,10 @@ async function hydrateWorkspaceFromEip({
       localWorkspace.projects.length > 0
     ) {
       const saved = await saveWorkspaceRemotely(localWorkspace);
+      const migratedWorkspace = isWorkspaceDocument(saved?.workspace)
+        ? saved.workspace
+        : localWorkspace;
+      publishWorkspaceCache(migratedWorkspace);
       if (identityId) window.localStorage.setItem(CACHE_OWNER_KEY, identityId);
       emitPersistence({
         state: 'migrated',
@@ -233,6 +344,7 @@ export async function initializePerfectFitWorkspacePersistence() {
     if (!authenticated) {
       window.localStorage.removeItem(workspaceStorageKey());
       window.localStorage.removeItem(CACHE_OWNER_KEY);
+      window.localStorage.removeItem(PROJECTION_RECONCILE_MARKER_KEY);
       clearPendingWorkspace();
       emitPersistence({ state: 'signed_out' });
       return;
