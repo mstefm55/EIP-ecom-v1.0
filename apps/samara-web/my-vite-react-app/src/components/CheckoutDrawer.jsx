@@ -13,7 +13,6 @@ import {
   ShoppingBag,
   Trash2,
   ArrowRight,
-  ShieldCheck,
   Mail,
   MapPin,
   CreditCard,
@@ -528,7 +527,7 @@ export default function CheckoutDrawer({
     }));
     const missingIndex = lines.findIndex((line) => !line.material_id && !line.material_code);
     if (missingIndex >= 0) {
-      setCheckoutError(`"${safeItems[missingIndex]?.pattern?.name || 'Product'}" is not registered with EIP for checkout.`);
+      setCheckoutError(`\"${safeItems[missingIndex]?.pattern?.name || 'Product'}\" is not registered with EIP for checkout.`);
       return;
     }
 
@@ -663,7 +662,7 @@ export default function CheckoutDrawer({
     const downloadUrl = resolveDigitalDownloadUrl(item);
     if (!downloadUrl) {
       window.showToast?.(
-        `No governed digital file is attached to "${item.pattern?.name || 'this pattern'}". The order remains valid, but no placeholder file will be fabricated.`,
+        `No governed digital file is attached to \"${item.pattern?.name || 'this pattern'}\". The order remains valid, but no placeholder file will be fabricated.`,
         'warning',
         'Pattern File Unavailable'
       );
@@ -828,13 +827,6 @@ export default function CheckoutDrawer({
                       </div>
                     );
                   })}
-                  <div className="bg-sand-50 border border-sand-200 rounded-[4px] p-4 flex gap-3">
-                    <ShieldCheck className="w-5 h-5 text-clay-700 shrink-0" />
-                    <div>
-                      <p className="text-xs font-semibold text-bark-850">Governed EIP checkout</p>
-                      <p className="text-[11px] text-bark-550">Prices are recalculated by EIP. Perfect Fit does not authorize payments or store raw card details.</p>
-                    </div>
-                  </div>
                 </div>
               )}
 
