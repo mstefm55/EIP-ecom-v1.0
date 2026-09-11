@@ -38,6 +38,7 @@ import {
 
 const PENDING_CHECKOUT_KEY = 'perfectfit_pending_eip_checkout_v1';
 const PAID_STATES = new Set(['paid', 'partially_refunded', 'refunded']);
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const normalizePaymentCode = (value) => {
   const code = String(value || '').trim().toLowerCase();
@@ -142,14 +143,23 @@ const getPatternInitials = (name = '') =>
     .map((part) => part.charAt(0).toUpperCase())
     .join('') || 'PF';
 
-const resolveMaterialCode = (pattern = {}) => {
+const resolveMaterialIdentity = (pattern = {}) => {
+  const materialId = [
+    pattern.eipProductId,
+    pattern.material_id,
+    pattern.materialId,
+    pattern.integration?.eip?.productId
+  ]
+    .map((value) => String(value || '').trim())
+    .find(Boolean);
+
+  if (materialId) return { material_id: materialId };
+
   const candidates = [
     pattern.materialCode,
     pattern.material_code,
     pattern.commerceMaterialCode,
     pattern.commerce_material_code,
-    pattern.commerceOverlayId,
-    pattern.legacyPatternId,
     pattern.code,
     pattern.sku,
     pattern.productReference,
@@ -158,7 +168,10 @@ const resolveMaterialCode = (pattern = {}) => {
   const normalized = candidates
     .map((value) => String(value || '').trim())
     .filter(Boolean);
-  return normalized.find((value) => /^PRD[-_]/i.test(value)) || normalized[0] || '';
+  const materialCode = normalized.find((value) => /^PRD[-_]/i.test(value)) || normalized[0] || '';
+
+  if (UUID_RE.test(materialCode)) return { material_id: materialCode };
+  return materialCode ? { material_code: materialCode } : {};
 };
 
 const numberValue = (...values) => {
@@ -510,10 +523,10 @@ export default function CheckoutDrawer({
       pattern: sanitizePatternForPurchase(item.pattern || {})
     }));
     const lines = safeItems.map((item) => ({
-      material_code: resolveMaterialCode(item.pattern),
+      ...resolveMaterialIdentity(item.pattern),
       quantity: Math.max(1, Number(item.quantity) || 1)
     }));
-    const missingIndex = lines.findIndex((line) => !line.material_code);
+    const missingIndex = lines.findIndex((line) => !line.material_id && !line.material_code);
     if (missingIndex >= 0) {
       setCheckoutError(`"${safeItems[missingIndex]?.pattern?.name || 'Product'}" is not registered with EIP for checkout.`);
       return;
@@ -559,7 +572,8 @@ export default function CheckoutDrawer({
           },
           perfect_fit: {
             selections: safeItems.map((item, index) => ({
-              material_code: lines[index].material_code,
+              ...(lines[index].material_id ? { material_id: lines[index].material_id } : {}),
+              ...(lines[index].material_code ? { material_code: lines[index].material_code } : {}),
               format: item.format || 'PDF',
               size_preference: item.sizePreference || null
             }))
@@ -866,10 +880,6 @@ export default function CheckoutDrawer({
                   <h4 className="text-sm font-semibold text-clay-800 font-serif uppercase tracking-widest flex items-center gap-2">
                     <CreditCard className="w-4 h-4" /> Secure payment
                   </h4>
-                  <div className="bg-bark-900 text-sand-100 rounded-[4px] p-5">
-                    <p className="text-xs font-semibold">Payment authority: EIP Gateway</p>
-                    <p className="text-[11px] text-sand-300 mt-1">Select a configured payment provider. Card numbers and CVC are never collected by Perfect Fit.</p>
-                  </div>
 
                   {paymentMethodsLoading ? (
                     <div className="flex items-center gap-2 text-xs text-bark-500"><RefreshCw className="w-4 h-4 animate-spin" /> Loading payment methods…</div>
