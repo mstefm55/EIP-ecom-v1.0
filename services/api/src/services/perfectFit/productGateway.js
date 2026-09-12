@@ -50,13 +50,13 @@ function applyPerfectFitDigitalCommerceProfile(attrs = {}) {
   return next;
 }
 
-async function reconcilePerfectFitCommerceProjections(db, tenantId, materialId = null) {
-  const params = [
+export async function reconcilePerfectFitCommerceProjections(db, tenantId, materialId = null) {
+  const digitalParams = [
     tenantId,
     MATERIAL_TYPE,
     PERFECT_FIT_LINK_RELATION,
     materialId || null,
-    PERFECT_FIT_PUBLICATION_RECORD_TYPE
+    PERFECT_FIT_DIGITAL_DELIVERY_MODE
   ];
 
   const digitalProfile = await db.query(
@@ -71,7 +71,7 @@ async function reconcilePerfectFitCommerceProjections(db, tenantId, materialId =
           || jsonb_build_object(
                'delivery',
                COALESCE(m.attrs->'delivery', '{}'::jsonb)
-                 || jsonb_build_object('mode', $6::text)
+                 || jsonb_build_object('mode', $5::text)
              )
           || jsonb_build_object(
                'integration',
@@ -103,12 +103,19 @@ async function reconcilePerfectFitCommerceProjections(db, tenantId, materialId =
       )
       AND (
         lower(COALESCE(m.attrs->'inventory'->>'track_inventory', '')) <> 'false'
-        OR lower(COALESCE(m.attrs->'delivery'->>'mode', '')) <> lower($6::text)
+        OR lower(COALESCE(m.attrs->'delivery'->>'mode', '')) <> lower($5::text)
         OR COALESCE(m.attrs->'integration'->'perfect_fit'->>'commerce_profile', '') <> 'DIGITAL_PATTERN'
       )
     `,
-    [...params, PERFECT_FIT_DIGITAL_DELIVERY_MODE]
+    digitalParams
   );
+
+  const publicationParams = [
+    tenantId,
+    MATERIAL_TYPE,
+    materialId || null,
+    PERFECT_FIT_PUBLICATION_RECORD_TYPE
+  ];
 
   const publishedProjection = await db.query(
     `
@@ -126,7 +133,7 @@ async function reconcilePerfectFitCommerceProjections(db, tenantId, materialId =
         updated_at = now()
     WHERE m.tenant_id=$1
       AND m.material_type=$2
-      AND ($4::uuid IS NULL OR m.id=$4::uuid)
+      AND ($3::uuid IS NULL OR m.id=$3::uuid)
       AND COALESCE(lower(m.attrs->'workflow'->>'stage'), '') <> 'published'
       AND EXISTS (
         SELECT 1
@@ -135,7 +142,7 @@ async function reconcilePerfectFitCommerceProjections(db, tenantId, materialId =
           ON so.tenant_id=publication_record.tenant_id
          AND so.id=(publication_record.payload->>'service_object_id')::uuid
         WHERE publication_record.tenant_id=m.tenant_id
-          AND publication_record.record_type=$5
+          AND publication_record.record_type=$4
           AND publication_record.is_active=true
           AND (publication_record.payload->>'material_id')::uuid=m.id
           AND (
@@ -150,7 +157,7 @@ async function reconcilePerfectFitCommerceProjections(db, tenantId, materialId =
           )
       )
     `,
-    params
+    publicationParams
   );
 
   return {
