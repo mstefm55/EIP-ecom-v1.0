@@ -14,8 +14,14 @@ function replaceObjectContents(target, source) {
 }
 
 function replaceArrayContents(target, source) {
-  if (!Array.isArray(target) || !Array.isArray(source)) return;
-  target.splice(0, target.length, ...source);
+  if (!Array.isArray(target) || !Array.isArray(source)) return false;
+  if (Object.isFrozen(target) || !Object.isExtensible(target)) return false;
+  try {
+    target.splice(0, target.length, ...source);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function getRuntimeLabelPacks() {
@@ -125,9 +131,7 @@ function applyControlledVocabularies(runtimeWorkspace) {
       requireControlledVocabulary(controlled, logicalCode),
       container[key]
     );
-    if (Array.isArray(container[key])) {
-      replaceArrayContents(container[key], next);
-    } else {
+    if (!replaceArrayContents(container[key], next)) {
       container[key] = next;
     }
   };

@@ -416,7 +416,13 @@ async function updateMaterialPublicationProjection(client, {
 }) {
   const now = new Date().toISOString();
   const normalizedStatus = normalizeUpper(status);
+  const canonicalStage = {
+    PUBLISHED: "published",
+    REVIEW: "review",
+    REJECTED: "rejected"
+  }[normalizedStatus] || normalizeText(normalizedStatus).toLowerCase();
   const patch = {
+    stage: canonicalStage,
     publication_status: normalizedStatus,
     publication_request_id: requestId,
     publication_updated_at: now,
@@ -1044,6 +1050,13 @@ export default async function registerPublicPerfectFitPublicationRoutes(app) {
 
         if (action === "PUBLISH") {
           if (node === "content_published") {
+            await updateMaterialPublicationProjection(client, {
+              tenantId: access.tenant.id,
+              materialId: row.material_id,
+              status: "PUBLISHED",
+              requestId,
+              actorIdentityId: session.identity_id
+            });
             await client.query("COMMIT");
             const response = { ok: true, request_id: requestId, status: "PUBLISHED", reused: true };
             await finalizePerfectFitWriteIdempotency(app, access, idem, response, {
