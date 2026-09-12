@@ -205,6 +205,21 @@ export const eipApiAdapter = Object.freeze({
     body: { workspace },
     idempotent: true
   }),
+  submitPublicationRequest: (body) => request('/perfect-fit/publication-requests', {
+    method: 'POST',
+    body,
+    idempotent: true
+  }),
+  listMyPublicationRequests: () => request('/perfect-fit/publication-requests/mine'),
+  listAdminPublicationRequests: () => request('/perfect-fit/admin/publication-requests'),
+  moderatePublicationRequest: (requestId, action, note = '') => request(
+    `/perfect-fit/admin/publication-requests/${encodeURIComponent(String(requestId || '').trim())}/actions`,
+    {
+      method: 'POST',
+      body: { action, note },
+      idempotent: true
+    }
+  ),
   listAdminCurationProducts: (query = '') => request(`/perfect-fit/admin/curation/products?limit=100&q=${encodeURIComponent(query)}`),
   saveAdminCuration: (productId, tags) => request(`/perfect-fit/admin/curation/products/${encodeURIComponent(productId)}`, {
     method: 'PUT',
