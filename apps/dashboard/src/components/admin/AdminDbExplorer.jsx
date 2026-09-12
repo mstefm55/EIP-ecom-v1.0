@@ -32,7 +32,7 @@ const DEFAULT_LAYOUT = {
   },
   sensitive: {
     title: "Sensitive access token",
-    tenantPlaceholder: "Tenant id",
+    tenantPlaceholder: "Select tenant",
     tokenPlaceholder: "Paste tenant token",
     consume: "Consume token",
     clear: "Clear token",
@@ -43,7 +43,7 @@ const DEFAULT_LAYOUT = {
     hint: "Required before table reads or exports. Grants are short-lived and audited.",
     reasonPlaceholder: "Reason for access",
     ticketPlaceholder: "Ticket / case reference",
-    targetPlaceholder: "Target tenant id (optional)",
+    targetPlaceholder: "Select target tenant (optional)",
     issue: "Open grant",
     clear: "Clear grant"
   }
@@ -445,6 +445,7 @@ export default function AdminDbExplorer({ node }) {
   useEffect(() => {
     loadSchema();
     loadBreakGlassStatus();
+    loadTenants("");
   }, []);
 
   useEffect(() => {
@@ -566,12 +567,20 @@ export default function AdminDbExplorer({ node }) {
             placeholder={layout.breakGlass.ticketPlaceholder}
             className="w-full rounded-xl border border-amber-200 bg-white px-3 py-2 text-xs text-ink-700"
           />
-          <input
+          <select
             value={breakGlassTarget}
             onChange={(event) => setBreakGlassTarget(event.target.value)}
-            placeholder={layout.breakGlass.targetPlaceholder}
             className="w-full rounded-xl border border-amber-200 bg-white px-3 py-2 text-xs text-ink-700"
-          />
+          >
+            <option value="">{layout.breakGlass.targetPlaceholder}</option>
+            {tenantOptions.map((tenant) => (
+              <option key={tenant.id} value={tenant.id}>
+                {tenant.name && tenant.code
+                  ? `${tenant.name} (${tenant.code})`
+                  : tenant.name || tenant.code || tenant.id}
+              </option>
+            ))}
+          </select>
         </div>
         {breakGlassStatus?.message ? (
           <div
@@ -614,12 +623,20 @@ export default function AdminDbExplorer({ node }) {
           </div>
         </div>
         <div className="mt-3 flex flex-wrap gap-3">
-          <input
+          <select
             value={sensitiveTenant}
             onChange={(event) => setSensitiveTenant(event.target.value)}
-            placeholder={layout.sensitive.tenantPlaceholder}
             className="w-full max-w-xs rounded-xl border border-ink-200/70 bg-white px-3 py-2 text-xs text-ink-700"
-          />
+          >
+            <option value="">{layout.sensitive.tenantPlaceholder}</option>
+            {tenantOptions.map((tenant) => (
+              <option key={tenant.id} value={tenant.id}>
+                {tenant.name && tenant.code
+                  ? `${tenant.name} (${tenant.code})`
+                  : tenant.name || tenant.code || tenant.id}
+              </option>
+            ))}
+          </select>
           <input
             value={sensitiveToken}
             onChange={(event) => setSensitiveToken(event.target.value)}
@@ -914,4 +931,3 @@ export default function AdminDbExplorer({ node }) {
     </div>
   );
 }
-
