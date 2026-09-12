@@ -16,9 +16,9 @@ function reconciliationParams(tenantId) {
  * - PF approved/content_approved -> EIP material.is_active=true
  * - PF published/content_published -> EIP workflow.stage='published'
  *
- * Approval and publication remain separate projections. Publication authority
- * stays in the EIP process engine, and publication is never inferred merely
- * from material activation.
+ * Review/rejected/unpublished states project material.is_active=false. Approval
+ * and publication remain separate projections: an approved material is active,
+ * but it is not sellable until the publication projection is also published.
  */
 export async function reconcilePerfectFitPublicationByIdentity(db, tenantId) {
   const params = reconciliationParams(tenantId);
@@ -81,28 +81,46 @@ export async function reconcilePerfectFitPublicationByIdentity(db, tenantId) {
                publication_record.created_at DESC,
                publication_record.id DESC
     ),
-    authoritative_approved AS (
-      SELECT lp.material_id
+    authoritative_activation AS (
+      SELECT lp.material_id,
+             CASE
+               WHEN lower(COALESCE(lp.service_object_status, '')) IN ('approved', 'published')
+                 OR EXISTS (
+                   SELECT 1
+                   FROM eip_core.process_instance pi
+                   WHERE pi.tenant_id=$1
+                     AND pi.service_object_id=lp.service_object_id
+                     AND pi.ended_at IS NULL
+                     AND pi.status='active'
+                     AND lower(COALESCE(pi.cursor_json->>'node', '')) IN ('content_approved', 'content_published')
+                 )
+                 THEN true
+               WHEN lower(COALESCE(lp.service_object_status, '')) IN ('new', 'review', 'rejected', 'cancelled')
+                 OR EXISTS (
+                   SELECT 1
+                   FROM eip_core.process_instance pi
+                   WHERE pi.tenant_id=$1
+                     AND pi.service_object_id=lp.service_object_id
+                     AND pi.ended_at IS NULL
+                     AND pi.status='active'
+                     AND lower(COALESCE(pi.cursor_json->>'node', '')) IN (
+                       'content_intake', 'content_draft', 'content_review', 'content_rejected', 'content_closed'
+                     )
+                 )
+                 THEN false
+               ELSE NULL
+             END AS should_be_active
       FROM latest_publication lp
-      WHERE lower(COALESCE(lp.service_object_status, '')) IN ('approved', 'published')
-         OR EXISTS (
-           SELECT 1
-           FROM eip_core.process_instance pi
-           WHERE pi.tenant_id=$1
-             AND pi.service_object_id=lp.service_object_id
-             AND pi.ended_at IS NULL
-             AND pi.status='active'
-             AND lower(COALESCE(pi.cursor_json->>'node', '')) IN ('content_approved', 'content_published')
-         )
     )
     UPDATE eip_core.material m
-    SET is_active=true,
+    SET is_active=aa.should_be_active,
         updated_at=now()
-    FROM authoritative_approved aa
+    FROM authoritative_activation aa
     WHERE m.tenant_id=$1
       AND m.id=aa.material_id
-      AND m.is_active IS DISTINCT FROM true
-    RETURNING m.id
+      AND aa.should_be_active IS NOT NULL
+      AND m.is_active IS DISTINCT FROM aa.should_be_active
+    RETURNING m.id, m.is_active
     `,
     params
   );
@@ -205,7 +223,10 @@ export async function reconcilePerfectFitPublicationByIdentity(db, tenantId) {
 
   return {
     approval_activation_reconciled: Number(approvalActivation.rowCount || 0),
-    approval_material_ids: (approvalActivation.rows || []).map((row) => row.id),
+    approval_materials: (approvalActivation.rows || []).map((row) => ({
+      id: row.id,
+      is_active: row.is_active
+    })),
     publication_identity_reconciled: Number(publishedProjection.rowCount || 0),
     material_ids: (publishedProjection.rows || []).map((row) => row.id)
   };
