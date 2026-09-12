@@ -1,4 +1,5 @@
 import { listPerfectFitProducts } from "./productGateway.js";
+import { reconcilePerfectFitPublicationByIdentity } from "./publicationIdentityReconciliation.js";
 
 /**
  * Repair legacy Perfect Fit commerce projections once when the public-commerce
@@ -12,6 +13,11 @@ import { listPerfectFitProducts } from "./productGateway.js";
  * - publication is projected only when the existing PF publication process is
  *   already authoritative/published;
  * - drafts/review/rejected products are never auto-published.
+ *
+ * A second compatibility pass repairs legacy publication requests that still
+ * reference an older EIP material UUID. It matches the current PF-linked
+ * STYLE_VARIANT by stable PF identity and only trusts the latest governed
+ * publication request/process state.
  */
 export async function reconcilePerfectFitCommerceAtBoot(
   app,
@@ -25,6 +31,13 @@ export async function reconcilePerfectFitCommerceAtBoot(
           // reconciliation before returning its read model. limit=1 keeps the
           // incidental read minimal while the reconciliation itself remains tenant-wide.
           await listPerfectFitProducts(app.db, { tenantId, limit: 1 });
+          const publicationIdentity = await reconcilePerfectFitPublicationByIdentity(app.db, tenantId);
+          app.log?.info?.({
+            event: "perfect_fit_publication_identity_reconcile",
+            tenant_id: tenantId,
+            reconciled: publicationIdentity.publication_identity_reconciled,
+            material_ids: publicationIdentity.material_ids
+          });
         };
 
   let tenants;
