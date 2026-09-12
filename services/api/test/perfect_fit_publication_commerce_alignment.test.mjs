@@ -14,6 +14,10 @@ const commerceRoute = fs.readFileSync(
   path.join(repoRoot, 'services/api/src/routes/public_commerce.js'),
   'utf8'
 );
+const runtimeMetadata = fs.readFileSync(
+  path.join(repoRoot, 'apps/samara-web/my-vite-react-app/src/lib/perfectFitRuntimeMetadata.js'),
+  'utf8'
+);
 
 test('PF moderation projects process status to the canonical commerce workflow stage', () => {
   assert.match(publicationRoute, /PUBLISHED:\s*["']published["']/);
@@ -37,4 +41,10 @@ test('public commerce continues to gate sale eligibility on canonical published 
     commerceRoute,
     /attrs->'workflow'->>'stage'[\s\S]*PUBLISHED_STAGE|PUBLISHED_STAGE[\s\S]*attrs->'workflow'->>'stage'/
   );
+});
+
+test('runtime metadata hydration does not splice frozen governed arrays', () => {
+  assert.match(runtimeMetadata, /Object\.isFrozen\(target\)/);
+  assert.match(runtimeMetadata, /!Object\.isExtensible\(target\)/);
+  assert.match(runtimeMetadata, /if \(!replaceArrayContents\(container\[key\], next\)\) \{\s*container\[key\] = next;/);
 });
