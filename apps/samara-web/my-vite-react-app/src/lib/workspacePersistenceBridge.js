@@ -17,6 +17,7 @@ const CACHE_OWNER_KEY = 'perfectfit_workspace_cache_owner_v1';
 const PENDING_WORKSPACE_KEY = 'perfectfit_workspace_remote_pending_v1';
 const PENDING_OWNER_KEY = 'perfectfit_workspace_remote_pending_owner_v1';
 const PROJECTION_RECONCILE_MARKER_KEY = 'perfectfit_workspace_projection_identity_reconciled_v1';
+const COMMERCE_RECONCILE_MARKER_KEY = 'perfectfit_workspace_commerce_profile_reconciled_v1';
 const WORKSPACE_PRESENTATION_REFRESH_EVENT = 'perfectfit_workspace_product_presentation_updated';
 const PERSISTENCE_EVENT = 'perfectfit:workspace-persistence';
 let initialized = false;
@@ -75,13 +76,13 @@ function clearPendingWorkspace() {
   window.localStorage.removeItem(PENDING_OWNER_KEY);
 }
 
-function projectionReconcileMarker() {
+function reconciliationMarker(storageKey) {
   if (typeof window === 'undefined') return null;
-  return safeParse(window.localStorage.getItem(PROJECTION_RECONCILE_MARKER_KEY));
+  return safeParse(window.localStorage.getItem(storageKey));
 }
 
-function projectionReconcileAttempted(identityId, revision) {
-  const marker = projectionReconcileMarker();
+function reconciliationAttempted(storageKey, identityId, revision) {
+  const marker = reconciliationMarker(storageKey);
   return Boolean(
     marker &&
     String(marker.identityId || '') === String(identityId || '') &&
@@ -89,15 +90,39 @@ function projectionReconcileAttempted(identityId, revision) {
   );
 }
 
-function markProjectionReconciled(identityId, revision) {
+function markReconciled(storageKey, identityId, revision) {
   if (typeof window === 'undefined' || !identityId) return;
   window.localStorage.setItem(
-    PROJECTION_RECONCILE_MARKER_KEY,
+    storageKey,
     JSON.stringify({
       identityId: String(identityId),
       revision: Number(revision || 0)
     })
   );
+}
+
+function projectionReconcileAttempted(identityId, revision) {
+  return reconciliationAttempted(
+    PROJECTION_RECONCILE_MARKER_KEY,
+    identityId,
+    revision
+  );
+}
+
+function markProjectionReconciled(identityId, revision) {
+  markReconciled(PROJECTION_RECONCILE_MARKER_KEY, identityId, revision);
+}
+
+function commerceReconcileAttempted(identityId, revision) {
+  return reconciliationAttempted(
+    COMMERCE_RECONCILE_MARKER_KEY,
+    identityId,
+    revision
+  );
+}
+
+function markCommerceReconciled(identityId, revision) {
+  markReconciled(COMMERCE_RECONCILE_MARKER_KEY, identityId, revision);
 }
 
 async function saveWorkspaceRemotely(workspace, { alreadyStaged = false } = {}) {
@@ -147,6 +172,10 @@ async function saveWorkspaceRemotely(workspace, { alreadyStaged = false } = {}) 
     clearPendingWorkspace();
     if (result?.identity_id) {
       markProjectionReconciled(result.identity_id, result?.revision || 0);
+      // Any successful governed workspace save re-runs enterprise product projection.
+      // Round-2 server projection therefore also repairs the legacy PF commerce profile
+      // (digital delivery, inventory tracking, and publication stage) for this revision.
+      markCommerceReconciled(result.identity_id, result?.revision || 0);
     }
     emitPersistence({
       state: projection?.ok === false && projection?.skipped !== true
@@ -264,6 +293,36 @@ async function hydrateWorkspaceFromEip({
         }
       }
 
+      // Round 2 also needs one governed projection pass for older workspaces that
+      // already contain EIP material UUIDs. That pass repairs only PF-linked material
+      // commerce attributes server-side and leaves the private workspace payload intact.
+      const commerceRevision = Number(hydratedResult?.revision || remoteRevision);
+      if (
+        identityId &&
+        !commerceReconcileAttempted(identityId, commerceRevision)
+      ) {
+        try {
+          const reconciled = await saveWorkspaceRemotely(hydratedWorkspace);
+          if (isWorkspaceDocument(reconciled?.workspace)) {
+            hydratedWorkspace = reconciled.workspace;
+          }
+          hydratedResult = reconciled || hydratedResult;
+          markCommerceReconciled(
+            identityId,
+            reconciled?.revision || commerceRevision
+          );
+        } catch (error) {
+          // saveWorkspaceRemotely retains the pending outbox, so a later authenticated
+          // page load can replay the same snapshot without losing designer data.
+          markCommerceReconciled(identityId, commerceRevision);
+          emitPersistence({
+            state: 'commerce_profile_reconcile_warning',
+            revision: commerceRevision,
+            error: error?.message || String(error)
+          });
+        }
+      }
+
       publishWorkspaceCache(hydratedWorkspace);
       if (identityId) window.localStorage.setItem(CACHE_OWNER_KEY, identityId);
       emitPersistence({
@@ -345,6 +404,7 @@ export async function initializePerfectFitWorkspacePersistence() {
       window.localStorage.removeItem(workspaceStorageKey());
       window.localStorage.removeItem(CACHE_OWNER_KEY);
       window.localStorage.removeItem(PROJECTION_RECONCILE_MARKER_KEY);
+      window.localStorage.removeItem(COMMERCE_RECONCILE_MARKER_KEY);
       clearPendingWorkspace();
       emitPersistence({ state: 'signed_out' });
       return;
