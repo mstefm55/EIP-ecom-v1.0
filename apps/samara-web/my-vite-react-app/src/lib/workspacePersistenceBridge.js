@@ -17,7 +17,10 @@ const CACHE_OWNER_KEY = 'perfectfit_workspace_cache_owner_v1';
 const PENDING_WORKSPACE_KEY = 'perfectfit_workspace_remote_pending_v1';
 const PENDING_OWNER_KEY = 'perfectfit_workspace_remote_pending_owner_v1';
 const PROJECTION_RECONCILE_MARKER_KEY = 'perfectfit_workspace_projection_identity_reconciled_v1';
-const COMMERCE_RECONCILE_MARKER_KEY = 'perfectfit_workspace_commerce_profile_reconciled_v1';
+// v2 deliberately forces one fresh governed save for workspaces already processed by
+// the earlier commerce-profile reconciliation. That fresh save now also bridges any
+// legacy PF publication state into the existing EIP publication process authority.
+const COMMERCE_RECONCILE_MARKER_KEY = 'perfectfit_workspace_commerce_profile_reconciled_v2';
 const WORKSPACE_PRESENTATION_REFRESH_EVENT = 'perfectfit_workspace_product_presentation_updated';
 const PERSISTENCE_EVENT = 'perfectfit:workspace-persistence';
 let initialized = false;
@@ -125,6 +128,211 @@ function markCommerceReconciled(identityId, revision) {
   markReconciled(COMMERCE_RECONCILE_MARKER_KEY, identityId, revision);
 }
 
+function normalizePublicationStatus(value) {
+  return String(value || '').trim().toUpperCase();
+}
+
+function publicationRows(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.items)) return payload.items;
+  if (Array.isArray(payload?.requests)) return payload.requests;
+  if (Array.isArray(payload?.publication_requests)) return payload.publication_requests;
+  return [];
+}
+
+function publicationRequestId(row) {
+  return String(
+    row?.request_id ||
+    row?.requestId ||
+    row?.id ||
+    ''
+  ).trim();
+}
+
+function publicationStatus(row) {
+  return normalizePublicationStatus(
+    row?.status ||
+    row?.publication_status ||
+    row?.publicationStatus
+  );
+}
+
+function collectWorkspacePublicationIntents(workspace) {
+  const intents = [];
+
+  for (const project of Array.isArray(workspace?.projects) ? workspace.projects : []) {
+    if (project?.nodeType !== 'project') continue;
+
+    for (const style of Array.isArray(project?.children) ? project.children : []) {
+      if (style?.nodeType !== 'product') continue;
+
+      for (const variant of Array.isArray(style?.children) ? style.children : []) {
+        if (variant?.nodeType !== 'variant') continue;
+
+        const release = variant?.values?.publicationRelease;
+        const requestId = String(release?.requestId || '').trim();
+        const status = normalizePublicationStatus(release?.status);
+        if (!requestId || !status) continue;
+
+        if (![
+          'AWAITING_MODERATOR_RELEASE',
+          'PUBLISHED',
+          'RETURNED_BY_MODERATOR'
+        ].includes(status)) {
+          continue;
+        }
+
+        const variantCode = String(variant?.values?.['variant.code'] || '').trim();
+        const styleName = String(
+          style?.values?.['product.style_name'] ||
+          style?.title ||
+          'Product'
+        ).trim();
+        const variantName = String(
+          variant?.values?.['variant.name'] ||
+          variant?.title ||
+          'Variant'
+        ).trim();
+
+        // Only the customer-facing identity projection is sent to publication intake.
+        // The private Workspace payload remains server-side and is never exposed to PF Admin.
+        const pattern = {
+          name: styleName,
+          styleName,
+          styleCode: String(style?.values?.['product.style_code'] || '').trim(),
+          variantName,
+          variantCode,
+          workspaceVariantId: String(variant.id || ''),
+          variantId: String(variant.id || ''),
+          eipProductId: variant?.integration?.eip?.productId || null
+        };
+
+        intents.push({
+          requestId,
+          variantId: String(variant.id || ''),
+          variantCode,
+          status,
+          moderatorNote: String(release?.moderatorNote || '').trim(),
+          pattern
+        });
+      }
+    }
+  }
+
+  return intents;
+}
+
+async function reconcileWorkspacePublicationAuthority(workspace) {
+  const intents = collectWorkspacePublicationIntents(workspace);
+  if (!intents.length) {
+    return {
+      ok: true,
+      skipped: true,
+      submitted: 0,
+      published: 0,
+      returned: 0,
+      warnings: []
+    };
+  }
+
+  const warnings = [];
+  let submitted = 0;
+  let published = 0;
+  let returned = 0;
+  let existingRows = [];
+
+  try {
+    const mine = await eipApiAdapter.listMyPublicationRequests();
+    existingRows = publicationRows(mine);
+  } catch (error) {
+    warnings.push({
+      request_id: null,
+      action: 'LIST_MINE',
+      error: error?.code || error?.message || String(error)
+    });
+  }
+
+  const byRequestId = new Map(
+    existingRows
+      .map((row) => [publicationRequestId(row), row])
+      .filter(([requestId]) => Boolean(requestId))
+  );
+
+  for (const intent of intents) {
+    let serverRow = byRequestId.get(intent.requestId) || null;
+
+    if (!serverRow) {
+      try {
+        const created = await eipApiAdapter.submitPublicationRequest({
+          request_id: intent.requestId,
+          variant_id: intent.variantId,
+          variant_code: intent.variantCode,
+          pattern: intent.pattern
+        });
+        submitted += 1;
+        serverRow = created?.item || created?.request || created?.publication_request || created || null;
+        if (serverRow) byRequestId.set(intent.requestId, serverRow);
+      } catch (error) {
+        warnings.push({
+          request_id: intent.requestId,
+          action: 'SUBMIT',
+          error: error?.code || error?.message || String(error)
+        });
+        continue;
+      }
+    }
+
+    const serverStatus = publicationStatus(serverRow);
+
+    if (intent.status === 'PUBLISHED' && serverStatus !== 'PUBLISHED') {
+      try {
+        await eipApiAdapter.moderatePublicationRequest(
+          intent.requestId,
+          'PUBLISH'
+        );
+        published += 1;
+      } catch (error) {
+        warnings.push({
+          request_id: intent.requestId,
+          action: 'PUBLISH',
+          error: error?.code || error?.message || String(error)
+        });
+      }
+      continue;
+    }
+
+    if (
+      intent.status === 'RETURNED_BY_MODERATOR' &&
+      serverStatus !== 'RETURNED_BY_MODERATOR' &&
+      intent.moderatorNote
+    ) {
+      try {
+        await eipApiAdapter.moderatePublicationRequest(
+          intent.requestId,
+          'RETURN',
+          intent.moderatorNote
+        );
+        returned += 1;
+      } catch (error) {
+        warnings.push({
+          request_id: intent.requestId,
+          action: 'RETURN',
+          error: error?.code || error?.message || String(error)
+        });
+      }
+    }
+  }
+
+  return {
+    ok: warnings.length === 0,
+    skipped: false,
+    submitted,
+    published,
+    returned,
+    warnings
+  };
+}
+
 async function saveWorkspaceRemotely(workspace, { alreadyStaged = false } = {}) {
   if (!isWorkspaceDocument(workspace) || !isEipApiConfigured()) return null;
 
@@ -165,6 +373,38 @@ async function saveWorkspaceRemotely(workspace, { alreadyStaged = false } = {}) 
       publishWorkspaceCache(persistedWorkspace);
     }
 
+    // Publication is a separate governed EIP process. Older PF builds only updated
+    // the private workspace presentation state, which is why PF Admin could display
+    // "Published" while Commerce correctly rejected the material. Bridge that intent
+    // into the existing server publication routes after the private save succeeds.
+    // Failures remain warnings: publication must never destroy a successful private save.
+    let publicationAuthority = {
+      ok: true,
+      skipped: true,
+      submitted: 0,
+      published: 0,
+      returned: 0,
+      warnings: []
+    };
+    try {
+      publicationAuthority = await reconcileWorkspacePublicationAuthority(
+        persistedWorkspace
+      );
+    } catch (error) {
+      publicationAuthority = {
+        ok: false,
+        skipped: false,
+        submitted: 0,
+        published: 0,
+        returned: 0,
+        warnings: [{
+          request_id: null,
+          action: 'RECONCILE',
+          error: error?.code || error?.message || String(error)
+        }]
+      };
+    }
+
     const projectionWarnings = Array.isArray(projection?.products)
       ? projection.products.filter((item) => item?.ok !== true)
       : [];
@@ -172,18 +412,18 @@ async function saveWorkspaceRemotely(workspace, { alreadyStaged = false } = {}) 
     clearPendingWorkspace();
     if (result?.identity_id) {
       markProjectionReconciled(result.identity_id, result?.revision || 0);
-      // Any successful governed workspace save re-runs enterprise product projection.
-      // Round-2 server projection therefore also repairs the legacy PF commerce profile
-      // (digital delivery, inventory tracking, and publication stage) for this revision.
       markCommerceReconciled(result.identity_id, result?.revision || 0);
     }
     emitPersistence({
-      state: projection?.ok === false && projection?.skipped !== true
+      state: publicationAuthority.ok === false
+        ? 'saved_with_publication_warning'
+        : projection?.ok === false && projection?.skipped !== true
         ? 'saved_with_projection_warning'
         : 'saved',
       revision: result?.revision || 0,
       savedAt: result?.saved_at || null,
       enterpriseProjection: projection,
+      publicationAuthority,
       manifestAudit: result?.manifest_audit || null,
       metadataSource: result?.manifest_source || null,
       fieldResolution: projection?.field_resolution?.summary || null,
@@ -192,7 +432,8 @@ async function saveWorkspaceRemotely(workspace, { alreadyStaged = false } = {}) 
     });
     return {
       ...(result || {}),
-      workspace: persistedWorkspace
+      workspace: persistedWorkspace,
+      publication_authority: publicationAuthority
     };
   } catch (error) {
     // Keep the pending snapshot in localStorage. The next authenticated page load
@@ -293,9 +534,9 @@ async function hydrateWorkspaceFromEip({
         }
       }
 
-      // Round 2 also needs one governed projection pass for older workspaces that
-      // already contain EIP material UUIDs. That pass repairs only PF-linked material
-      // commerce attributes server-side and leaves the private workspace payload intact.
+      // Re-run the governed enterprise projection once for older already-linked
+      // workspaces, and at the same time bridge any legacy publication state into the
+      // existing EIP publication process. The versioned marker prevents reload loops.
       const commerceRevision = Number(hydratedResult?.revision || remoteRevision);
       if (
         identityId &&
