@@ -874,9 +874,11 @@ export default function AdminDbExplorer({ node }) {
                         {columns.map((col) => {
                           const value = row[col];
                           const display =
-                            value && typeof value === "object"
-                              ? JSON.stringify(value)
-                              : value ?? "";
+                            typeof value === "boolean"
+                              ? String(value)
+                              : value && typeof value === "object"
+                                ? JSON.stringify(value)
+                                : value ?? "";
                           return (
                             <td key={col} className="px-3 py-2 align-top">
                               {display}
