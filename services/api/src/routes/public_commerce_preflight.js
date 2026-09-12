@@ -7,6 +7,7 @@
 import { extractProfiles } from "../services/gateway/connectionProfile.js";
 import { connectionAllowsOrigin } from "../services/gateway/verification.js";
 import { auditSecurityEvent } from "../lib/securityAudit.js";
+import { reconcilePerfectFitCommerceAtBoot } from "../services/perfectFit/bootCommerceReconciliation.js";
 import registerPublicMemberSecurityRoutes from "./public_member_security.js";
 import registerPublicPerfectFitWorkspaceRoutes from "./public_perfect_fit_workspace.js";
 import registerPublicPerfectFitAdminRoutes from "./public_perfect_fit_admin.js";
@@ -58,6 +59,11 @@ async function resolveTenantBySuffix(app, suffix) {
 }
 
 export default async function publicCommercePreflightRoutes(app) {
+  // Repair stale legacy PF material projections before the order routes register.
+  // The reconciler is idempotent and only promotes publication when the existing
+  // governed PF publication process already proves that the material is published.
+  await reconcilePerfectFitCommerceAtBoot(app);
+
   async function handlePreflight(req, reply) {
     const suffix = normalizeText(req.params?.suffix);
     const origin = normalizeText(req.headers.origin);
