@@ -10,9 +10,10 @@ import { reconcilePerfectFitPublicationByIdentity } from "./publicationIdentityR
  *
  * The product gateway remains the authority for the actual mutation rules:
  * - PF-linked products receive the digital commerce profile;
- * - publication is projected only when the existing PF publication process is
- *   already authoritative/published;
- * - drafts/review/rejected products are never auto-published.
+ * - PF approved/published process state projects to material.is_active=true;
+ * - review/rejected/unpublished process state projects to material.is_active=false;
+ * - publication remains a separate gate and is projected only when the existing
+ *   PF publication process is authoritative/published.
  *
  * A second compatibility pass repairs legacy publication requests that still
  * reference an older EIP material UUID. It matches the current PF-linked
@@ -35,7 +36,9 @@ export async function reconcilePerfectFitCommerceAtBoot(
           app.log?.info?.({
             event: "perfect_fit_publication_identity_reconcile",
             tenant_id: tenantId,
-            reconciled: publicationIdentity.publication_identity_reconciled,
+            approval_activation_reconciled: publicationIdentity.approval_activation_reconciled,
+            approval_materials: publicationIdentity.approval_materials,
+            publication_reconciled: publicationIdentity.publication_identity_reconciled,
             material_ids: publicationIdentity.material_ids
           });
         };
