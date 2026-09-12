@@ -14,6 +14,8 @@ import {
 const MATERIAL_TYPE = "PRODUCT";
 const PRODUCT_LEVEL_STYLE_MASTER = "STYLE_MASTER";
 const PRODUCT_LEVEL_STYLE_VARIANT = "STYLE_VARIANT";
+const PERFECT_FIT_PUBLICATION_RECORD_TYPE = "PERFECT_FIT_PUBLICATION_REQUEST";
+const PERFECT_FIT_DIGITAL_DELIVERY_MODE = "digital";
 
 function normalizeProductLevel(value, identity = {}) {
   const normalized = String(value || "").trim().toUpperCase();
@@ -24,6 +26,137 @@ function normalizeProductLevel(value, identity = {}) {
     return PRODUCT_LEVEL_STYLE_VARIANT;
   }
   return identity.entity_level === "STYLE" ? PRODUCT_LEVEL_STYLE_MASTER : PRODUCT_LEVEL_STYLE_VARIANT;
+}
+
+function applyPerfectFitDigitalCommerceProfile(attrs = {}) {
+  const next = attrs && typeof attrs === "object" ? { ...attrs } : {};
+  next.inventory = {
+    ...(next.inventory && typeof next.inventory === "object" ? next.inventory : {}),
+    track_inventory: false
+  };
+  next.delivery = {
+    ...(next.delivery && typeof next.delivery === "object" ? next.delivery : {}),
+    mode: PERFECT_FIT_DIGITAL_DELIVERY_MODE
+  };
+  next.integration = {
+    ...(next.integration && typeof next.integration === "object" ? next.integration : {}),
+    perfect_fit: {
+      ...(next.integration?.perfect_fit && typeof next.integration.perfect_fit === "object"
+        ? next.integration.perfect_fit
+        : {}),
+      commerce_profile: "DIGITAL_PATTERN"
+    }
+  };
+  return next;
+}
+
+async function reconcilePerfectFitCommerceProjections(db, tenantId, materialId = null) {
+  const params = [
+    tenantId,
+    MATERIAL_TYPE,
+    PERFECT_FIT_LINK_RELATION,
+    materialId || null,
+    PERFECT_FIT_PUBLICATION_RECORD_TYPE
+  ];
+
+  const digitalProfile = await db.query(
+    `
+    UPDATE eip_core.material m
+    SET attrs = COALESCE(m.attrs, '{}'::jsonb)
+          || jsonb_build_object(
+               'inventory',
+               COALESCE(m.attrs->'inventory', '{}'::jsonb)
+                 || jsonb_build_object('track_inventory', false)
+             )
+          || jsonb_build_object(
+               'delivery',
+               COALESCE(m.attrs->'delivery', '{}'::jsonb)
+                 || jsonb_build_object('mode', $6::text)
+             )
+          || jsonb_build_object(
+               'integration',
+               COALESCE(m.attrs->'integration', '{}'::jsonb)
+                 || jsonb_build_object(
+                      'perfect_fit',
+                      COALESCE(m.attrs->'integration'->'perfect_fit', '{}'::jsonb)
+                        || jsonb_build_object('commerce_profile', 'DIGITAL_PATTERN')
+                    )
+             ),
+        updated_at = now()
+    WHERE m.tenant_id=$1
+      AND m.material_type=$2
+      AND ($4::uuid IS NULL OR m.id=$4::uuid)
+      AND EXISTS (
+        SELECT 1
+        FROM eip_core.object_link ol
+        JOIN eip_core.info_record link_record
+          ON link_record.tenant_id=ol.tenant_id
+         AND link_record.id=ol.dst_id
+         AND link_record.record_type='PERFECT_FIT_PRODUCT_LINK'
+         AND link_record.is_active=true
+        WHERE ol.tenant_id=m.tenant_id
+          AND ol.src_kind='material'
+          AND ol.src_id=m.id
+          AND ol.dst_kind='info_record'
+          AND ol.relation_type=$3
+          AND ol.is_active=true
+      )
+      AND (
+        lower(COALESCE(m.attrs->'inventory'->>'track_inventory', '')) <> 'false'
+        OR lower(COALESCE(m.attrs->'delivery'->>'mode', '')) <> lower($6::text)
+        OR COALESCE(m.attrs->'integration'->'perfect_fit'->>'commerce_profile', '') <> 'DIGITAL_PATTERN'
+      )
+    `,
+    [...params, PERFECT_FIT_DIGITAL_DELIVERY_MODE]
+  );
+
+  const publishedProjection = await db.query(
+    `
+    UPDATE eip_core.material m
+    SET attrs = COALESCE(m.attrs, '{}'::jsonb)
+          || jsonb_build_object(
+               'workflow',
+               COALESCE(m.attrs->'workflow', '{}'::jsonb)
+                 || jsonb_build_object(
+                      'stage', 'published',
+                      'publication_status', 'PUBLISHED',
+                      'publication_reconciled_at', now()
+                    )
+             ),
+        updated_at = now()
+    WHERE m.tenant_id=$1
+      AND m.material_type=$2
+      AND ($4::uuid IS NULL OR m.id=$4::uuid)
+      AND COALESCE(lower(m.attrs->'workflow'->>'stage'), '') <> 'published'
+      AND EXISTS (
+        SELECT 1
+        FROM eip_core.info_record publication_record
+        JOIN eip_core.service_object so
+          ON so.tenant_id=publication_record.tenant_id
+         AND so.id=(publication_record.payload->>'service_object_id')::uuid
+        WHERE publication_record.tenant_id=m.tenant_id
+          AND publication_record.record_type=$5
+          AND publication_record.is_active=true
+          AND (publication_record.payload->>'material_id')::uuid=m.id
+          AND (
+            lower(COALESCE(so.status, ''))='published'
+            OR EXISTS (
+              SELECT 1
+              FROM eip_core.process_instance pi
+              WHERE pi.tenant_id=so.tenant_id
+                AND pi.service_object_id=so.id
+                AND lower(COALESCE(pi.cursor_json->>'node', ''))='content_published'
+            )
+          )
+      )
+    `,
+    params
+  );
+
+  return {
+    digital_profile_reconciled: Number(digitalProfile.rowCount || 0),
+    publication_projection_reconciled: Number(publishedProjection.rowCount || 0)
+  };
 }
 
 async function generateProductCode(client, tenantId) {
@@ -249,6 +382,7 @@ async function withTransaction(db, operation) {
 }
 
 export async function listPerfectFitProducts(db, { tenantId, query = "", limit = 100 }) {
+  await reconcilePerfectFitCommerceProjections(db, tenantId);
   const normalizedQuery = String(query || "").trim();
   const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 100);
   const result = await db.query(
@@ -275,6 +409,7 @@ export async function listPerfectFitProducts(db, { tenantId, query = "", limit =
 }
 
 export async function getPerfectFitProduct(db, { tenantId, productId }) {
+  await reconcilePerfectFitCommerceProjections(db, tenantId, productId);
   const product = await db.query(
     `SELECT id, code, name AS title, attrs, created_at, updated_at
      FROM eip_core.material
@@ -330,7 +465,7 @@ export async function linkPerfectFitProduct(db, {
       ...extractEipSharedMetadata(material.rows[0]),
       ...(sharedMetadata || {})
     });
-    return attachPerfectFitProductLink(client, {
+    const attached = await attachPerfectFitProductLink(client, {
       tenantId,
       materialId: productId,
       identity: normalized.identity,
@@ -338,6 +473,10 @@ export async function linkPerfectFitProduct(db, {
       origin: origin || "LINKED",
       actorIdentityId
     });
+    if (attached.ok) {
+      await reconcilePerfectFitCommerceProjections(client, tenantId, productId);
+    }
+    return attached;
   });
 }
 
@@ -381,6 +520,7 @@ export async function registerPerfectFitProduct(db, {
          WHERE tenant_id=$1 AND id=$2 AND material_type=$4`,
         [tenantId, productId, hierarchyLevel, MATERIAL_TYPE]
       );
+      await reconcilePerfectFitCommerceProjections(client, tenantId, productId);
       let hierarchyLink = null;
       if (parentProductId) {
         hierarchyLink = await ensureStyleVariantHierarchyLink(client, {
@@ -400,13 +540,13 @@ export async function registerPerfectFitProduct(db, {
     }
 
     const code = await generateProductCode(client, tenantId);
-    const attrs = {
+    const attrs = applyPerfectFitDigitalCommerceProfile({
       content: { summary: shared.description },
       taxonomy: { brand: shared.brand },
       workflow: { integration_origin: "PERFECT_FIT" },
       product_hierarchy: { level: hierarchyLevel },
       integration: { perfect_fit: { registered_at: new Date().toISOString() } }
-    };
+    });
     const material = await client.query(
       `INSERT INTO eip_core.material (tenant_id, material_type, code, name, attrs)
        VALUES ($1,$2,$3,$4,$5::jsonb)
@@ -511,10 +651,11 @@ export async function syncPerfectFitSizeVariants(db, {
       items: [...mergedPfItems, ...preservedEipItems]
     };
 
+    const profiledAttrs = applyPerfectFitDigitalCommerceProfile(attrs);
     await client.query(
       `UPDATE eip_core.material SET attrs=$3::jsonb, updated_at=now()
        WHERE tenant_id=$1 AND id=$2`,
-      [tenantId, productId, JSON.stringify(attrs)]
+      [tenantId, productId, JSON.stringify(profiledAttrs)]
     );
 
     return {
@@ -575,11 +716,11 @@ export async function syncPerfectFitVariantPresentation(db, {
       else delete nextAttrs.seo;
     }
 
-
-    nextAttrs.integration = {
-      ...(nextAttrs.integration || {}),
+    const profiledAttrs = applyPerfectFitDigitalCommerceProfile(nextAttrs);
+    profiledAttrs.integration = {
+      ...(profiledAttrs.integration || {}),
       perfect_fit: {
-        ...(nextAttrs.integration?.perfect_fit || {}),
+        ...(profiledAttrs.integration?.perfect_fit || {}),
         variant_presentation_synced_at: new Date().toISOString(),
         variant_presentation_fields: ownedKeys.filter((key) => presence?.[key] === true)
       }
@@ -588,14 +729,14 @@ export async function syncPerfectFitVariantPresentation(db, {
     await client.query(
       `UPDATE eip_core.material SET attrs=$3::jsonb, updated_at=now()
        WHERE tenant_id=$1 AND id=$2`,
-      [tenantId, productId, JSON.stringify(nextAttrs)]
+      [tenantId, productId, JSON.stringify(profiledAttrs)]
     );
 
     return {
       ok: true,
       product_id: productId,
       updated_fields: ownedKeys.filter((key) => presence?.[key] === true),
-      seo: nextAttrs.seo || {}
+      seo: profiledAttrs.seo || {}
     };
   });
 }
@@ -619,9 +760,11 @@ export async function syncPerfectFitAdminCuration(db, {
     );
     if (!material.rowCount) return { ok: false, status: 404, error: "STYLE_VARIANT_NOT_FOUND" };
 
-    const nextAttrs = material.rows[0].attrs && typeof material.rows[0].attrs === "object"
-      ? { ...material.rows[0].attrs }
-      : {};
+    const nextAttrs = applyPerfectFitDigitalCommerceProfile(
+      material.rows[0].attrs && typeof material.rows[0].attrs === "object"
+        ? { ...material.rows[0].attrs }
+        : {}
+    );
     const taxonomy = nextAttrs.taxonomy && typeof nextAttrs.taxonomy === "object"
       ? { ...nextAttrs.taxonomy }
       : {};
@@ -682,7 +825,7 @@ export async function syncPerfectFitProduct(db, {
       lastAccepted: payload?.shared_snapshot?.accepted || {},
       resolutions: resolutions || {}
     });
-    const nextAttrs = { ...(material.rows[0].attrs || {}) };
+    const nextAttrs = applyPerfectFitDigitalCommerceProfile({ ...(material.rows[0].attrs || {}) });
     nextAttrs.content = { ...(nextAttrs.content || {}), summary: reconciled.patch_to_eip.description };
     nextAttrs.taxonomy = { ...(nextAttrs.taxonomy || {}) };
     if (reconciled.patch_to_eip.brand) nextAttrs.taxonomy.brand = reconciled.patch_to_eip.brand;
